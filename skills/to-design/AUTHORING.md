@@ -37,7 +37,7 @@ judged against the `coding-guidelines` skill.
   Non-Goals bound the work, how each module declares what it hides, and how the dependency
   rule keeps layers from leaking into each other.
 - Include a `## Module Dependencies` section (the dependency graph) — the downstream
-  `task-creator` skill reads it to order tasks, so every named module must appear there.
+  `to-tasks` skill reads it to order the tasks, so every named module must appear there.
 - Prefer immutable value objects across boundaries. State derived-vs-stored explicitly and
   name the single method that owns any ordering or derivation rule.
 
