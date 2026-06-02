@@ -3,28 +3,28 @@ name: coding-guidelines
 description: Use it when the user asks you to create a design document or write code.
 ---
 
-All the design you propose or all the code you will write needs to be analized before
-actually implementing, to achive this review the Glosary and the Best practices sections
+All the design you propose or all the code you will write needs to be analyzed before
+actually implementing, to achieve this review the Glossary and the Best practices sections
 of this document to create simple systems.
 
-# Glosary
+# Glossary
 
 ## Important
-The biggest problem which solution can fix other problems or the most common knowledge that
+The biggest problem whose solution can fix other problems, or the most common knowledge that
 can be used to solve most of the problems.
 
 ## Complexity
-Something that is dificult to undertand or you needs a lot of time to implement a simple feature.
+Something that is difficult to understand or that takes a lot of time to implement a simple feature.
 
-## Symptomps of Complexity
-**Amplification change** The number of changes I need to do for implementing a simple feature.
+## Symptoms of Complexity
+**Change amplification** The number of changes I need to do for implementing a simple feature.
 **Cognitive load** The amount of time I need to understand the code to implement a simple feature.
 **Unknown unknown** The things I don't know I need to implement a simple feature.
 
 ## Deep Module
-Provides a simple interface to use and provides a great functionallity by exposing the important things
-in the interface and hides the unimportant things in the implementation. Also, deep modules prevent information
-leakage that is when a piece of knowledge is known by mulple modules.
+Provides a simple interface to use and provides great functionality by exposing the important things
+in the interface and hiding the unimportant things in the implementation. Also, deep modules prevent information
+leakage, which is when a piece of knowledge is known by multiple modules.
 
 
 ## Shallow modules (reject these)
@@ -38,7 +38,7 @@ leakage that is when a piece of knowledge is known by mulple modules.
 ## Creating generic deep modules
 1. Generic deep module should be designed in a way that will solve most of the problems from a feature.
 2. A deep module should have a generic interface but its implementation only contains what is required to complete a feature.
-3. Minimize the number of functions required to use the module, as long as the number of parameters don't extend 3 parameters.
+3. Minimize the number of functions required to use the module, as long as no function exceeds 3 parameters.
 4. If a method or class will be called only once, then this is not a deep module and you need to rethink the deep module.
 
 ## Functions
@@ -47,9 +47,9 @@ leakage that is when a piece of knowledge is known by mulple modules.
 3. Functions needs to be deep.
 
 ## Comments
-1. Comments for interfaces needs to highligh the important things to explain its use.
+1. Comments for interfaces need to highlight the important things to explain its use.
 2. Implementation comments highlight the unimportant things.
-3. A comment needs to help to solve cognitive load and unknown unkowns.
+3. A comment needs to help solve cognitive load and unknown unknowns.
 4. Never repeat code or vocabulary of the code on the comment.
 5. Never write comments when the code is self explanatory.
 
