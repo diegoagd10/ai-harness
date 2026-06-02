@@ -1,6 +1,7 @@
 ---
 name: tdd-implement
-description: The strict TDD method — red→green→refactor with triangulation and assertion-quality
+description: |
+  The strict TDD method — red→green→refactor with triangulation and assertion-quality
   rules — for an implementer sub-agent. Pure methodology: the task, the spec, and the testing
   capabilities are SUPPLIED in the prompt; this skill governs only HOW to drive implementation
   through tests, never WHERE the spec comes from nor how to style the code. Language-agnostic.
