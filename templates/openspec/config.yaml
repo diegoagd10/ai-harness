@@ -13,14 +13,21 @@ rules:
   proposal:
     - Include a rollback plan for risky changes
     - Identify the packages/modules affected by the change
+    - "Engram: mem_save any user preference or constraint stated during the discussion (type preference); do NOT copy the proposal text"
+    - "Engram: after writing, upsert the active-change pointer (mem_save topic_key openspec/active-change, type config, scope project) with change name, phase propose, next step, and path to the change dir"
   specs:
     - Use Given/When/Then format for scenarios
     - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY)
+    - "Engram: mem_save any non-obvious discovery about the codebase or domain surfaced while writing specs (type discovery)"
+    - "Engram: after writing, upsert the active-change pointer (topic_key openspec/active-change, type config) advancing phase to specs"
   design:
     - Load the coding-guidelines skill to design deep modules
     - Document architecture decisions with their rationale
     - Add diagrams for complex flows when they reduce cognitive load
+    - "Engram: mem_save each architecture/design decision with its rejected alternative and WHY (type decision); the rationale is memory, not artifact text"
+    - "Engram: after writing, upsert the active-change pointer (topic_key openspec/active-change, type config) advancing phase to design"
   tasks:
     - Group tasks by phase (infrastructure, implementation, testing)
     - Use hierarchical numbering (1.1, 1.2, ...)
     - Keep each task small enough to complete in one session
+    - "Engram: after writing, upsert the active-change pointer (topic_key openspec/active-change, type config) advancing phase to tasks, next step apply"

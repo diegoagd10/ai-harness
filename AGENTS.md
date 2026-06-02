@@ -71,9 +71,11 @@ Multiple skills can apply at once. Match by file context (extensions, paths) and
 
 Engram is persistent memory that survives sessions and compactions. It is **MEMORY, not an artifact store**: decisions, conventions, discoveries, and cross-agent handoff notes live here. **OpenSpec owns the artifacts** (proposal, specs, design, tasks) as files under `openspec/` — never duplicate those into Engram. `tasks.md` is the single source of truth for task status.
 
-### Proactive save triggers (do NOT wait to be asked)
+This protocol is **MANDATORY and ALWAYS ACTIVE** — not something you activate on demand. The Engram tools may arrive deferred in some harnesses; if they are not loaded, load them (e.g. `ToolSearch`) rather than skipping a save.
 
-Call `mem_save` immediately after:
+### When to save (MANDATORY — not optional)
+
+Call `mem_save` **IMMEDIATELY and WITHOUT BEING ASKED** after any of these:
 - Architecture or design decision made
 - Convention/pattern established (naming, structure)
 - Tool or library choice made with tradeoffs
@@ -84,6 +86,19 @@ Call `mem_save` immediately after:
 
 Self-check after every task: "Did I make a decision, fix a bug, learn something non-obvious, or establish a convention? If yes, call `mem_save` NOW."
 
+### Passive capture (do this EVERY task response)
+
+When you complete a task or subtask, append a `## Key Learnings:` section at the end of your reply with numbered items — Engram auto-extracts and saves them. This is the per-response habit; do not let it lapse.
+
+```
+## Key Learnings:
+
+1. bcrypt cost=12 is the right balance for our server performance
+2. JWT refresh tokens need atomic rotation to prevent race conditions
+```
+
+You can also call `mem_capture_passive(content)` directly with any text containing such a section.
+
 ### `mem_save` format
 
 - **title**: verb + what — short, searchable (e.g. "Fixed N+1 query in UserList")
@@ -91,6 +106,7 @@ Self-check after every task: "Did I make a decision, fix a bug, learn something 
 - **scope**: `project` (default) | `personal`
 - **topic_key**: stable key for evolving topics (e.g. `architecture/auth-model`); same topic evolving → reuse the key (upsert). Unsure → `mem_suggest_topic_key`. Know the exact ID → `mem_update`.
 - **capture_prompt**: default `true`. Set `false` only for automated artifacts (sub-agent reports, caches).
+- **prompt capture**: if a hook can observe the user's prompt before derived saves, call `mem_save_prompt` first so later `mem_save` calls dedupe against it. `mem_save` never invents prompt text — if no prompt context exists, the save still succeeds without it.
 - **content**: **What** (one sentence) / **Why** (motivation) / **Where** (files) / **Learned** (gotchas — omit if none)
 
 ### When to search
@@ -106,11 +122,15 @@ Also search proactively when starting work that may have been done before, or wh
 
 Call `mem_session_summary` with: **Goal / Instructions / Discoveries / Accomplished / Next Steps / Relevant Files**.
 
+This is **NOT optional** — skip it and the next session starts blind.
+
 ### After compaction
 
 1. `mem_session_summary` with the compacted content — persists pre-compaction work
 2. `mem_context` — recover prior context
 3. Only then continue.
+
+Do not skip step 1 — without it, everything done before compaction is lost from memory.
 
 ## Orchestration
 
@@ -172,6 +192,32 @@ openspec init --tools claude,codex,opencode,github-copilot
 Then **disable the generated apply** so it never competes with this project's flow: remove the generated `opsx-apply` command and the `openspec-apply-change` skill for each tool. `openspec update` regenerates files — re-disable apply after every update.
 
 **Boundary**: openspec = artifacts (files). Engram = memory. `tasks.md` = single source of truth for task status.
+
+### Engram during native planning phases (propose/specs/design/tasks)
+
+The native opsx commands say nothing about Engram — YOU must. The artifact BODY
+goes to the file; the following go to Engram via `mem_save` as they surface:
+- a user preference or constraint stated during the discussion → type `preference`
+- a decision + the rejected alternative and WHY → type `decision`
+- a non-obvious discovery about the codebase/domain → type `discovery`
+
+"Never duplicate artifacts into Engram" means do not copy the proposal/spec TEXT.
+It does NOT mean stay silent during planning — the reasoning behind the text is
+memory, and it is exactly what survives compaction.
+
+### Active-change breadcrumb (session recovery)
+
+OpenSpec does NOT persist which change is active or what phase you are in. Keep a
+single, always-current pointer in Engram so a fresh session resumes instantly:
+
+- ONE observation, `topic_key: openspec/active-change`, type `config`, scope `project`.
+- UPSERT it (reuse the topic_key) at every phase transition — never create a second one.
+- Content: change name · current phase (propose|specs|design|tasks|apply|verify) ·
+  one-line next step · path to `openspec/changes/<name>/`.
+- This is a POINTER, not status — task status stays in `tasks.md`.
+
+On session start or after compaction: `mem_context`, then `mem_search "openspec/active-change"`
+BEFORE doing anything, to recover the active change and phase.
 
 ## Implementation Policy (this project's `apply`)
 
