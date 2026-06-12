@@ -9,6 +9,7 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLAUDE_DIR="${HOME}/.claude"
 AGENTS_DIR="${HOME}/.agents"
+COPILOT_DIR="${HOME}/.copilot"
 
 unlink_if_ours() {
   local dest="$1"
@@ -37,4 +38,5 @@ unlink_if_ours "$CLAUDE_DIR/skills"
 unlink_if_ours "$CLAUDE_DIR/CLAUDE.md"
 unlink_if_ours "$AGENTS_DIR/skills"
 unlink_if_ours "$AGENTS_DIR/AGENTS.md"
+unlink_if_ours "$COPILOT_DIR/copilot-instructions.md"
 echo "Done. Any *.bak.* backups were left in place."

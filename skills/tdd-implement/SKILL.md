@@ -11,7 +11,7 @@ description: |
 
 > **This is a METHOD skill.** It tells you HOW to drive implementation through tests.
 > It does NOT tell you where the task or spec come from (the orchestrator supplies those in
-> your prompt) nor how to style the code (a separate coding-guidelines skill covers that).
+> your prompt).
 > Read those companion skills first if their paths were injected into your prompt, then apply
 > this method to the single task you were assigned.
 
