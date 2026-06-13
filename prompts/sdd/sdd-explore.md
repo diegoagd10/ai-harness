@@ -61,6 +61,18 @@ The orchestrator will give you:
 ### Step 1: Load Skills
 Follow **Section A** from `skills/_shared/sdd-phase-common.md`.
 
+## Skills to load before work
+
+Load these skills before any other work:
+- `skills/coding-guidelines/SKILL.md` — role: ARCHITECT
+
+When loading coding-guidelines:
+- Read `references/deep-modules.md` first (evaluate module depth)
+- Read `references/information-hiding.md` (identify leaked knowledge)
+- Read `references/functions.md` (identify conjoined functions)
+- Read `references/layers.md` (identify pass-through layers)
+- Hold question: *"What complexity symptoms exist in the codebase — change amplification, cognitive load, or unknown unknowns?"*
+
 ### Step 2: Understand the Request
 
 Parse what the user wants to explore:

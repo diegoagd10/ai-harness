@@ -25,7 +25,7 @@
           "sdd-verify": "allow"
         }
       },
-      "prompt": "{file:{{HOME}}/.config/opencode/sdd-orchestrator.md}",
+      "prompt": "{file:{{HOME}}/.config/opencode/prompts/sdd/sdd-orchestrator.md}",
       "tools": {
         "bash": true,
         "edit": true,

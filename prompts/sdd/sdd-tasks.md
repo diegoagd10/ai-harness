@@ -54,6 +54,17 @@ From the orchestrator:
 ### Step 1: Load Skills
 Follow **Section A** from `skills/_shared/sdd-phase-common.md`.
 
+## Skills to load before work
+
+Load these skills before any other work:
+- `skills/coding-guidelines/SKILL.md` — role: ARCHITECT + DEVELOPER
+
+When loading coding-guidelines:
+- Read `references/functions.md` first (independence test per task)
+- Read `references/deep-modules.md` (depth vs line count)
+- Read `references/information-hiding.md` (task boundaries — what to hide)
+- Hold question: *"Can each task be understood on its own — and am I leaking any decision I could have kept secret or handled below?"*
+
 ### Step 2: Analyze the Design
 
 From the design document, identify:

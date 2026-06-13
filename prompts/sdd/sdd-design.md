@@ -53,6 +53,19 @@ From the orchestrator:
 ### Step 1: Load Skills
 Follow **Section A** from `skills/_shared/sdd-phase-common.md`.
 
+## Skills to load before work
+
+Load these skills before any other work:
+- `skills/coding-guidelines/SKILL.md` — role: ARCHITECT + DEVELOPER
+
+When loading coding-guidelines:
+- Read `references/deep-modules.md` first (mandatory — the yardstick for every boundary)
+- Read `references/information-hiding.md` (what knowledge to hide behind each interface)
+- Read `references/layers.md` (does each layer add a new abstraction)
+- Read `references/classes.md` (together or apart by knowledge)
+- Read `references/general-purpose.md` (interface generality)
+- Hold question: *"Where does each piece of knowledge live, and does every boundary I draw hide something real without pushing rituals upward?"*
+
 ### Step 2: Read the Codebase
 
 Before designing, read the actual code that will be affected:

@@ -53,6 +53,17 @@ From the orchestrator:
 ### Step 1: Load Skills
 Follow **Section A** from `skills/_shared/sdd-phase-common.md`.
 
+## Skills to load before work
+
+Load these skills before any other work:
+- `skills/coding-guidelines/SKILL.md` — role: ARCHITECT
+
+When loading coding-guidelines:
+- Read `references/information-hiding.md` first (requirements as contracts)
+- Read `references/deep-modules.md` (each requirement = a module boundary)
+- Read `references/general-purpose.md` (capability generality)
+- Hold question: *"Is this knowledge the caller NEEDS, or a leaked decision?"*
+
 ### Step 2: Identify Affected Domains
 
 Read the proposal's **Capabilities section** — this is your primary contract:

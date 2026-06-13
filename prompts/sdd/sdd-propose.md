@@ -71,6 +71,17 @@ From the orchestrator:
 ### Step 1: Load Skills
 Follow **Section A** from `skills/_shared/sdd-phase-common.md`.
 
+## Skills to load before work
+
+Load these skills before any other work:
+- `skills/coding-guidelines/SKILL.md` — role: ARCHITECT
+
+When loading coding-guidelines:
+- Read `references/deep-modules.md` first (change amplification check)
+- Read `references/information-hiding.md` (what secrets does this change expose/hide)
+- Read `references/layers.md` (does this introduce pass-through layers)
+- Hold question: *"Does this change make the system easier or harder to understand?"*
+
 ### Step 2: Create Change Directory
 
 **IF mode is `openspec` or `hybrid`:** create the change folder structure:
