@@ -202,6 +202,11 @@ func writeFakeRepo(t *testing.T) string {
 	if err := os.MkdirAll(ocDir, 0o755); err != nil {
 		t.Fatalf("mkdir agent-clis/opencode: %v", err)
 	}
+	// agent-clis/opencode/plugins is symlinked into the OpenCode config dir on
+	// install (OpenCode auto-loads plugins it finds there).
+	if err := os.MkdirAll(filepath.Join(ocDir, "plugins"), 0o755); err != nil {
+		t.Fatalf("mkdir agent-clis/opencode/plugins: %v", err)
+	}
 	ocSource := `{"agent":{"gentle-orchestrator":{"prompt":"{file:{{HOME}}/.config/opencode/prompts/sdd/sdd-orchestrator.md}"}}}`
 	if err := os.WriteFile(filepath.Join(ocDir, "opencode.json"), []byte(ocSource), 0o644); err != nil {
 		t.Fatalf("write opencode.json source: %v", err)
@@ -229,6 +234,17 @@ func TestRunInstallLinksHarnessIntoHome(t *testing.T) {
 	}
 	if !strings.Contains(res.stdout, dest) {
 		t.Fatalf("expected stdout to mention %s, got %q", dest, res.stdout)
+	}
+
+	// The OpenCode plugins dir is symlinked into ~/.config/opencode/plugins so
+	// OpenCode auto-loads the bundled plugins.
+	pluginsDest := filepath.Join(home, ".config", "opencode", "plugins")
+	pluginsTarget, err := os.Readlink(pluginsDest)
+	if err != nil {
+		t.Fatalf("expected plugins symlink at %s: %v", pluginsDest, err)
+	}
+	if pluginsTarget != filepath.Join(repo, "agent-clis", "opencode", "plugins") {
+		t.Fatalf("plugins symlink target = %q, want %q", pluginsTarget, filepath.Join(repo, "agent-clis", "opencode", "plugins"))
 	}
 }
 

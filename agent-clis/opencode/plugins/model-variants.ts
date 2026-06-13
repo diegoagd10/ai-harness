@@ -30,6 +30,25 @@ async function removeOwnTempFile(tmpPath: string) {
   }
 }
 
+/**
+ * Builds the variants map from an OpenCode provider list. For each model that
+ * declares one or more variants (effort levels), records its sorted variant
+ * keys under provider id -> model id. Models without variants are skipped.
+ */
+export function extractVariants(providerList: any[]): Record<string, Record<string, string[]>> {
+  const variants: Record<string, Record<string, string[]>> = {}
+  for (const prov of providerList) {
+    for (const [modelId, model] of Object.entries(prov.models ?? {})) {
+      const m = model as any
+      if (m.variants && Object.keys(m.variants).length > 0) {
+        variants[prov.id] = variants[prov.id] || {}
+        variants[prov.id][modelId] = Object.keys(m.variants).sort()
+      }
+    }
+  }
+  return variants
+}
+
 export const ModelVariantsPlugin: Plugin = async (input) => {
   async function refreshVariantsCache() {
     let tmpPath: string | undefined
@@ -38,16 +57,7 @@ export const ModelVariantsPlugin: Plugin = async (input) => {
       const data = (result as any).data ?? result
       const providerList: any[] = data?.all ?? data?.providers ?? (Array.isArray(data) ? data : [])
 
-      const variants: Record<string, Record<string, string[]>> = {}
-      for (const prov of providerList) {
-        for (const [modelId, model] of Object.entries(prov.models ?? {})) {
-          const m = model as any
-          if (m.variants && Object.keys(m.variants).length > 0) {
-            variants[prov.id] = variants[prov.id] || {}
-            variants[prov.id][modelId] = Object.keys(m.variants).sort()
-          }
-        }
-      }
+      const variants = extractVariants(providerList)
 
       const cacheDir = path.join(homedir(), ".ai-harness", "cache")
       await mkdir(cacheDir, { recursive: true })

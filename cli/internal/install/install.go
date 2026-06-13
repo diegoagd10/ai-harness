@@ -1,7 +1,8 @@
 // Package install ports the repo's install.sh / uninstall.sh into a tested Go
-// deep module. It symlinks the shared agent config (skills/, AGENTS.md, and the
-// OpenCode prompts/sdd dir) into the user's home-dir locations, and removes only
-// the symlinks that point back into this repo.
+// deep module. It symlinks the shared agent config (skills/, AGENTS.md, the
+// OpenCode prompts/sdd dir, and the OpenCode plugins dir) into the user's
+// home-dir locations, and removes only the symlinks that point back into this
+// repo.
 //
 // The package is host-injectable on purpose: it never reads $HOME or the wall
 // clock itself. The caller supplies every directory and a timestamp source via
@@ -66,10 +67,11 @@ type link struct {
 }
 
 // mappings returns the repo->home links. The first five mirror install.sh's
-// original link calls; the last three wire OpenCode's shared config: skills/,
-// the root AGENTS.md (OpenCode's global persona prompt), and the prompts/sdd dir
-// its agents reference. All eight ride the same idempotent
-// backup/relink/uninstall logic.
+// original link calls; the last four wire OpenCode's shared config: skills/,
+// the root AGENTS.md (OpenCode's global persona prompt), the prompts/sdd dir its
+// agents reference, and the agent-clis/opencode/plugins dir (OpenCode
+// auto-loads plugins it finds under ~/.config/opencode/plugins). All nine ride
+// the same idempotent backup/relink/uninstall logic.
 func (c Config) mappings() []link {
 	skills := filepath.Join(c.RepoDir, "skills")
 	agents := filepath.Join(c.RepoDir, "AGENTS.md")
@@ -82,6 +84,7 @@ func (c Config) mappings() []link {
 		{skills, filepath.Join(c.OpencodeDir, "skills")},
 		{agents, filepath.Join(c.OpencodeDir, "AGENTS.md")},
 		{filepath.Join(c.RepoDir, "prompts", "sdd"), filepath.Join(c.OpencodeDir, "prompts", "sdd")},
+		{filepath.Join(c.RepoDir, "agent-clis", "opencode", "plugins"), filepath.Join(c.OpencodeDir, "plugins")},
 	}
 }
 
@@ -96,7 +99,7 @@ func DefaultTimestamp() string {
 // other links, but returns a non-nil error so the CLI can exit non-zero — this
 // matches install.sh, whose link() returns 1 on a missing source.
 func Install(cfg Config) (Report, error) {
-	report := make(Report, 0, 8)
+	report := make(Report, 0, 9)
 	var firstErr error
 	for _, m := range cfg.mappings() {
 		outcome, err := installOne(cfg, m)
@@ -172,7 +175,7 @@ func relink(src, dest string) error {
 // real files, foreign symlinks, and *.bak.* backups untouched. It never returns
 // an error for an expected per-target outcome.
 func Uninstall(cfg Config) (Report, error) {
-	report := make(Report, 0, 8)
+	report := make(Report, 0, 9)
 	var firstErr error
 	for _, m := range cfg.mappings() {
 		outcome, err := uninstallOne(cfg, m.dest)

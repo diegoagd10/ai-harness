@@ -19,6 +19,9 @@ func fakeRepo(t *testing.T) string {
 	if err := os.MkdirAll(filepath.Join(repo, "prompts", "sdd"), 0o755); err != nil {
 		t.Fatalf("mkdir prompts/sdd: %v", err)
 	}
+	if err := os.MkdirAll(filepath.Join(repo, "agent-clis", "opencode", "plugins"), 0o755); err != nil {
+		t.Fatalf("mkdir agent-clis/opencode/plugins: %v", err)
+	}
 	if err := os.WriteFile(filepath.Join(repo, "AGENTS.md"), []byte("# Agents\n"), 0o644); err != nil {
 		t.Fatalf("write AGENTS.md: %v", err)
 	}
@@ -78,6 +81,7 @@ func TestInstallLinksAllTargets(t *testing.T) {
 		{filepath.Join(home, ".config", "opencode", "skills"), filepath.Join(repo, "skills")},
 		{filepath.Join(home, ".config", "opencode", "AGENTS.md"), filepath.Join(repo, "AGENTS.md")},
 		{filepath.Join(home, ".config", "opencode", "prompts", "sdd"), filepath.Join(repo, "prompts", "sdd")},
+		{filepath.Join(home, ".config", "opencode", "plugins"), filepath.Join(repo, "agent-clis", "opencode", "plugins")},
 	}
 
 	if len(report) != len(cases) {
@@ -264,6 +268,7 @@ func TestInstallLinksOpencodePromptsSkillsAndPersona(t *testing.T) {
 		{filepath.Join(home, ".config", "opencode", "skills"), filepath.Join(repo, "skills")},
 		{filepath.Join(home, ".config", "opencode", "AGENTS.md"), filepath.Join(repo, "AGENTS.md")},
 		{filepath.Join(home, ".config", "opencode", "prompts", "sdd"), filepath.Join(repo, "prompts", "sdd")},
+		{filepath.Join(home, ".config", "opencode", "plugins"), filepath.Join(repo, "agent-clis", "opencode", "plugins")},
 	}
 	for _, c := range cases {
 		got, err := os.Readlink(c.dest)
@@ -298,6 +303,7 @@ func TestUninstallRemovesOpencodeRepoPointingLinks(t *testing.T) {
 		filepath.Join(home, ".config", "opencode", "skills"),
 		filepath.Join(home, ".config", "opencode", "AGENTS.md"),
 		filepath.Join(home, ".config", "opencode", "prompts", "sdd"),
+		filepath.Join(home, ".config", "opencode", "plugins"),
 	} {
 		if _, err := os.Lstat(dest); !os.IsNotExist(err) {
 			t.Fatalf("expected %s removed, lstat err = %v", dest, err)
