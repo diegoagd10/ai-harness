@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/diegoagd10/ai-harness-setup/cli/internal/install"
 )
 
 // runResult captures everything an end-to-end Run invocation produces.
@@ -18,8 +20,32 @@ type runResult struct {
 
 func invoke(args ...string) runResult {
 	var out, errBuf bytes.Buffer
-	code := Run(args, &out, &errBuf)
+	// Default test invocations are non-interactive with empty stdin, matching a
+	// CI/script run. Tests that drive the picker call Run directly with a reader
+	// and interactive=true.
+	code := Run(args, strings.NewReader(""), false, &out, &errBuf)
 	return runResult{code: code, stdout: out.String(), stderr: errBuf.String()}
+}
+
+// TestRunInstallInteractivePromptSelectsHarness drives the picker through Run:
+// with no --harness and interactive=true, the injected stdin ("2" = claude)
+// selects claude only — proving the prompt path without relying on a real TTY.
+func TestRunInstallInteractivePromptSelectsHarness(t *testing.T) {
+	repo := writeFakeRepo(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	var out, errBuf bytes.Buffer
+	code := Run([]string{"install", "--repo", repo}, strings.NewReader("2\n"), true, &out, &errBuf)
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d (stderr=%q)", code, errBuf.String())
+	}
+	if _, err := os.Lstat(filepath.Join(home, ".claude", "skills")); err != nil {
+		t.Fatalf("claude skills should be linked when '2' is chosen: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".config", "opencode", "opencode.json")); !os.IsNotExist(err) {
+		t.Fatalf("opencode.json must be absent when only claude is chosen (err=%v)", err)
+	}
 }
 
 func TestRunNoArgsPrintsUsageAndFails(t *testing.T) {
@@ -347,6 +373,154 @@ func TestRunUninstallRemovesOpenCodeJSON(t *testing.T) {
 	}
 	if _, err := os.Lstat(dest); !os.IsNotExist(err) {
 		t.Fatalf("expected opencode.json %s removed, lstat err = %v", dest, err)
+	}
+}
+
+func TestRunInstallHarnessClaudeSkipsOpenCodeExtras(t *testing.T) {
+	repo := writeFakeRepo(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	res := invoke("install", "--harness", "claude", "--repo", repo)
+	if res.code != 0 {
+		t.Fatalf("expected exit 0, got %d (stderr=%q)", res.code, res.stderr)
+	}
+
+	// claude + agents links exist.
+	claudeMD := filepath.Join(home, ".claude", "CLAUDE.md")
+	if _, err := os.Readlink(claudeMD); err != nil {
+		t.Fatalf("expected claude link %s: %v", claudeMD, err)
+	}
+	agents := filepath.Join(home, ".agents", "skills")
+	if _, err := os.Readlink(agents); err != nil {
+		t.Fatalf("expected agents link %s: %v", agents, err)
+	}
+
+	// No opencode.json, no command files, no opencode symlinks.
+	if _, err := os.Stat(filepath.Join(home, ".config", "opencode", "opencode.json")); !os.IsNotExist(err) {
+		t.Fatalf("claude-only must not generate opencode.json, err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".config", "opencode", "commands", "sdd-continue.md")); !os.IsNotExist(err) {
+		t.Fatalf("claude-only must not generate command files, err = %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(home, ".config", "opencode", "plugins")); !os.IsNotExist(err) {
+		t.Fatalf("claude-only must not create opencode plugins link, err = %v", err)
+	}
+}
+
+func TestRunInstallHarnessOpenCodeGeneratesExtras(t *testing.T) {
+	repo := writeFakeRepo(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	res := invoke("install", "--harness", "opencode", "--repo", repo)
+	if res.code != 0 {
+		t.Fatalf("expected exit 0, got %d (stderr=%q)", res.code, res.stderr)
+	}
+
+	if _, err := os.Stat(filepath.Join(home, ".config", "opencode", "opencode.json")); err != nil {
+		t.Fatalf("opencode selection should generate opencode.json: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".config", "opencode", "commands", "sdd-continue.md")); err != nil {
+		t.Fatalf("opencode selection should generate command files: %v", err)
+	}
+	if _, err := os.Readlink(filepath.Join(home, ".config", "opencode", "plugins")); err != nil {
+		t.Fatalf("opencode selection should create plugins symlink: %v", err)
+	}
+	// claude must not be configured.
+	if _, err := os.Lstat(filepath.Join(home, ".claude", "CLAUDE.md")); !os.IsNotExist(err) {
+		t.Fatalf("opencode-only must not link claude CLAUDE.md, err = %v", err)
+	}
+}
+
+func TestRunInstallUnknownHarnessFails(t *testing.T) {
+	repo := writeFakeRepo(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	res := invoke("install", "--harness", "bogus", "--repo", repo)
+	if res.code == 0 {
+		t.Fatalf("expected non-zero exit for unknown harness")
+	}
+	if !strings.Contains(res.stderr, "bogus") {
+		t.Fatalf("expected stderr to name the unknown harness, got %q", res.stderr)
+	}
+}
+
+func TestRunUninstallCleansAllHarnessesIgnoringFlag(t *testing.T) {
+	repo := writeFakeRepo(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// Install everything (no --harness => all in non-TTY).
+	if res := invoke("install", "--repo", repo); res.code != 0 {
+		t.Fatalf("install precondition failed: %q", res.stderr)
+	}
+
+	// Uninstall with a narrow --harness flag must still clean every link.
+	res := invoke("uninstall", "--harness", "claude", "--repo", repo)
+	if res.code != 0 {
+		t.Fatalf("expected exit 0, got %d (stderr=%q)", res.code, res.stderr)
+	}
+	for _, dest := range []string{
+		filepath.Join(home, ".claude", "skills"),
+		filepath.Join(home, ".copilot", "copilot-instructions.md"),
+		filepath.Join(home, ".config", "opencode", "plugins"),
+	} {
+		if _, err := os.Lstat(dest); !os.IsNotExist(err) {
+			t.Fatalf("uninstall should remove %s regardless of flag, lstat err = %v", dest, err)
+		}
+	}
+}
+
+func TestPromptHarnessesEmptyMeansAll(t *testing.T) {
+	in := strings.NewReader("\n")
+	var out bytes.Buffer
+	got, err := promptHarnesses(in, &out)
+	if err != nil {
+		t.Fatalf("promptHarnesses error: %v", err)
+	}
+	if len(got) != len(install.AllHarnesses) {
+		t.Fatalf("empty input: got %v, want all %v", got, install.AllHarnesses)
+	}
+}
+
+func TestPromptHarnessesNumberSelectsOpencode(t *testing.T) {
+	in := strings.NewReader("1\n")
+	var out bytes.Buffer
+	got, err := promptHarnesses(in, &out)
+	if err != nil {
+		t.Fatalf("promptHarnesses error: %v", err)
+	}
+	if len(got) != 1 || got[0] != install.HarnessOpenCode {
+		t.Fatalf(`input "1": got %v, want [opencode]`, got)
+	}
+}
+
+func TestPromptHarnessesNamesSelectThose(t *testing.T) {
+	in := strings.NewReader("claude,copilot\n")
+	var out bytes.Buffer
+	got, err := promptHarnesses(in, &out)
+	if err != nil {
+		t.Fatalf("promptHarnesses error: %v", err)
+	}
+	want := map[install.Harness]bool{install.HarnessClaude: true, install.HarnessCopilot: true}
+	if len(got) != 2 {
+		t.Fatalf(`input "claude,copilot": got %v, want 2`, got)
+	}
+	for _, h := range got {
+		if !want[h] {
+			t.Fatalf("unexpected harness %q in %v", h, got)
+		}
+	}
+}
+
+func TestPromptHarnessesRejectsBadInput(t *testing.T) {
+	in := strings.NewReader("bogus\n")
+	var out bytes.Buffer
+	_, err := promptHarnesses(in, &out)
+	if err == nil {
+		t.Fatalf(`input "bogus": expected an error`)
 	}
 }
 

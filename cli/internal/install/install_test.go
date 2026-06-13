@@ -77,6 +77,7 @@ func TestInstallLinksAllTargets(t *testing.T) {
 		{filepath.Join(home, ".claude", "CLAUDE.md"), filepath.Join(repo, "AGENTS.md")},
 		{filepath.Join(home, ".agents", "skills"), filepath.Join(repo, "skills")},
 		{filepath.Join(home, ".agents", "AGENTS.md"), filepath.Join(repo, "AGENTS.md")},
+		{filepath.Join(home, ".copilot", "skills"), filepath.Join(repo, "skills")},
 		{filepath.Join(home, ".copilot", "copilot-instructions.md"), filepath.Join(repo, "AGENTS.md")},
 		{filepath.Join(home, ".config", "opencode", "skills"), filepath.Join(repo, "skills")},
 		{filepath.Join(home, ".config", "opencode", "AGENTS.md"), filepath.Join(repo, "AGENTS.md")},
@@ -415,6 +416,188 @@ func TestUninstallNeverTouchesBackups(t *testing.T) {
 	}
 	if _, err := os.Stat(backup); err != nil {
 		t.Fatalf("backup must survive uninstall: %v", err)
+	}
+}
+
+// destsOf returns the set of destination paths a Config's mappings would link.
+func destsOf(c Config) map[string]bool {
+	set := make(map[string]bool)
+	for _, m := range c.mappings() {
+		set[m.dest] = true
+	}
+	return set
+}
+
+func TestMappingsEmptyHarnessesLinksAll(t *testing.T) {
+	repo := fakeRepo(t)
+	home := t.TempDir()
+	cfg := cfgFor(repo, home) // Harnesses empty -> all
+
+	dests := destsOf(cfg)
+	want := []string{
+		filepath.Join(home, ".agents", "skills"),
+		filepath.Join(home, ".agents", "AGENTS.md"),
+		filepath.Join(home, ".claude", "skills"),
+		filepath.Join(home, ".claude", "CLAUDE.md"),
+		filepath.Join(home, ".copilot", "skills"),
+		filepath.Join(home, ".copilot", "copilot-instructions.md"),
+		filepath.Join(home, ".config", "opencode", "skills"),
+		filepath.Join(home, ".config", "opencode", "AGENTS.md"),
+		filepath.Join(home, ".config", "opencode", "prompts", "sdd"),
+		filepath.Join(home, ".config", "opencode", "plugins"),
+	}
+	if len(dests) != len(want) {
+		t.Fatalf("empty Harnesses: got %d links, want %d: %v", len(dests), len(want), dests)
+	}
+	for _, d := range want {
+		if !dests[d] {
+			t.Fatalf("empty Harnesses: missing link %q in %v", d, dests)
+		}
+	}
+}
+
+func TestMappingsClaudeOnly(t *testing.T) {
+	repo := fakeRepo(t)
+	home := t.TempDir()
+	cfg := cfgFor(repo, home)
+	cfg.Harnesses = []Harness{HarnessClaude}
+
+	dests := destsOf(cfg)
+	mustLink := []string{
+		filepath.Join(home, ".agents", "skills"),
+		filepath.Join(home, ".agents", "AGENTS.md"),
+		filepath.Join(home, ".claude", "skills"),
+		filepath.Join(home, ".claude", "CLAUDE.md"),
+	}
+	mustNot := []string{
+		filepath.Join(home, ".copilot", "copilot-instructions.md"),
+		filepath.Join(home, ".copilot", "skills"),
+		filepath.Join(home, ".config", "opencode", "skills"),
+		filepath.Join(home, ".config", "opencode", "plugins"),
+	}
+	if len(dests) != len(mustLink) {
+		t.Fatalf("claude-only: got %d links, want %d: %v", len(dests), len(mustLink), dests)
+	}
+	for _, d := range mustLink {
+		if !dests[d] {
+			t.Fatalf("claude-only: missing %q in %v", d, dests)
+		}
+	}
+	for _, d := range mustNot {
+		if dests[d] {
+			t.Fatalf("claude-only: unexpected %q in %v", d, dests)
+		}
+	}
+}
+
+func TestMappingsCopilotOnlyIncludesSkillsDir(t *testing.T) {
+	repo := fakeRepo(t)
+	home := t.TempDir()
+	cfg := cfgFor(repo, home)
+	cfg.Harnesses = []Harness{HarnessCopilot}
+
+	dests := destsOf(cfg)
+	mustLink := []string{
+		filepath.Join(home, ".agents", "skills"),
+		filepath.Join(home, ".agents", "AGENTS.md"),
+		filepath.Join(home, ".copilot", "skills"),
+		filepath.Join(home, ".copilot", "copilot-instructions.md"),
+	}
+	mustNot := []string{
+		filepath.Join(home, ".claude", "CLAUDE.md"),
+		filepath.Join(home, ".config", "opencode", "skills"),
+	}
+	if len(dests) != len(mustLink) {
+		t.Fatalf("copilot-only: got %d links, want %d: %v", len(dests), len(mustLink), dests)
+	}
+	for _, d := range mustLink {
+		if !dests[d] {
+			t.Fatalf("copilot-only: missing %q in %v", d, dests)
+		}
+	}
+	for _, d := range mustNot {
+		if dests[d] {
+			t.Fatalf("copilot-only: unexpected %q in %v", d, dests)
+		}
+	}
+}
+
+func TestMappingsOpencodeOnlyIncludesPlugins(t *testing.T) {
+	repo := fakeRepo(t)
+	home := t.TempDir()
+	cfg := cfgFor(repo, home)
+	cfg.Harnesses = []Harness{HarnessOpenCode}
+
+	dests := destsOf(cfg)
+	mustLink := []string{
+		filepath.Join(home, ".agents", "skills"),
+		filepath.Join(home, ".agents", "AGENTS.md"),
+		filepath.Join(home, ".config", "opencode", "skills"),
+		filepath.Join(home, ".config", "opencode", "AGENTS.md"),
+		filepath.Join(home, ".config", "opencode", "prompts", "sdd"),
+		filepath.Join(home, ".config", "opencode", "plugins"),
+	}
+	mustNot := []string{
+		filepath.Join(home, ".claude", "CLAUDE.md"),
+		filepath.Join(home, ".copilot", "copilot-instructions.md"),
+	}
+	if len(dests) != len(mustLink) {
+		t.Fatalf("opencode-only: got %d links, want %d: %v", len(dests), len(mustLink), dests)
+	}
+	for _, d := range mustLink {
+		if !dests[d] {
+			t.Fatalf("opencode-only: missing %q in %v", d, dests)
+		}
+	}
+	for _, d := range mustNot {
+		if dests[d] {
+			t.Fatalf("opencode-only: unexpected %q in %v", d, dests)
+		}
+	}
+}
+
+func TestInstallClaudeOnlyReportCoversAgentsAndClaude(t *testing.T) {
+	repo := fakeRepo(t)
+	home := t.TempDir()
+	cfg := cfgFor(repo, home)
+	cfg.Harnesses = []Harness{HarnessClaude}
+
+	report, err := Install(cfg)
+	if err != nil {
+		t.Fatalf("Install error: %v", err)
+	}
+	if len(report) != 4 {
+		t.Fatalf("claude-only Install report = %d outcomes, want 4: %+v", len(report), report)
+	}
+	claudeMD := findOutcome(t, report, filepath.Join(home, ".claude", "CLAUDE.md"))
+	if claudeMD.Action != ActionLinked {
+		t.Fatalf("claude CLAUDE.md: want %q, got %q", ActionLinked, claudeMD.Action)
+	}
+	// No opencode link should have been created on disk.
+	if _, err := os.Lstat(filepath.Join(home, ".config", "opencode", "skills")); !os.IsNotExist(err) {
+		t.Fatalf("claude-only must not create opencode link, lstat err = %v", err)
+	}
+}
+
+func TestWantsEmptyMeansAll(t *testing.T) {
+	cfg := Config{} // no Harnesses
+	for _, h := range AllHarnesses {
+		if !cfg.wants(h) {
+			t.Fatalf("empty Harnesses: wants(%q) = false, want true", h)
+		}
+	}
+}
+
+func TestWantsRespectsSelection(t *testing.T) {
+	cfg := Config{Harnesses: []Harness{HarnessClaude}}
+	if !cfg.wants(HarnessClaude) {
+		t.Fatalf("wants(claude) = false, want true")
+	}
+	if cfg.wants(HarnessOpenCode) {
+		t.Fatalf("wants(opencode) = true, want false")
+	}
+	if cfg.wants(HarnessCopilot) {
+		t.Fatalf("wants(copilot) = true, want false")
 	}
 }
 

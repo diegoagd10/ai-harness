@@ -48,7 +48,9 @@ else
   print_summary; exit 1
 fi
 
-HOME="$H" "$BIN" install --repo "$REPO_DIR" >"$WORK/install.log" 2>&1
+# Explicit --harness (and no stdin) so install never blocks on the interactive
+# picker; this exercises the full multi-harness install non-interactively.
+HOME="$H" "$BIN" install --harness opencode,claude,copilot --repo "$REPO_DIR" </dev/null >"$WORK/install.log" 2>&1
 if [ $? -eq 0 ]; then log_pass "ai-harness install exits 0"; else log_fail "ai-harness install exits 0" "$(cat "$WORK/install.log")"; fi
 
 # opencode.json: generated, valid, {{HOME}} substituted to the test HOME.

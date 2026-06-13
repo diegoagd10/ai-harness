@@ -4,6 +4,13 @@
 // home-dir locations, and removes only the symlinks that point back into this
 // repo.
 //
+// The link set is conditional on the selected harnesses (see Config.Harnesses):
+// the generic .agents links are always installed, while the claude, copilot, and
+// opencode links are added only when their harness is selected. Each harness gets
+// a different scope (claude: skills + CLAUDE.md; copilot: skills +
+// copilot-instructions.md; opencode: the full skills + AGENTS.md + prompts/sdd +
+// plugins set).
+//
 // The package is host-injectable on purpose: it never reads $HOME or the wall
 // clock itself. The caller supplies every directory and a timestamp source via
 // Config, so the whole behavior is exercisable against temp dirs with
@@ -46,6 +53,19 @@ type Outcome struct {
 // Report is the per-target log of an Install or Uninstall run, in target order.
 type Report []Outcome
 
+// Harness names one AI CLI whose home-dir config this module can wire up.
+type Harness string
+
+const (
+	HarnessClaude   Harness = "claude"
+	HarnessCopilot  Harness = "copilot"
+	HarnessOpenCode Harness = "opencode"
+)
+
+// AllHarnesses is the full, stable-ordered set of selectable harnesses. The CLI
+// uses it to validate --harness values and as the default selection.
+var AllHarnesses = []Harness{HarnessOpenCode, HarnessClaude, HarnessCopilot}
+
 // Config carries every host-specific input so the logic stays pure and testable.
 // ClaudeDir/AgentsDir/CopilotDir/OpencodeDir default-filling is the CLI layer's
 // job, not this module's.
@@ -55,9 +75,27 @@ type Config struct {
 	AgentsDir   string
 	CopilotDir  string
 	OpencodeDir string
+	// Harnesses selects which harnesses to configure. An EMPTY slice means ALL
+	// harnesses (back-compat / safe default); the generic .agents links are
+	// always installed regardless of this selection.
+	Harnesses []Harness
 	// Timestamp produces the suffix for "<dest>.bak.<ts>" backups. Inject a
 	// fixed value in tests; the CLI injects a real clock via DefaultTimestamp.
 	Timestamp func() string
+}
+
+// wants reports whether harness h is selected. An empty Harnesses slice selects
+// every harness, so wants returns true for all of them in that case.
+func (c Config) wants(h Harness) bool {
+	if len(c.Harnesses) == 0 {
+		return true
+	}
+	for _, selected := range c.Harnesses {
+		if selected == h {
+			return true
+		}
+	}
+	return false
 }
 
 // link is one source->dest mapping.
@@ -66,26 +104,47 @@ type link struct {
 	dest string
 }
 
-// mappings returns the repo->home links. The first five mirror install.sh's
-// original link calls; the last four wire OpenCode's shared config: skills/,
-// the root AGENTS.md (OpenCode's global persona prompt), the prompts/sdd dir its
-// agents reference, and the agent-clis/opencode/plugins dir (OpenCode
-// auto-loads plugins it finds under ~/.config/opencode/plugins). All nine ride
-// the same idempotent backup/relink/uninstall logic.
+// mappings builds the repo->home links for the selected harnesses, in a stable
+// order: the always-on generic .agents links first, then claude, copilot, and
+// opencode, each added only when wants() selects it. Every harness has a
+// different scope:
+//   - .agents (always): skills/ + AGENTS.md.
+//   - claude: skills/ + CLAUDE.md.
+//   - copilot: skills/ + copilot-instructions.md.
+//   - opencode: skills/ + AGENTS.md (its global persona) + the prompts/sdd dir
+//     its agents reference + the agent-clis/opencode/plugins dir (OpenCode
+//     auto-loads plugins it finds under ~/.config/opencode/plugins).
+//
+// Every link rides the same idempotent backup/relink/uninstall logic.
 func (c Config) mappings() []link {
 	skills := filepath.Join(c.RepoDir, "skills")
 	agents := filepath.Join(c.RepoDir, "AGENTS.md")
-	return []link{
-		{skills, filepath.Join(c.ClaudeDir, "skills")},
-		{agents, filepath.Join(c.ClaudeDir, "CLAUDE.md")},
+
+	links := []link{
 		{skills, filepath.Join(c.AgentsDir, "skills")},
 		{agents, filepath.Join(c.AgentsDir, "AGENTS.md")},
-		{agents, filepath.Join(c.CopilotDir, "copilot-instructions.md")},
-		{skills, filepath.Join(c.OpencodeDir, "skills")},
-		{agents, filepath.Join(c.OpencodeDir, "AGENTS.md")},
-		{filepath.Join(c.RepoDir, "prompts", "sdd"), filepath.Join(c.OpencodeDir, "prompts", "sdd")},
-		{filepath.Join(c.RepoDir, "agent-clis", "opencode", "plugins"), filepath.Join(c.OpencodeDir, "plugins")},
 	}
+	if c.wants(HarnessClaude) {
+		links = append(links,
+			link{skills, filepath.Join(c.ClaudeDir, "skills")},
+			link{agents, filepath.Join(c.ClaudeDir, "CLAUDE.md")},
+		)
+	}
+	if c.wants(HarnessCopilot) {
+		links = append(links,
+			link{skills, filepath.Join(c.CopilotDir, "skills")},
+			link{agents, filepath.Join(c.CopilotDir, "copilot-instructions.md")},
+		)
+	}
+	if c.wants(HarnessOpenCode) {
+		links = append(links,
+			link{skills, filepath.Join(c.OpencodeDir, "skills")},
+			link{agents, filepath.Join(c.OpencodeDir, "AGENTS.md")},
+			link{filepath.Join(c.RepoDir, "prompts", "sdd"), filepath.Join(c.OpencodeDir, "prompts", "sdd")},
+			link{filepath.Join(c.RepoDir, "agent-clis", "opencode", "plugins"), filepath.Join(c.OpencodeDir, "plugins")},
+		)
+	}
+	return links
 }
 
 // DefaultTimestamp is the production timestamp source: a local-time stamp in the
@@ -99,9 +158,10 @@ func DefaultTimestamp() string {
 // other links, but returns a non-nil error so the CLI can exit non-zero — this
 // matches install.sh, whose link() returns 1 on a missing source.
 func Install(cfg Config) (Report, error) {
-	report := make(Report, 0, 9)
+	mappings := cfg.mappings()
+	report := make(Report, 0, len(mappings))
 	var firstErr error
-	for _, m := range cfg.mappings() {
+	for _, m := range mappings {
 		outcome, err := installOne(cfg, m)
 		report = append(report, outcome)
 		if err != nil && firstErr == nil {
@@ -175,9 +235,10 @@ func relink(src, dest string) error {
 // real files, foreign symlinks, and *.bak.* backups untouched. It never returns
 // an error for an expected per-target outcome.
 func Uninstall(cfg Config) (Report, error) {
-	report := make(Report, 0, 9)
+	mappings := cfg.mappings()
+	report := make(Report, 0, len(mappings))
 	var firstErr error
-	for _, m := range cfg.mappings() {
+	for _, m := range mappings {
 		outcome, err := uninstallOne(cfg, m.dest)
 		report = append(report, outcome)
 		if err != nil && firstErr == nil {
