@@ -11,6 +11,9 @@ description: >-
   "complexity" or "design": any time the work involves drawing a
   module/class/function boundary, deciding what an interface should reveal or
   conceal, or judging whether code is well-structured, this skill applies.
+metadata:
+  author: diegoagd10
+  version: "1.0"
 ---
 
 ## How to use this skill — pick your role first

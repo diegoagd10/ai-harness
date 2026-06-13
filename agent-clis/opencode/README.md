@@ -33,10 +33,8 @@ phases, and a **review-workload guard** before implementing.
 | `AGENTS.md` | Global persona / system prompt applied to all agents. |
 | `sdd-orchestrator.md` | The primary orchestrator prompt, referenced by `gentle-orchestrator` via `{file:{{HOME}}/.config/opencode/sdd-orchestrator.md}`. |
 | `blocks/*.md` | Source blocks that control repeated or generated prompt sections. Tests ensure the final prompt files stay synchronized with these blocks. |
-| `commands/sdd-*.md` | Slash-command entrypoints (`/sdd-new`, `/sdd-ff`, `/sdd-continue`, `/sdd-apply`, `/sdd-verify`, `/sdd-archive`, `/sdd-status`, `/sdd-init`, `/sdd-explore`, `/sdd-onboard`). |
-| `prompts/sdd/*.md` | The prompt each phase subagent loads. Derived from the matching `skills/<phase>/SKILL.md`. |
-| `plugins/*.ts` | OpenCode plugins: `skill-registry.ts` (resolves project skills) and `model-variants.ts` (model profiles). |
-| `skills/` | Full bundled skill set, incl. the `judgment-day` skill (the "juicio final" choreography), `_shared` conventions, and the `sdd-*` phase skills. |
+| _(generated)_ slash commands | The five user-facing entrypoints (`/sdd-new`, `/sdd-continue`, `/sdd-status`, `/sdd-init`, `/sdd-onboard`) are no longer staged here. They live once as platform-neutral templates at the repo root `prompts/commands/*.md`; `ai-harness install` generates the OpenCode-specific files into `~/.config/opencode/commands/`. Phases are not commands — the orchestrator drives them as hidden subagents. |
+| `plugins/*.ts` | OpenCode plugin `model-variants.ts` (model profiles). |
 
 ## `{{HOME}}` placeholder
 
@@ -47,9 +45,13 @@ phases, and a **review-workload guard** before implementing.
 "prompt": "{file:{{HOME}}/.config/opencode/prompts/sdd/sdd-init.md}"
 ```
 
-`ai-harness` substitutes `{{HOME}}` with the real home dir at install time. To run this
-copy directly you'd either replace `{{HOME}}` with your home and drop the folder into
-`~/.config/opencode/`, or rewrite the refs to relative `{file:./prompts/sdd/...}`.
+`ai-harness` substitutes `{{HOME}}` with the real home dir at install time.
+
+The phase prompts these refs point at are **not** stored in this folder. They live once at
+the repo root in `prompts/sdd/*.md` (the single source of truth, shared across the opencode,
+claude, and copilot installs) and are written into `~/.config/opencode/prompts/sdd/` at
+install time. To run this copy directly, point the `{file:...}` refs at your repo-root
+`prompts/sdd/` or drop those files into `~/.config/opencode/prompts/sdd/` yourself.
 
 ## Source
 

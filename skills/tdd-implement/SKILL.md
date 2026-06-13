@@ -5,6 +5,9 @@ description: |
   rules — for an implementer sub-agent. Pure methodology: the task, the spec, and the testing
   capabilities are SUPPLIED in the prompt; this skill governs only HOW to drive implementation
   through tests, never WHERE the spec comes from nor how to style the code. Language-agnostic.
+metadata:
+  author: diegoagd10
+  version: "1.0"
 ---
 
 # Strict TDD — Method

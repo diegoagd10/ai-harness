@@ -172,7 +172,8 @@ func TestRunSDDStatusEmptyWorkspaceRecommendsSddNew(t *testing.T) {
 	}
 }
 
-// writeFakeRepo builds a minimal valid harness repo (skills/ + AGENTS.md).
+// writeFakeRepo builds a minimal valid harness repo (skills/ + AGENTS.md) plus a
+// canonical prompts/commands/ entrypoint so install can generate command files.
 func writeFakeRepo(t *testing.T) string {
 	t.Helper()
 	repo := t.TempDir()
@@ -181,6 +182,15 @@ func writeFakeRepo(t *testing.T) string {
 	}
 	if err := os.WriteFile(filepath.Join(repo, "AGENTS.md"), []byte("# Agents\n"), 0o644); err != nil {
 		t.Fatalf("write AGENTS.md: %v", err)
+	}
+	cmdDir := filepath.Join(repo, "prompts", "commands")
+	if err := os.MkdirAll(cmdDir, 0o755); err != nil {
+		t.Fatalf("mkdir prompts/commands: %v", err)
+	}
+	canonical := "---\ndescription: Continue the next SDD phase\nsubtask: false\nread-only: false\n---\n\n" +
+		"You are the `{{ORCHESTRATOR_AGENT}}`.\n\nRun `ai-harness sdd-continue`.\n\nChange: {{ARGS}}\n"
+	if err := os.WriteFile(filepath.Join(cmdDir, "sdd-continue.md"), []byte(canonical), 0o644); err != nil {
+		t.Fatalf("write canonical command: %v", err)
 	}
 	return repo
 }
@@ -205,6 +215,58 @@ func TestRunInstallLinksHarnessIntoHome(t *testing.T) {
 	}
 	if !strings.Contains(res.stdout, dest) {
 		t.Fatalf("expected stdout to mention %s, got %q", dest, res.stdout)
+	}
+}
+
+func TestRunInstallGeneratesOpenCodeCommandFiles(t *testing.T) {
+	repo := writeFakeRepo(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	res := invoke("install", "--repo", repo)
+	if res.code != 0 {
+		t.Fatalf("expected exit 0, got %d (stderr=%q)", res.code, res.stderr)
+	}
+
+	dest := filepath.Join(home, ".config", "opencode", "commands", "sdd-continue.md")
+	content, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("expected generated command at %s: %v", dest, err)
+	}
+	text := string(content)
+	if !strings.Contains(text, "agent: gentle-orchestrator") {
+		t.Fatalf("generated command missing opencode frontmatter:\n%s", text)
+	}
+	if strings.Contains(text, "{{ORCHESTRATOR_AGENT}}") || strings.Contains(text, "{{ARGS}}") {
+		t.Fatalf("generated command still has placeholders:\n%s", text)
+	}
+	if !strings.Contains(text, "You are the `gentle-orchestrator`.") {
+		t.Fatalf("orchestrator not substituted:\n%s", text)
+	}
+	if !strings.Contains(res.stdout, dest) {
+		t.Fatalf("expected stdout to mention generated %s, got %q", dest, res.stdout)
+	}
+}
+
+func TestRunUninstallRemovesOpenCodeCommandFiles(t *testing.T) {
+	repo := writeFakeRepo(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	if res := invoke("install", "--repo", repo); res.code != 0 {
+		t.Fatalf("install precondition failed: %q", res.stderr)
+	}
+	dest := filepath.Join(home, ".config", "opencode", "commands", "sdd-continue.md")
+	if _, err := os.Stat(dest); err != nil {
+		t.Fatalf("install should have created %s: %v", dest, err)
+	}
+
+	res := invoke("uninstall", "--repo", repo)
+	if res.code != 0 {
+		t.Fatalf("expected exit 0, got %d (stderr=%q)", res.code, res.stderr)
+	}
+	if _, err := os.Lstat(dest); !os.IsNotExist(err) {
+		t.Fatalf("expected generated command %s removed, lstat err = %v", dest, err)
 	}
 }
 
@@ -267,9 +329,8 @@ func TestOpenCodeSDDAssetsPreferAIHarnessNativeDispatcher(t *testing.T) {
 		path     string
 		required []string
 	}{
-		{filepath.Join(repoRoot, "agent-clis", "opencode", "commands", "sdd-status.md"), []string{"ai-harness sdd-status"}},
-		{filepath.Join(repoRoot, "agent-clis", "opencode", "commands", "sdd-continue.md"), []string{"ai-harness sdd-continue"}},
-		{filepath.Join(repoRoot, "agent-clis", "opencode", "skills", "_shared", "sdd-status-contract.md"), []string{"ai-harness sdd-status", "ai-harness sdd-continue"}},
+		{filepath.Join(repoRoot, "prompts", "commands", "sdd-status.md"), []string{"ai-harness sdd-status"}},
+		{filepath.Join(repoRoot, "prompts", "commands", "sdd-continue.md"), []string{"ai-harness sdd-continue"}},
 		{filepath.Join(repoRoot, "agent-clis", "opencode", "sdd-orchestrator.md"), []string{"ai-harness sdd-status", "ai-harness sdd-continue"}},
 	}
 

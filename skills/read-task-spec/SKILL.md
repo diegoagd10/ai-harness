@@ -4,6 +4,9 @@ description: How an implementer sub-agent locates and reads the SPEC and the TAS
   from the OpenSpec change artifacts. Pure sourcing — it tells you WHERE the task, the acceptance
   criteria, and the design constraints live and how to interpret them. It does NOT cover the TDD
   method (see tdd-implement) nor code style (see coding-guidelines), and you NEVER mark a task done.
+metadata:
+  author: diegoagd10
+  version: "1.0"
 ---
 
 # Read the Task & Spec — Sourcing

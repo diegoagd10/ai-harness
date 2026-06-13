@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/diegoagd10/ai-harness-setup/cli/internal/commands"
 	"github.com/diegoagd10/ai-harness-setup/cli/internal/install"
 	"github.com/diegoagd10/ai-harness-setup/cli/internal/sdd"
 )
@@ -153,7 +154,46 @@ func runInstall(args []string, stdout, stderr io.Writer, remove bool) int {
 		fmt.Fprintf(stderr, "ai-harness: %v\n", opErr)
 		return 1
 	}
+
+	if cmdErr := syncOpencodeCommands(repoDir, opencodeDir(), remove, stdout); cmdErr != nil {
+		fmt.Fprintf(stderr, "ai-harness: %v\n", cmdErr)
+		return 1
+	}
 	return 0
+}
+
+// syncOpencodeCommands generates the OpenCode slash-command files from the
+// canonical prompts/commands/ source on install, and removes those same
+// generated artifacts on uninstall. The command dir is <OpencodeDir>/commands —
+// OpenCode's user-level custom-command location.
+func syncOpencodeCommands(repoDir, opencodeDir string, remove bool, stdout io.Writer) error {
+	profile := commands.OpenCodeProfile(filepath.Join(opencodeDir, "commands"))
+	if remove {
+		report, err := commands.Remove(repoDir, profile)
+		for _, o := range report {
+			fmt.Fprintln(stdout, formatCommandOutcome(o))
+		}
+		return err
+	}
+	report, err := commands.Generate(repoDir, profile)
+	for _, o := range report {
+		fmt.Fprintln(stdout, formatCommandOutcome(o))
+	}
+	return err
+}
+
+// formatCommandOutcome renders one generated/removed command file as a line.
+func formatCommandOutcome(o commands.Outcome) string {
+	switch o.Action {
+	case commands.ActionGenerated:
+		return fmt.Sprintf("  generated %s (from %s)", o.Dest, o.Src)
+	case commands.ActionRemoved:
+		return fmt.Sprintf("  removed %s", o.Dest)
+	case commands.ActionAbsent:
+		return fmt.Sprintf("  absent %s", o.Dest)
+	default:
+		return fmt.Sprintf("  %s %s", o.Action, o.Dest)
+	}
 }
 
 // homeConfig returns a Config with all paths rooted under $HOME. The deep
@@ -167,6 +207,14 @@ func homeConfig(repoDir string) install.Config {
 		CopilotDir: filepath.Join(home, ".copilot"),
 		Timestamp:  install.DefaultTimestamp,
 	}
+}
+
+// opencodeDir returns the OpenCode config root under $HOME. Generated
+// slash-commands live in its commands/ subdir. Kept separate from
+// install.Config so the symlink module is not burdened with a path it never
+// links.
+func opencodeDir() string {
+	return filepath.Join(os.Getenv("HOME"), ".config", "opencode")
 }
 
 // formatOutcome renders one Report entry as a single human-readable line.

@@ -1,6 +1,9 @@
 ---
 name: branch-pr
 description: "Create pull requests. Trigger: creating, opening, or preparing PRs for review."
+metadata:
+  author: diegoagd10
+  version: "1.0"
 ---
 
 ## When to Use

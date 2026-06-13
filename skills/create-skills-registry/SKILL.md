@@ -4,6 +4,9 @@ description: Scan every known skill directory (global + project) and render a co
   .atl/registry.md — one row per skill with a short summary and its exact SKILL.md path — so an
   orchestrator can pick which skill to delegate and inject its path into a sub-agent. Use after
   installing, creating, moving, or renaming skills, or when "create/refresh the skill registry".
+metadata:
+  author: diegoagd10
+  version: "1.0"
 ---
 
 Build the **delegator's index** of skills. The registry lets an orchestrator know what skills
