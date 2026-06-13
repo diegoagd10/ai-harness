@@ -192,6 +192,20 @@ func writeFakeRepo(t *testing.T) string {
 	if err := os.WriteFile(filepath.Join(cmdDir, "sdd-continue.md"), []byte(canonical), 0o644); err != nil {
 		t.Fatalf("write canonical command: %v", err)
 	}
+	// prompts/sdd/ is symlinked into the OpenCode config dir on install.
+	if err := os.MkdirAll(filepath.Join(repo, "prompts", "sdd"), 0o755); err != nil {
+		t.Fatalf("mkdir prompts/sdd: %v", err)
+	}
+	// agent-clis/opencode/opencode.json is the source ai-harness substitutes
+	// {{HOME}} into and writes as a regular file.
+	ocDir := filepath.Join(repo, "agent-clis", "opencode")
+	if err := os.MkdirAll(ocDir, 0o755); err != nil {
+		t.Fatalf("mkdir agent-clis/opencode: %v", err)
+	}
+	ocSource := `{"agent":{"gentle-orchestrator":{"prompt":"{file:{{HOME}}/.config/opencode/prompts/sdd/sdd-orchestrator.md}"}}}`
+	if err := os.WriteFile(filepath.Join(ocDir, "opencode.json"), []byte(ocSource), 0o644); err != nil {
+		t.Fatalf("write opencode.json source: %v", err)
+	}
 	return repo
 }
 
@@ -270,6 +284,56 @@ func TestRunUninstallRemovesOpenCodeCommandFiles(t *testing.T) {
 	}
 }
 
+func TestRunInstallGeneratesOpenCodeJSONWithHomeSubstituted(t *testing.T) {
+	repo := writeFakeRepo(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	res := invoke("install", "--repo", repo)
+	if res.code != 0 {
+		t.Fatalf("expected exit 0, got %d (stderr=%q)", res.code, res.stderr)
+	}
+
+	dest := filepath.Join(home, ".config", "opencode", "opencode.json")
+	content, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("expected generated opencode.json at %s: %v", dest, err)
+	}
+	text := string(content)
+	if strings.Contains(text, "{{HOME}}") {
+		t.Fatalf("opencode.json still has {{HOME}}:\n%s", text)
+	}
+	want := filepath.Join(home, ".config", "opencode", "prompts", "sdd", "sdd-orchestrator.md")
+	if !strings.Contains(text, want) {
+		t.Fatalf("opencode.json missing substituted home path %q:\n%s", want, text)
+	}
+	if !strings.Contains(res.stdout, dest) {
+		t.Fatalf("expected stdout to mention generated %s, got %q", dest, res.stdout)
+	}
+}
+
+func TestRunUninstallRemovesOpenCodeJSON(t *testing.T) {
+	repo := writeFakeRepo(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	if res := invoke("install", "--repo", repo); res.code != 0 {
+		t.Fatalf("install precondition failed: %q", res.stderr)
+	}
+	dest := filepath.Join(home, ".config", "opencode", "opencode.json")
+	if _, err := os.Stat(dest); err != nil {
+		t.Fatalf("install should have created %s: %v", dest, err)
+	}
+
+	res := invoke("uninstall", "--repo", repo)
+	if res.code != 0 {
+		t.Fatalf("expected exit 0, got %d (stderr=%q)", res.code, res.stderr)
+	}
+	if _, err := os.Lstat(dest); !os.IsNotExist(err) {
+		t.Fatalf("expected opencode.json %s removed, lstat err = %v", dest, err)
+	}
+}
+
 func TestRunInstallInvalidRepoFails(t *testing.T) {
 	bare := t.TempDir() // no skills/, no AGENTS.md
 	home := t.TempDir()
@@ -331,7 +395,7 @@ func TestOpenCodeSDDAssetsPreferAIHarnessNativeDispatcher(t *testing.T) {
 	}{
 		{filepath.Join(repoRoot, "prompts", "commands", "sdd-status.md"), []string{"ai-harness sdd-status"}},
 		{filepath.Join(repoRoot, "prompts", "commands", "sdd-continue.md"), []string{"ai-harness sdd-continue"}},
-		{filepath.Join(repoRoot, "agent-clis", "opencode", "sdd-orchestrator.md"), []string{"ai-harness sdd-status", "ai-harness sdd-continue"}},
+		{filepath.Join(repoRoot, "prompts", "sdd", "sdd-orchestrator.md"), []string{"ai-harness sdd-status", "ai-harness sdd-continue"}},
 	}
 
 	for _, asset := range assets {
@@ -356,18 +420,16 @@ func TestOpenCodeControlledBlocksStaySynchronized(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	opencodeRoot := filepath.Join(repoRoot, "agent-clis", "opencode")
 
-	persona := readAssetText(t, filepath.Join(opencodeRoot, "blocks", "persona.md"))
-	agents := readAssetText(t, filepath.Join(opencodeRoot, "AGENTS.md"))
-	if strings.TrimSpace(agents) != strings.TrimSpace(persona) {
-		t.Fatalf("AGENTS.md must match blocks/persona.md")
-	}
-
 	modelAssignments := readAssetText(t, filepath.Join(opencodeRoot, "blocks", "sdd-model-assignments.md"))
-	orchestrator := readAssetText(t, filepath.Join(opencodeRoot, "sdd-orchestrator.md"))
+	orchestrator := readAssetText(t, filepath.Join(repoRoot, "prompts", "sdd", "sdd-orchestrator.md"))
 	if !strings.Contains(orchestrator, strings.TrimSpace(modelAssignments)) {
 		t.Fatalf("sdd-orchestrator.md must include blocks/sdd-model-assignments.md")
 	}
 
+	// AGENTS.md is the global persona OpenCode loads (symlinked into
+	// ~/.config/opencode at install time); the orchestrator carries generated
+	// blocks. Neither may fence controlled sections with HTML sentinels.
+	agents := readAssetText(t, filepath.Join(repoRoot, "AGENTS.md"))
 	for _, text := range []struct {
 		name    string
 		content string

@@ -7,13 +7,17 @@ import (
 	"testing"
 )
 
-// fakeRepo builds a minimal valid repo (skills/ dir + AGENTS.md) under a temp
-// dir and returns its path.
+// fakeRepo builds a minimal valid repo (skills/ dir, AGENTS.md, and the
+// prompts/sdd dir the OpenCode links point at) under a temp dir and returns its
+// path.
 func fakeRepo(t *testing.T) string {
 	t.Helper()
 	repo := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(repo, "skills"), 0o755); err != nil {
 		t.Fatalf("mkdir skills: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, "prompts", "sdd"), 0o755); err != nil {
+		t.Fatalf("mkdir prompts/sdd: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(repo, "AGENTS.md"), []byte("# Agents\n"), 0o644); err != nil {
 		t.Fatalf("write AGENTS.md: %v", err)
@@ -26,14 +30,17 @@ func fixedTimestamp() func() string {
 	return func() string { return "20240101000000" }
 }
 
-// cfgFor builds a Config rooted at repo with three home subdirs under home.
+// cfgFor builds a Config rooted at repo with all home subdirs under home,
+// including the OpenCode config dir whose skills/AGENTS.md/prompts links the
+// install flow now owns.
 func cfgFor(repo, home string) Config {
 	return Config{
-		RepoDir:    repo,
-		ClaudeDir:  filepath.Join(home, ".claude"),
-		AgentsDir:  filepath.Join(home, ".agents"),
-		CopilotDir: filepath.Join(home, ".copilot"),
-		Timestamp:  fixedTimestamp(),
+		RepoDir:     repo,
+		ClaudeDir:   filepath.Join(home, ".claude"),
+		AgentsDir:   filepath.Join(home, ".agents"),
+		CopilotDir:  filepath.Join(home, ".copilot"),
+		OpencodeDir: filepath.Join(home, ".config", "opencode"),
+		Timestamp:   fixedTimestamp(),
 	}
 }
 
@@ -49,7 +56,7 @@ func findOutcome(t *testing.T, r Report, dest string) Outcome {
 	return Outcome{}
 }
 
-func TestInstallLinksAllFiveTargets(t *testing.T) {
+func TestInstallLinksAllTargets(t *testing.T) {
 	repo := fakeRepo(t)
 	home := t.TempDir()
 	cfg := cfgFor(repo, home)
@@ -68,6 +75,9 @@ func TestInstallLinksAllFiveTargets(t *testing.T) {
 		{filepath.Join(home, ".agents", "skills"), filepath.Join(repo, "skills")},
 		{filepath.Join(home, ".agents", "AGENTS.md"), filepath.Join(repo, "AGENTS.md")},
 		{filepath.Join(home, ".copilot", "copilot-instructions.md"), filepath.Join(repo, "AGENTS.md")},
+		{filepath.Join(home, ".config", "opencode", "skills"), filepath.Join(repo, "skills")},
+		{filepath.Join(home, ".config", "opencode", "AGENTS.md"), filepath.Join(repo, "AGENTS.md")},
+		{filepath.Join(home, ".config", "opencode", "prompts", "sdd"), filepath.Join(repo, "prompts", "sdd")},
 	}
 
 	if len(report) != len(cases) {
@@ -234,6 +244,68 @@ func TestUninstallRemovesOnlyRepoPointingLinks(t *testing.T) {
 	o := findOutcome(t, report, dest)
 	if o.Action != ActionRemoved {
 		t.Fatalf("expected action %q, got %q", ActionRemoved, o.Action)
+	}
+}
+
+func TestInstallLinksOpencodePromptsSkillsAndPersona(t *testing.T) {
+	repo := fakeRepo(t)
+	home := t.TempDir()
+	cfg := cfgFor(repo, home)
+
+	report, err := Install(cfg)
+	if err != nil {
+		t.Fatalf("Install error: %v", err)
+	}
+
+	cases := []struct {
+		dest string
+		src  string
+	}{
+		{filepath.Join(home, ".config", "opencode", "skills"), filepath.Join(repo, "skills")},
+		{filepath.Join(home, ".config", "opencode", "AGENTS.md"), filepath.Join(repo, "AGENTS.md")},
+		{filepath.Join(home, ".config", "opencode", "prompts", "sdd"), filepath.Join(repo, "prompts", "sdd")},
+	}
+	for _, c := range cases {
+		got, err := os.Readlink(c.dest)
+		if err != nil {
+			t.Fatalf("expected symlink at %s: %v", c.dest, err)
+		}
+		if got != c.src {
+			t.Fatalf("symlink %s points to %q, want %q", c.dest, got, c.src)
+		}
+		o := findOutcome(t, report, c.dest)
+		if o.Action != ActionLinked {
+			t.Fatalf("dest %s: expected action %q, got %q", c.dest, ActionLinked, o.Action)
+		}
+	}
+}
+
+func TestUninstallRemovesOpencodeRepoPointingLinks(t *testing.T) {
+	repo := fakeRepo(t)
+	home := t.TempDir()
+	cfg := cfgFor(repo, home)
+
+	if _, err := Install(cfg); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+
+	report, err := Uninstall(cfg)
+	if err != nil {
+		t.Fatalf("uninstall error: %v", err)
+	}
+
+	for _, dest := range []string{
+		filepath.Join(home, ".config", "opencode", "skills"),
+		filepath.Join(home, ".config", "opencode", "AGENTS.md"),
+		filepath.Join(home, ".config", "opencode", "prompts", "sdd"),
+	} {
+		if _, err := os.Lstat(dest); !os.IsNotExist(err) {
+			t.Fatalf("expected %s removed, lstat err = %v", dest, err)
+		}
+		o := findOutcome(t, report, dest)
+		if o.Action != ActionRemoved {
+			t.Fatalf("dest %s: expected action %q, got %q", dest, ActionRemoved, o.Action)
+		}
 	}
 }
 

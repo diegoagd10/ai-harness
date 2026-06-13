@@ -10,6 +10,7 @@ import (
 
 	"github.com/diegoagd10/ai-harness-setup/cli/internal/commands"
 	"github.com/diegoagd10/ai-harness-setup/cli/internal/install"
+	"github.com/diegoagd10/ai-harness-setup/cli/internal/opencode"
 	"github.com/diegoagd10/ai-harness-setup/cli/internal/sdd"
 )
 
@@ -18,8 +19,10 @@ const usage = `usage: ai-harness <command> [flags] [change]
 Commands:
   sdd-status   [change]   Report the SDD phase state for a change.
   sdd-continue [change]   Report the SDD dispatcher routing for a change.
-  install      [--repo P] Symlink the harness (skills + AGENTS.md) into your home.
-  uninstall    [--repo P] Remove only the harness symlinks pointing into the repo.
+  install      [--repo P] Wire the harness into your home: symlink skills + AGENTS.md,
+                          and fully configure OpenCode (opencode.json + prompts + skills + persona).
+  uninstall    [--repo P] Remove only the harness artifacts we created (symlinks into the
+                          repo and the generated opencode.json).
 
 Flags (sdd commands):
   --json                  Emit indented JSON instead of markdown.
@@ -159,7 +162,42 @@ func runInstall(args []string, stdout, stderr io.Writer, remove bool) int {
 		fmt.Fprintf(stderr, "ai-harness: %v\n", cmdErr)
 		return 1
 	}
+
+	if jsonErr := syncOpencodeConfig(repoDir, opencodeDir(), remove, stdout); jsonErr != nil {
+		fmt.Fprintf(stderr, "ai-harness: %v\n", jsonErr)
+		return 1
+	}
 	return 0
+}
+
+// syncOpencodeConfig generates the OpenCode agent config (opencode.json) with
+// the real $HOME substituted on install, and removes that generated file on
+// uninstall. This is the composition root: the only place $HOME is read; the
+// opencode package itself stays host-injectable.
+func syncOpencodeConfig(repoDir, opencodeDir string, remove bool, stdout io.Writer) error {
+	if remove {
+		out, err := opencode.Remove(opencodeDir)
+		fmt.Fprintln(stdout, formatOpencodeOutcome(out))
+		return err
+	}
+	out, err := opencode.Generate(repoDir, opencodeDir, os.Getenv("HOME"))
+	fmt.Fprintln(stdout, formatOpencodeOutcome(out))
+	return err
+}
+
+// formatOpencodeOutcome renders the opencode.json generate/remove result as a
+// single line, mirroring formatCommandOutcome.
+func formatOpencodeOutcome(o opencode.Outcome) string {
+	switch o.Action {
+	case opencode.ActionGenerated:
+		return fmt.Sprintf("  generated %s (from %s)", o.Dest, o.Src)
+	case opencode.ActionRemoved:
+		return fmt.Sprintf("  removed %s", o.Dest)
+	case opencode.ActionAbsent:
+		return fmt.Sprintf("  absent %s", o.Dest)
+	default:
+		return fmt.Sprintf("  %s %s", o.Action, o.Dest)
+	}
 }
 
 // syncOpencodeCommands generates the OpenCode slash-command files from the
@@ -201,11 +239,12 @@ func formatCommandOutcome(o commands.Outcome) string {
 func homeConfig(repoDir string) install.Config {
 	home := os.Getenv("HOME")
 	return install.Config{
-		RepoDir:    repoDir,
-		ClaudeDir:  filepath.Join(home, ".claude"),
-		AgentsDir:  filepath.Join(home, ".agents"),
-		CopilotDir: filepath.Join(home, ".copilot"),
-		Timestamp:  install.DefaultTimestamp,
+		RepoDir:     repoDir,
+		ClaudeDir:   filepath.Join(home, ".claude"),
+		AgentsDir:   filepath.Join(home, ".agents"),
+		CopilotDir:  filepath.Join(home, ".copilot"),
+		OpencodeDir: opencodeDir(),
+		Timestamp:   install.DefaultTimestamp,
 	}
 }
 
