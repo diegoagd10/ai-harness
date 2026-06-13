@@ -48,8 +48,8 @@ phases, and a **review-workload guard** before implementing.
 `ai-harness` substitutes `{{HOME}}` with the real home dir at install time.
 
 The phase prompts these refs point at are **not** stored in this folder. They live once at
-the repo root in `prompts/sdd/*.md` (the single source of truth, shared across the opencode,
-claude, and copilot installs) and are written into `~/.config/opencode/prompts/sdd/` at
+the repo root in `prompts/sdd/*.md` (the single source of truth) and are written
+into `~/.config/opencode/prompts/sdd/` at
 install time. To run this copy directly, point the `{file:...}` refs at your repo-root
 `prompts/sdd/` or drop those files into `~/.config/opencode/prompts/sdd/` yourself.
 

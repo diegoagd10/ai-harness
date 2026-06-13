@@ -1,53 +1,53 @@
 # ai-harness-setup
 
-Personal, version-controlled configuration shared across **code AI harnesses** —
-Claude Code, opencode, Codex, GitHub Copilot, and any other tool that reads a
-`CLAUDE.md`/`AGENTS.md` plus a skills directory.
+Personal, version-controlled configuration for the **OpenCode** code-AI harness:
+one source of truth (`AGENTS.md` + a skills directory + SDD prompts), generated
+into the places OpenCode expects.
 
-One source of truth, symlinked into the places each harness expects.
+> **Scope:** today this repo targets **OpenCode** only. Once the OpenCode setup is
+> solid it becomes the reference for other harnesses (Claude Code, Copilot).
 
 ## What's in here
 
 | Path | Purpose |
 |------|---------|
-| `AGENTS.md` | The single config: persona, rules, orchestration policy, OpenSpec/SDD flow. Symlinked as both `CLAUDE.md` (Claude) and `AGENTS.md` (others). |
+| `AGENTS.md` | The single config: persona, rules, orchestration policy, OpenSpec/SDD flow. |
+| `prompts/sdd/` | Platform-neutral SDD phase prompts (the executor prompts the orchestrator drives). |
+| `prompts/commands/` | Platform-neutral slash-command entrypoints, the single source of truth. |
 | `skills/` | Reusable skills (SDD apply flow, branch-pr, coding-guidelines, …). |
+| `agent-clis/opencode/` | The OpenCode wiring: agent graph (`opencode.json`), orchestrator prompt, blocks, plugins. |
+| `cli/` | The `ai-harness` Go CLI: SDD dispatcher + installer that generates the OpenCode slash-commands. |
 | `templates/openspec/config.yaml` | Starter OpenSpec project config to copy into new projects. |
-| `install.sh` / `uninstall.sh` | Create / remove the home symlinks. |
 
 ## Install
 
+Build the CLI and generate the OpenCode integration:
+
 ```bash
 git clone git@github.com:diegoagd10/ai-harness-setup.git ~/Projects/ai-harness-setup
-cd ~/Projects/ai-harness-setup
-./install.sh
+cd ~/Projects/ai-harness-setup/cli
+make install            # put the `ai-harness` binary on your PATH
+ai-harness install      # generate the OpenCode slash-commands into ~/.config/opencode/commands/
 ```
 
-`install.sh` creates these symlinks (idempotent — re-running just repoints them,
-and any real file already in the way is backed up to `<path>.bak.<timestamp>`):
-
-```
-~/.claude/skills    -> <repo>/skills
-~/.claude/CLAUDE.md -> <repo>/AGENTS.md
-~/.agents/skills    -> <repo>/skills
-~/.agents/AGENTS.md -> <repo>/AGENTS.md
-```
-
-Editing the repo edits the live config for every harness — no copy step, no drift.
+`ai-harness install` reads the canonical `prompts/commands/*.md` and writes the
+OpenCode-specific command files under `~/.config/opencode/`. Editing the repo
+edits the source those files are generated from — re-run `ai-harness install` to
+regenerate. See `agent-clis/opencode/README.md` for how the agent graph fits
+together.
 
 ## Uninstall
 
 ```bash
-./uninstall.sh
+ai-harness uninstall
 ```
 
-Removes only the symlinks that point back into this repo. Real files and `*.bak.*`
-backups are left untouched.
+Removes only the OpenCode command files this repo generated.
 
 ## Using the OpenSpec template in a new project
 
 ```bash
-openspec init --tools claude,codex,opencode,github-copilot
+openspec init --tools opencode
 cp ~/Projects/ai-harness-setup/templates/openspec/config.yaml openspec/config.yaml
 ```
 
@@ -60,5 +60,5 @@ not artifacts); that guidance belongs in `AGENTS.md`. Also quote any rule that
 contains `": "`, e.g. `- "Run: scripts/verify"`, or YAML parses it as a map.
 
 After `openspec init`/`openspec update`, remove the generated `opsx-apply`
-command and `openspec-apply-change` skill per tool, so they don't compete with
-the custom apply flow defined in `AGENTS.md`.
+command and `openspec-apply-change` skill, so they don't compete with the custom
+apply flow defined in `AGENTS.md`.

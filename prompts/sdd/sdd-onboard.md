@@ -154,7 +154,7 @@ Implement the tasks following `sdd-apply` behavior. Narrate each task as you com
  ✓ Done — [brief note on what was created/changed]"
 ```
 
-If Strict TDD mode is active, apply the TDD cycle and explain it:
+Apply the strict TDD cycle (always the method) and explain it:
 
 ```
 "Notice: RED → GREEN → TRIANGULATE → REFACTOR.

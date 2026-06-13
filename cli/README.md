@@ -72,13 +72,18 @@ ai-harness uninstall    [--repo <path>]
 - `sdd-continue` — report the dispatcher routing (always includes phase instructions).
 - A single positional argument selects the change; with exactly one active change
   it is inferred.
-- `install`      — symlink the harness (`skills/` and `AGENTS.md`) into `~/.claude`,
-  `~/.agents`, and `~/.copilot`. The repo root is the cwd unless `--repo` is given.
-- `uninstall`    — remove only the harness symlinks pointing back into the repo;
-  real files and `*.bak.*` backups are left untouched.
+- `install`      — generate the OpenCode slash-commands from `prompts/commands/`
+  into `~/.config/opencode/commands/`. The repo root is the cwd unless `--repo`
+  is given.
+- `uninstall`    — remove only the OpenCode command files this repo generated.
+
+> **Scope:** the project currently targets **OpenCode** only. `install` still
+> creates dormant home symlinks for other harnesses (`~/.claude`, `~/.agents`,
+> `~/.copilot`) via `internal/install`; that path is legacy and undocumented
+> pending the OpenCode-first refocus.
 
 > `make install` installs the **binary** onto your PATH (the bootstrap).
-> `ai-harness install` installs the **harness** (the skills + AGENTS.md symlinks).
+> `ai-harness install` installs the **harness** (generates the OpenCode commands).
 
 ## Build & test
 

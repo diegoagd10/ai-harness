@@ -13,7 +13,7 @@ Load this skill only when the user explicitly asks for Judgment Day, dual/advers
 
 ## Hard Rules
 
-- Resolve project skills before launching agents: read skill registry, match skill paths by target files/task, and inject the same `Skills to load before work` block into both judge prompts and fix prompts.
+- Resolve project skills before launching agents: scan the installed skills directory for `*/SKILL.md`, match skill paths by target files/task, and inject the same `Skills to load before work` block into both judge prompts and fix prompts.
 - Launch **two blind judges in parallel** with identical target and criteria; never review the code yourself.
 - Wait for both judges before synthesis; never accept a partial verdict.
 - Classify warnings as `WARNING (real)` only if normal intended use can trigger them; otherwise downgrade to INFO as `WARNING (theoretical)`.
@@ -27,7 +27,7 @@ Load this skill only when the user explicitly asks for Judgment Day, dual/advers
 | Condition | Action |
 |---|---|
 | Target unclear | Ask for scope; do not launch judges. |
-| No skill registry | Warn, proceed with generic criteria, and record `Skill Resolution: none`. |
+| No skills resolved | Warn, proceed with generic criteria, and record `Skill Resolution: none`. |
 | Both judges find same CRITICAL/real WARNING | Confirmed; ask/fix according to round rules. |
 | One judge finds issue | Suspect; report and triage, do not auto-fix. |
 | Judges contradict | Escalate for manual decision. |

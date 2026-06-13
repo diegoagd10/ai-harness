@@ -145,11 +145,9 @@ When a sub-agent persists artifacts (via `mem_save` or file writes), the persist
 
 Sub-agents must NOT call `mem_session_summary` — that's reserved for top-level agents only.
 
-## Skill Registry
+## Skill Resolution
 
-The orchestrator pre-resolves skill paths from the skill registry and injects them as `## Skills to load before work` in your launch prompt. Sub-agents read those exact `SKILL.md` files before task-specific work.
-
-To generate/update: run the `skill-registry` skill, or run `sdd-init`.
+The orchestrator pre-resolves skill paths by scanning the installed skills directory (`*/SKILL.md` frontmatter — `name` and triggers/`description`) and injects the matches as `## Skills to load before work` in your launch prompt. Sub-agents read those exact `SKILL.md` files before task-specific work.
 
 Sub-agent skill loading: check for a `## Skills to load before work` block in your prompt — if present, read those exact files. If not present, check for `SKILL: Load` instructions as a fallback. If neither exists, proceed without — this is not an error.
 

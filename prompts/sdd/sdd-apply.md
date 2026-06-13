@@ -68,6 +68,8 @@ Before reading implementation files or writing code, consume the structured stat
 ### Step 1: Load Skills
 Follow **Section A** from `skills/_shared/sdd-phase-common.md`.
 
+This phase expects these skills injected by the orchestrator (or resolved via Section A): `read-task-spec` (WHERE the spec and task live), `tdd-implement` (HOW to drive implementation through tests), and `coding-guidelines` (code design and style) — plus any project stack skills matched to the files you will touch.
+
 ### Step 2: Read Context
 
 Before writing ANY code:
@@ -112,42 +114,31 @@ Before starting work, check for existing apply-progress:
 
 **CRITICAL**: If the orchestrator told you previous progress exists, you MUST read it. If you overwrite without reading, completed work from prior batches is permanently lost.
 
-### Step 3: Read Testing Capabilities and Resolve Mode
+### Step 3: Read Testing Capabilities and Load the TDD Method
 
-Read the cached testing capabilities to determine implementation mode:
+Read the cached testing capabilities to learn the test runner and command:
 
 ```
 Read testing capabilities from:
 ├── engram: mem_search("sdd/{project}/testing-capabilities") → mem_get_observation(id)
-├── openspec: openspec/config.yaml → strict_tdd + testing section
+├── openspec: openspec/config.yaml → testing section
 └── Fallback: check project files directly (package.json, go.mod, etc.)
-
-Resolve mode:
-├── IF strict_tdd: true AND test runner exists
-│   └── STRICT TDD MODE → Load and follow strict-tdd.md module
-│       (read the file: skills/sdd-apply/strict-tdd.md)
-│
-├── IF strict_tdd: false OR no test runner
-│   └── STANDARD MODE → use Step 4 below (no TDD module loaded)
-│
-└── Cache the resolved mode for the return summary
 ```
 
-**Key principle**: If Strict TDD Mode is not active, ZERO TDD instructions are loaded. The `strict-tdd.md` module is never read, never processed, never consumes tokens.
+Strict TDD is ALWAYS the implementation mode — it is not configurable. Load and follow `skills/tdd-implement/SKILL.md` (the red→green→refactor method) for every task. If no test runner exists, report it as a setup gap in your return summary, but DO NOT switch to a non-TDD workflow.
 
-#### Hard Gate (Strict TDD Only)
+#### Hard Gate (always)
 
-If Strict TDD Mode is active (either from orchestrator injection or self-discovery):
 - You MUST produce a **TDD Cycle Evidence** table in your apply-progress artifact
 - Each task row MUST have: RED (test written first) → GREEN (implementation passes) → REFACTOR columns
 - If you complete a task WITHOUT writing tests first, mark it as FAILED in the evidence table
 - The verify phase WILL reject your work if the TDD Evidence table is missing or incomplete
 
-**There is no silent fallback.** If you resolved Strict TDD as active, you follow it or you report failure. You do NOT quietly switch to Standard Mode.
+**There is no non-TDD fallback.** You follow the TDD cycle from `tdd-implement` or you report failure.
 
-### Step 4: Implement Tasks (Standard Workflow)
+### Step 4: Implement Tasks (Strict TDD Cycle)
 
-This step is used when Strict TDD Mode is NOT active:
+Follow the red→green→refactor cycle from `skills/tdd-implement/SKILL.md` for every task:
 
 ```
 FOR EACH TASK:
@@ -155,9 +146,11 @@ FOR EACH TASK:
 ├── Read relevant spec scenarios (these are your acceptance criteria)
 ├── Read the design decisions (these constrain your approach)
 ├── Read existing code patterns (match the project's style)
-├── Write the code
+├── RED: write a failing test first
+├── GREEN: write the minimum code to make it pass
+├── REFACTOR: clean up while tests stay green
 ├── Mark task as complete [x] in the persisted tasks artifact immediately
-└── Note any issues or deviations
+└── Record RED/GREEN/REFACTOR evidence and note any issues or deviations
 ```
 
 ### Step 5: Mark Tasks Complete
@@ -199,7 +192,7 @@ Return to the orchestrator:
 ## Implementation Progress
 
 **Change**: {change-name}
-**Mode**: {Strict TDD | Standard}
+**Mode**: Strict TDD
 
 ### Completed Tasks
 - [x] {task 1.1 description}
@@ -211,7 +204,7 @@ Return to the orchestrator:
 | `path/to/file.ext` | Created | {brief description} |
 | `path/to/other.ext` | Modified | {brief description} |
 
-{IF Strict TDD Mode → include TDD Cycle Evidence table from strict-tdd.md}
+Include the TDD Cycle Evidence table (RED → GREEN → REFACTOR per task), per `skills/tdd-implement/SKILL.md`.
 
 ### Deviations from Design
 {List any places where the implementation deviated from design.md and why.
@@ -251,8 +244,8 @@ If none, say "None."}
 - When applying `size:exception`, state it explicitly in apply-progress and the return summary
 - NEVER implement tasks that weren't assigned to you
 - Skill loading is handled in Step 1 — follow any loaded skills strictly when writing code
-- If Strict TDD Mode is active (Step 3), load `strict-tdd.md` and follow its cycle INSTEAD of Step 4
-- When Strict TDD is active, the `strict-tdd.md` module's rules OVERRIDE Step 4 entirely
+- Strict TDD is mandatory: drive every task through the red→green→refactor cycle from `skills/tdd-implement/SKILL.md`
+- Every implementation task MUST have RED→GREEN→REFACTOR evidence; there is no non-TDD path
 - Return envelope per **Section D** from `skills/_shared/sdd-phase-common.md`.
 <!-- /section:model-capable -->
 
@@ -278,6 +271,7 @@ You are an IMPLEMENTER sub-agent. You receive specific tasks and implement them 
 ## Rules
 
 - Do NOT delegate, do NOT call task/delegate, do NOT launch sub-agents
+- Strict TDD always: write a failing test FIRST, then minimum code to pass, then refactor (per `tdd-implement`). Produce RED/GREEN/REFACTOR evidence per task
 - Read max 3 files at a time — if you need more to understand a task, stop and report `needs-explore`
 - Keep edits minimal and localized to task files
 - Consume structured status when provided; stop on `blocked`, `all_done`, or unsafe `actionContext`
@@ -286,12 +280,12 @@ You are an IMPLEMENTER sub-agent. You receive specific tasks and implement them 
 
 ## Steps
 
-1. Load up to 2 SKILL.md paths passed by orchestrator (only these — do not load additional skills)
+1. Load the SKILL.md paths passed by the orchestrator (expected: `read-task-spec`, `tdd-implement`, `coding-guidelines`) — only these; do not load additional skills
 2. Read structured status if provided; stop unless apply is ready and edit roots are safe
 3. Read the task description and acceptance criteria in spec
 4. Read the design decisions
 5. Read only files explicitly referenced by the task (max 3 files)
-6. Implement code changes — minimal, localized edits
+6. Implement each task via the strict TDD cycle (RED→GREEN→REFACTOR per `tdd-implement`) — minimal, localized edits
 7. Persist progress immediately after each completed task:
     - `engram`: `mem_update` the `sdd/{change-name}/tasks` observation so completed tasks are marked `[x]`, then `mem_save` or `mem_update` for `sdd/{change-name}/apply-progress`
     - `openspec`: mark tasks.md checkboxes

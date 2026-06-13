@@ -319,16 +319,15 @@ This prevents duplicate sub-agent launches that cause "File X has been modified 
 
 ### Sub-Agent Launch Pattern
 
-ALL sub-agent launch prompts that involve reading, writing, or reviewing code MUST include pre-resolved skill paths from the skill registry. Follow the Skill Resolver Protocol (see `_shared/skill-resolver.md` in the skills directory).
+ALL sub-agent launch prompts that involve reading, writing, or reviewing code MUST include pre-resolved skill paths. Follow the Skill Resolver Protocol (see `_shared/skill-resolver.md` in the skills directory).
 
-The orchestrator resolves skills from the registry ONCE (at session start or first delegation), caches the skill index, and passes matching `SKILL.md` paths into each sub-agent's prompt.
+The orchestrator resolves skills by scanning the installed skills directory ONCE (at session start or first delegation), caches the skill index, and passes matching `SKILL.md` paths into each sub-agent's prompt.
 
 Orchestrator skill resolution (do once per session):
 
-1. `mem_search(query: "skill-registry", project: "{project}")` -> `mem_get_observation(id)` for full registry content
-2. Fallback: read `.atl/skill-registry.md` if engram is not available
-3. Cache the skill index: skill name, trigger/description, scope, and exact path
-4. If no registry exists, warn the user and proceed without project-specific standards
+1. Scan the installed skills directory (where your platform symlinks `skills/`, e.g. `~/.config/opencode/skills/`) for `*/SKILL.md` and read each frontmatter (`name`, trigger/`description`, scope, exact path)
+2. Cache the skill index for the rest of the session
+3. If no skills are found, warn the user and proceed without project-specific standards
 
 For each sub-agent launch:
 
@@ -341,7 +340,7 @@ For each sub-agent launch:
 After every delegation that returns a result, check the `skill_resolution` field:
 
 - `paths-injected` -> all good; exact skill paths were passed and loaded
-- `fallback-registry`, `fallback-path`, or `none` -> skill cache was lost; re-read the registry immediately and pass skill paths in subsequent delegations
+- `fallback-scan`, `fallback-path`, or `none` -> skill cache was lost; re-scan the skills directory immediately and pass skill paths in subsequent delegations
 
 ### Sub-Agent Context Protocol
 
@@ -372,11 +371,10 @@ For phases with required dependencies, sub-agents read directly from the backend
 
 #### Strict TDD Forwarding (MANDATORY)
 
-When launching `sdd-apply` or `sdd-verify`, the orchestrator MUST:
+Strict TDD is non-configurable. When launching `sdd-apply` or `sdd-verify`, the orchestrator MUST:
 
-1. Search for testing capabilities: `mem_search(query: "sdd-init/{project}", project: "{project}")`
-2. If the result contains `strict_tdd: true`, add: `"STRICT TDD MODE IS ACTIVE. Test runner: {test_command}. You MUST follow strict-tdd.md. Do NOT fall back to Standard Mode."`
-3. If the search fails or `strict_tdd` is not found, do NOT add the TDD instruction
+1. Search for testing capabilities: `mem_search(query: "sdd-init/{project}", project: "{project}")` to recover the test command
+2. Always add: `"STRICT TDD MODE IS ACTIVE. Test runner: {test_command, or 'none detected — report as a setup gap'}. You MUST follow skills/tdd-implement/SKILL.md (red→green→refactor). There is no non-TDD fallback."`
 
 #### Apply-Progress Continuity (MANDATORY)
 

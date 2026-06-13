@@ -17,6 +17,6 @@ HARD GATES:
 2. Use the resolved artifact store from session preflight; do not hardcode Engram.
 
 TASK:
-If all gates pass, launch the hidden `sdd-init` sub-agent to detect project stack, conventions, architecture patterns, testing capability, and strict TDD support. Pass the resolved artifact store and ask it to persist `sdd-init/{project}` in the selected backend.
+If all gates pass, launch the hidden `sdd-init` sub-agent to detect project stack, conventions, architecture patterns, testing capability, and the test runner command (Strict TDD is always the method). Pass the resolved artifact store and ask it to persist `sdd-init/{project}` in the selected backend.
 
 Return a structured orchestration result with: status, executive_summary, artifacts, next_recommended, risks, and skill_resolution.

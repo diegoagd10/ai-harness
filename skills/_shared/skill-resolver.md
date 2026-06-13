@@ -4,7 +4,7 @@ Any agent that **delegates work to sub-agents** MUST use this protocol to resolv
 
 ## Why This Exists
 
-Sub-agents start with no project skill context. The registry gives delegators a cheap index of available skills without rewriting or summarizing those skills.
+Sub-agents start with no project skill context. Scanning the installed skills directory gives delegators a cheap index of available skills without rewriting or summarizing those skills.
 
 ## When to Apply
 
@@ -12,15 +12,15 @@ Before every sub-agent launch that involves reading, writing, reviewing, testing
 
 ## The Protocol
 
-### Step 1: Obtain the Skill Registry
+### Step 1: Discover Available Skills
 
-The registry is an **index** of skill names, triggers, scopes, and exact `SKILL.md` paths. It is not a compact-rules bundle.
+Build an in-session **index** of skill names, triggers, scopes, and exact `SKILL.md` paths by reading frontmatter. It is not a compact-rules bundle.
 
 Resolution order:
 1. Use the session cache if present.
-2. `mem_search(query: "skill-registry", project: "{project}")` → `mem_get_observation(id)` for full content.
-3. Fallback: read `.atl/skill-registry.md` from the project root.
-4. No registry found → proceed without project skills and warn the user to run `ai-harness skill-registry refresh`.
+2. Scan the installed skills directory (where your platform symlinks `skills/`, e.g. `~/.config/opencode/skills/` or `~/.claude/skills/`) for `*/SKILL.md` and read each frontmatter (`name`, `description`/triggers, scope).
+3. Cache the resulting index for the rest of the session.
+4. No skills found → proceed without project skills and warn the user.
 
 ### Step 2: Match Relevant Skills
 
@@ -28,8 +28,8 @@ Match on two dimensions:
 
 | Context | Match against |
 | --- | --- |
-| Code/files | Registry trigger/description mentions the language, framework, tool, or path context |
-| Task/action | Registry trigger/description mentions actions like PR, review, docs, tests, Jira, comments, release |
+| Code/files | A skill's trigger/description mentions the language, framework, tool, or path context |
+| Task/action | A skill's trigger/description mentions actions like PR, review, docs, tests, Jira, comments, release |
 
 Prefer the smallest useful set. If more than five skills match, keep the five most relevant and prioritize code context over task context.
 
@@ -53,16 +53,16 @@ The sub-agent MUST read those files before task-specific work. `SKILL.md` is the
 Sub-agents MUST report `skill_resolution`:
 
 - `paths-injected` — received exact skill paths from the delegator and loaded them.
-- `fallback-registry` — no paths received, self-loaded paths from the registry.
-- `fallback-path` — loaded an explicit fallback path outside the registry.
+- `fallback-scan` — no paths received, self-loaded paths by scanning the skills directory.
+- `fallback-path` — loaded an explicit fallback path.
 - `none` — no skills loaded.
 
-If a sub-agent reports anything other than `paths-injected`, the orchestrator MUST re-read the registry before the next delegation.
+If a sub-agent reports anything other than `paths-injected`, the orchestrator MUST re-scan the skills directory before the next delegation.
 
 ## Compaction Safety
 
-- The registry persists in Engram and `.atl/skill-registry.md`.
-- Delegators can recover selected paths after compaction by re-reading the registry.
+- The skills directory is the durable source; the in-session index is rebuilt by re-scanning it.
+- Delegators can recover selected paths after compaction by re-scanning the skills directory.
 - Sub-agents receive exact files to read, so skill meaning is not degraded by generated summaries.
 
 ## Integration Points
