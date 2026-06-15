@@ -26,10 +26,23 @@ Before writing, read `openspec/config.yaml` for project-specific rules (`rules.t
 
 ### Step 1: Load Skills
 
-1. If the orchestrator injected extra skill paths in the launch prompt, read those `SKILL.md` files too.
-2. Otherwise, if `SKILL: Load` instructions are present, load those exact skill files.
-3. Otherwise, scan the installed skills directory for `*/SKILL.md`, read each frontmatter (`name`, triggers/`description`), and read any whose triggers match this task.
-4. If nothing matches, proceed with the skills already loaded above.
+Resolve and read every skill named in the orchestrator's launch prompt before doing any task-specific work.
+
+Resolution protocol:
+1. Look for a `## Skills to load` block in the launch prompt. It names the required skills for this phase.
+2. Scan the installed skills directory for `*/SKILL.md`. Default search paths:
+   - User: `~/.config/opencode/skills/`
+   - Project: `{project-root}/skills/`
+   - Project: `{project-root}/.opencode/skills/`
+3. For each name in the `## Skills to load` block, find the matching `SKILL.md` by its `name` frontmatter field and read the file.
+4. If any named skill is missing, STOP and return `status: blocked` with the missing names in `risks`. Do not silently substitute a different skill.
+5. If the launch prompt has no `## Skills to load` block, fall back to the standard required skills for this phase (see below).
+6. If nothing matches, proceed without extra skills.
+
+Skip `sdd-*`, `_shared`, and `skill-registry` directories during the scan.
+
+**Standard required skills for this phase** (fallback only — the orchestrator's hint takes priority):
+- (none)
 
 ### Step 2: Analyze the Design
 
@@ -228,4 +241,4 @@ Return a structured envelope to the orchestrator:
 - `artifacts`: artifact paths written this step (e.g., `openspec/changes/{change-name}/tasks.md`), or "None"
 - `next_recommended`: the next SDD phase to run (sdd-apply), or "none" — or note that a size-exception decision is needed first
 - `risks`: risks discovered, including budget-risk status, or "None"
-- `skill_resolution`: how skills were loaded — `paths-injected` (received exact skill paths from orchestrator), `fallback-scan` (self-loaded by scanning the skills directory), `fallback-path` (loaded via `SKILL: Load` path), or `none` (no extra skills loaded)
+- `skill_resolution`: how skills were loaded — `paths-injected` (honored the orchestrator's `## Skills to load` block and resolved each name to a `SKILL.md`), `fallback-scan` (no hint; phase scanned the skills directory and matched by trigger), `fallback-path` (loaded via `SKILL: Load` instruction in phase context), or `none` (no skills loaded)

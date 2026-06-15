@@ -24,18 +24,23 @@ Before starting, read `openspec/config.yaml` and `openspec/specs/` to gather con
 
 ### Step 1: Load Skills
 
-Always load `skills/coding-guidelines/SKILL.md` (role: ARCHITECT) before any other work:
-- Read `references/deep-modules.md` first (evaluate module depth)
-- Read `references/information-hiding.md` (identify leaked knowledge)
-- Read `references/functions.md` (identify conjoined functions)
-- Read `references/layers.md` (identify pass-through layers)
-- Hold question: *"What complexity symptoms exist in the codebase — change amplification, cognitive load, or unknown unknowns?"*
+Resolve and read every skill named in the orchestrator's launch prompt before doing any task-specific work.
 
-Then resolve any additional skills:
-1. If the orchestrator injected extra skill paths in the launch prompt, read those `SKILL.md` files too.
-2. Otherwise, if `SKILL: Load` instructions are present, load those exact skill files.
-3. Otherwise, scan the installed skills directory for `*/SKILL.md`, read each frontmatter (`name`, triggers/`description`), and read any whose triggers match this task.
-4. If nothing matches, proceed with the skills already loaded above.
+Resolution protocol:
+1. Look for a `## Skills to load` block in the launch prompt. It names the required skills for this phase.
+2. Scan the installed skills directory for `*/SKILL.md`. Default search paths:
+   - User: `~/.config/opencode/skills/`
+   - Project: `{project-root}/skills/`
+   - Project: `{project-root}/.opencode/skills/`
+3. For each name in the `## Skills to load` block, find the matching `SKILL.md` by its `name` frontmatter field and read the file.
+4. If any named skill is missing, STOP and return `status: blocked` with the missing names in `risks`. Do not silently substitute a different skill.
+5. If the launch prompt has no `## Skills to load` block, fall back to the standard required skills for this phase (see below).
+6. If nothing matches, proceed without extra skills.
+
+Skip `sdd-*`, `_shared`, and `skill-registry` directories during the scan.
+
+**Standard required skills for this phase** (fallback only — the orchestrator's hint takes priority):
+- (none)
 
 ### Step 2: Understand the Request
 
@@ -123,7 +128,7 @@ Return this report to the orchestrator wrapped in a structured envelope:
 - `artifacts`: artifact keys/paths written this step, or "None"
 - `next_recommended`: the next SDD phase to run, or "none"
 - `risks`: risks discovered, or "None"
-- `skill_resolution`: how skills were loaded — `paths-injected` (received exact skill paths from orchestrator), `fallback-scan` (self-loaded paths by scanning the skills directory), `fallback-path` (loaded via `SKILL: Load` path), or `none` (no extra skills loaded)
+- `skill_resolution`: how skills were loaded — `paths-injected` (honored the orchestrator's `## Skills to load` block and resolved each name to a `SKILL.md`), `fallback-scan` (no hint; phase scanned the skills directory and matched by trigger), `fallback-path` (loaded via `SKILL: Load` instruction in phase context), or `none` (no skills loaded)
 
 Example:
 
@@ -134,7 +139,7 @@ Example:
 **Artifacts**: `openspec/changes/{change-name}/exploration.md`
 **Next**: sdd-propose
 **Risks**: None
-**Skill Resolution**: paths-injected — 1 skill (coding-guidelines)
+**Skill Resolution**: none — no required skills for this phase
 ```
 
 > **CRITICAL — Response ordering**: Your FINAL output MUST be this text envelope, NOT a tool call. Complete Step 5 (writing `exploration.md`) BEFORE this final response — if a sub-agent's last action is a tool call, the orchestrator receives only the tool result and this report is lost.

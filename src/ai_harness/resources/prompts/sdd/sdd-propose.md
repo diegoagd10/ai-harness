@@ -38,14 +38,27 @@ Before writing, read `openspec/config.yaml` for project-specific rules (`rules.p
   8. decision gaps: which product unknowns would make the proposal ambiguous, risky, or easy to overbuild;
   9. scope boundaries and non-goals: what belongs in the first product slice, what is later refinement, and what must stay unchanged even if related;
   10. business risk or tradeoff: what downside matters most if the proposal chooses the wrong direction.
-- Prefer 3–5 concrete product questions per round. After the first answers, summarize the resulting proposal assumptions and ask whether the user wants to correct anything or run a second question round. Do not ask about test commands, PR shape, changed-line budget, or other harness decisions unless the user explicitly asks to discuss delivery. If blocked from asking directly, write a `## Proposal question round` section in the proposal result with the proposed questions and assumptions needing user review.
+- Prefer 3-5 concrete product questions per round. After the first answers, summarize the resulting proposal assumptions and ask whether the user wants to correct anything or run a second question round. Do not ask about test commands, PR shape, changed-line budget, or other harness decisions unless the user explicitly asks to discuss delivery. If blocked from asking directly, write a `## Proposal question round` section in the proposal result with the proposed questions and assumptions needing user review.
 
 ### Step 1: Load Skills
 
-1. If the orchestrator injected extra skill paths in the launch prompt, read those `SKILL.md` files too.
-2. Otherwise, if `SKILL: Load` instructions are present, load those exact skill files.
-3. Otherwise, scan the installed skills directory for `*/SKILL.md`, read each frontmatter (`name`, triggers/`description`), and read any whose triggers match this task.
-4. If nothing matches, proceed with the skills already loaded above.
+Resolve and read every skill named in the orchestrator's launch prompt before doing any task-specific work.
+
+Resolution protocol:
+1. Look for a `## Skills to load` block in the launch prompt. It names the required skills for this phase.
+2. Scan the installed skills directory for `*/SKILL.md`. Default search paths:
+   - User: `~/.config/opencode/skills/`
+   - Project: `{project-root}/skills/`
+   - Project: `{project-root}/.opencode/skills/`
+3. For each name in the `## Skills to load` block, find the matching `SKILL.md` by its `name` frontmatter field and read the file.
+4. If any named skill is missing, STOP and return `status: blocked` with the missing names in `risks`. Do not silently substitute a different skill.
+5. If the launch prompt has no `## Skills to load` block, fall back to the standard required skills for this phase (see below).
+6. If nothing matches, proceed without extra skills.
+
+Skip `sdd-*`, `_shared`, and `skill-registry` directories during the scan.
+
+**Standard required skills for this phase** (fallback only - the orchestrator's hint takes priority):
+- (none)
 
 ### Step 2: Create Change Directory
 
@@ -53,7 +66,7 @@ Create the change folder if it doesn't exist yet:
 
 ```
 openspec/changes/{change-name}/
-└── proposal.md
++-- proposal.md
 ```
 
 ### Step 3: Write proposal.md
@@ -84,7 +97,7 @@ Be specific about the user need or technical debt being addressed.}
 > Research `openspec/specs/` before filling this in.
 
 ### New Capabilities
-<!-- Capabilities being introduced. Each becomes a new `openspec/specs/<name>/spec.md`.
+<!-- Capabilities being introduced. Each becomes a new change-local `openspec/changes/{change-name}/specs/<name>/spec.md` first; archive later promotes it to `openspec/specs/<name>/spec.md`.
      Use kebab-case names (e.g., user-auth, data-export, api-rate-limiting).
      Leave empty if no new capabilities. -->
 - `<capability-name>`: <brief description of what this capability covers>
@@ -128,11 +141,11 @@ Reference the recommended approach from exploration if available.}
 
 ### Step 4: Persist Artifact
 
-**This step is MANDATORY — do NOT skip it.** Skipping it breaks the pipeline: downstream phases will not find your output.
+**This step is MANDATORY - do NOT skip it.** Skipping it breaks the pipeline: downstream phases will not find your output.
 
 Write the proposal to `openspec/changes/{change-name}/proposal.md`:
 - If the change directory doesn't exist yet, create it first.
-- If `proposal.md` already exists, read it first and update it — don't overwrite blindly.
+- If `proposal.md` already exists, read it first and update it - don't overwrite blindly.
 
 ### Step 5: Return Summary
 
@@ -163,15 +176,15 @@ Ready for specs (sdd-spec) or design (sdd-design).
 - Every proposal MUST have success criteria
 - Use concrete file paths in "Affected Areas" when possible
 - Apply any `rules.proposal` from `openspec/config.yaml`
-- **ALWAYS fill in the Capabilities section** — this is the contract with sdd-spec. Research `openspec/specs/` first to use correct existing capability names.
-- New Capabilities → each will become `openspec/specs/<name>/spec.md` (new full spec)
-- Modified Capabilities → each will become a delta spec in the change folder
-- If nothing changes at the spec level (pure refactor, config change), explicitly write "None" under both sub-sections — don't leave them as template placeholders
+- **ALWAYS fill in the Capabilities section** - this is the contract with sdd-spec. Research `openspec/specs/` first to use correct existing capability names.
+- New Capabilities -> each will become a new full spec under `openspec/changes/{change-name}/specs/<name>/spec.md`; archive later promotes it to `openspec/specs/<name>/spec.md`
+- Modified Capabilities -> each will become a delta spec in the change folder
+- If nothing changes at the spec level (pure refactor, config change), explicitly write "None" under both sub-sections - don't leave them as template placeholders
 - **Size budget**: Proposal artifact MUST be under 450 words. Use bullet points and tables over prose. Headers organize, not explain.
 
 ## Return Envelope
 
-> **CRITICAL — Response ordering**: Your FINAL output MUST be this text envelope, NOT a tool call. Complete Step 4 (writing `proposal.md`) BEFORE this final response — if a sub-agent's last action is a tool call, the orchestrator receives only the tool result and this report is lost.
+> **CRITICAL - Response ordering**: Your FINAL output MUST be this text envelope, NOT a tool call. Complete Step 4 (writing `proposal.md`) BEFORE this final response - if a sub-agent's last action is a tool call, the orchestrator receives only the tool result and this report is lost.
 
 Return a structured envelope to the orchestrator:
 
@@ -181,4 +194,4 @@ Return a structured envelope to the orchestrator:
 - `artifacts`: artifact paths written this step (e.g., `openspec/changes/{change-name}/proposal.md`), or "None"
 - `next_recommended`: the next SDD phase to run (sdd-spec or sdd-design), or "none"
 - `risks`: risks discovered, or "None"
-- `skill_resolution`: how skills were loaded — `paths-injected` (received exact skill paths from orchestrator), `fallback-scan` (self-loaded by scanning the skills directory), `fallback-path` (loaded via `SKILL: Load` path), or `none` (no extra skills loaded)
+- `skill_resolution`: how skills were loaded - `paths-injected` (honored the orchestrator's `## Skills to load` block and resolved each name to a `SKILL.md`), `fallback-scan` (no hint; phase scanned the skills directory and matched by trigger), `fallback-path` (loaded via `SKILL: Load` instruction in phase context), or `none` (no skills loaded)
