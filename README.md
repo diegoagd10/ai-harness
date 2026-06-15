@@ -13,8 +13,35 @@ Claude Code, Copilot, and generic `.agents` consumers expect.
 | `prompts/commands/` | Platform-neutral slash-command entrypoints, the single source of truth. |
 | `skills/` | Reusable skills (SDD apply flow, branch-pr, coding-guidelines, …). |
 | `agent-clis/opencode/` | The OpenCode wiring: agent graph (`opencode.json`), orchestrator prompt, blocks, plugins. |
-| `cli/` | The `ai-harness` Go CLI: SDD dispatcher + copy-based harness installer/uninstaller. |
+| `cli/` | The `ai-harness` Python CLI (uv + Typer + Rich). See [CLI](#cli). |
 | `templates/openspec/config.yaml` | Starter OpenSpec project config to copy into new projects. |
+
+## CLI
+
+`cli/` is a [uv](https://docs.astral.sh/uv/)-managed Python package built with
+[Typer](https://typer.tiangolo.com/) and [Rich](https://rich.readthedocs.io/),
+providing the `ai-harness` command.
+
+```bash
+cd cli
+uv run ai-harness install
+```
+
+### Installing the `ai-harness` binary
+
+```bash
+cd cli
+uv tool install .              # install on PATH (~/.local/bin/ai-harness)
+uv tool install --reinstall .  # update after pulling code changes
+uv tool uninstall cli           # remove
+```
+
+End-to-end tests live in `e2e/` and run the installed `ai-harness` binary
+(not `uv run`) inside Docker:
+
+```bash
+e2e/docker-test.sh
+```
 
 ## Install
 
