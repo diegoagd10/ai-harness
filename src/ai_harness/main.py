@@ -4,6 +4,9 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
+from ai_harness import compat
+from ai_harness.sdd import SddError, resolve
+
 app = typer.Typer()
 console = Console()
 
@@ -206,6 +209,29 @@ def uninstall() -> None:
         if not target.exists() and backup.exists():
             shutil.move(backup, target)
             console.print(f"Restored {target} from {backup}")
+
+
+@app.command(name="sdd-status")
+def sdd_status(
+    change: str | None = typer.Argument(
+        None, help="Active OpenSpec change name; inferred when omitted."
+    ),
+    json_output: bool = typer.Option(
+        False, "--json", help="Emit deterministic JSON instead of a rendered summary."
+    ),
+    cwd: str = typer.Option("", "--cwd", help="Workspace directory to read openspec/ from."),
+) -> None:
+    """Report the SDD phase state for a change."""
+    try:
+        status = resolve(cwd, "", change or "")
+    except SddError as err:
+        typer.echo(f"ai-harness: {err}", err=True)
+        raise typer.Exit(code=compat.EXIT_ERROR) from err
+    except OSError as err:
+        typer.echo(f"ai-harness: {err}", err=True)
+        raise typer.Exit(code=compat.EXIT_ERROR) from err
+
+    typer.echo(compat.status_to_json(status))
 
 
 def main() -> None:
