@@ -10,22 +10,17 @@ Public/contextual comments follow the target context language by default. Explic
 
 You are a sub-agent responsible for creating PROPOSALS. You take the exploration analysis (or direct user input) and produce a structured `proposal.md` document inside the change folder.
 
+You are an EXECUTOR, not an orchestrator: write this proposal yourself. Do NOT launch sub-agents, do NOT call `delegate`/`task`, and do NOT bounce work back unless you are reporting a blocker.
+
 ## What You Receive
 
 From the orchestrator:
 - Change name (e.g., "add-dark-mode")
 - Exploration analysis (from sdd-explore) OR direct user description
-- Artifact store mode (`hybrid` by default; other modes only when explicitly required)
 
-## Execution and Persistence Contract
+## Context Retrieval
 
-> Follow **Section B** (retrieval) and **Section C** (persistence) from `skills/_shared/sdd-phase-common.md`.
-
-- **engram**: Read `sdd/{change-name}/explore` (optional) and `sdd-init/{project}` (optional). Save artifact as `sdd/{change-name}/proposal`.
-- **openspec**: Read and follow `skills/_shared/openspec-convention.md`.
-- **hybrid**: Follow BOTH conventions — persist to Engram AND write to filesystem. Retrieve dependencies from Engram (primary) with filesystem fallback.
-- **none**: Return result only. Never create or modify project files.
-- Never force `openspec/` creation unless user requested file-based persistence or mode is `hybrid`.
+Before writing, read `openspec/config.yaml` for project-specific rules (`rules.proposal`). If `openspec/changes/{change-name}/exploration.md` exists, read it as input. If `openspec/specs/` has relevant specs, read them to understand current behavior this change might affect.
 
 ## What to Do
 
@@ -46,39 +41,22 @@ From the orchestrator:
 - Prefer 3–5 concrete product questions per round. After the first answers, summarize the resulting proposal assumptions and ask whether the user wants to correct anything or run a second question round. Do not ask about test commands, PR shape, changed-line budget, or other harness decisions unless the user explicitly asks to discuss delivery. If blocked from asking directly, write a `## Proposal question round` section in the proposal result with the proposed questions and assumptions needing user review.
 
 ### Step 1: Load Skills
-Follow **Section A** from `skills/_shared/sdd-phase-common.md`.
 
-## Skills to load before work
-
-Load these skills before any other work:
-- `skills/coding-guidelines/SKILL.md` — role: ARCHITECT
-
-When loading coding-guidelines:
-- Read `references/deep-modules.md` first (change amplification check)
-- Read `references/information-hiding.md` (what secrets does this change expose/hide)
-- Read `references/layers.md` (does this introduce pass-through layers)
-- Hold question: *"Does this change make the system easier or harder to understand?"*
+1. If the orchestrator injected extra skill paths in the launch prompt, read those `SKILL.md` files too.
+2. Otherwise, if `SKILL: Load` instructions are present, load those exact skill files.
+3. Otherwise, scan the installed skills directory for `*/SKILL.md`, read each frontmatter (`name`, triggers/`description`), and read any whose triggers match this task.
+4. If nothing matches, proceed with the skills already loaded above.
 
 ### Step 2: Create Change Directory
 
-**IF mode is `openspec` or `hybrid`:** create the change folder structure:
+Create the change folder if it doesn't exist yet:
 
 ```
 openspec/changes/{change-name}/
 └── proposal.md
 ```
 
-**IF mode is `engram` or `none`:** Do NOT create any `openspec/` directories. Skip this step.
-
-### Step 3: Read Existing Specs
-
-**IF mode is `openspec` or `hybrid`:** If `openspec/specs/` has relevant specs, read them to understand current behavior that this change might affect.
-
-**IF mode is `engram`:** Existing context was already retrieved from Engram in the Persistence Contract. Skip filesystem reads.
-
-**IF mode is `none`:** Skip — no existing specs to read.
-
-### Step 4: Write proposal.md
+### Step 3: Write proposal.md
 
 ```markdown
 # Proposal: {Change Title}
@@ -148,24 +126,23 @@ Reference the recommended approach from exploration if available.}
 - [ ] {Measurable outcome}
 ```
 
-### Step 5: Persist Artifact
+### Step 4: Persist Artifact
 
-**This step is MANDATORY — do NOT skip it.**
+**This step is MANDATORY — do NOT skip it.** Skipping it breaks the pipeline: downstream phases will not find your output.
 
-Follow **Section C** from `skills/_shared/sdd-phase-common.md`.
-- artifact: `proposal`
-- topic_key: `sdd/{change-name}/proposal`
-- type: `architecture`
+Write the proposal to `openspec/changes/{change-name}/proposal.md`:
+- If the change directory doesn't exist yet, create it first.
+- If `proposal.md` already exists, read it first and update it — don't overwrite blindly.
 
-### Step 6: Return Summary
+### Step 5: Return Summary
 
-Return to the orchestrator:
+This summary is the `detailed_report` for the return envelope below:
 
 ```markdown
 ## Proposal Created
 
 **Change**: {change-name}
-**Location**: `openspec/changes/{change-name}/proposal.md` (openspec/hybrid) | Engram `sdd/{change-name}/proposal` (engram) | inline (none)
+**Location**: `openspec/changes/{change-name}/proposal.md`
 
 ### Summary
 - **Intent**: {one-line summary}
@@ -179,7 +156,7 @@ Ready for specs (sdd-spec) or design (sdd-design).
 
 ## Rules
 
-- In `openspec` mode, ALWAYS create the `proposal.md` file
+- ALWAYS create the `proposal.md` file
 - If the change directory already exists with a proposal, READ it first and UPDATE it
 - Keep the proposal CONCISE - it's a thinking tool, not a novel
 - Every proposal MUST have a rollback plan
@@ -191,4 +168,17 @@ Ready for specs (sdd-spec) or design (sdd-design).
 - Modified Capabilities → each will become a delta spec in the change folder
 - If nothing changes at the spec level (pure refactor, config change), explicitly write "None" under both sub-sections — don't leave them as template placeholders
 - **Size budget**: Proposal artifact MUST be under 450 words. Use bullet points and tables over prose. Headers organize, not explain.
-- Return envelope per **Section D** from `skills/_shared/sdd-phase-common.md`.
+
+## Return Envelope
+
+> **CRITICAL — Response ordering**: Your FINAL output MUST be this text envelope, NOT a tool call. Complete Step 4 (writing `proposal.md`) BEFORE this final response — if a sub-agent's last action is a tool call, the orchestrator receives only the tool result and this report is lost.
+
+Return a structured envelope to the orchestrator:
+
+- `status`: `success`, `partial`, or `blocked`
+- `executive_summary`: 1-3 sentence summary of the proposal and its intent
+- `detailed_report`: the Proposal Created summary from Step 5
+- `artifacts`: artifact paths written this step (e.g., `openspec/changes/{change-name}/proposal.md`), or "None"
+- `next_recommended`: the next SDD phase to run (sdd-spec or sdd-design), or "none"
+- `risks`: risks discovered, or "None"
+- `skill_resolution`: how skills were loaded — `paths-injected` (received exact skill paths from orchestrator), `fallback-scan` (self-loaded by scanning the skills directory), `fallback-path` (loaded via `SKILL: Load` path), or `none` (no extra skills loaded)

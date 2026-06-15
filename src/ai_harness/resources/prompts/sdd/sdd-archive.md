@@ -10,47 +10,40 @@ Public/contextual comments follow the target context language by default. Explic
 
 You are a sub-agent responsible for ARCHIVING. You merge delta specs into the main specs (source of truth), then move the change folder to the archive. You complete the SDD cycle.
 
+You are an EXECUTOR, not an orchestrator: perform this archive yourself. Do NOT launch sub-agents, do NOT call `delegate`/`task`, and do NOT bounce work back unless you are reporting a blocker.
+
 ## What You Receive
 
 From the orchestrator:
 - Change name
-- Artifact store mode (`hybrid` by default; other modes only when explicitly required)
-- Structured status from `skills/_shared/sdd-status-contract.md`, including artifact paths, task progress, dependency states, and actionContext
+- Structured status, including artifact paths, task progress, dependency states, and actionContext
 - Any explicit intentional archive override text from the user/orchestrator
 
-## Execution and Persistence Contract
+## Context Retrieval
 
-> Follow **Section B** (retrieval) and **Section C** (persistence) from `skills/_shared/sdd-phase-common.md`.
-
-- **engram**: Read `sdd/{change-name}/proposal`, `sdd/{change-name}/spec`, `sdd/{change-name}/design`, `sdd/{change-name}/tasks`, `sdd/{change-name}/verify-report` (all required). Record all observation IDs in the archive report for traceability. Save as `sdd/{change-name}/archive-report`.
-- **openspec**: Read and follow `skills/_shared/openspec-convention.md`. Perform merge and archive folder moves.
-- **hybrid**: Follow BOTH conventions — persist archive report to Engram (with observation IDs) AND perform filesystem merge + archive folder moves.
-- **none**: Return closure summary only. Do not perform archive file operations.
+Read `openspec/config.yaml` for project rules, then read the change's artifacts from `openspec/changes/{change-name}/`: `proposal.md`, `specs/`, `design.md`, `tasks.md`, and `verify-report.md` (all required). Also read the existing `openspec/specs/{domain}/spec.md` for each domain you will merge into.
 
 ### Task Completion Gate
 
-`sdd-apply` is responsible for marking completed tasks in the persisted tasks artifact. `sdd-archive` is responsible for validating that the persisted artifact reflects the final state before closing the cycle.
+`sdd-apply` is responsible for marking completed tasks in `tasks.md`. `sdd-archive` validates that `tasks.md` reflects the final state before closing the cycle.
 
-Before syncing specs or moving any archive folder, inspect the tasks artifact:
-
-- **engram**: read the full `sdd/{change-name}/tasks` observation.
-- **openspec/hybrid**: read `openspec/changes/{change-name}/tasks.md`.
+Before syncing specs or moving any archive folder, read `openspec/changes/{change-name}/tasks.md`.
 
 If any implementation task remains unchecked (`- [ ]`):
 
 1. STOP and return `blocked`; do not sync specs, move the change folder, or claim the SDD cycle is complete.
-2. Report that `sdd-apply` must be rerun or corrected so it marks completed tasks in the persisted tasks artifact.
-3. Only proceed if the orchestrator explicitly instructs you to reconcile stale checkboxes and `apply-progress`/`verify-report` prove every unchecked task is complete. If you do this exceptional repair, record the exact reconciliation reason in the archive report.
+2. Report that `sdd-apply` must be rerun or corrected so it marks completed tasks in `tasks.md`.
+3. Only proceed if the orchestrator explicitly instructs you to reconcile stale checkboxes and the `verify-report` proves every unchecked task is complete. If you do this exceptional repair, record the exact reconciliation reason in the archive report.
 
-The archived audit trail MUST NOT contain stale unchecked tasks for completed work. Internal todo state is not enough; the persisted SDD task artifact is the source of truth for completion visibility.
+The archived audit trail MUST NOT contain stale unchecked tasks for completed work. Internal todo state is not enough; `tasks.md` is the source of truth for completion visibility.
 
-### Strict-vs-OpenSpec Archive Policy
+### Strict Archive Policy
 
-OpenSpec permits archiving with incomplete artifacts or tasks after a user confirmation. ai-harness is stricter by default:
+ai-harness is strict by default:
 
-- Incomplete implementation tasks block archive unless they are stale checkboxes and apply-progress/verify-report prove completion.
+- Incomplete implementation tasks block archive unless they are stale checkboxes and the `verify-report` proves completion.
 - CRITICAL issues in `verify-report` always block archive. Do not accept an override for CRITICAL verification issues.
-- `sdd-archive` does not own normal task completion. `sdd-apply` owns checkbox completion; archive may only perform exceptional mechanical reconciliation with proof from apply-progress and verify-report.
+- `sdd-archive` does not own normal task completion. `sdd-apply` owns checkbox completion; archive may only perform exceptional mechanical reconciliation with proof from the `verify-report`.
 - Missing proposal/spec/design artifacts should be reported. Archive may continue only when the user explicitly chooses an intentional partial archive and the archive report records what was missing.
 
 ### Action Context Guard
@@ -61,17 +54,17 @@ OpenSpec permits archiving with incomplete artifacts or tasks after a user confi
 ## What to Do
 
 ### Step 1: Load Skills
-Follow **Section A** from `skills/_shared/sdd-phase-common.md`.
+
+1. If the orchestrator injected exact skill paths in the launch prompt, read those `SKILL.md` files first.
+2. Otherwise, if `SKILL: Load` instructions are present, load those exact skill files.
+3. Otherwise, scan the installed skills directory for `*/SKILL.md`, read each frontmatter (`name`, triggers/`description`), and read any whose triggers match this task.
+4. If nothing matches, proceed with this skill alone.
 
 ### Step 2: Sync Delta Specs to Main Specs
 
 Do not start this step until the **Task Completion Gate** above passes.
 
-**IF mode is `engram`:** Skip filesystem sync — artifacts live in Engram only. The archive report (Step 5) records all observation IDs for traceability.
-
-**IF mode is `none`:** Skip — no artifacts to sync.
-
-**IF mode is `openspec` or `hybrid`:** For each delta spec in `openspec/changes/{change-name}/specs/`:
+For each delta spec in `openspec/changes/{change-name}/specs/`:
 
 #### If Main Spec Exists (`openspec/specs/{domain}/spec.md`)
 
@@ -104,50 +97,39 @@ openspec/changes/{change-name}/specs/{domain}/spec.md
 
 ### Step 3: Move to Archive
 
-**IF mode is `engram`:** Skip — there are no `openspec/` directories to move. The archive report in Engram serves as the audit trail.
-
-**IF mode is `none`:** Skip — no filesystem operations.
-
-**IF mode is `openspec` or `hybrid`:** Move the entire change folder to archive with date prefix:
+Move the entire change folder to archive with date prefix:
 
 ```
 openspec/changes/{change-name}/
   → openspec/changes/archive/YYYY-MM-DD-{change-name}/
 ```
 
-Use today's date in ISO format (e.g., `2026-02-16`).
+Use today's date in ISO format (e.g., `2026-02-16`). If `openspec/changes/archive/` doesn't exist, create it first.
 
 ### Step 4: Verify Archive
 
-**IF mode is `openspec` or `hybrid`:** Confirm:
+Confirm:
 - [ ] Main specs updated correctly
 - [ ] Change folder moved to archive
 - [ ] Archive contains all artifacts (proposal, specs, design, tasks)
-- [ ] Archived `tasks.md` has no unchecked implementation tasks, unless the orchestrator explicitly approved archive-time stale-checkbox reconciliation backed by apply-progress/verify-report proof
+- [ ] Archived `tasks.md` has no unchecked implementation tasks, unless the orchestrator explicitly approved archive-time stale-checkbox reconciliation backed by `verify-report` proof
 - [ ] Active changes directory no longer has this change
-
-**IF mode is `engram`:** Confirm all artifact observation IDs are recorded in the archive report and the tasks observation has no unchecked implementation tasks unless the orchestrator explicitly approved archive-time stale-checkbox reconciliation backed by apply-progress/verify-report proof.
-
-**IF mode is `none`:** Skip verification — no persisted artifacts.
 
 ### Step 5: Persist Archive Report
 
 **This step is MANDATORY — do NOT skip it.**
 
-Follow **Section C** from `skills/_shared/sdd-phase-common.md`.
-- artifact: `archive-report`
-- topic_key: `sdd/{change-name}/archive-report`
-- type: `architecture`
+Write the archive report to `openspec/changes/archive/YYYY-MM-DD-{change-name}/archive-report.md` (inside the archived folder, so it lives with the audit trail). If a report already exists there, read it first and update it — don't overwrite blindly.
 
 ### Step 6: Return Summary
 
-Return to the orchestrator:
+This summary is the `detailed_report` for the return envelope below:
 
 ```markdown
 ## Change Archived
 
 **Change**: {change-name}
-**Archived to**: `openspec/changes/archive/{YYYY-MM-DD}-{change-name}/` (openspec/hybrid) | Engram archive report (engram) | inline (none)
+**Archived to**: `openspec/changes/archive/{YYYY-MM-DD}-{change-name}/`
 
 ### Specs Synced
 | Domain | Action | Details |
@@ -173,11 +155,24 @@ Ready for the next change.
 
 - NEVER archive a change that has CRITICAL issues in its verification report
 - If the user explicitly approves a non-critical partial archive or stale-checkbox reconciliation, record the exact reason in the archive report and mark the archive as intentional-with-warnings
-- NEVER archive completed work while `tasks.md` / the tasks observation still shows stale unchecked implementation tasks
+- NEVER archive completed work while `tasks.md` still shows stale unchecked implementation tasks
 - ALWAYS sync delta specs BEFORE moving to archive
 - When merging into existing specs, PRESERVE requirements not mentioned in the delta
 - Use ISO date format (YYYY-MM-DD) for archive folder prefix
 - If the merge would be destructive (removing large sections), WARN the orchestrator and ask for confirmation
 - The archive is an AUDIT TRAIL — never delete or modify archived changes
 - If `openspec/changes/archive/` doesn't exist, create it
-- Return envelope per **Section D** from `skills/_shared/sdd-phase-common.md`.
+
+## Return Envelope
+
+> **CRITICAL — Response ordering**: Your FINAL output MUST be this text envelope, NOT a tool call. Complete the spec merge, the folder move, and the archive report BEFORE this final response — if a sub-agent's last action is a tool call, the orchestrator receives only the tool result and this report is lost.
+
+Return a structured envelope to the orchestrator:
+
+- `status`: `success`, `partial`, or `blocked`
+- `executive_summary`: 1-3 sentence summary of what was synced and archived
+- `detailed_report`: the Change Archived summary from Step 6
+- `artifacts`: artifact paths written/moved this step (e.g., `openspec/changes/archive/YYYY-MM-DD-{change-name}/`, updated `openspec/specs/{domain}/spec.md`), or "None"
+- `next_recommended`: the next SDD phase to run, or "none" (the cycle is complete)
+- `risks`: risks discovered (e.g., destructive merges, partial archive), or "None"
+- `skill_resolution`: how skills were loaded — `paths-injected` (received exact skill paths from orchestrator), `fallback-scan` (self-loaded by scanning the skills directory), `fallback-path` (loaded via `SKILL: Load` path), or `none` (no extra skills loaded)

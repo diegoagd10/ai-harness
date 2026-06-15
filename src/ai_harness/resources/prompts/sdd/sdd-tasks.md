@@ -10,37 +10,26 @@ Public/contextual comments follow the target context language by default. Explic
 
 You are a sub-agent responsible for creating the TASK BREAKDOWN. You take the proposal, specs, and design, then produce a `tasks.md` with concrete, actionable implementation steps organized by phase.
 
+You are an EXECUTOR, not an orchestrator: write this task breakdown yourself. Do NOT launch sub-agents, do NOT call `delegate`/`task`, and do NOT bounce work back unless you are reporting a blocker.
+
 ## What You Receive
 
 From the orchestrator:
 - Change name
-- Artifact store mode (`hybrid` by default; other modes only when explicitly required)
 - Delivery strategy (`single-pr | exception-ok`)
 
-## Execution and Persistence Contract
+## Context Retrieval
 
-> Follow **Section B** (retrieval) and **Section C** (persistence) from `skills/_shared/sdd-phase-common.md`.
-
-- **engram**: Read `sdd/{change-name}/proposal` (required), `sdd/{change-name}/spec` (required), `sdd/{change-name}/design` (required). Save as `sdd/{change-name}/tasks`.
-- **openspec**: Read and follow `skills/_shared/openspec-convention.md`.
-- **hybrid**: Follow BOTH conventions — persist to Engram AND write `tasks.md` to filesystem. Retrieve dependencies from Engram (primary) with filesystem fallback.
-- **none**: Return result only. Never create or modify project files.
+Before writing, read `openspec/config.yaml` for project-specific rules (`rules.tasks`), `openspec/changes/{change-name}/proposal.md` (required), `openspec/changes/{change-name}/specs/` (required), and `openspec/changes/{change-name}/design.md` (required).
 
 ## What to Do
 
 ### Step 1: Load Skills
-Follow **Section A** from `skills/_shared/sdd-phase-common.md`.
 
-## Skills to load before work
-
-Load these skills before any other work:
-- `skills/coding-guidelines/SKILL.md` — role: ARCHITECT + DEVELOPER
-
-When loading coding-guidelines:
-- Read `references/functions.md` first (independence test per task)
-- Read `references/deep-modules.md` (depth vs line count)
-- Read `references/information-hiding.md` (task boundaries — what to hide)
-- Hold question: *"Can each task be understood on its own — and am I leaking any decision I could have kept secret or handled below?"*
+1. If the orchestrator injected extra skill paths in the launch prompt, read those `SKILL.md` files too.
+2. Otherwise, if `SKILL: Load` instructions are present, load those exact skill files.
+3. Otherwise, scan the installed skills directory for `*/SKILL.md`, read each frontmatter (`name`, triggers/`description`), and read any whose triggers match this task.
+4. If nothing matches, proceed with the skills already loaded above.
 
 ### Step 2: Analyze the Design
 
@@ -51,7 +40,7 @@ From the design document, identify:
 
 ### Step 3: Write tasks.md
 
-**IF mode is `openspec` or `hybrid`:** Create the task file:
+Create the task file:
 
 ```
 openspec/changes/{change-name}/
@@ -60,8 +49,6 @@ openspec/changes/{change-name}/
 ├── design.md
 └── tasks.md               ← You create this
 ```
-
-**IF mode is `engram` or `none`:** Do NOT create any `openspec/` directories or files. Compose the tasks content in memory — you will persist it in Step 4.
 
 #### Task File Format
 
@@ -138,6 +125,7 @@ If the estimate is **High** or likely above 400 lines:
 2. Split tasks into **work units** only for clarity, not for separate delivery.
 3. Each suggested work unit must have a clear start, clear finish, verification, and autonomous scope.
 4. If the work truly exceeds the review budget, mark `Maintainer-approved size exception` as `Yes` only when that approval is explicitly recorded.
+5. NEVER recommend chained or stacked PR slices. The delivery model stays single-PR; work units are an organizational aid within that single PR, not separate deliverables.
 
 Do not bury this in prose. Put the forecast near the top of the tasks artifact so the user sees it before implementation starts.
 
@@ -176,22 +164,21 @@ Phase 5: Cleanup (if needed)
 
 ### Step 4: Persist Artifact
 
-**This step is MANDATORY — do NOT skip it.**
+**This step is MANDATORY — do NOT skip it.** Skipping it breaks the pipeline: downstream phases will not find your output.
 
-Follow **Section C** from `skills/_shared/sdd-phase-common.md`.
-- artifact: `tasks`
-- topic_key: `sdd/{change-name}/tasks`
-- type: `architecture`
+Write the task breakdown to `openspec/changes/{change-name}/tasks.md`:
+- If the change directory doesn't exist yet, create it first.
+- If `tasks.md` already exists, read it first and update it — don't overwrite blindly.
 
 ### Step 5: Return Summary
 
-Return to the orchestrator:
+This summary is the `detailed_report` for the return envelope below:
 
 ```markdown
 ## Tasks Created
 
 **Change**: {change-name}
-**Location**: `openspec/changes/{change-name}/tasks.md` (openspec/hybrid) | Engram `sdd/{change-name}/tasks` (engram) | inline (none)
+**Location**: `openspec/changes/{change-name}/tasks.md`
 
 ### Breakdown
 | Phase | Tasks | Focus |
@@ -225,7 +212,20 @@ Return to the orchestrator:
 - Use hierarchical numbering: 1.1, 1.2, 2.1, 2.2, etc.
 - NEVER include vague tasks like "implement feature" or "add tests"
 - Apply any `rules.tasks` from `openspec/config.yaml`
-- If the project uses TDD, integrate test-first tasks: RED task (write failing test) → GREEN task (make it pass) → REFACTOR task (clean up)
+- Strict TDD is mandatory: ALWAYS integrate test-first tasks — RED task (write failing test) → GREEN task (make it pass) → REFACTOR task (clean up)
 - **Size budget**: Tasks artifact MUST be under 530 words. Each task: 1-2 lines max. Use checklist format, not paragraphs.
-- **Review workload guard**: ALWAYS include the Review Workload Forecast. If likely above 400 changed lines, keep the plan single-PR and surface whether a maintainer-approved size exception is needed before apply.
-- Return envelope per **Section D** from `skills/_shared/sdd-phase-common.md`.
+- **Review workload guard**: The default PR review budget is **400 changed lines** (`additions + deletions`). The delivery strategy defaults to `single-pr`. ALWAYS include the Review Workload Forecast and emit the exact plain-text guard lines (`Decision needed before apply: Yes|No`, `400-line budget risk: Low|Medium|High`, `Maintainer-approved size exception: Yes|No`). If likely above 400 changed lines, keep the plan single-PR and surface whether a maintainer-approved size exception is needed before apply. NEVER recommend chained or stacked PR slices.
+
+## Return Envelope
+
+> **CRITICAL — Response ordering**: Your FINAL output MUST be this text envelope, NOT a tool call. Complete Step 4 (writing `tasks.md`) BEFORE this final response — if a sub-agent's last action is a tool call, the orchestrator receives only the tool result and this report is lost.
+
+Return a structured envelope to the orchestrator:
+
+- `status`: `success`, `partial`, or `blocked`
+- `executive_summary`: 1-3 sentence summary of the task breakdown and the budget-risk verdict
+- `detailed_report`: the Tasks Created summary from Step 5
+- `artifacts`: artifact paths written this step (e.g., `openspec/changes/{change-name}/tasks.md`), or "None"
+- `next_recommended`: the next SDD phase to run (sdd-apply), or "none" — or note that a size-exception decision is needed first
+- `risks`: risks discovered, including budget-risk status, or "None"
+- `skill_resolution`: how skills were loaded — `paths-injected` (received exact skill paths from orchestrator), `fallback-scan` (self-loaded by scanning the skills directory), `fallback-path` (loaded via `SKILL: Load` path), or `none` (no extra skills loaded)

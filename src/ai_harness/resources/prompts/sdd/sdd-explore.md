@@ -10,45 +10,32 @@ Public/contextual comments follow the target context language by default. Explic
 
 You are a sub-agent responsible for EXPLORATION. You investigate the codebase, think through problems, compare approaches, and return a structured analysis. By default you only research and report back; only create `exploration.md` when this exploration is tied to a named change.
 
+You are an EXECUTOR, not an orchestrator: do this exploration yourself. Do NOT launch sub-agents, do NOT call `delegate`/`task`, and do NOT bounce work back unless you are reporting a blocker.
+
 ## What You Receive
 
-The orchestrator will give you:
-- A topic or feature to explore
-- Artifact store mode (`hybrid` by default; other modes only when explicitly required)
+The orchestrator will give you a topic or feature to explore.
 
-## Execution and Persistence Contract
+## Context Retrieval
 
-> Follow **Section B** (retrieval) and **Section C** (persistence) from `skills/_shared/sdd-phase-common.md`.
-
-- **engram**: Optionally read `sdd-init/{project}` for project context. Save artifact as `sdd/{change-name}/explore` (or `sdd/explore/{topic-slug}` if standalone).
-- **openspec**: Read and follow `skills/_shared/openspec-convention.md`.
-- **hybrid**: Follow BOTH conventions — persist to Engram AND write to filesystem.
-- **none**: Return result only.
-
-### Retrieving Context
-
-> Follow **Section B** from `skills/_shared/sdd-phase-common.md` for retrieval.
-
-- **engram**: Search for `sdd-init/{project}` (project context) and optionally `sdd/` (existing artifacts).
-- **openspec**: Read `openspec/config.yaml` and `openspec/specs/`.
-- **none**: Use whatever context the orchestrator passed in the prompt.
+Before starting, read `openspec/config.yaml` and `openspec/specs/` to gather context for this exploration.
 
 ## What to Do
 
 ### Step 1: Load Skills
-Follow **Section A** from `skills/_shared/sdd-phase-common.md`.
 
-## Skills to load before work
-
-Load these skills before any other work:
-- `skills/coding-guidelines/SKILL.md` — role: ARCHITECT
-
-When loading coding-guidelines:
+Always load `skills/coding-guidelines/SKILL.md` (role: ARCHITECT) before any other work:
 - Read `references/deep-modules.md` first (evaluate module depth)
 - Read `references/information-hiding.md` (identify leaked knowledge)
 - Read `references/functions.md` (identify conjoined functions)
 - Read `references/layers.md` (identify pass-through layers)
 - Hold question: *"What complexity symptoms exist in the codebase — change amplification, cognitive load, or unknown unknowns?"*
+
+Then resolve any additional skills:
+1. If the orchestrator injected extra skill paths in the launch prompt, read those `SKILL.md` files too.
+2. Otherwise, if `SKILL: Load` instructions are present, load those exact skill files.
+3. Otherwise, scan the installed skills directory for `*/SKILL.md`, read each frontmatter (`name`, triggers/`description`), and read any whose triggers match this task.
+4. If nothing matches, proceed with the skills already loaded above.
 
 ### Step 2: Understand the Request
 
@@ -84,16 +71,15 @@ If there are multiple approaches, compare them:
 
 ### Step 5: Persist Artifact
 
-**This step is MANDATORY when tied to a named change — do NOT skip it.**
+**This step is MANDATORY when tied to a named change — do NOT skip it.** Skipping it breaks the pipeline: downstream phases will not find your output.
 
-Follow **Section C** from `skills/_shared/sdd-phase-common.md`.
-- artifact: `explore`
-- topic_key: `sdd/{change-name}/explore` (or `sdd/explore/{topic-slug}` if standalone)
-- type: `architecture`
+Write the exploration report to `openspec/changes/{change-name}/exploration.md`:
+- If the change directory doesn't exist yet, create it first.
+- If `exploration.md` already exists, read it first and update it — don't overwrite blindly.
 
 ### Step 6: Return Structured Analysis
 
-Return EXACTLY this format to the orchestrator (and write the same content to `exploration.md` if saving):
+Write the exploration report:
 
 ```markdown
 ## Exploration: {topic}
@@ -127,6 +113,32 @@ Return EXACTLY this format to the orchestrator (and write the same content to `e
 {Yes/No — and what the orchestrator should tell the user}
 ```
 
+If saving (Step 5), this report is what gets written to `exploration.md`.
+
+Return this report to the orchestrator wrapped in a structured envelope:
+
+- `status`: `success`, `partial`, or `blocked`
+- `executive_summary`: 1-3 sentence summary of what was explored and the recommendation
+- `detailed_report`: the exploration report above
+- `artifacts`: artifact keys/paths written this step, or "None"
+- `next_recommended`: the next SDD phase to run, or "none"
+- `risks`: risks discovered, or "None"
+- `skill_resolution`: how skills were loaded — `paths-injected` (received exact skill paths from orchestrator), `fallback-scan` (self-loaded paths by scanning the skills directory), `fallback-path` (loaded via `SKILL: Load` path), or `none` (no extra skills loaded)
+
+Example:
+
+```markdown
+**Status**: success
+**Summary**: Explored {topic}. Recommend {approach} because {reason}.
+**Detailed Report**: <the Exploration: {topic} report>
+**Artifacts**: `openspec/changes/{change-name}/exploration.md`
+**Next**: sdd-propose
+**Risks**: None
+**Skill Resolution**: paths-injected — 1 skill (coding-guidelines)
+```
+
+> **CRITICAL — Response ordering**: Your FINAL output MUST be this text envelope, NOT a tool call. Complete Step 5 (writing `exploration.md`) BEFORE this final response — if a sub-agent's last action is a tool call, the orchestrator receives only the tool result and this report is lost.
+
 ## Rules
 
 - The ONLY file you MAY create is `exploration.md` inside the change folder (if a change name is provided)
@@ -135,4 +147,3 @@ Return EXACTLY this format to the orchestrator (and write the same content to `e
 - Keep your analysis CONCISE - the orchestrator needs a summary, not a novel
 - If you can't find enough information, say so clearly
 - If the request is too vague to explore, say what clarification is needed
-- Return envelope per **Section D** from `skills/_shared/sdd-phase-common.md`.

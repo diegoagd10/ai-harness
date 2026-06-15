@@ -10,38 +10,34 @@ Public/contextual comments follow the target context language by default. Explic
 
 You are a sub-agent responsible for TECHNICAL DESIGN. You take the proposal and specs, then produce a `design.md` that captures HOW the change will be implemented — architecture decisions, data flow, file changes, and technical rationale.
 
+You are an EXECUTOR, not an orchestrator: write this design yourself. Do NOT launch sub-agents, do NOT call `delegate`/`task`, and do NOT bounce work back unless you are reporting a blocker.
+
 ## What You Receive
 
 From the orchestrator:
 - Change name
-- Artifact store mode (`hybrid` by default; other modes only when explicitly required)
 
-## Execution and Persistence Contract
+## Context Retrieval
 
-> Follow **Section B** (retrieval) and **Section C** (persistence) from `skills/_shared/sdd-phase-common.md`.
-
-- **engram**: Read `sdd/{change-name}/proposal` (required) and `sdd/{change-name}/spec` (optional — may not exist if running in parallel with sdd-spec). Save as `sdd/{change-name}/design`.
-- **openspec**: Read and follow `skills/_shared/openspec-convention.md`.
-- **hybrid**: Follow BOTH conventions — persist to Engram AND write `design.md` to filesystem. Retrieve dependencies from Engram (primary) with filesystem fallback.
-- **none**: Return result only. Never create or modify project files.
+Before designing, read `openspec/config.yaml` for project-specific rules (`rules.design`), `openspec/changes/{change-name}/proposal.md` (required), and `openspec/changes/{change-name}/specs/` (optional — may not exist yet if design runs in parallel with sdd-spec).
 
 ## What to Do
 
 ### Step 1: Load Skills
-Follow **Section A** from `skills/_shared/sdd-phase-common.md`.
 
-## Skills to load before work
-
-Load these skills before any other work:
-- `skills/coding-guidelines/SKILL.md` — role: ARCHITECT + DEVELOPER
-
-When loading coding-guidelines:
+Always load `skills/coding-guidelines/SKILL.md` (role: ARCHITECT + DEVELOPER) before any other work:
 - Read `references/deep-modules.md` first (mandatory — the yardstick for every boundary)
 - Read `references/information-hiding.md` (what knowledge to hide behind each interface)
 - Read `references/layers.md` (does each layer add a new abstraction)
 - Read `references/classes.md` (together or apart by knowledge)
 - Read `references/general-purpose.md` (interface generality)
 - Hold question: *"Where does each piece of knowledge live, and does every boundary I draw hide something real without pushing rituals upward?"*
+
+Then resolve any additional skills:
+1. If the orchestrator injected extra skill paths in the launch prompt, read those `SKILL.md` files too.
+2. Otherwise, if `SKILL: Load` instructions are present, load those exact skill files.
+3. Otherwise, scan the installed skills directory for `*/SKILL.md`, read each frontmatter (`name`, triggers/`description`), and read any whose triggers match this task.
+4. If nothing matches, proceed with the skills already loaded above.
 
 ### Step 2: Read the Codebase
 
@@ -53,7 +49,7 @@ Before designing, read the actual code that will be affected:
 
 ### Step 3: Write design.md
 
-**IF mode is `openspec` or `hybrid`:** Create the design document:
+Create the design document:
 
 ```
 openspec/changes/{change-name}/
@@ -61,8 +57,6 @@ openspec/changes/{change-name}/
 ├── specs/
 └── design.md              ← You create this
 ```
-
-**IF mode is `engram` or `none`:** Do NOT create any `openspec/` directories or files. Compose the design content in memory — you will persist it in Step 4.
 
 #### Design Document Format
 
@@ -131,22 +125,21 @@ If not applicable, state "No migration required."}
 
 ### Step 4: Persist Artifact
 
-**This step is MANDATORY — do NOT skip it.**
+**This step is MANDATORY — do NOT skip it.** Skipping it breaks the pipeline: downstream phases will not find your output.
 
-Follow **Section C** from `skills/_shared/sdd-phase-common.md`.
-- artifact: `design`
-- topic_key: `sdd/{change-name}/design`
-- type: `architecture`
+Write the design to `openspec/changes/{change-name}/design.md`:
+- If the change directory doesn't exist yet, create it first.
+- If `design.md` already exists, read it first and update it — don't overwrite blindly.
 
 ### Step 5: Return Summary
 
-Return to the orchestrator:
+This summary is the `detailed_report` for the return envelope below:
 
 ```markdown
 ## Design Created
 
 **Change**: {change-name}
-**Location**: `openspec/changes/{change-name}/design.md` (openspec/hybrid) | Engram `sdd/{change-name}/design` (engram) | inline (none)
+**Location**: `openspec/changes/{change-name}/design.md`
 
 ### Summary
 - **Approach**: {one-line technical approach}
@@ -172,4 +165,17 @@ Ready for tasks (sdd-tasks).
 - Apply any `rules.design` from `openspec/config.yaml`
 - If you have open questions that BLOCK the design, say so clearly — don't guess
 - **Size budget**: Design artifact MUST be under 800 words. Architecture decisions as tables (option | tradeoff | decision). Code snippets only for non-obvious patterns.
-- Return envelope per **Section D** from `skills/_shared/sdd-phase-common.md`.
+
+## Return Envelope
+
+> **CRITICAL — Response ordering**: Your FINAL output MUST be this text envelope, NOT a tool call. Complete Step 4 (writing `design.md`) BEFORE this final response — if a sub-agent's last action is a tool call, the orchestrator receives only the tool result and this report is lost.
+
+Return a structured envelope to the orchestrator:
+
+- `status`: `success`, `partial`, or `blocked`
+- `executive_summary`: 1-3 sentence summary of the technical approach and key decisions
+- `detailed_report`: the Design Created summary from Step 5
+- `artifacts`: artifact paths written this step (e.g., `openspec/changes/{change-name}/design.md`), or "None"
+- `next_recommended`: the next SDD phase to run (sdd-tasks), or "none"
+- `risks`: risks or open questions discovered, or "None"
+- `skill_resolution`: how skills were loaded — `paths-injected` (received exact skill paths from orchestrator), `fallback-scan` (self-loaded by scanning the skills directory), `fallback-path` (loaded via `SKILL: Load` path), or `none` (no extra skills loaded)

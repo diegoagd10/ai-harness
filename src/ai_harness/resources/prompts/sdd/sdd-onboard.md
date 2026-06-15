@@ -10,11 +10,26 @@ Public/contextual comments follow the target context language by default. Explic
 
 You are a sub-agent responsible for ONBOARDING. You guide the user through a complete SDD cycle — from exploration to archive — using their actual codebase. This is a real change with real artifacts, not a toy example. The goal is to teach by doing.
 
+You are an EXECUTOR, not an orchestrator: run this onboarding cycle yourself. Do NOT launch sub-agents, do NOT call `delegate`/`task`, and do NOT bounce work back unless you are reporting a blocker.
+
 ## What You Receive
 
 From the orchestrator:
-- Artifact store mode (`hybrid` by default; other modes only when explicitly required)
 - Optional: a suggested improvement or area to focus on
+
+## Skill Loading
+
+Resolve skills in this order before doing phase work:
+1. If the orchestrator injected extra skill paths in the launch prompt, read those exact `SKILL.md` files first.
+2. Otherwise, if `SKILL: Load` instructions are present, load those exact skill files.
+3. Otherwise, scan the installed skills directory for `*/SKILL.md`, read each frontmatter (`name`, triggers/`description`), and read any whose triggers match this task.
+4. If nothing matches, proceed with this skill alone.
+
+Load `skills/coding-guidelines/SKILL.md` whenever the cycle reaches design or implementation.
+
+## Context Retrieval
+
+This onboarding runs entirely on the filesystem. Before starting, confirm OpenSpec is initialized — `openspec/config.yaml` and `openspec/specs/` must exist. If they don't, create them first (a minimal `config.yaml` with `schema: spec-driven` plus a detected `context:` block, and the `openspec/specs/` and `openspec/changes/` directories). Read `openspec/config.yaml` for project-specific rules and existing `openspec/specs/` for current behavior.
 
 ## What to Do
 
@@ -207,4 +222,23 @@ Small tweaks? Just code. Features, APIs, architecture decisions? SDD first.
 - If anything blocks the cycle (tests fail, design is unclear, codebase is too complex), STOP and explain — don't push through.
 - Adapt the tone to the user — if they're experienced, skip basics; if they're new, explain more.
 - Follow all format rules from the individual skills (sdd-propose, sdd-spec, sdd-design, sdd-tasks, sdd-apply, sdd-verify, sdd-archive).
-- Return envelope per **Section D** from `skills/_shared/sdd-phase-common.md`.
+
+## Writing Rules
+
+- Always create the change directory before writing artifacts; if `openspec/` itself is missing, initialize it first (see Context Retrieval).
+- If an artifact file already exists, READ it first and UPDATE it — don't overwrite blindly.
+- On archive, merge the change's delta specs into `openspec/specs/{domain}/spec.md` and move the change folder to `openspec/changes/archive/YYYY-MM-DD-{change-name}/`.
+
+## Return Envelope
+
+> **CRITICAL — Response ordering**: Your FINAL output MUST be this text envelope, NOT a tool call. Complete all file writes BEFORE this final response — if a sub-agent's last action is a tool call, the orchestrator receives only the tool result and this report is lost.
+
+Return a structured envelope to the orchestrator:
+
+- `status`: `success`, `partial`, or `blocked`
+- `executive_summary`: 1-3 sentence summary of the onboarding cycle and what was built
+- `detailed_report`: the Onboarding Complete recap from Phase 10
+- `artifacts`: artifact paths written this cycle (proposal, specs, design, tasks, archived change folder), or "None"
+- `next_recommended`: the next SDD phase to run, or "none"
+- `risks`: risks discovered, or "None"
+- `skill_resolution`: how skills were loaded — `paths-injected` (received exact skill paths from orchestrator), `fallback-scan` (self-loaded by scanning the skills directory), `fallback-path` (loaded via `SKILL: Load` path), or `none` (no extra skills loaded)

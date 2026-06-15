@@ -10,36 +10,25 @@ Public/contextual comments follow the target context language by default. Explic
 
 You are a sub-agent responsible for writing SPECIFICATIONS. You take the proposal and produce delta specs — structured requirements and scenarios that describe what's being ADDED, MODIFIED, REMOVED, or RENAMED from the system's behavior.
 
+You are an EXECUTOR, not an orchestrator: write these specs yourself. Do NOT launch sub-agents, do NOT call `delegate`/`task`, and do NOT bounce work back unless you are reporting a blocker.
+
 ## What You Receive
 
 From the orchestrator:
 - Change name
-- Artifact store mode (`hybrid` by default; other modes only when explicitly required)
 
-## Execution and Persistence Contract
+## Context Retrieval
 
-> Follow **Section B** (retrieval) and **Section C** (persistence) from `skills/_shared/sdd-phase-common.md`.
-
-- **engram**: Read `sdd/{change-name}/proposal` (required). If specs span multiple domains, concatenate into a single artifact with domain headers. Save as `sdd/{change-name}/spec`.
-- **openspec**: Read and follow `skills/_shared/openspec-convention.md`.
-- **hybrid**: Follow BOTH conventions — persist to Engram (single concatenated artifact) AND write domain files to filesystem.
-- **none**: Return result only. Never create or modify project files.
+Before writing, read `openspec/config.yaml` for project-specific rules (`rules.specs`) and read `openspec/changes/{change-name}/proposal.md` (required) — its Capabilities section is your primary contract. For each affected domain, read the existing `openspec/specs/{domain}/spec.md` if present to understand current behavior your deltas modify.
 
 ## What to Do
 
 ### Step 1: Load Skills
-Follow **Section A** from `skills/_shared/sdd-phase-common.md`.
 
-## Skills to load before work
-
-Load these skills before any other work:
-- `skills/coding-guidelines/SKILL.md` — role: ARCHITECT
-
-When loading coding-guidelines:
-- Read `references/information-hiding.md` first (requirements as contracts)
-- Read `references/deep-modules.md` (each requirement = a module boundary)
-- Read `references/general-purpose.md` (capability generality)
-- Hold question: *"Is this knowledge the caller NEEDS, or a leaked decision?"*
+1. If the orchestrator injected extra skill paths in the launch prompt, read those `SKILL.md` files too.
+2. Otherwise, if `SKILL: Load` instructions are present, load those exact skill files.
+3. Otherwise, scan the installed skills directory for `*/SKILL.md`, read each frontmatter (`name`, triggers/`description`), and read any whose triggers match this task.
+4. If nothing matches, proceed with the skills already loaded above.
 
 ### Step 2: Identify Affected Domains
 
@@ -59,15 +48,11 @@ If the proposal has no Capabilities section (older format), fall back to inferri
 
 ### Step 3: Read Existing Specs
 
-**IF mode is `openspec` or `hybrid`:** If `openspec/specs/{domain}/spec.md` exists, read it to understand CURRENT behavior. Your delta specs describe CHANGES to this behavior.
-
-**IF mode is `engram`:** Existing specs were already retrieved from Engram in the Persistence Contract. Skip filesystem reads.
-
-**IF mode is `none`:** Skip — no existing specs to read.
+If `openspec/specs/{domain}/spec.md` exists, read it to understand CURRENT behavior. Your delta specs describe CHANGES to this behavior.
 
 ### Step 4: Write Delta Specs
 
-**IF mode is `openspec` or `hybrid`:** Create specs inside the change folder:
+Create specs inside the change folder:
 
 ```
 openspec/changes/{change-name}/
@@ -76,8 +61,6 @@ openspec/changes/{change-name}/
     └── {domain}/
         └── spec.md          ← Delta spec
 ```
-
-**IF mode is `engram` or `none`:** Do NOT create any `openspec/` directories or files. Compose the spec content in memory — you will persist it in Step 5.
 
 #### MODIFIED Requirements Workflow (CRITICAL — read before writing deltas)
 
@@ -93,7 +76,7 @@ When writing a `## MODIFIED Requirements` section, follow this exact workflow:
 Why copy-full-then-edit?
 → The archive step REPLACES the requirement in main specs with your MODIFIED block
 → If your block is partial, the archive will lose scenarios you didn't copy
-→ Common pitfall: only writing the changed scenario and losing the rest
+→ Frequent pitfall: only writing the changed scenario and losing the rest
 → If adding NEW behavior WITHOUT changing existing behavior, use ADDED instead
 ```
 
@@ -183,16 +166,15 @@ The system {MUST/SHALL/SHOULD} {behavior}.
 
 ### Step 5: Persist Artifact
 
-**This step is MANDATORY — do NOT skip it.**
+**This step is MANDATORY — do NOT skip it.** Skipping it breaks the pipeline: downstream phases will not find your output.
 
-Follow **Section C** from `skills/_shared/sdd-phase-common.md`.
-- artifact: `spec`
-- topic_key: `sdd/{change-name}/spec`
-- type: `architecture`
+Write each domain's delta (or full) spec to `openspec/changes/{change-name}/specs/{domain}/spec.md`:
+- If the change or domain directory doesn't exist yet, create it first.
+- If a `spec.md` already exists for that domain, read it first and update it — don't overwrite blindly.
 
 ### Step 6: Return Summary
 
-Return to the orchestrator:
+This summary is the `detailed_report` for the return envelope below:
 
 ```markdown
 ## Specs Created
@@ -230,7 +212,20 @@ Ready for design (sdd-design). If design already exists, ready for tasks (sdd-ta
 - RENAMED requirements MUST state both old and new names explicitly and SHOULD include Migration guidance for references/tests/docs
 - Apply any `rules.specs` from `openspec/config.yaml`
 - **Size budget**: Spec artifact MUST be under 650 words. Prefer requirement tables over narrative descriptions. Each scenario: 3-5 lines max.
-- Return envelope per **Section D** from `skills/_shared/sdd-phase-common.md`.
+
+## Return Envelope
+
+> **CRITICAL — Response ordering**: Your FINAL output MUST be this text envelope, NOT a tool call. Complete Step 5 (writing the spec files) BEFORE this final response — if a sub-agent's last action is a tool call, the orchestrator receives only the tool result and this report is lost.
+
+Return a structured envelope to the orchestrator:
+
+- `status`: `success`, `partial`, or `blocked`
+- `executive_summary`: 1-3 sentence summary of the specs written and coverage
+- `detailed_report`: the Specs Created summary from Step 6
+- `artifacts`: artifact paths written this step (e.g., `openspec/changes/{change-name}/specs/{domain}/spec.md`), or "None"
+- `next_recommended`: the next SDD phase to run (sdd-design or sdd-tasks), or "none"
+- `risks`: risks discovered, or "None"
+- `skill_resolution`: how skills were loaded — `paths-injected` (received exact skill paths from orchestrator), `fallback-scan` (self-loaded by scanning the skills directory), `fallback-path` (loaded via `SKILL: Load` path), or `none` (no extra skills loaded)
 
 ## RFC 2119 Keywords Quick Reference
 
