@@ -1,0 +1,35 @@
+# OpenSpec project config for ai-harness-setup.
+
+schema: spec-driven
+project:
+  name: ai-harness-setup
+  description: Personal AI harness configuration and Python CLI for installing shared agents, skills, prompts, and SDD workflows.
+
+strict_tdd: true
+
+testing:
+  package_manager: uv
+  default_commands:
+    - uv run pytest
+    - e2e/docker-test.sh
+  coverage_commands:
+    - uv run pytest --cov=ai_harness
+  notes:
+    - Python package uses pytest with pythonpath=src.
+    - CLI entry point is ai_harness.main:main.
+    - End-to-end coverage runs in Docker and exercises the installed ai-harness binary lifecycle.
+
+rules:
+  proposal:
+    - Include a rollback plan for risky changes
+    - Identify the packages/modules affected by the change
+  specs:
+    - Use Given/When/Then format for scenarios
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY)
+  design:
+    - Document architecture decisions with their rationale
+    - Add diagrams for complex flows when they reduce cognitive load
+  tasks:
+    - Group tasks by phase (infrastructure, implementation, testing)
+    - Use hierarchical numbering (1.1, 1.2, ...)
+    - Keep each task small enough to complete in one session
