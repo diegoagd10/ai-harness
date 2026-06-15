@@ -1,3 +1,7 @@
 .git
 **/node_modules
+*.bak
 *.bak.*
+**/.venv
+**/__pycache__
+**/.pytest_cache
