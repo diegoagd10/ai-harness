@@ -13,6 +13,8 @@ CLI_DIR=/build
 RESOURCES_DIR="$CLI_DIR/src/ai_harness/resources"
 AGENTS_MD="$RESOURCES_DIR/AGENTS.md"
 SKILLS_DIR="$RESOURCES_DIR/skills"
+OPENCODE_JSON="$RESOURCES_DIR/agent-clis/opencode/opencode.json"
+SDD_PROMPTS_DIR="$RESOURCES_DIR/prompts/sdd"
 
 assert_same_content() {
   local actual="$1" expected="$2" label="$3"
@@ -28,6 +30,23 @@ assert_same_content() {
   fi
 }
 
+assert_opencode_json_installed() {
+  local actual="$1" home="$2" label="$3"
+  local expected
+  expected="$(sed "s|{{HOME}}|$home|g" "$OPENCODE_JSON")"
+
+  if [ ! -f "$actual" ]; then
+    echo "FAIL: $label (missing: $actual)"
+    exit 1
+  fi
+  if [ "$(cat "$actual")" = "$expected" ]; then
+    echo "PASS: $label"
+  else
+    echo "FAIL: $label (content mismatch after {{HOME}} substitution: $actual)"
+    exit 1
+  fi
+}
+
 check_install_targets() {
   local home="$1" label="$2"
 
@@ -37,10 +56,20 @@ check_install_targets() {
     "AGENTS.md -> ~/.claude/CLAUDE.md ($label)"
   assert_same_content "$home/.copilot/copilot-instructions.md" "$AGENTS_MD" \
     "AGENTS.md -> ~/.copilot/copilot-instructions.md ($label)"
+  assert_same_content "$home/.config/opencode/AGENTS.md" "$AGENTS_MD" \
+    "AGENTS.md -> ~/.config/opencode/AGENTS.md ($label)"
 
   for skills_root in "$home/.agents/skills" "$home/.claude/skills"; do
     assert_same_content "$skills_root/example/SKILL.md" "$SKILLS_DIR/example/SKILL.md" \
       "skills/example -> $skills_root ($label)"
+  done
+
+  assert_opencode_json_installed "$home/.config/opencode/opencode.json" "$home" \
+    "opencode.json -> ~/.config/opencode/opencode.json ($label)"
+
+  for prompt_file in "$SDD_PROMPTS_DIR"/*.md; do
+    assert_same_content "$home/.config/opencode/prompts/sdd/$(basename "$prompt_file")" "$prompt_file" \
+      "prompts/sdd/$(basename "$prompt_file") -> ~/.config/opencode/prompts/sdd ($label)"
   done
 }
 
@@ -56,8 +85,13 @@ check_install_targets "$HOME1" "fresh install"
 # --- any skill matching a name from this project ---------------------------
 HOME2="$(mktemp -d)"
 mkdir -p "$HOME2/.agents/skills/my-custom-skill" "$HOME2/.claude/skills/example"
+mkdir -p "$HOME2/.config/opencode/prompts/sdd" "$HOME2/.config/opencode/prompts/custom"
 printf '# my custom skill\n' >"$HOME2/.agents/skills/my-custom-skill/SKILL.md"
 printf '# stale content\n' >"$HOME2/.claude/skills/example/SKILL.md"
+printf '{"stale": true}\n' >"$HOME2/.config/opencode/opencode.json"
+printf '# user opencode instructions\n' >"$HOME2/.config/opencode/AGENTS.md"
+printf '# stale prompt\n' >"$HOME2/.config/opencode/prompts/sdd/sdd-apply.md"
+printf '# custom prompt\n' >"$HOME2/.config/opencode/prompts/custom/user.md"
 
 HOME="$HOME2" ai-harness install
 
@@ -70,6 +104,10 @@ else
 fi
 assert_same_content "$HOME2/.claude/skills/example/SKILL.md" "$SKILLS_DIR/example/SKILL.md" \
   "stale project skill overridden with fresh content"
+assert_opencode_json_installed "$HOME2/.config/opencode/opencode.json" "$HOME2" \
+  "stale opencode.json overridden with fresh content"
+assert_same_content "$HOME2/.config/opencode/prompts/sdd/sdd-apply.md" "$SDD_PROMPTS_DIR/sdd-apply.md" \
+  "stale SDD prompt overridden with fresh content"
 
 # --- Reinstall keeps the same behaviour -------------------------------------
 echo "==> uv tool install --reinstall ."
@@ -101,11 +139,75 @@ for skills_root in "$HOME2/.agents/skills" "$HOME2/.claude/skills"; do
   fi
 done
 
+restored_opencode_config="$(cat "$HOME2/.config/opencode/opencode.json")"
+if [ "$restored_opencode_config" = '{"stale": true}' ]; then
+  echo "PASS: pre-existing opencode.json restored after uninstall"
+else
+  echo "FAIL: pre-existing opencode.json restored after uninstall (got: $restored_opencode_config)"
+  exit 1
+fi
+
+restored_opencode_agents="$(cat "$HOME2/.config/opencode/AGENTS.md")"
+if [ "$restored_opencode_agents" = "# user opencode instructions" ]; then
+  echo "PASS: pre-existing opencode AGENTS.md restored after uninstall"
+else
+  echo "FAIL: pre-existing opencode AGENTS.md restored after uninstall (got: $restored_opencode_agents)"
+  exit 1
+fi
+
+if [ -e "$HOME2/.config/opencode/AGENTS.md.ai-harness-backup" ]; then
+  echo "FAIL: opencode AGENTS.md backup still exists after uninstall"
+  exit 1
+else
+  echo "PASS: opencode AGENTS.md backup removed after restore"
+fi
+
+if [ -e "$HOME2/.config/opencode/opencode.json.ai-harness-backup" ]; then
+  echo "FAIL: opencode backup still exists after uninstall"
+  exit 1
+else
+  echo "PASS: opencode backup removed after restore"
+fi
+
+for prompt_file in "$SDD_PROMPTS_DIR"/*.md; do
+  target="$HOME2/.config/opencode/prompts/sdd/$(basename "$prompt_file")"
+  if [ "$(basename "$prompt_file")" = "sdd-apply.md" ]; then
+    restored_prompt_content="$(cat "$target")"
+    if [ "$restored_prompt_content" = "# stale prompt" ]; then
+      echo "PASS: pre-existing prompts/sdd/sdd-apply.md restored after uninstall"
+    else
+      echo "FAIL: pre-existing prompts/sdd/sdd-apply.md restored after uninstall (got: $restored_prompt_content)"
+      exit 1
+    fi
+    if [ -e "$target.ai-harness-backup" ]; then
+      echo "FAIL: prompts/sdd/sdd-apply.md backup still exists after uninstall"
+      exit 1
+    else
+      echo "PASS: prompts/sdd/sdd-apply.md backup removed after restore"
+    fi
+    continue
+  fi
+  if [ -e "$target" ]; then
+    echo "FAIL: $target still exists after uninstall"
+    exit 1
+  else
+    echo "PASS: prompts/sdd/$(basename "$prompt_file") removed by uninstall"
+  fi
+done
+
 custom_content="$(cat "$HOME2/.agents/skills/my-custom-skill/SKILL.md")"
 if [ "$custom_content" = "# my custom skill" ]; then
   echo "PASS: user-authored skill preserved after uninstall ($HOME2/.agents/skills/my-custom-skill)"
 else
   echo "FAIL: user-authored skill preserved after uninstall (got: $custom_content)"
+  exit 1
+fi
+
+custom_prompt_content="$(cat "$HOME2/.config/opencode/prompts/custom/user.md")"
+if [ "$custom_prompt_content" = "# custom prompt" ]; then
+  echo "PASS: user-authored opencode prompt preserved after uninstall"
+else
+  echo "FAIL: user-authored opencode prompt preserved after uninstall (got: $custom_prompt_content)"
   exit 1
 fi
 

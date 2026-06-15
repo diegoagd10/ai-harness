@@ -10,6 +10,8 @@ console = Console()
 RESOURCES_DIR = Path(__file__).resolve().parent / "resources"
 AGENTS_MD_SRC = RESOURCES_DIR / "AGENTS.md"
 SKILLS_SRC = RESOURCES_DIR / "skills"
+OPENCODE_JSON_SRC = RESOURCES_DIR / "agent-clis" / "opencode" / "opencode.json"
+OPENCODE_SDD_PROMPTS_SRC = RESOURCES_DIR / "prompts" / "sdd"
 
 AGENTS_MD_TARGETS = (
     Path(".agents/AGENTS.md"),
@@ -22,10 +24,30 @@ SKILLS_TARGET_DIRS = (
     Path(".claude/skills"),
 )
 
+OPENCODE_JSON_TARGET = Path(".config/opencode/opencode.json")
+OPENCODE_JSON_BACKUP_TARGET = Path(".config/opencode/opencode.json.ai-harness-backup")
+OPENCODE_AGENTS_MD_TARGET = Path(".config/opencode/AGENTS.md")
+OPENCODE_AGENTS_MD_BACKUP_TARGET = Path(".config/opencode/AGENTS.md.ai-harness-backup")
+OPENCODE_SDD_PROMPTS_TARGET_DIR = Path(".config/opencode/prompts/sdd")
+OPENCODE_BACKUP_SUFFIX = ".ai-harness-backup"
+OPENCODE_CONFLICT_BACKUP_SUFFIX = ".ai-harness-conflict-backup"
+
 
 @app.callback()
 def callback() -> None:
     pass
+
+
+def next_available_path(path: Path) -> Path:
+    if not path.exists():
+        return path
+
+    index = 1
+    while True:
+        candidate = path.with_name(f"{path.name}.{index}")
+        if not candidate.exists():
+            return candidate
+        index += 1
 
 
 @app.command()
@@ -50,6 +72,78 @@ def install() -> None:
             shutil.copytree(skill_dir, target)
         console.print(f"Installed skills to {target_dir}")
 
+    opencode_json_target = home / OPENCODE_JSON_TARGET
+    opencode_json_target.parent.mkdir(parents=True, exist_ok=True)
+    opencode_json = OPENCODE_JSON_SRC.read_text(encoding="utf-8").replace(
+        "{{HOME}}", str(home)
+    )
+    opencode_json_backup = home / OPENCODE_JSON_BACKUP_TARGET
+    if opencode_json_target.exists() and opencode_json_target.read_text(
+        encoding="utf-8"
+    ) != opencode_json:
+        if not opencode_json_backup.exists():
+            shutil.copyfile(opencode_json_target, opencode_json_backup)
+            console.print(f"Backed up {opencode_json_target} to {opencode_json_backup}")
+        else:
+            conflict_backup = next_available_path(
+                opencode_json_target.with_name(
+                    f"{opencode_json_target.name}{OPENCODE_CONFLICT_BACKUP_SUFFIX}"
+                )
+            )
+            shutil.copyfile(opencode_json_target, conflict_backup)
+            console.print(f"Backed up {opencode_json_target} to {conflict_backup}")
+    opencode_json_target.write_text(opencode_json, encoding="utf-8")
+    console.print(f"Installed {opencode_json_target}")
+
+    opencode_agents_md_target = home / OPENCODE_AGENTS_MD_TARGET
+    opencode_agents_md_backup = home / OPENCODE_AGENTS_MD_BACKUP_TARGET
+    agents_md = AGENTS_MD_SRC.read_text(encoding="utf-8")
+    if opencode_agents_md_target.exists() and opencode_agents_md_target.read_text(
+        encoding="utf-8"
+    ) != agents_md:
+        if not opencode_agents_md_backup.exists():
+            shutil.copyfile(opencode_agents_md_target, opencode_agents_md_backup)
+            console.print(
+                f"Backed up {opencode_agents_md_target} to {opencode_agents_md_backup}"
+            )
+        else:
+            conflict_backup = next_available_path(
+                opencode_agents_md_target.with_name(
+                    f"{opencode_agents_md_target.name}{OPENCODE_CONFLICT_BACKUP_SUFFIX}"
+                )
+            )
+            shutil.copyfile(opencode_agents_md_target, conflict_backup)
+            console.print(
+                f"Backed up {opencode_agents_md_target} to {conflict_backup}"
+            )
+    opencode_agents_md_target.write_text(agents_md, encoding="utf-8")
+    console.print(f"Installed {opencode_agents_md_target}")
+
+    opencode_prompts_target_dir = home / OPENCODE_SDD_PROMPTS_TARGET_DIR
+    opencode_prompts_target_dir.mkdir(parents=True, exist_ok=True)
+    for prompt_file in OPENCODE_SDD_PROMPTS_SRC.iterdir():
+        if not prompt_file.is_file():
+            continue
+        target = opencode_prompts_target_dir / prompt_file.name
+        backup = target.with_name(f"{target.name}{OPENCODE_BACKUP_SUFFIX}")
+        prompt_content = prompt_file.read_text(encoding="utf-8")
+        if target.exists() and target.read_text(
+            encoding="utf-8"
+        ) != prompt_content:
+            if not backup.exists():
+                shutil.copyfile(target, backup)
+                console.print(f"Backed up {target} to {backup}")
+            else:
+                conflict_backup = next_available_path(
+                    target.with_name(
+                        f"{target.name}{OPENCODE_CONFLICT_BACKUP_SUFFIX}"
+                    )
+                )
+                shutil.copyfile(target, conflict_backup)
+                console.print(f"Backed up {target} to {conflict_backup}")
+        target.write_text(prompt_content, encoding="utf-8")
+    console.print(f"Installed opencode SDD prompts to {opencode_prompts_target_dir}")
+
 
 @app.command()
 def uninstall() -> None:
@@ -70,6 +164,48 @@ def uninstall() -> None:
             if target.exists():
                 shutil.rmtree(target)
                 console.print(f"Removed {target}")
+
+    opencode_json_target = home / OPENCODE_JSON_TARGET
+    opencode_json_backup = home / OPENCODE_JSON_BACKUP_TARGET
+    opencode_json = OPENCODE_JSON_SRC.read_text(encoding="utf-8").replace(
+        "{{HOME}}", str(home)
+    )
+    if opencode_json_target.exists() and opencode_json_target.read_text(
+        encoding="utf-8"
+    ) == opencode_json:
+        opencode_json_target.unlink()
+        console.print(f"Removed {opencode_json_target}")
+    if not opencode_json_target.exists() and opencode_json_backup.exists():
+        shutil.move(opencode_json_backup, opencode_json_target)
+        console.print(f"Restored {opencode_json_target} from {opencode_json_backup}")
+
+    opencode_agents_md_target = home / OPENCODE_AGENTS_MD_TARGET
+    opencode_agents_md_backup = home / OPENCODE_AGENTS_MD_BACKUP_TARGET
+    agents_md = AGENTS_MD_SRC.read_text(encoding="utf-8")
+    if opencode_agents_md_target.exists() and opencode_agents_md_target.read_text(
+        encoding="utf-8"
+    ) == agents_md:
+        opencode_agents_md_target.unlink()
+        console.print(f"Removed {opencode_agents_md_target}")
+    if not opencode_agents_md_target.exists() and opencode_agents_md_backup.exists():
+        shutil.move(opencode_agents_md_backup, opencode_agents_md_target)
+        console.print(
+            f"Restored {opencode_agents_md_target} from {opencode_agents_md_backup}"
+        )
+
+    opencode_prompts_target_dir = home / OPENCODE_SDD_PROMPTS_TARGET_DIR
+    for prompt_file in OPENCODE_SDD_PROMPTS_SRC.iterdir():
+        if not prompt_file.is_file():
+            continue
+        target = opencode_prompts_target_dir / prompt_file.name
+        backup = target.with_name(f"{target.name}{OPENCODE_BACKUP_SUFFIX}")
+        prompt_content = prompt_file.read_text(encoding="utf-8")
+        if target.exists() and target.read_text(encoding="utf-8") == prompt_content:
+            target.unlink()
+            console.print(f"Removed {target}")
+        if not target.exists() and backup.exists():
+            shutil.move(backup, target)
+            console.print(f"Restored {target} from {backup}")
 
 
 def main() -> None:
