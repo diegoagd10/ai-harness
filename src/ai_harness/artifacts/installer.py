@@ -12,7 +12,12 @@ from pathlib import Path
 
 from rich.console import Console
 
-from ai_harness.artifacts.manifest import ArtifactManifest, DirArtifact, FileArtifact
+from ai_harness.artifacts.manifest import (
+    ArtifactManifest,
+    ComposedFileArtifact,
+    DirArtifact,
+    FileArtifact,
+)
 
 
 def _next_available_path(path: Path) -> Path:
@@ -36,6 +41,22 @@ def _prepare_content(artifact: FileArtifact, home: Path) -> str:
     return text
 
 
+def _prepare_composed_content(artifact: ComposedFileArtifact, home: Path) -> str:
+    """Read frontmatter and body sources, return concatenated text.
+
+    Produces ``frontmatter + "\\n---\\n" + body`` verbatim.  Template
+    substitution is applied to the FULL composed result (not to the
+    frontmatter or body individually).
+    """
+    frontmatter = artifact.frontmatter_source.read_text(encoding="utf-8")
+    body = artifact.body_source.read_text(encoding="utf-8")
+    text = frontmatter.rstrip("\n") + "\n---\n" + body
+    if artifact.template:
+        for placeholder, replacement in artifact.template.items():
+            text = text.replace(placeholder, replacement)
+    return text
+
+
 def install(manifest: ArtifactManifest, home: Path, console: Console) -> None:
     """Install every artifact in *manifest* into *home*."""
 
@@ -45,6 +66,27 @@ def install(manifest: ArtifactManifest, home: Path, console: Console) -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
 
         prepared = _prepare_content(artifact, home)
+
+        if target.exists() and target.read_text(encoding="utf-8") != prepared:
+            backup = home / (str(artifact.target_relative) + artifact.backup_suffix)
+            if not backup.exists():
+                shutil.copyfile(target, backup)
+                console.print(f"Backed up {target} to {backup}")
+            else:
+                conflict = home / (str(artifact.target_relative) + artifact.conflict_suffix)
+                conflict = _next_available_path(conflict)
+                shutil.copyfile(target, conflict)
+                console.print(f"Backed up {target} to {conflict}")
+
+        target.write_text(prepared, encoding="utf-8")
+        console.print(f"Installed {target}")
+
+    # --- ComposedFileArtifact ---
+    for artifact in manifest.composed:
+        target = home / artifact.target_relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+        prepared = _prepare_composed_content(artifact, home)
 
         if target.exists() and target.read_text(encoding="utf-8") != prepared:
             backup = home / (str(artifact.target_relative) + artifact.backup_suffix)
@@ -93,6 +135,20 @@ def uninstall(manifest: ArtifactManifest, home: Path, console: Console) -> None:
     for artifact in manifest.files:
         target = home / artifact.target_relative
         prepared = _prepare_content(artifact, home)
+        backup = home / (str(artifact.target_relative) + artifact.backup_suffix)
+
+        if target.exists() and target.read_text(encoding="utf-8") == prepared:
+            target.unlink()
+            console.print(f"Removed {target}")
+
+        if not target.exists() and backup.exists():
+            shutil.move(str(backup), str(target))
+            console.print(f"Restored {target} from {backup}")
+
+    # --- ComposedFileArtifact ---
+    for artifact in manifest.composed:
+        target = home / artifact.target_relative
+        prepared = _prepare_composed_content(artifact, home)
         backup = home / (str(artifact.target_relative) + artifact.backup_suffix)
 
         if target.exists() and target.read_text(encoding="utf-8") == prepared:

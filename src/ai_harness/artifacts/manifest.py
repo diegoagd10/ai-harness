@@ -6,7 +6,7 @@ ai_harness.artifacts.installer decides *how*.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -33,8 +33,31 @@ class DirArtifact:
 
 
 @dataclass(frozen=True)
+class ComposedFileArtifact:
+    """An artifact whose target is produced at install time by joining a
+    frontmatter source with a body source.
+
+    The two sources are read and concatenated as::
+
+        frontmatter + "\\n---\\n" + body
+
+    The composed result is written to ``home / target_relative`` with the
+    same backup, conflict-rotation, and uninstall-restore policy as
+    ``FileArtifact``.
+    """
+
+    frontmatter_source: Path
+    body_source: Path
+    target_relative: Path
+    template: dict[str, str] = field(default_factory=dict)
+    backup_suffix: str = ".ai-harness-backup"
+    conflict_suffix: str = ".ai-harness-conflict-backup"
+
+
+@dataclass(frozen=True)
 class ArtifactManifest:
     """A complete install/uninstall plan — a bag of file & dir descriptors."""
 
-    files: list[FileArtifact]
-    dirs: list[DirArtifact]
+    files: list[FileArtifact] = field(default_factory=list)
+    dirs: list[DirArtifact] = field(default_factory=list)
+    composed: list[ComposedFileArtifact] = field(default_factory=list)
