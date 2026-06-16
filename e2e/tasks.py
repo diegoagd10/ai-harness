@@ -77,6 +77,14 @@ def copilot_cli_lifecycle(ctx) -> None:
     _provision_and_run(run_all, ctx)
 
 
+@task
+def wizard_lifecycle(ctx) -> None:
+    """End-to-end wizard bypass lifecycle: install --all -> state file, uninstall --all -> cleared."""
+    from .test_wizard_lifecycle import run_state_file_tests
+
+    _provision_and_run(run_state_file_tests, ctx)
+
+
 @task(default=True)
 def test(ctx) -> None:
     """Run all e2e categories (default task)."""
@@ -84,6 +92,7 @@ def test(ctx) -> None:
     install(ctx)
     uninstall(ctx)
     copilot_cli_lifecycle(ctx)
+    wizard_lifecycle(ctx)
     sdd_status(ctx)
     sdd_continue(ctx)
     # Verify workspace cleanup tracking (no binary needed).

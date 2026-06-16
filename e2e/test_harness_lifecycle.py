@@ -177,7 +177,7 @@ def run_install_tests(bin_dir: str) -> None:
     # -- fresh install ---------------------------------------------------
     print("=== Harness Lifecycle: fresh install")
     home1 = harness.sandbox_home()
-    harness.run_in_sandbox(home1, "ai-harness", "install", extra_env=extra_env)
+    harness.run_in_sandbox(home1, "ai-harness", "install", "--all", extra_env=extra_env)
     _assert_agents_md_targets(home1, "fresh")
     _assert_skills_targets(home1, "fresh")
     _assert_sdd_prompts(home1, "fresh")
@@ -222,7 +222,7 @@ def run_install_tests(bin_dir: str) -> None:
         "# custom prompt\n", encoding="utf-8"
     )
 
-    harness.run_in_sandbox(home2, "ai-harness", "install", extra_env=extra_env)
+    harness.run_in_sandbox(home2, "ai-harness", "install", "--all", extra_env=extra_env)
 
     # User-authored skill preserved
     user_skill = Path(home2) / ".agents" / "skills" / "my-custom-skill" / "SKILL.md"
@@ -299,12 +299,12 @@ def run_uninstall_tests(bin_dir: str) -> None:
     )
 
     # Install (creates backups of pre-existing files)
-    harness.run_in_sandbox(home, "ai-harness", "install", extra_env=extra_env)
+    harness.run_in_sandbox(home, "ai-harness", "install", "--all", extra_env=extra_env)
     print("  (pre-seed install done)")
 
     # Uninstall
     print("=== Harness Lifecycle: uninstall")
-    harness.run_in_sandbox(home, "ai-harness", "uninstall", extra_env=extra_env)
+    harness.run_in_sandbox(home, "ai-harness", "uninstall", "--all", extra_env=extra_env)
 
     # AGENTS.md targets removed
     for relative_target in AGENTS_MD_RELATIVE_TARGETS:

@@ -23,9 +23,9 @@ def test_uninstall_removes_agents_md_targets(
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
 
-    runner.invoke(app, ["install"])
+    runner.invoke(app, ["install", "--all"])
 
-    result = runner.invoke(app, ["uninstall"])
+    result = runner.invoke(app, ["uninstall", "--all"])
     assert result.exit_code == 0, result.output
 
     for relative_target in AGENTS_MD_TARGETS:
@@ -41,9 +41,9 @@ def test_uninstall_removes_only_project_skills_preserving_custom_skills(
     custom_skill.parent.mkdir(parents=True)
     custom_skill.write_text("# my custom skill\n", encoding="utf-8")
 
-    runner.invoke(app, ["install"])
+    runner.invoke(app, ["install", "--all"])
 
-    result = runner.invoke(app, ["uninstall"])
+    result = runner.invoke(app, ["uninstall", "--all"])
     assert result.exit_code == 0, result.output
 
     project_skill_names = [d.name for d in SKILLS_SRC.iterdir() if d.is_dir()]
@@ -60,7 +60,7 @@ def test_uninstall_is_idempotent_when_nothing_was_installed(
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
 
-    result = runner.invoke(app, ["uninstall"])
+    result = runner.invoke(app, ["uninstall", "--all"])
     assert result.exit_code == 0, result.output
 
     for relative_target in AGENTS_MD_TARGETS:
@@ -72,12 +72,12 @@ def test_uninstall_does_not_touch_unrelated_files(
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
 
-    runner.invoke(app, ["install"])
+    runner.invoke(app, ["install", "--all"])
 
     unrelated_file = tmp_path / ".claude" / "settings.json"
     unrelated_file.write_text('{"some": "setting"}\n', encoding="utf-8")
 
-    result = runner.invoke(app, ["uninstall"])
+    result = runner.invoke(app, ["uninstall", "--all"])
     assert result.exit_code == 0, result.output
 
     assert unrelated_file.read_text(encoding="utf-8") == '{"some": "setting"}\n'
@@ -88,9 +88,9 @@ def test_uninstall_removes_opencode_configuration(
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
 
-    runner.invoke(app, ["install"])
+    runner.invoke(app, ["install", "--all"])
 
-    result = runner.invoke(app, ["uninstall"])
+    result = runner.invoke(app, ["uninstall", "--all"])
     assert result.exit_code == 0, result.output
 
     assert not (tmp_path / OPENCODE_JSON_TARGET).exists()
@@ -103,13 +103,13 @@ def test_uninstall_preserves_unrelated_opencode_prompts(
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
 
-    runner.invoke(app, ["install"])
+    runner.invoke(app, ["install", "--all"])
 
     custom_prompt = tmp_path / ".config" / "opencode" / "prompts" / "custom" / "user.md"
     custom_prompt.parent.mkdir(parents=True)
     custom_prompt.write_text("# custom prompt\n", encoding="utf-8")
 
-    result = runner.invoke(app, ["uninstall"])
+    result = runner.invoke(app, ["uninstall", "--all"])
     assert result.exit_code == 0, result.output
 
     assert custom_prompt.read_text(encoding="utf-8") == "# custom prompt\n"
@@ -124,9 +124,9 @@ def test_uninstall_restores_existing_opencode_config_backup(
     opencode_json.parent.mkdir(parents=True)
     opencode_json.write_text('{"user": true}\n', encoding="utf-8")
 
-    runner.invoke(app, ["install"])
+    runner.invoke(app, ["install", "--all"])
 
-    result = runner.invoke(app, ["uninstall"])
+    result = runner.invoke(app, ["uninstall", "--all"])
     assert result.exit_code == 0, result.output
 
     assert opencode_json.read_text(encoding="utf-8") == '{"user": true}\n'
@@ -144,11 +144,11 @@ def test_uninstall_preserves_modified_opencode_config(
     opencode_json.parent.mkdir(parents=True)
     opencode_json.write_text('{"user": true}\n', encoding="utf-8")
 
-    runner.invoke(app, ["install"])
+    runner.invoke(app, ["install", "--all"])
 
     opencode_json.write_text('{"modified": true}\n', encoding="utf-8")
 
-    result = runner.invoke(app, ["uninstall"])
+    result = runner.invoke(app, ["uninstall", "--all"])
     assert result.exit_code == 0, result.output
 
     assert opencode_json.read_text(encoding="utf-8") == '{"modified": true}\n'
@@ -166,9 +166,9 @@ def test_uninstall_restores_existing_opencode_agents_md_backup(
     opencode_agents_md.parent.mkdir(parents=True)
     opencode_agents_md.write_text("# user instructions\n", encoding="utf-8")
 
-    runner.invoke(app, ["install"])
+    runner.invoke(app, ["install", "--all"])
 
-    result = runner.invoke(app, ["uninstall"])
+    result = runner.invoke(app, ["uninstall", "--all"])
     assert result.exit_code == 0, result.output
 
     assert opencode_agents_md.read_text(encoding="utf-8") == "# user instructions\n"
@@ -186,11 +186,11 @@ def test_uninstall_preserves_modified_opencode_agents_md(
     opencode_agents_md.parent.mkdir(parents=True)
     opencode_agents_md.write_text("# user instructions\n", encoding="utf-8")
 
-    runner.invoke(app, ["install"])
+    runner.invoke(app, ["install", "--all"])
 
     opencode_agents_md.write_text("# modified instructions\n", encoding="utf-8")
 
-    result = runner.invoke(app, ["uninstall"])
+    result = runner.invoke(app, ["uninstall", "--all"])
     assert result.exit_code == 0, result.output
 
     assert opencode_agents_md.read_text(encoding="utf-8") == "# modified instructions\n"
@@ -208,10 +208,244 @@ def test_uninstall_restores_existing_opencode_prompt_backup(
     prompt.parent.mkdir(parents=True)
     prompt.write_text("# user prompt\n", encoding="utf-8")
 
-    runner.invoke(app, ["install"])
+    runner.invoke(app, ["install", "--all"])
 
-    result = runner.invoke(app, ["uninstall"])
+    result = runner.invoke(app, ["uninstall", "--all"])
     assert result.exit_code == 0, result.output
 
     assert prompt.read_text(encoding="utf-8") == "# user prompt\n"
     assert not prompt.with_name("sdd-apply.md.ai-harness-backup").exists()
+
+
+# ================================================================ 5.1 RED ===
+
+
+def test_uninstall_empty_state_exits_zero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When no state file exists, uninstall prints a message and exits 0."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    result = runner.invoke(app, ["uninstall"])
+
+    assert result.exit_code == 0, f"Expected exit 0, got {result.exit_code}: {result.output}"
+    assert "Nothing to uninstall" in result.output
+
+
+# ================================================================  WARN 1 ===
+
+
+def test_uninstall_no_tty_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without ``--all`` and with no TTY, uninstall errors with a clear message."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    # Seed state so the "Nothing to uninstall" early-return does not fire.
+    runner.invoke(app, ["install", "--all"])
+
+    result = runner.invoke(app, ["uninstall"])
+
+    assert result.exit_code != 0, f"Expected non-zero exit, got {result.exit_code}: {result.output}"
+    assert "--all" in result.output
+
+
+# ================================================================ 5.3 RED ===
+
+
+def test_uninstall_all_bypasses_wizard(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, monkeypatch_questionary
+) -> None:
+    """``--all`` uninstalls all agents without invoking the wizard."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    # First install all 3 agents so there is something to uninstall.
+    runner.invoke(app, ["install", "--all"])
+
+    result = runner.invoke(app, ["uninstall", "--all"])
+
+    # When --all is not yet implemented, Typer will reject the unknown option.
+    assert result.exit_code == 0, f"Expected exit 0, got {result.exit_code}: {result.output}"
+
+    # Wizard must NOT have been called.
+    assert len(monkeypatch_questionary.calls) == 0, (
+        "questionary.checkbox must not be invoked with --all"
+    )
+
+    # State file must be removed when all agents are uninstalled.
+    state_path = tmp_path / ".ai-harness" / "state.json"
+    assert not state_path.is_file(), f"State file should be deleted, found at {state_path}"
+
+
+# ================================================================ 5.4 RED ===
+
+
+@pytest.mark.questionary_return(["opencode"])
+def test_uninstall_wizard_called_no_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, monkeypatch_questionary
+) -> None:
+    """Without ``--all`` and with a TTY, the uninstall wizard must be invoked."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+
+    from ai_harness.artifacts.state import save_state
+
+    save_state(tmp_path, {"opencode"})
+
+    from ai_harness.commands.artifacts.uninstall import uninstall
+
+    uninstall(all=False)
+
+    assert len(monkeypatch_questionary.calls) == 1, (
+        "questionary.checkbox must be called without --all when TTY is present"
+    )
+    # State file was updated (opencode was removed).
+    state_path = tmp_path / ".ai-harness" / "state.json"
+    assert not state_path.is_file(), "State file should be deleted after last agent"
+
+
+@pytest.mark.questionary_return([])
+def test_uninstall_empty_exits_zero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, monkeypatch_questionary,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Empty wizard selection prints a message and exits 0."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+
+    from ai_harness.artifacts.state import save_state
+
+    save_state(tmp_path, {"opencode"})
+
+    from ai_harness.commands.artifacts.uninstall import uninstall
+
+    import typer
+
+    with pytest.raises(typer.Exit) as exc_info:
+        uninstall(all=False)
+
+    assert exc_info.value.exit_code == 0
+    captured = capsys.readouterr()
+    assert "No agents were uninstalled" in captured.out
+
+
+@pytest.mark.questionary_return(None)
+def test_uninstall_escape_exits_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, monkeypatch_questionary,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Pressing Escape during uninstall wizard exits with code 1."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+
+    from ai_harness.artifacts.state import save_state
+
+    save_state(tmp_path, {"opencode"})
+
+    from ai_harness.commands.artifacts.uninstall import uninstall
+
+    import typer
+
+    with pytest.raises(typer.Exit) as exc_info:
+        uninstall(all=False)
+
+    assert exc_info.value.exit_code == 1
+    captured = capsys.readouterr()
+    assert "Uninstallation cancelled" in captured.out
+
+
+# ================================================================ 5.5 RED ===
+
+
+@pytest.mark.questionary_return(["opencode"])
+def test_uninstall_state_on_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, monkeypatch_questionary
+) -> None:
+    """When the wizard returns a selection, the state file is updated on success."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+
+    from ai_harness.artifacts.state import save_state
+
+    save_state(tmp_path, {"opencode", "claude"})
+
+    from ai_harness.commands.artifacts.uninstall import uninstall
+
+    uninstall(all=False)
+
+    import json
+
+    state_path = tmp_path / ".ai-harness" / "state.json"
+    assert state_path.is_file(), f"State file missing at {state_path}"
+    data = json.loads(state_path.read_text())
+    assert "opencode" not in data["installed"], (
+        "Selected opencode should have been removed from state"
+    )
+    assert "claude" in data["installed"], (
+        "Unselected claude should remain in state"
+    )
+
+
+@pytest.mark.questionary_return(["opencode"])
+def test_uninstall_last_deletes_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, monkeypatch_questionary
+) -> None:
+    """When the last agent is uninstalled, the state file is deleted."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+
+    from ai_harness.artifacts.state import save_state
+
+    save_state(tmp_path, {"opencode"})
+
+    from ai_harness.commands.artifacts.uninstall import uninstall
+
+    uninstall(all=False)
+
+    state_path = tmp_path / ".ai-harness" / "state.json"
+    assert not state_path.is_file(), (
+        "State file must be deleted when the installed set becomes empty"
+    )
+
+
+@pytest.mark.questionary_return(["opencode", "claude"])
+def test_uninstall_all_or_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, monkeypatch_questionary
+) -> None:
+    """When one uninstaller fails the state file must remain unchanged."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+
+    from ai_harness.artifacts.installer import UninstallResult
+    from ai_harness.artifacts.state import save_state
+
+    save_state(tmp_path, {"opencode", "claude"})
+
+    def failing_uninstall(self, home: Path, console: Console) -> UninstallResult:
+        return UninstallResult(success=False, errors=["simulated opencode failure"])
+
+    monkeypatch.setattr(
+        "ai_harness.artifacts.installers.opencode.OpencodeInstaller.uninstall",
+        failing_uninstall,
+    )
+
+    from ai_harness.commands.artifacts.uninstall import uninstall
+
+    import typer
+
+    with pytest.raises(typer.Exit) as exc_info:
+        uninstall(all=False)
+
+    assert exc_info.value.exit_code == 1
+
+    import json
+
+    state_path = tmp_path / ".ai-harness" / "state.json"
+    assert state_path.is_file(), "State file should remain after partial failure"
+    data = json.loads(state_path.read_text())
+    assert "opencode" in data["installed"], (
+        "Failed uninstall must leave opencode in state"
+    )
+    assert "claude" in data["installed"], (
+        "Failed uninstall must leave claude in state"
+    )
