@@ -65,12 +65,25 @@ def tool_lifecycle(ctx) -> None:
     run()
 
 
+@task
+def copilot_cli_lifecycle(ctx) -> None:
+    """End-to-end copilot-cli install / uninstall lifecycle."""
+    from .test_copilot_cli_lifecycle import run_install_tests, run_uninstall_tests
+
+    def run_all(bin_dir: str) -> None:
+        run_install_tests(bin_dir)
+        run_uninstall_tests(bin_dir)
+
+    _provision_and_run(run_all, ctx)
+
+
 @task(default=True)
 def test(ctx) -> None:
     """Run all e2e categories (default task)."""
     tool_lifecycle(ctx)
     install(ctx)
     uninstall(ctx)
+    copilot_cli_lifecycle(ctx)
     sdd_status(ctx)
     sdd_continue(ctx)
     # Verify workspace cleanup tracking (no binary needed).
