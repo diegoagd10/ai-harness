@@ -18,6 +18,21 @@ AGENTS_MD_SRC = RESOURCES_DIR / "AGENTS.md"
 SKILLS_SRC = RESOURCES_DIR / "skills"
 OPENCODE_JSON_SRC = RESOURCES_DIR / "agent-clis" / "opencode" / "opencode.json"
 SDD_PROMPTS_SRC = RESOURCES_DIR / "prompts" / "sdd"
+CLAUDE_AGENTS_SRC = RESOURCES_DIR / "agent-clis" / "claude" / "agents"
+CLAUDE_ORCHESTRATOR_SRC = RESOURCES_DIR / "agent-clis" / "claude" / "sdd-orchestrator" / "SKILL.md"
+
+# Eight SDD phases whose Claude agents are composed from frontmatter + prompt body.
+_SDD_PHASE_NAMES = (
+    "sdd-explore", "sdd-propose", "sdd-spec", "sdd-design",
+    "sdd-tasks", "sdd-apply", "sdd-verify", "sdd-archive",
+)
+
+# Seven inline Claude agents that are copied verbatim (their body is inline in the resource file).
+_INLINE_AGENT_NAMES = (
+    "jd-fix-agent", "jd-judge-a", "jd-judge-b",
+    "review-readability", "review-reliability", "review-resilience",
+    "review-risk",
+)
 
 # Agent directories that receive AGENTS.md (same as main.py).
 AGENTS_MD_RELATIVE_TARGETS = (
@@ -86,6 +101,71 @@ def _assert_sdd_prompts(home: str, label: str) -> None:
         )
 
 
+def _assert_claude_agents(home: str, label: str) -> None:
+    """Assert Claude composer wrote composed agents + inline copies + orchestrator SKILL.md.
+
+    For each SDD phase name the installed file must start with the frontmatter
+    block from ``CLAUDE_AGENTS_SRC/<name>.md``, contain a ``---`` separator,
+    and end with the body from ``SDD_PROMPTS_SRC/<name>.md`` verbatim.
+
+    Inline agents are compared byte-for-byte with their source.  The orchestrator
+    SKILL.md must exist, and the agent directory must hold exactly 15 .md files.
+    """
+    agents_target = Path(home) / ".claude" / "agents"
+    orchestrator_target = Path(home) / ".claude" / "skills" / "sdd-orchestrator" / "SKILL.md"
+
+    # 1. SDD phase agents — composed (frontmatter + body)
+    for name in _SDD_PHASE_NAMES:
+        installed = agents_target / f"{name}.md"
+        agent_src = CLAUDE_AGENTS_SRC / f"{name}.md"
+        body_src = SDD_PROMPTS_SRC / f"{name}.md"
+
+        harness.assert_file_exists(installed, f"claude subagent {name} ({label})")
+
+        frontmatter = agent_src.read_text(encoding="utf-8")
+        body = body_src.read_text(encoding="utf-8")
+        actual = installed.read_text(encoding="utf-8")
+
+        # Compose expected output: frontmatter (stripped of trailing
+        # newlines) + "\n---\n" separator + the prompt body verbatim.
+        expected = frontmatter.rstrip("\n") + "\n---\n" + body
+
+        if actual != expected:
+            raise AssertionError(
+                f"claude subagent {name} ({label}): "
+                f"missing composed body from prompts/sdd/{name}.md\n"
+                f"  actual length:   {len(actual)}\n"
+                f"  expected length: {len(expected)}\n"
+                f"  expected suffix:  ...--- + body({len(body)} chars)"
+            )
+
+    # 2. Inline agents — verbatim copies
+    for name in _INLINE_AGENT_NAMES:
+        installed = agents_target / f"{name}.md"
+        agent_src = CLAUDE_AGENTS_SRC / f"{name}.md"
+        harness.assert_file_content(
+            installed, agent_src,
+            f"claude inline subagent {name} ({label})"
+        )
+
+    # 3. Orchestrator SKILL.md
+    harness.assert_file_exists(
+        orchestrator_target, f"claude sdd-orchestrator SKILL.md ({label})"
+    )
+
+    # 4. Agent count (8 phases + 7 inline) = 15
+    if agents_target.is_dir():
+        md_count = sum(
+            1 for f in agents_target.iterdir() if f.suffix == ".md"
+        )
+    else:
+        md_count = 0
+    if md_count != 15:
+        raise AssertionError(
+            f"claude agents .md file count ({label}): expected 15, got {md_count}"
+        )
+
+
 def run_install_tests(bin_dir: str) -> None:
     """Run all install-scenario assertions.
 
@@ -101,6 +181,7 @@ def run_install_tests(bin_dir: str) -> None:
     _assert_agents_md_targets(home1, "fresh")
     _assert_skills_targets(home1, "fresh")
     _assert_sdd_prompts(home1, "fresh")
+    _assert_claude_agents(home1, "fresh")
     _assert_opencode_json(home1, "fresh")
     harness.assert_file_exists(
         Path(home1) / ".config" / "opencode" / "AGENTS.md",

@@ -12,7 +12,12 @@ import pytest
 from rich.console import Console
 
 from ai_harness.artifacts.installer import install, uninstall
-from ai_harness.artifacts.manifest import ArtifactManifest, DirArtifact, FileArtifact
+from ai_harness.artifacts.manifest import (
+    ArtifactManifest,
+    ComposedFileArtifact,
+    DirArtifact,
+    FileArtifact,
+)
 
 
 @pytest.fixture
@@ -258,3 +263,124 @@ def test_idempotent_uninstall(tmp_path: Path, console: Console) -> None:
     # Should not raise, and everything stays as it was.
     uninstall(manifest, home, console)
     assert not (home / target_relative).exists()
+
+
+# ------------------------------------------------------- ComposedFileArtifact ---
+
+
+def test_composed_install_writes_frontmatter_and_body(
+    tmp_path: Path, console: Console
+) -> None:
+    """ComposedFileArtifact install produces frontmatter + --- + body."""
+    fm = tmp_path / "frontmatter.md"
+    body = tmp_path / "body.md"
+    fm.write_text("---\nname: test\n---\n", encoding="utf-8")
+    body.write_text("body content here", encoding="utf-8")
+
+    target_rel = Path(".claude/agents/sdd-apply.md")
+    artifact = ComposedFileArtifact(
+        frontmatter_source=fm,
+        body_source=body,
+        target_relative=target_rel,
+    )
+    manifest = ArtifactManifest(composed=[artifact])
+
+    install(manifest, tmp_path, console)
+
+    target = tmp_path / target_rel
+    # _prepare_composed_content uses frontmatter.rstrip("\n") + "\n---\n" + body
+    assert target.read_text(encoding="utf-8") == (
+        "---\nname: test\n---\n---\nbody content here"
+    )
+
+
+def test_composed_install_rotates_existing_target_to_backup(
+    tmp_path: Path, console: Console
+) -> None:
+    """ComposedFileArtifact install backs up a different-content target before overwriting."""
+    fm = tmp_path / "frontmatter.md"
+    body = tmp_path / "body.md"
+    fm.write_text("---\nname: test\n---\n", encoding="utf-8")
+    body.write_text("new body", encoding="utf-8")
+
+    target_rel = Path(".claude/agents/sdd-apply.md")
+    target = tmp_path / target_rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("OLD USER CONTENT — must be backed up", encoding="utf-8")
+
+    artifact = ComposedFileArtifact(
+        frontmatter_source=fm,
+        body_source=body,
+        target_relative=target_rel,
+    )
+    manifest = ArtifactManifest(composed=[artifact])
+
+    install(manifest, tmp_path, console)
+
+    backup = tmp_path / (str(target_rel) + ".ai-harness-backup")
+    assert backup.exists(), "backup should have been created"
+    assert backup.read_text(encoding="utf-8") == (
+        "OLD USER CONTENT — must be backed up"
+    )
+    assert target.read_text(encoding="utf-8") == (
+        "---\nname: test\n---\n---\nnew body"
+    )
+
+
+def test_composed_uninstall_removes_matching_target(
+    tmp_path: Path, console: Console
+) -> None:
+    """ComposedFileArtifact uninstall removes a target whose content matches the composed output."""
+    fm = tmp_path / "frontmatter.md"
+    body = tmp_path / "body.md"
+    fm.write_text("---\nname: test\n---\n", encoding="utf-8")
+    body.write_text("body content", encoding="utf-8")
+
+    target_rel = Path(".claude/agents/sdd-apply.md")
+    target = tmp_path / target_rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    # Match the composed output exactly (using rstrip join as the installer does).
+    target.write_text(
+        "---\nname: test\n---\n---\nbody content",
+        encoding="utf-8",
+    )
+
+    artifact = ComposedFileArtifact(
+        frontmatter_source=fm,
+        body_source=body,
+        target_relative=target_rel,
+    )
+    manifest = ArtifactManifest(composed=[artifact])
+
+    uninstall(manifest, tmp_path, console)
+
+    assert not target.exists(), "matching target should have been removed by uninstall"
+
+
+def test_composed_uninstall_restores_backup(
+    tmp_path: Path, console: Console
+) -> None:
+    """ComposedFileArtifact uninstall restores a backup when target is removed and backup exists."""
+    fm = tmp_path / "frontmatter.md"
+    body = tmp_path / "body.md"
+    fm.write_text("---\nname: test\n---\n", encoding="utf-8")
+    body.write_text("body content", encoding="utf-8")
+
+    target_rel = Path(".claude/agents/sdd-apply.md")
+    target = tmp_path / target_rel
+    backup = tmp_path / (str(target_rel) + ".ai-harness-backup")
+    # Target is gone (already removed). Backup holds the original user content.
+    target.parent.mkdir(parents=True, exist_ok=True)
+    backup.write_text("USER ORIGINAL", encoding="utf-8")
+
+    artifact = ComposedFileArtifact(
+        frontmatter_source=fm,
+        body_source=body,
+        target_relative=target_rel,
+    )
+    manifest = ArtifactManifest(composed=[artifact])
+
+    uninstall(manifest, tmp_path, console)
+
+    assert target.exists(), "target should have been restored from backup"
+    assert target.read_text(encoding="utf-8") == "USER ORIGINAL"
