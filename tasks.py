@@ -6,9 +6,18 @@ both the repo root and the Docker container without ``-r`` flags.
 
 from invoke import Collection
 
-from e2e.tasks import install, sdd_continue, sdd_status, test, tool_lifecycle, uninstall
+from e2e.tasks import (
+    copilot_cli_lifecycle,
+    install,
+    sdd_continue,
+    sdd_status,
+    test,
+    tool_lifecycle,
+    uninstall,
+)
 
 ns = Collection(
+    copilot_cli_lifecycle,
     install,
     uninstall,
     sdd_status,

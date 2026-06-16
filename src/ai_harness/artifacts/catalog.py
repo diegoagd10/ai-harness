@@ -27,6 +27,7 @@ AGENTS_MD_TARGETS: tuple[Path, ...] = (
 SKILLS_TARGET_DIRS: tuple[Path, ...] = (
     Path(".agents/skills"),
     Path(".claude/skills"),
+    Path(".copilot/skills"),
 )
 OPENCODE_JSON_TARGET = Path(".config/opencode/opencode.json")
 OPENCODE_SDD_PROMPTS_TARGET_DIR = Path(".config/opencode/prompts/sdd")

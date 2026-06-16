@@ -1,0 +1,114 @@
+{
+  "version": 1,
+  "preToolUse": [
+    {
+      "toolName": "task",
+      "default": "deny",
+      "allow": [
+        "sdd-explore",
+        "sdd-propose",
+        "sdd-spec",
+        "sdd-design",
+        "sdd-tasks",
+        "sdd-apply",
+        "sdd-verify",
+        "sdd-archive",
+        "jd-fix-agent",
+        "jd-judge-a",
+        "jd-judge-b",
+        "review-risk",
+        "review-readability",
+        "review-reliability",
+        "review-resilience"
+      ]
+    },
+    {
+      "toolName": "bash",
+      "deny": {
+        "paths": [
+          "~/.ssh/**",
+          "~/.aws/**",
+          "~/.gnupg/**",
+          "~/.zshrc",
+          "~/.bashrc",
+          "~/.bash_history",
+          "~/.zsh_history",
+          "~/.netrc",
+          "~/.config/gh/**",
+          "~/.docker/config.json",
+          "/tmp/**",
+          "/etc/**",
+          "/proc/**",
+          "/sys/**",
+          "/var/**"
+        ]
+      }
+    },
+    {
+      "toolName": "view",
+      "deny": {
+        "paths": [
+          "~/.ssh/**",
+          "~/.aws/**",
+          "~/.gnupg/**",
+          "~/.zshrc",
+          "~/.bashrc",
+          "~/.bash_history",
+          "~/.zsh_history",
+          "~/.netrc",
+          "~/.config/gh/**",
+          "~/.docker/config.json",
+          "/tmp/**",
+          "/etc/**",
+          "/proc/**",
+          "/sys/**",
+          "/var/**"
+        ]
+      }
+    },
+    {
+      "toolName": "create",
+      "deny": {
+        "paths": [
+          "~/.ssh/**",
+          "~/.aws/**",
+          "~/.gnupg/**",
+          "~/.zshrc",
+          "~/.bashrc",
+          "~/.bash_history",
+          "~/.zsh_history",
+          "~/.netrc",
+          "~/.config/gh/**",
+          "~/.docker/config.json",
+          "/tmp/**",
+          "/etc/**",
+          "/proc/**",
+          "/sys/**",
+          "/var/**"
+        ]
+      }
+    },
+    {
+      "toolName": "edit",
+      "deny": {
+        "paths": [
+          "~/.ssh/**",
+          "~/.aws/**",
+          "~/.gnupg/**",
+          "~/.zshrc",
+          "~/.bashrc",
+          "~/.bash_history",
+          "~/.zsh_history",
+          "~/.netrc",
+          "~/.config/gh/**",
+          "~/.docker/config.json",
+          "/tmp/**",
+          "/etc/**",
+          "/proc/**",
+          "/sys/**",
+          "/var/**"
+        ]
+      }
+    }
+  ]
+}
