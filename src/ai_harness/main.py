@@ -5,6 +5,7 @@ import typer
 from rich.console import Console
 
 from ai_harness import compat
+from ai_harness.rendering import render_dispatcher
 from ai_harness.sdd import SddError, resolve
 
 app = typer.Typer()
@@ -211,6 +212,34 @@ def uninstall() -> None:
             console.print(f"Restored {target} from {backup}")
 
 
+def _run_sdd_resolve(
+    cwd: str,
+    workspace_root: str,
+    change_name: str,
+    include_instructions: bool,
+    json_output: bool,
+) -> None:
+    """Resolve status, then emit JSON (when json_output) or dispatcher markdown.
+
+    Resolution errors (SddError) and OSError are caught, reported to stderr,
+    and exit 1. JSON output goes through compat.status_to_json; markdown
+    output goes through render_dispatcher.
+    """
+    try:
+        status = resolve(cwd, workspace_root, change_name, include_instructions=include_instructions)
+    except SddError as err:
+        typer.echo(f"ai-harness: {err}", err=True)
+        raise typer.Exit(code=compat.EXIT_ERROR) from err
+    except OSError as err:
+        typer.echo(f"ai-harness: {err}", err=True)
+        raise typer.Exit(code=compat.EXIT_ERROR) from err
+
+    if json_output:
+        typer.echo(compat.status_to_json(status))
+    else:
+        typer.echo(render_dispatcher(status))
+
+
 @app.command(name="sdd-status")
 def sdd_status(
     change: str | None = typer.Argument(
@@ -219,19 +248,39 @@ def sdd_status(
     json_output: bool = typer.Option(
         False, "--json", help="Emit deterministic JSON instead of a rendered summary."
     ),
+    instructions: bool = typer.Option(
+        False, "--instructions", help="Include phase instructions in JSON output."
+    ),
     cwd: str = typer.Option("", "--cwd", help="Workspace directory to read openspec/ from."),
 ) -> None:
     """Report the SDD phase state for a change."""
-    try:
-        status = resolve(cwd, "", change or "")
-    except SddError as err:
-        typer.echo(f"ai-harness: {err}", err=True)
-        raise typer.Exit(code=compat.EXIT_ERROR) from err
-    except OSError as err:
-        typer.echo(f"ai-harness: {err}", err=True)
-        raise typer.Exit(code=compat.EXIT_ERROR) from err
+    _run_sdd_resolve(
+        cwd=cwd,
+        workspace_root="",
+        change_name=change or "",
+        include_instructions=instructions,
+        json_output=True,  # sdd-status always emits JSON in this slice
+    )
 
-    typer.echo(compat.status_to_json(status))
+
+@app.command(name="sdd-continue")
+def sdd_continue(
+    change: str | None = typer.Argument(
+        None, help="Active OpenSpec change name; inferred when omitted."
+    ),
+    json_output: bool = typer.Option(
+        False, "--json", help="Emit deterministic JSON instead of dispatcher markdown."
+    ),
+    cwd: str = typer.Option("", "--cwd", help="Workspace directory to read openspec/ from."),
+) -> None:
+    """Show the next SDD action and per-phase instructions (dispatcher markdown by default)."""
+    _run_sdd_resolve(
+        cwd=cwd,
+        workspace_root="",
+        change_name=change or "",
+        include_instructions=True,
+        json_output=json_output,
+    )
 
 
 def main() -> None:

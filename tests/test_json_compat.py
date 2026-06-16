@@ -96,3 +96,46 @@ def test_html_escape_in_change_name(tmp_path: Path):
     assert "\\u0026" in raw
     assert "\\u003c" in raw
     assert "\\u003e" in raw
+
+
+# --- phaseInstructions serialization ----------------------------------------
+
+
+def test_phase_instructions_present_when_populated(tmp_path: Path):
+    from ai_harness.sdd.models import PhaseInstructions as PI
+
+    seed_ready_change(tmp_path, "thin", "- [ ] 1.1 Work\n")
+    status = resolve(str(tmp_path), "", "thin")
+    status.phase_instructions = PI(
+        apply=["Change: thin", "State: ready", "hint1", "hint2"],
+        verify=["Change: thin", "State: blocked", "hint3", "hint4"],
+        archive=["Change: thin", "State: blocked", "hint5"],
+    )
+    raw = compat.status_to_json(status)
+    payload = json.loads(raw)
+
+    assert "phaseInstructions" in payload
+    # Must appear before nextRecommended in the JSON output
+    assert raw.index('"phaseInstructions"') < raw.index('"nextRecommended"')
+    assert payload["phaseInstructions"]["apply"] == ["Change: thin", "State: ready", "hint1", "hint2"]
+    assert payload["phaseInstructions"]["verify"] == ["Change: thin", "State: blocked", "hint3", "hint4"]
+    assert payload["phaseInstructions"]["archive"] == ["Change: thin", "State: blocked", "hint5"]
+
+
+def test_phase_instructions_absent_when_none(tmp_path: Path):
+    seed_ready_change(tmp_path, "thin", "- [ ] 1.1 Work\n")
+    status = resolve(str(tmp_path), "", "thin")
+    assert status.phase_instructions is None
+    raw = compat.status_to_json(status)
+    payload = json.loads(raw)
+
+    assert "phaseInstructions" not in payload
+
+
+def test_phase_instructions_absent_from_key_order_when_none(tmp_path: Path):
+    """When phase_instructions is None, the key must not appear in the expected
+    key order (first-slice behavior is preserved)."""
+    seed_ready_change(tmp_path, "thin", "- [ ] 1.1 Work\n")
+    payload = _payload(tmp_path)
+    assert "phaseInstructions" not in payload
+    assert list(payload.keys()) == EXPECTED_KEY_ORDER

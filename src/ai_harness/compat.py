@@ -14,10 +14,10 @@ import json
 from ai_harness.sdd import (
     ArtifactPaths,
     Dependencies,
+    PhaseInstructions,
     Status,
     TaskProgress,
 )
-from ai_harness.sdd.models import PhaseInstructions
 
 # Exit codes mirror the Go CLI: success, resolution/serialization failure, and
 # usage/parse error.
