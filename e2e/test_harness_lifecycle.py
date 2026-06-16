@@ -7,6 +7,7 @@ Every assertion from the legacy ``e2e/e2e_test.sh`` is preserved.
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -166,6 +167,37 @@ def _assert_claude_agents(home: str, label: str) -> None:
         )
 
 
+_MANAGED_RULE_NAMES = {"Bash", "Read", "Edit", "Write", "Agent"}
+
+
+def _assert_claude_permissions(home: str, label: str) -> None:
+    """Assert ``settings.json`` has the 5 managed rules, the marker
+    exists, and the backup exists."""
+    settings = Path(home) / ".claude" / "settings.json"
+    marker = Path(home) / ".claude" / ".ai-harness-managed-allow.json"
+    backup = Path(home) / ".claude" / "settings.json.ai-harness-backup"
+
+    # settings.json must contain the 5 managed rules.
+    if not settings.is_file():
+        raise AssertionError(f"{label}: missing settings.json at {settings}")
+    data = json.loads(settings.read_text(encoding="utf-8"))
+    allow = data.get("permissions", {}).get("allow", [])
+    if not _MANAGED_RULE_NAMES.issubset(set(allow)):
+        raise AssertionError(
+            f"{label}: permissions.allow missing managed rules — "
+            f"expected all of {sorted(_MANAGED_RULE_NAMES)}, "
+            f"got {allow}"
+        )
+
+    # Marker must exist.
+    if not marker.is_file():
+        raise AssertionError(f"{label}: missing marker file at {marker}")
+
+    # Backup must exist.
+    if not backup.is_file():
+        raise AssertionError(f"{label}: missing backup file at {backup}")
+
+
 def run_install_tests(bin_dir: str) -> None:
     """Run all install-scenario assertions.
 
@@ -177,6 +209,15 @@ def run_install_tests(bin_dir: str) -> None:
     # -- fresh install ---------------------------------------------------
     print("=== Harness Lifecycle: fresh install")
     home1 = harness.sandbox_home()
+
+    # Pre-seed a minimal settings.json (Claude Code always creates this
+    # before ai-harness install runs).
+    claude_dir1 = Path(home1) / ".claude"
+    claude_dir1.mkdir(parents=True)
+    (claude_dir1 / "settings.json").write_text(
+        '{"statusLine": {"type": "command"}}', encoding="utf-8"
+    )
+
     harness.run_in_sandbox(home1, "ai-harness", "install", extra_env=extra_env)
     _assert_agents_md_targets(home1, "fresh")
     _assert_skills_targets(home1, "fresh")
@@ -187,6 +228,7 @@ def run_install_tests(bin_dir: str) -> None:
         Path(home1) / ".config" / "opencode" / "AGENTS.md",
         "opencode AGENTS.md (fresh)"
     )
+    _assert_claude_permissions(home1, "fresh")
     print("  PASS: fresh install assertions")
 
     # -- reinstall (user-skill preserved, stale overridden) --------------
@@ -201,6 +243,10 @@ def run_install_tests(bin_dir: str) -> None:
     (Path(home2) / ".claude" / "skills" / "example").mkdir(parents=True)
     (Path(home2) / ".claude" / "skills" / "example" / "SKILL.md").write_text(
         "# stale content\n", encoding="utf-8"
+    )
+    # Pre-seed settings.json so permissions backup is created.
+    (Path(home2) / ".claude" / "settings.json").write_text(
+        '{"statusLine": {"type": "command"}}', encoding="utf-8"
     )
     # Stale opencode state
     (Path(home2) / ".config" / "opencode").mkdir(parents=True)
@@ -298,6 +344,15 @@ def run_uninstall_tests(bin_dir: str) -> None:
         "# custom prompt\n", encoding="utf-8"
     )
 
+    # Pre-seed a minimal settings.json so the permissions backup is
+    # created on install (matches real-world where Claude Code
+    # already created it).
+    claude_dir = Path(home) / ".claude"
+    claude_dir.mkdir(parents=True)
+    (claude_dir / "settings.json").write_text(
+        '{"statusLine": {"type": "command"}}', encoding="utf-8"
+    )
+
     # Install (creates backups of pre-existing files)
     harness.run_in_sandbox(home, "ai-harness", "install", extra_env=extra_env)
     print("  (pre-seed install done)")
@@ -383,5 +438,31 @@ def run_uninstall_tests(bin_dir: str) -> None:
     if custom_prompt.read_text(encoding="utf-8") != "# custom prompt\n":
         raise AssertionError("user-authored prompt NOT preserved after uninstall")
     print("  PASS: user-authored prompt preserved after uninstall")
+
+    # -- Permissions cleanup assertions ------------------------------------
+    settings = Path(home) / ".claude" / "settings.json"
+    marker = Path(home) / ".claude" / ".ai-harness-managed-allow.json"
+    backup = Path(home) / ".claude" / "settings.json.ai-harness-backup"
+
+    # Managed rules must be removed.
+    if settings.is_file():
+        data = json.loads(settings.read_text(encoding="utf-8"))
+        allow = data.get("permissions", {}).get("allow", [])
+        remaining_managed = _MANAGED_RULE_NAMES & set(allow)
+        if remaining_managed:
+            raise AssertionError(
+                f"uninstall: managed rules not removed — {remaining_managed}"
+            )
+    print("  PASS: claude permissions rules removed on uninstall")
+
+    # Marker must be deleted.
+    if marker.is_file():
+        raise AssertionError(f"uninstall: marker file not deleted — {marker}")
+    print("  PASS: claude permissions marker deleted on uninstall")
+
+    # Backup must be preserved.
+    if not backup.is_file():
+        raise AssertionError(f"uninstall: backup missing — {backup}")
+    print("  PASS: claude settings backup preserved after uninstall")
 
     print("=== Harness Lifecycle: all uninstall assertions passed")

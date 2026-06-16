@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -216,3 +217,32 @@ def test_repeated_reinstall_keeps_existing_conflict_backups(
     assert opencode_json.with_name(
         "opencode.json.ai-harness-conflict-backup.1"
     ).read_text(encoding="utf-8") == '{"modified": 2}\n'
+
+
+def test_claude_install_writes_permissions_allow(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``ai-harness install`` produces ``settings.json`` with the 5 required
+    permission rules and a marker file."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    claude_dir = tmp_path / ".claude"
+    claude_dir.mkdir(parents=True)
+
+    # Pre-seed a minimal settings.json (no permissions key).
+    settings = claude_dir / "settings.json"
+    settings.write_text('{"statusLine": {"type": "command"}}')
+
+    result = runner.invoke(app, ["install"])
+    assert result.exit_code == 0, result.output
+
+    data = json.loads(settings.read_text())
+    allow = data.get("permissions", {}).get("allow", [])
+    assert set(allow) == {"Bash", "Read", "Edit", "Write", "Agent"}
+
+    marker = claude_dir / ".ai-harness-managed-allow.json"
+    assert marker.is_file()
+    marker_data = json.loads(marker.read_text())
+    assert set(marker_data) == {"Bash", "Read", "Edit", "Write", "Agent"}
+
+    backup = claude_dir / "settings.json.ai-harness-backup"
+    assert backup.is_file()

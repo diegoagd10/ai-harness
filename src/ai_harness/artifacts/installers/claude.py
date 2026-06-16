@@ -22,6 +22,11 @@ from ai_harness.artifacts.manifest import (
     FileArtifact,
 )
 
+from ai_harness.artifacts.installers.permissions import (
+    install_permissions,
+    uninstall_permissions,
+)
+
 # Eight SDD phases whose Claude agent files are composed at install time
 # from a frontmatter source (agent-clis/claude/agents/<phase>.md) and a
 # body source (prompts/sdd/<phase>.md), joined with ``---``.
@@ -37,6 +42,8 @@ _INLINE_AGENTS: list[str] = [
     "review-readability", "review-reliability", "review-resilience",
     "review-risk",
 ]
+
+_MARKER_FILENAME = ".ai-harness-managed-allow.json"
 
 
 @dataclass(frozen=True)
@@ -55,7 +62,8 @@ class ClaudeInstaller:
         self._catalog = catalog
 
     def install(self, home: Path, console: Console) -> None:
-        """Build manifest from catalog and invoke generic installer."""
+        """Build manifest, install subagent permission rules,
+        and invoke generic installer."""
         assets = ClaudeAssets(
             agents_dir=self._catalog.get_resource_dir(
                 Path("agent-clis/claude/agents")
@@ -68,10 +76,12 @@ class ClaudeInstaller:
             ),
         )
         manifest = self._build_manifest(home, assets)
+        self._install_permissions(manifest, assets)
         generic_install(manifest, home, console)
 
     def uninstall(self, home: Path, console: Console) -> None:
-        """Build manifest and invoke generic uninstall."""
+        """Build manifest, invoke generic uninstall,
+        then remove managed permission rules."""
         assets = ClaudeAssets(
             agents_dir=self._catalog.get_resource_dir(
                 Path("agent-clis/claude/agents")
@@ -85,6 +95,28 @@ class ClaudeInstaller:
         )
         manifest = self._build_manifest(home, assets)
         generic_uninstall(manifest, home, console)
+        self._uninstall_permissions()
+
+    def _install_permissions(
+        self, manifest: ArtifactManifest, assets: ClaudeAssets
+    ) -> None:
+        """Collect subagent frontmatter paths and delegate to
+        :func:`~ai_harness.artifacts.installers.permissions.install_permissions`.
+        """
+        all_paths = [a.frontmatter_source for a in manifest.composed]
+        all_paths += [
+            a.source
+            for a in manifest.files
+            if str(a.target_relative).startswith(".claude/agents/")
+        ]
+        all_paths.append(assets.orchestrator_dir / "SKILL.md")
+        install_permissions(all_paths)
+
+    def _uninstall_permissions(self) -> None:
+        """Delegate the uninstall sequence to
+        :func:`~ai_harness.artifacts.installers.permissions.uninstall_permissions`.
+        """
+        uninstall_permissions()
 
     def _build_manifest(self, home: Path, assets: ClaudeAssets) -> ArtifactManifest:
         instructions_src = self._catalog.get_main_instructions()
