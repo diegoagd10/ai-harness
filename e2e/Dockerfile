@@ -1,23 +1,23 @@
 # Base image: Debian "bookworm-slim" with Python 3.12 and the `uv` binary
-# already installed. Provides uv + the cli source; e2e_test.sh drives the
-# actual uv tool install / reinstall / uninstall lifecycle.
+# already installed. Provides uv + the cli source; the e2e suite runs via
+# ``uv run inv test`` which exercises the full install/reinstall/uninstall
+# lifecycle plus sdd-status / sdd-continue coverage.
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
 # Set the working directory for subsequent instructions (created if missing).
 WORKDIR /build
 
 # Copy the project source from the build context (repo root) into the image
-# at /build. AGENTS.md and skills/ live inside src/ai_harness/resources as package
-# data, so a non-editable `uv tool install` carries them along.
+# at /build.
 COPY . /build
 
-# Copy the e2e test script alongside it.
-COPY e2e/e2e_test.sh /e2e_test.sh
+# Install dev dependencies (invoke, pytest, etc.) so ``uv run inv test`` works.
+RUN uv sync --group dev
 
-# `uv tool install` puts executables in ~/.local/bin. The container runs as
-# root, so that's /root/.local/bin — prepend it to PATH so `ai-harness` is
-# found once e2e_test.sh installs it.
+# ``uv tool install`` puts executables in ~/.local/bin. The container runs as
+# root, so that's /root/.local/bin — prepend it to PATH so ``ai-harness`` is
+# found once the suite provisions it.
 ENV PATH="/root/.local/bin:${PATH}"
 
-# Default command when the container runs: execute the e2e test script.
-CMD ["/e2e_test.sh"]
+# Default command: run the full e2e suite via Invoke.
+CMD ["uv", "run", "inv", "test"]

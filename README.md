@@ -37,9 +37,20 @@ uv tool uninstall cli           # remove
 ```
 
 End-to-end tests live in `e2e/` and run the installed `ai-harness` binary
-(not `uv run`) inside Docker:
+(not `uv run`) inside Docker or locally with isolated sandboxes:
 
 ```bash
+# Run the full e2e suite locally (all sandboxed — zero host-side effects):
+uv run inv test
+
+# Run a single category in isolation:
+uv run inv install
+uv run inv uninstall
+uv run inv sdd-status
+uv run inv sdd-continue
+uv run inv tool-lifecycle
+
+# Run inside Docker (fully isolated):
 e2e/docker-test.sh
 ```
 
