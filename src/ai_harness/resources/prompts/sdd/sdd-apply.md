@@ -54,6 +54,9 @@ Resolution protocol:
    - User: `~/.config/opencode/skills/`
    - Project: `{project-root}/skills/`
    - Project: `{project-root}/.opencode/skills/`
+   - Project: `{project-root}/.agents/skills/`
+   - Project: `{project-root}/.claude/skills/`
+   - Project: `{project-root}/.copilot/skills/`
 3. For each name in the `## Skills to load` block, find the matching `SKILL.md` by its `name` frontmatter field and read the file.
 4. If any named skill is missing, STOP and return `status: blocked` with the missing names in `risks`. Do not silently substitute a different skill.
 5. If the launch prompt has no `## Skills to load` block, fall back to the standard required skills for this phase (see below).
