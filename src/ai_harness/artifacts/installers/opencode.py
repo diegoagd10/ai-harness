@@ -12,8 +12,12 @@ from pathlib import Path
 from rich.console import Console
 
 from ai_harness.artifacts.catalog import ArtifactCatalog
-from ai_harness.artifacts.installer import install as generic_install
-from ai_harness.artifacts.installer import uninstall as generic_uninstall
+from ai_harness.artifacts.installer import (
+    InstallResult,
+    UninstallResult,
+    install as generic_install,
+    uninstall as generic_uninstall,
+)
 from ai_harness.artifacts.manifest import ArtifactManifest, DirArtifact, FileArtifact
 
 
@@ -32,7 +36,7 @@ class OpencodeInstaller:
     def __init__(self, catalog: ArtifactCatalog) -> None:
         self._catalog = catalog
 
-    def install(self, home: Path, console: Console) -> None:
+    def install(self, home: Path, console: Console) -> InstallResult:
         """Build manifest from catalog and invoke generic installer."""
         assets = OpencodeAssets(
             config_path=self._catalog.get_resource_dir(
@@ -42,9 +46,9 @@ class OpencodeInstaller:
             prompts_dir=self._catalog.get_resource_dir(Path("prompts/sdd")),
         )
         manifest = self._build_manifest(home, assets)
-        generic_install(manifest, home, console)
+        return generic_install(manifest, home, console)
 
-    def uninstall(self, home: Path, console: Console) -> None:
+    def uninstall(self, home: Path, console: Console) -> UninstallResult:
         """Build manifest and invoke generic uninstall."""
         assets = OpencodeAssets(
             config_path=self._catalog.get_resource_dir(
@@ -54,7 +58,7 @@ class OpencodeInstaller:
             prompts_dir=self._catalog.get_resource_dir(Path("prompts/sdd")),
         )
         manifest = self._build_manifest(home, assets)
-        generic_uninstall(manifest, home, console)
+        return generic_uninstall(manifest, home, console)
 
     def _build_manifest(self, home: Path, assets: OpencodeAssets) -> ArtifactManifest:
         instructions_src = self._catalog.get_main_instructions()

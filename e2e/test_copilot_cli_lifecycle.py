@@ -242,7 +242,7 @@ def run_install_tests(bin_dir: str) -> None:
     # -- fresh install ------------------------------------------------
     print("=== Copilot CLI Lifecycle: fresh install")
     home1 = harness.sandbox_home()
-    harness.run_in_sandbox(home1, "ai-harness", "install", extra_env=extra_env)
+    harness.run_in_sandbox(home1, "ai-harness", "install", "--all", extra_env=extra_env)
 
     # Copilot instructions
     instructions = Path(home1) / _INSTRUCTIONS_RELATIVE
@@ -285,7 +285,7 @@ def run_install_tests(bin_dir: str) -> None:
     inst2.parent.mkdir(parents=True, exist_ok=True)
     inst2.write_text("# user instructions\n", encoding="utf-8")
 
-    harness.run_in_sandbox(home2, "ai-harness", "install", extra_env=extra_env)
+    harness.run_in_sandbox(home2, "ai-harness", "install", "--all", extra_env=extra_env)
 
     # User-authored agent preserved
     if user_agent.read_text(encoding="utf-8") != "---\nname: custom\ndescription: user agent\ntools: []\n---\n# body\n":
@@ -307,8 +307,8 @@ def run_install_tests(bin_dir: str) -> None:
     # -- idempotent override ------------------------------------------
     print("=== Copilot CLI Lifecycle: idempotent override")
     home3 = harness.sandbox_home()
-    harness.run_in_sandbox(home3, "ai-harness", "install", extra_env=extra_env)
-    harness.run_in_sandbox(home3, "ai-harness", "install", extra_env=extra_env)
+    harness.run_in_sandbox(home3, "ai-harness", "install", "--all", extra_env=extra_env)
+    harness.run_in_sandbox(home3, "ai-harness", "install", "--all", extra_env=extra_env)
 
     _assert_agents_installed(home3, "idempotent")
     _assert_hook_installed(home3, "idempotent")
@@ -340,12 +340,12 @@ def run_uninstall_tests(bin_dir: str) -> None:
     (Path(home) / _INSTRUCTIONS_RELATIVE).parent.mkdir(parents=True, exist_ok=True)
     (Path(home) / _INSTRUCTIONS_RELATIVE).write_text("# my instructions\n", encoding="utf-8")
 
-    harness.run_in_sandbox(home, "ai-harness", "install", extra_env=extra_env)
+    harness.run_in_sandbox(home, "ai-harness", "install", "--all", extra_env=extra_env)
     print("  (pre-seed install done)")
 
     # -- uninstall ----------------------------------------------------
     print("=== Copilot CLI Lifecycle: uninstall")
-    harness.run_in_sandbox(home, "ai-harness", "uninstall", extra_env=extra_env)
+    harness.run_in_sandbox(home, "ai-harness", "uninstall", "--all", extra_env=extra_env)
 
     # Project agents removed
     for name in _ALL_SUBAGENT_NAMES:

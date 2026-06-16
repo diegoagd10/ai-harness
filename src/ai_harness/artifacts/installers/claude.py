@@ -13,8 +13,12 @@ from pathlib import Path
 from rich.console import Console
 
 from ai_harness.artifacts.catalog import ArtifactCatalog
-from ai_harness.artifacts.installer import install as generic_install
-from ai_harness.artifacts.installer import uninstall as generic_uninstall
+from ai_harness.artifacts.installer import (
+    InstallResult,
+    UninstallResult,
+    install as generic_install,
+    uninstall as generic_uninstall,
+)
 from ai_harness.artifacts.manifest import (
     ArtifactManifest,
     ComposedFileArtifact,
@@ -61,27 +65,13 @@ class ClaudeInstaller:
     def __init__(self, catalog: ArtifactCatalog) -> None:
         self._catalog = catalog
 
-    def install(self, home: Path, console: Console) -> None:
-        """Build manifest, install subagent permission rules,
-        and invoke generic installer."""
-        assets = ClaudeAssets(
-            agents_dir=self._catalog.get_resource_dir(
-                Path("agent-clis/claude/agents")
-            ),
-            prompts_dir=self._catalog.get_resource_dir(
-                Path("prompts/sdd")
-            ),
-            orchestrator_dir=self._catalog.get_resource_dir(
-                Path("agent-clis/claude/sdd-orchestrator")
-            ),
-        )
-        manifest = self._build_manifest(home, assets)
-        self._install_permissions(manifest, assets)
-        generic_install(manifest, home, console)
+    def install(self, home: Path, console: Console) -> InstallResult:
+        """Build manifest, install subagent permission rules, and invoke
+        the generic installer.
 
-    def uninstall(self, home: Path, console: Console) -> None:
-        """Build manifest, invoke generic uninstall,
-        then remove managed permission rules."""
+        Errors from the permission step are merged into the result; if
+        either step fails the result is failure.
+        """
         assets = ClaudeAssets(
             agents_dir=self._catalog.get_resource_dir(
                 Path("agent-clis/claude/agents")
@@ -94,8 +84,44 @@ class ClaudeInstaller:
             ),
         )
         manifest = self._build_manifest(home, assets)
-        generic_uninstall(manifest, home, console)
-        self._uninstall_permissions()
+        errors: list[str] = []
+        try:
+            self._install_permissions(manifest, assets)
+        except Exception as exc:
+            errors.append(f"claude permissions: {exc}")
+        result = generic_install(manifest, home, console)
+        if errors:
+            return InstallResult(success=False, errors=errors + result.errors)
+        return result
+
+    def uninstall(self, home: Path, console: Console) -> UninstallResult:
+        """Build manifest, invoke generic uninstall, then remove the
+        managed permission rules.
+
+        Errors from the permission-removal step are merged into the
+        result; if either step fails the result is failure.
+        """
+        assets = ClaudeAssets(
+            agents_dir=self._catalog.get_resource_dir(
+                Path("agent-clis/claude/agents")
+            ),
+            prompts_dir=self._catalog.get_resource_dir(
+                Path("prompts/sdd")
+            ),
+            orchestrator_dir=self._catalog.get_resource_dir(
+                Path("agent-clis/claude/sdd-orchestrator")
+            ),
+        )
+        manifest = self._build_manifest(home, assets)
+        result = generic_uninstall(manifest, home, console)
+        try:
+            self._uninstall_permissions()
+        except Exception as exc:
+            return UninstallResult(
+                success=False,
+                errors=[f"claude permissions: {exc}"] + result.errors,
+            )
+        return result
 
     def _install_permissions(
         self, manifest: ArtifactManifest, assets: ClaudeAssets

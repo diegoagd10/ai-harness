@@ -384,3 +384,45 @@ def test_composed_uninstall_restores_backup(
 
     assert target.exists(), "target should have been restored from backup"
     assert target.read_text(encoding="utf-8") == "USER ORIGINAL"
+
+
+# ------------------------------------------------------- return contract ---
+
+
+def test_install_returns_install_result(
+    tmp_path: Path, console: Console
+) -> None:
+    """install() returns an InstallResult, not None."""
+    src = tmp_path / "src.md"
+    src.write_text("# content\n", encoding="utf-8")
+    manifest = ArtifactManifest(
+        files=[FileArtifact(source=src, target_relative=Path(".config/target.md"))],
+        dirs=[],
+    )
+    home = tmp_path / "home"
+    home.mkdir()
+
+    from ai_harness.artifacts.installer import InstallResult
+
+    result = install(manifest, home, console)
+    assert isinstance(result, InstallResult), (
+        f"Expected InstallResult, got {type(result).__name__}"
+    )
+
+
+def test_install_result_success_fields(
+    tmp_path: Path, console: Console
+) -> None:
+    """InstallResult has success: bool and errors: list[str] on success."""
+    src = tmp_path / "src.md"
+    src.write_text("# content\n", encoding="utf-8")
+    manifest = ArtifactManifest(
+        files=[FileArtifact(source=src, target_relative=Path(".config/target.md"))],
+        dirs=[],
+    )
+    home = tmp_path / "home"
+    home.mkdir()
+
+    result = install(manifest, home, console)
+    assert result.success is True
+    assert result.errors == []
