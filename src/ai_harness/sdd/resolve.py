@@ -18,25 +18,52 @@ from .verifyreport import report_is_clearly_passing
 from .workspace import list_active_changes, resolve_root
 
 
-def resolve(cwd: str, workspace_root: str, change_name: str) -> Status:
+def resolve(
+    cwd: str,
+    workspace_root: str,
+    change_name: str,
+    include_instructions: bool = False,
+) -> Status:
     """Read {root}/openspec/changes and compute the SDD status for one change.
 
     root is workspace_root when non-empty, otherwise cwd. change_name may be empty
     to let resolve infer the single active change (or block when zero or many
     exist). Raises SddError when root cannot be resolved or read; a blocked
     change is reported as a valid Status, not an error.
+
+    When include_instructions=True and the next phase is concrete (apply, verify,
+    archive), build_phase_instructions(status) is called and attached to
+    status.phase_instructions. Blocked statuses (sentinel next phases) skip
+    this even when the flag is True.
     """
+    from .instructions import build_phase_instructions
+
     root = resolve_root(cwd, workspace_root)
     active = list_active_changes(root)
 
     selected, blocked = _select_change(active, change_name.strip())
     if blocked is not None:
-        return _new_blocked_status(
+        status = _new_blocked_status(
             root, blocked.change_name, blocked.next, blocked.reasons
         )
+    else:
+        change_root = os.path.join(root, "openspec", "changes", selected)
+        status = _resolve_change(root, selected, change_root)
 
-    change_root = os.path.join(root, "openspec", "changes", selected)
-    return _resolve_change(root, selected, change_root)
+    # Build and attach instructions only for concrete next phases
+    if include_instructions and _phase_is_concrete(status.next_recommended):
+        status.phase_instructions = build_phase_instructions(status)
+
+    return status
+
+
+# Concrete phase identifiers (sentinel-aware guard for instruction building).
+_PHASES_CONCRETE = frozenset({"apply", "verify", "archive"})
+
+
+def _phase_is_concrete(next_recommended: str) -> bool:
+    """Return True when next_recommended points to a phase with instructions."""
+    return next_recommended in _PHASES_CONCRETE
 
 
 @dataclass

@@ -466,3 +466,31 @@ def test_apply_verify_archive_gates(
         assert blocked in joined
     if blocked_absent is not None:
         assert blocked_absent not in joined
+
+
+# --- include_instructions kwarg ---------------------------------------------
+
+
+def test_include_instructions_default_false_keeps_none(tmp_path: Path):
+    seed_ready_change(tmp_path, "thin", "- [ ] 1.1 Work\n")
+    status = resolve(str(tmp_path), "", "thin")
+    assert status.phase_instructions is None
+
+
+def test_include_instructions_true_populates_apply(tmp_path: Path):
+    seed_ready_change(tmp_path, "feat-x", "- [ ] 1.1 Work\n")
+    status = resolve(str(tmp_path), "", "feat-x", include_instructions=True)
+    assert status.phase_instructions is not None
+    assert isinstance(status.phase_instructions.apply, list)
+    assert len(status.phase_instructions.apply) == 4
+    assert status.phase_instructions.apply[0] == "Change: feat-x"
+    assert "Read proposal" in status.phase_instructions.apply[2]
+
+
+def test_include_instructions_true_blocked_status_omits(tmp_path: Path):
+    # Empty workspace -> blocked status with sentinel next phase
+    from pathlib import Path as _Path
+    _Path(tmp_path / "openspec" / "changes").mkdir(parents=True, exist_ok=True)
+    status = resolve(str(tmp_path), "", "", include_instructions=True)
+    assert status.phase_instructions is None
+    assert status.next_recommended == "sdd-new"

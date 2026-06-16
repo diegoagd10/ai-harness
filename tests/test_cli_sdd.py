@@ -78,3 +78,70 @@ def test_apply_report_present_in_cli_json_output(tmp_path: Path):
     assert "applyReport" in payload["artifacts"]
     assert "applyProgress" not in payload["artifactPaths"]
     assert "applyProgress" not in payload["artifacts"]
+
+
+# --- sdd-continue CLI tests --------------------------------------------------
+
+
+def test_sdd_continue_dispatcher_markdown(tmp_path: Path):
+    seed_ready_change(tmp_path, "fix-auth", "- [ ] 1.1 Work\n")
+    result = runner.invoke(app, ["sdd-continue", "--cwd", str(tmp_path)])
+    assert result.exit_code == 0
+    out = result.stdout
+    assert "## Native SDD Dispatcher: fix-auth" in out
+    assert "### Dependency States" in out
+    assert "next_recommended: apply" in out
+    assert "### JSON" in out
+    assert "```json" in out
+
+
+def test_sdd_continue_json_includes_instructions(tmp_path: Path):
+    seed_ready_change(tmp_path, "fix-auth", "- [ ] 1.1 Work\n")
+    result = runner.invoke(app, ["sdd-continue", "--json", "--cwd", str(tmp_path)])
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert "phaseInstructions" in payload
+    assert "apply" in payload["phaseInstructions"]
+    assert "verify" in payload["phaseInstructions"]
+    assert "archive" in payload["phaseInstructions"]
+
+
+def test_sdd_continue_empty_workspace(tmp_path: Path):
+    import os as _os
+    _os.makedirs(tmp_path / "openspec" / "changes", exist_ok=True)
+    result = runner.invoke(app, ["sdd-continue", "--cwd", str(tmp_path)])
+    assert result.exit_code == 0
+    out = result.stdout
+    assert "## Native SDD Dispatcher: unresolved" in out
+    assert "### Blocked Reasons" in out
+    assert "no active openspec changes" in out.lower()
+    assert "### Next Phase Instructions" not in out
+
+
+def test_sdd_continue_missing_change(tmp_path: Path):
+    seed_ready_change(tmp_path, "real", "- [ ] 1.1 Work\n")
+    result = runner.invoke(app, ["sdd-continue", "--cwd", str(tmp_path), "ghost"])
+    assert result.exit_code == 0
+    out = result.stdout
+    assert "## Native SDD Dispatcher: ghost" in out
+    assert "### Blocked Reasons" in out
+    assert "ghost" in out
+    assert "### Next Phase Instructions" not in out
+
+
+def test_sdd_status_instructions_flag(tmp_path: Path):
+    seed_ready_change(tmp_path, "fix-auth", "- [ ] 1.1 Work\n")
+    result = runner.invoke(
+        app, ["sdd-status", "--json", "--instructions", "--cwd", str(tmp_path)]
+    )
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert "phaseInstructions" in payload
+
+
+def test_sdd_status_no_instructions_flag(tmp_path: Path):
+    seed_ready_change(tmp_path, "fix-auth", "- [ ] 1.1 Work\n")
+    result = runner.invoke(app, ["sdd-status", "--json", "--cwd", str(tmp_path)])
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert "phaseInstructions" not in payload
