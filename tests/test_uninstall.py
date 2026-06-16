@@ -5,15 +5,15 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from ai_harness.main import (
+from ai_harness.artifacts.catalog import (
     AGENTS_MD_TARGETS,
     OPENCODE_JSON_TARGET,
     OPENCODE_SDD_PROMPTS_SRC,
     OPENCODE_SDD_PROMPTS_TARGET_DIR,
     SKILLS_SRC,
     SKILLS_TARGET_DIRS,
-    app,
 )
+from ai_harness.main import app
 
 runner = CliRunner()
 
