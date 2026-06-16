@@ -1,43 +1,138 @@
-# ai-harness-setup
+# ai-harness
 
-Personal, version-controlled configuration for AI coding harnesses: one source
-of truth (`AGENTS.md` + skills + SDD prompts), copied into the places OpenCode,
-Claude Code, Copilot, and generic `.agents` consumers expect.
+Personal, version-controlled configuration for AI coding harnesses — one source
+of truth, copied into the places OpenCode, Claude Code, and generic `.agents`
+consumers expect.
 
-## What's in here
+## Why we built this
 
-| Path | Purpose |
-|------|---------|
-| `AGENTS.md` | The single config: persona, rules, orchestration policy, OpenSpec/SDD flow. |
-| `prompts/sdd/` | Platform-neutral SDD phase prompts (the executor prompts the orchestrator drives). |
-| `prompts/commands/` | Platform-neutral slash-command entrypoints, the single source of truth. |
-| `skills/` | Reusable skills (SDD apply flow, branch-pr, coding-guidelines, …). |
-| `agent-clis/opencode/` | The OpenCode wiring: agent graph (`opencode.json`), orchestrator prompt, blocks, plugins. |
-| `cli/` | The `ai-harness` Python CLI (uv + Typer + Rich). See [CLI](#cli). |
-| `templates/openspec/config.yaml` | Starter OpenSpec project config to copy into new projects. |
+LLMs produce code fast, but the code they produce by default is generic. You
+spend the real time in small "fix it" cycles: refine this function, extract that
+helper, rename those variables, add error handling the model forgot. Each cycle
+costs context, and after a few rounds the thread is too long for the model to
+hold the whole design.
 
-## CLI
+Planning usually lives in chat history. Chat history is ephemeral — it scrolls
+away, it gets compacted, it disappears when the session ends. There is no
+artifact that says "this is what we decided and why." Without that artifact,
+every new session starts from scratch, or worse, from a stale mental model of
+what the last person intended.
 
-`cli/` is a [uv](https://docs.astral.sh/uv/)-managed Python package built with
-[Typer](https://typer.tiangolo.com/) and [Rich](https://rich.readthedocs.io/),
-providing the `ai-harness` command.
+Tool choice amplifies the problem. OpenCode, Claude Code, Copilot — each stores
+configuration in a different place, with a different format, for a different
+agent graph. Without a single source of truth, you duplicate skills, prompts, and
+rules across harnesses, then forget which copy is the canonical one.
+
+**ai-harness** is our response to all three problems. It gives you a
+single, version-controlled home for your agent persona, skills, and Spec-Driven
+Development pipeline, then copies everything into the right places so every
+harness sees the same configuration.
+
+## What this tool does
+
+**ai-harness** drives a planning-first SDD (Spec-Driven Development)
+workflow where every change starts as a structured proposal, spec, design, and
+task list before any code is written. Instead of asking the LLM to write code
+immediately, the orchestrator walks through structured phases: explore the
+codebase, write a proposal with acceptance criteria, produce specs and a design,
+decompose into bounded tasks, then implement each task through strict TDD.
+
+The pipeline runs entirely through prompts and configuration — there is no custom
+runtime and no extra daemon.
+
+```
+sdd-orchestrator (primary)
+  └─ task tool ─▶ sdd-init → sdd-explore → sdd-propose ─┬─▶ sdd-spec ─┐
+                                                        └─▶ sdd-design ┴─▶ sdd-tasks
+                  ─▶ sdd-apply → sdd-verify → sdd-archive
+  judgment ─▶ jd-judge-a ∥ jd-judge-b (blind, parallel) → jd-fix-agent → re-judge
+  review   ─▶ review-risk / -readability / -reliability / -resilience (R1–R4)
+```
+
+The orchestrator never works inline. It asks a session preflight (interactive vs
+auto, artifact backend, PR strategy, review budget), enforces hard gates between
+phases, and applies a review-workload guard before implementing anything. The
+result is implementation that stays inside bounded tasks rather than sprawling
+across the codebase.
+
+## Getting started
+
+Requires Python >= 3.12.
 
 ```bash
-cd cli
+git clone https://github.com/diegoagd10/ai-harness.git
+cd ai-harness
+uv tool install .              # puts ai-harness on PATH (~/.local/bin/ai-harness)
+ai-harness install             # copies AGENTS.md, skills, opencode.json, SDD prompts into home dirs
+```
+
+If you prefer not to install on PATH, use `uv run` directly:
+
+```bash
 uv run ai-harness install
 ```
 
-### Installing the `ai-harness` binary
+To remove everything the tool installed:
 
 ```bash
-cd cli
-uv tool install .              # install on PATH (~/.local/bin/ai-harness)
-uv tool install --reinstall .  # update after pulling code changes
-uv tool uninstall cli           # remove
+ai-harness uninstall
 ```
 
-End-to-end tests live in `e2e/` and run the installed `ai-harness` binary
-(not `uv run`) inside Docker or locally with isolated sandboxes:
+`ai-harness uninstall` removes only files listed in the central harness manifest,
+then removes the manifest. It does not need the source repo to be available.
+
+## Driving the SDD pipeline
+
+`ai-harness` is a single Python binary. It was built **on top of**
+[OpenSpec](https://github.com/Fission-AI/OpenSpec) — it adopts the same
+spec-driven change format (proposal, specs, design, tasks) — but it does **not**
+depend on the OpenSpec CLI. The pipeline is implemented natively inside
+`ai-harness` and is driven from the command line by two subcommands:
+
+- `sdd-status` — reports the current SDD phase state for an active change.
+  Invoke it as `ai-harness sdd-status` (it emits machine-readable JSON).
+- `sdd-continue` — shows the next SDD action and the per-phase instructions the
+  orchestrator needs to keep the pipeline moving. Invoke it as
+  `ai-harness sdd-continue`.
+
+To use them in a new project, copy the starter config and customize it:
+
+```bash
+cp templates/openspec/config.yaml openspec/config.yaml
+```
+
+The config lets you define project rules for each SDD artifact and pin the
+testing commands the pipeline uses.
+
+### Prerequisite: Engram
+
+For the system to work well, also install
+[Engram](https://github.com/Gentleman-Programming/engram) — a persistent memory
+MCP server. Engram is what lets the AI agents that consume `ai-harness` retain
+context across sessions and survive context compactions. Without it, the
+orchestrator loses memory between sessions and starts each one cold.
+
+## What's in here
+
+The project is a uv-managed Python package. The main regions of the tree:
+
+- `src/ai_harness/` — the CLI package. Each `ai-harness` subcommand (`install`, `uninstall`, `sdd-status`, `sdd-continue`) is implemented in its own subpackage; per-CLI installers under `src/ai_harness/artifacts/installers/` decide which bundled resources get installed for which target harness.
+- `src/ai_harness/resources/` — the bundled artifacts (skills, prompts, agent configs, project config templates) that the installers copy into each AI harness's home directory. The CLI does NOT install this directory verbatim; the per-CLI installers enumerate the specific files they own.
+- `tests/` — Python unit tests for the CLI package. Run with `uv run pytest`.
+- `e2e/` — end-to-end test suite and Docker sandbox (`e2e/docker-test.sh`).
+- `openspec/` — spec-driven change artifacts for this project (`config.yaml`, `specs/`, `changes/`). The directory follows the OpenSpec spec format; the CLI implements the pipeline natively.
+
+The repo root also holds `pyproject.toml` (project metadata and dependencies) and `tasks.py` (Invoke tasks for running the e2e suite). For everything else, explore the tree.
+
+## Running tests
+
+Unit tests run against the Python source (no Docker needed):
+
+```bash
+uv run pytest
+```
+
+End-to-end tests run the installed `ai-harness` binary inside isolated sandboxes:
 
 ```bash
 # Run the full e2e suite locally (all sandboxed — zero host-side effects):
@@ -54,50 +149,8 @@ uv run inv tool-lifecycle
 e2e/docker-test.sh
 ```
 
-## Install
+## Contributing
 
-Build the CLI and install the harness artifacts:
-
-```bash
-git clone git@github.com:diegoagd10/ai-harness-setup.git ~/Projects/ai-harness-setup
-cd ~/Projects/ai-harness-setup/cli
-make install            # put the `ai-harness` binary on your PATH
-ai-harness install      # copy skills/config and generate OpenCode commands/config
-```
-
-`ai-harness install` copies the shared skills/config into harness home dirs
-(`~/.agents`, `~/.claude`, `~/.copilot`, and `~/.config/opencode` by default),
-generates OpenCode slash-command files from `prompts/commands/*.md`, writes the
-OpenCode config, and records owned files in
-`~/.config/ai-harness/install-manifest.json`. Editing the repo edits the source
-for those copied/generated files — re-run `ai-harness install` to refresh them.
-See `agent-clis/opencode/README.md` for how the OpenCode agent graph fits
-together.
-
-## Uninstall
-
-```bash
-ai-harness uninstall
-```
-
-Removes only files listed in the central ai-harness manifest, then removes the
-manifest. It does not need the source repo to be available.
-
-## Using the OpenSpec template in a new project
-
-```bash
-openspec init --tools opencode
-cp ~/Projects/ai-harness-setup/templates/openspec/config.yaml openspec/config.yaml
-```
-
-Then customize `openspec/config.yaml` for that project.
-
-**Important about the config:** OpenSpec only accepts `rules` for the four
-spec-driven *artifacts* — `proposal`, `specs`, `design`, `tasks`. Rules under
-`apply`, `verify`, or `archive` are silently ignored (they are workflow phases,
-not artifacts); that guidance belongs in `AGENTS.md`. Also quote any rule that
-contains `": "`, e.g. `- "Run: scripts/verify"`, or YAML parses it as a map.
-
-After `openspec init`/`openspec update`, remove the generated `opsx-apply`
-command and `openspec-apply-change` skill, so they don't compete with the custom
-apply flow defined in `AGENTS.md`.
+- Run `uv run inv test` before opening a pull request.
+- File issues at [https://github.com/diegoagd10/ai-harness/issues](https://github.com/diegoagd10/ai-harness/issues).
+- Open pull requests against the same remote's `main` branch.
