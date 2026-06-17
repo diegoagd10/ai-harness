@@ -23,13 +23,14 @@ class FileArtifact:
 
 @dataclass(frozen=True)
 class DirArtifact:
-    """A directory tree to install from *source* to *home/target_relative*."""
+    """A directory tree to install from *source* to *home/target_relative*.
+
+    Install removes a matching target subdir before copying each source
+    subdir, leaving unrelated entries untouched.
+    """
 
     source: Path
     target_relative: Path
-    merge_mode: str = "replace_matching"
-    # "replace_matching" removes target subdir if it exists before copying.
-    # "merge_preserve" (future) merges without deleting unknown entries.
 
 
 @dataclass(frozen=True)
@@ -45,14 +46,12 @@ class ComposedFileArtifact:
     same backup, conflict-rotation, and uninstall-restore policy as
     ``FileArtifact``.
 
-    *frontmatter_text* is always required.  *frontmatter_source* is kept
-    for backward-compatibility but is never set by v2 installers.
+    *frontmatter_text* is always required.
     """
 
     frontmatter_text: str
     body_source: Path
     target_relative: Path
-    frontmatter_source: Path | None = None
     template: dict[str, str] = field(default_factory=dict)
     backup_suffix: str = ".ai-harness-backup"
     conflict_suffix: str = ".ai-harness-conflict-backup"

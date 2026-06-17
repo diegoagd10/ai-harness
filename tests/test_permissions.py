@@ -4,13 +4,12 @@ Phase 1 (RED gate): all tests import functions that do NOT exist yet.
 Phase 2 makes them GREEN one task at a time.
 
 Covers:
-  - compute_required_rules (public pure) — tasks 1.2, 1.3, 1.4
-  - _resolve_settings_path (private)     — task 1.5
-  - _backup_settings (private)           — task 1.6
-  - _merge_allow_rules (private)         — task 1.7
-  - install_permissions (public)         — task 1.8
-  - _remove_managed_rules (private)      — tasks 1.9, 1.10, 1.11
-  - uninstall_permissions (public)       — task 1.12
+  - _resolve_settings_path (private)
+  - _backup_settings (private)
+  - _merge_allow_rules (private)
+  - _remove_managed_rules (private)
+  - install_permissions_from_tools (public)
+  - uninstall_permissions (public)
 """
 
 from __future__ import annotations
@@ -21,13 +20,10 @@ from pathlib import Path
 import pytest
 
 from ai_harness.artifacts.installers.permissions import (
-    TOOL_TO_RULE,
     _backup_settings,
     _merge_allow_rules,
     _remove_managed_rules,
     _resolve_settings_path,
-    compute_required_rules,
-    install_permissions,
     install_permissions_from_tools,
     uninstall_permissions,
 )
@@ -35,32 +31,6 @@ from ai_harness.artifacts.installers.permissions import (
 # ──────────────────────────────────────────────────────────────────────────────
 # Test helpers
 # ──────────────────────────────────────────────────────────────────────────────
-
-
-def _agent_md(path: Path, tools: list[str] | None = None) -> Path:
-    """Write a synthetic sub-agent .md file with YAML frontmatter.
-
-    ``tools`` is written as a YAML flow sequence ``[A, B, ...]``.
-    When ``tools`` is None the frontmatter has no ``tools:`` field.
-    """
-    if tools is None:
-        content = "---\nname: test-agent\n---\nBody text here.\n"
-    else:
-        tools_yaml = ", ".join(tools)
-        content = (
-            f"---\nname: test-agent\ntools: [{tools_yaml}]\n---\nBody text here.\n"
-        )
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content)
-    return path
-
-
-def _agent_md_scalar(path: Path, tool: str) -> Path:
-    """Write a synthetic sub-agent .md file where ``tools:`` is a scalar."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    content = f"---\nname: test-agent\ntools: {tool}\n---\nBody text here.\n"
-    path.write_text(content)
-    return path
 
 
 def _settings_json(dir_path: Path, allow: list[str] | None = None) -> Path:
@@ -76,111 +46,6 @@ def _settings_json(dir_path: Path, allow: list[str] | None = None) -> Path:
         obj["permissions"] = {}
     p.write_text(json.dumps(obj, indent=2))
     return p
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Task 1.2: compute_required_rules — tool union across sub-agents
-# ──────────────────────────────────────────────────────────────────────────────
-
-
-class TestComputeRequiredRulesUnion:
-    """Tool union across sub-agents — deduplication and empty-list handling."""
-
-    def test_single_agent_returns_its_tools(self, tmp_path: Path) -> None:
-        p = _agent_md(tmp_path / "a.md", ["Bash", "Read"])
-        result = compute_required_rules([p])
-        assert result == {"Bash", "Read"}
-
-    def test_two_agents_overlapping_union(self, tmp_path: Path) -> None:
-        p1 = _agent_md(tmp_path / "a.md", ["Bash", "Read"])
-        p2 = _agent_md(tmp_path / "b.md", ["Read", "Edit"])
-        result = compute_required_rules([p1, p2])
-        assert result == {"Bash", "Read", "Edit"}
-
-    def test_empty_path_list_returns_empty_set(self) -> None:
-        result = compute_required_rules([])
-        assert result == set()
-
-    def test_agent_without_tools_field_returns_empty(self, tmp_path: Path) -> None:
-        p = _agent_md(tmp_path / "a.md", None)
-        result = compute_required_rules([p])
-        assert result == set()
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Task 1.3: compute_required_rules — TOOL_TO_RULE mapping (parametrized)
-# ──────────────────────────────────────────────────────────────────────────────
-
-
-class TestToolToRuleMapping:
-    """Each declared tool maps to exactly one permission rule."""
-
-    @pytest.mark.parametrize(
-        "tool,expected",
-        [
-            ("Glob", "Read"),
-            ("Grep", "Read"),
-            ("Bash", "Bash"),
-            ("Read", "Read"),
-            ("Edit", "Edit"),
-            ("Write", "Write"),
-            ("Agent", "Agent"),
-        ],
-    )
-    def test_tool_maps_to_expected_rule(
-        self, tmp_path: Path, tool: str, expected: str
-    ) -> None:
-        p = _agent_md(tmp_path / "a.md", [tool])
-        result = compute_required_rules([p])
-        assert result == {expected}
-
-    def test_unknown_tool_uses_tool_name_as_rule(self, tmp_path: Path) -> None:
-        """Tools not in TOOL_TO_RULE should fall back to the tool name itself."""
-        p = _agent_md(tmp_path / "a.md", ["SomeUnknownTool"])
-        result = compute_required_rules([p])
-        assert result == {"SomeUnknownTool"}
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Task 1.4: compute_required_rules — frontmatter parsing edge cases
-# ──────────────────────────────────────────────────────────────────────────────
-
-
-class TestFrontmatterParsing:
-    """YAML frontmatter parsing: list, scalar, malformed."""
-
-    def test_yaml_flow_sequence(self, tmp_path: Path) -> None:
-        p = _agent_md(tmp_path / "a.md", ["Read", "Edit", "Write", "Bash"])
-        result = compute_required_rules([p])
-        assert result == {"Read", "Edit", "Write", "Bash"}
-
-    def test_yaml_scalar_tool(self, tmp_path: Path) -> None:
-        p = _agent_md_scalar(tmp_path / "a.md", "Read")
-        result = compute_required_rules([p])
-        assert result == {"Read"}
-
-    def test_malformed_yaml_raises(self, tmp_path: Path) -> None:
-        p = tmp_path / "bad.md"
-        p.write_text("no frontmatter delimiters at all\njust plain text\n")
-        with pytest.raises((ValueError, Exception)):
-            compute_required_rules([p])
-
-    def test_unclosed_frontmatter_raises(self, tmp_path: Path) -> None:
-        p = tmp_path / "bad.md"
-        p.write_text("---\nname: agent\n")
-        with pytest.raises((ValueError, Exception)):
-            compute_required_rules([p])
-
-    def test_frontmatter_preserves_tools_from_multiple_files(
-        self, tmp_path: Path
-    ) -> None:
-        """Integration-style: 3 files with overlapping tools."""
-        p1 = _agent_md(tmp_path / "a.md", ["Bash", "Read"])
-        p2 = _agent_md(tmp_path / "b.md", ["Glob", "Grep", "Bash"])
-        p3 = _agent_md_scalar(tmp_path / "c.md", "Agent")
-        result = compute_required_rules([p1, p2, p3])
-        # Glob→Read, Grep→Read, Bash→Bash, Read→Read, Agent→Agent
-        assert result == {"Read", "Bash", "Agent"}
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -298,83 +163,6 @@ class TestMergeAllowRules:
         data = json.loads(settings.read_text())
         assert set(data["permissions"]["allow"]) == {"Read"}
         assert data["otherKey"] == "value"
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Task 1.8: install_permissions — full recipe (fresh + idempotent)
-# ──────────────────────────────────────────────────────────────────────────────
-
-
-class TestInstallPermissions:
-    """Orchestrator: resolves, backs up, computes, merges, writes marker."""
-
-    def test_fresh_install(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        config_dir = tmp_path / "claude"
-        config_dir.mkdir()
-        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
-
-        settings = config_dir / "settings.json"
-        settings.write_text('{"permissions": {}}')
-
-        agent1 = _agent_md(tmp_path / "a.md", ["Bash", "Read"])
-        agent2 = _agent_md(tmp_path / "b.md", ["Edit", "Write", "Agent"])
-
-        result = install_permissions([agent1, agent2])
-
-        assert result == {"Bash", "Read", "Edit", "Write", "Agent"}
-
-        data = json.loads(settings.read_text())
-        assert set(data["permissions"]["allow"]) == {
-            "Bash", "Read", "Edit", "Write", "Agent",
-        }
-
-        marker = config_dir / ".ai-harness-managed-allow.json"
-        assert marker.is_file()
-
-        backup = config_dir / "settings.json.ai-harness-backup"
-        assert backup.is_file()
-
-    def test_reinstall_idempotent(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        config_dir = tmp_path / "claude"
-        config_dir.mkdir()
-        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
-
-        settings = config_dir / "settings.json"
-        settings.write_text(
-            json.dumps({"permissions": {"allow": ["Bash", "Read"]}})
-        )
-        original = settings.read_text()
-
-        marker = config_dir / ".ai-harness-managed-allow.json"
-        marker.write_text(json.dumps(["Bash", "Read"]))
-
-        agent = _agent_md(tmp_path / "a.md", ["Bash", "Read"])
-
-        result = install_permissions([agent])
-        assert result == set()
-        assert settings.read_text() == original
-
-    def test_fresh_install_with_no_permissions_key(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """settings.json exists but has no 'permissions' key."""
-        config_dir = tmp_path / "claude"
-        config_dir.mkdir()
-        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
-
-        settings = config_dir / "settings.json"
-        settings.write_text('{"statusLine": {"type": "command"}}')
-
-        agent = _agent_md(tmp_path / "a.md", ["Bash", "Read"])
-
-        result = install_permissions([agent])
-        assert result == {"Bash", "Read"}
-
-        data = json.loads(settings.read_text())
-        assert set(data["permissions"]["allow"]) == {"Bash", "Read"}
-        assert data["statusLine"]["type"] == "command"
 
 
 # ──────────────────────────────────────────────────────────────────────────────

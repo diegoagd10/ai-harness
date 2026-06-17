@@ -7,7 +7,6 @@ prompts, AGENTS.md targets for opencode, and skills for .agents/.
 from __future__ import annotations
 
 import json
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -260,10 +259,9 @@ class OpencodeInstaller:
     def __init__(self, catalog: ArtifactCatalog) -> None:
         self._catalog = catalog
 
-    def install(self, home: Path, console: Console) -> InstallResult:
-        """Build manifest from catalog, invoke generic installer, and
-        write generated fixtures for e2e."""
-        assets = OpencodeAssets(
+    def _assets(self) -> OpencodeAssets:
+        """Build the catalog-derived asset paths shared by install/uninstall."""
+        return OpencodeAssets(
             prompts_dir=self._catalog.get_resource_dir(Path("prompts/sdd")),
             jd_prompts_dir=self._catalog.get_resource_dir(Path("prompts/jd")),
             review_prompts_dir=self._catalog.get_resource_dir(Path("prompts/review")),
@@ -271,22 +269,16 @@ class OpencodeInstaller:
                 Path("prompts/orchestrator")
             ),
         )
+
+    def install(self, home: Path, console: Console) -> InstallResult:
+        """Build manifest from catalog and invoke the generic installer."""
+        assets = self._assets()
         manifest = self._build_manifest(home, assets)
-        result = generic_install(manifest, home, console)
-        if result.success:
-            self._write_fixture(home, console)
-        return result
+        return generic_install(manifest, home, console)
 
     def uninstall(self, home: Path, console: Console) -> UninstallResult:
         """Build manifest and invoke generic uninstall."""
-        assets = OpencodeAssets(
-            prompts_dir=self._catalog.get_resource_dir(Path("prompts/sdd")),
-            jd_prompts_dir=self._catalog.get_resource_dir(Path("prompts/jd")),
-            review_prompts_dir=self._catalog.get_resource_dir(Path("prompts/review")),
-            orchestrator_prompts_dir=self._catalog.get_resource_dir(
-                Path("prompts/orchestrator")
-            ),
-        )
+        assets = self._assets()
         manifest = self._build_manifest(home, assets)
         return generic_uninstall(manifest, home, console)
 
@@ -380,34 +372,3 @@ class OpencodeInstaller:
             )
 
         return ArtifactManifest(files=files, dirs=dirs)
-
-    # ── generated fixture for e2e ────────────────────────────────────────────
-
-    _GENERATED_DIR = (
-        Path(__file__).resolve().parent.parent.parent / "resources" / "generated"
-    )
-
-    @staticmethod
-    def _write_fixture(home: Path, console: Console) -> None:
-        """Write generated opencode.json to resources/generated/opencode/
-        so e2e source-path constants resolve.
-
-        Guarded by ``os.access(os.W_OK)`` — silent skip on read-only
-        source trees.
-        """
-        import os
-
-        gen_dir = OpencodeInstaller._GENERATED_DIR / "opencode"
-        if not os.access(gen_dir.parent, os.W_OK):
-            return  # read-only source tree
-
-        gen_dir.mkdir(parents=True, exist_ok=True)
-        config = _build_opencode_config()
-        config_json = json.dumps(config, indent=2) + "\n"
-        # Write fixture with {{HOME}} template placeholder preserved.
-        # The e2e does .replace("{{HOME}}", home) at test time
-        # (see e2e/test_harness_lifecycle.py lines 54-55).
-        fixture = config_json
-        fixture_path = gen_dir / "opencode.json"
-        fixture_path.write_text(fixture, encoding="utf-8")
-        console.print(f"Fixture written {fixture_path}")

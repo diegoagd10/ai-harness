@@ -5,17 +5,26 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from ai_harness.artifacts.catalog import (
-    AGENTS_MD_TARGETS,
-    OPENCODE_JSON_TARGET,
-    OPENCODE_SDD_PROMPTS_SRC,
-    OPENCODE_SDD_PROMPTS_TARGET_DIR,
-    SKILLS_SRC,
-    SKILLS_TARGET_DIRS,
-)
 from ai_harness.main import app
 
 runner = CliRunner()
+
+_RESOURCES_DIR = Path(__file__).resolve().parent.parent / "src" / "ai_harness" / "resources"
+SKILLS_SRC = _RESOURCES_DIR / "skills"
+OPENCODE_SDD_PROMPTS_SRC = _RESOURCES_DIR / "prompts" / "sdd"
+
+AGENTS_MD_TARGETS: tuple[Path, ...] = (
+    Path(".agents/AGENTS.md"),
+    Path(".claude/CLAUDE.md"),
+    Path(".copilot/copilot-instructions.md"),
+)
+SKILLS_TARGET_DIRS: tuple[Path, ...] = (
+    Path(".agents/skills"),
+    Path(".claude/skills"),
+    Path(".copilot/skills"),
+)
+OPENCODE_JSON_TARGET = Path(".config/opencode/opencode.json")
+OPENCODE_SDD_PROMPTS_TARGET_DIR = Path(".config/opencode/prompts/sdd")
 
 
 def test_uninstall_removes_agents_md_targets(

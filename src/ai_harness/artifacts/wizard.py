@@ -15,7 +15,7 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.keys import Keys
 from prompt_toolkit.styles import Style
 from questionary.constants import INDICATOR_SELECTED
-from questionary.prompts.common import InquirerControl, Separator, create_inquirer_layout
+from questionary.prompts.common import InquirerControl, create_inquirer_layout
 from questionary.question import Question
 from questionary.styles import merge_styles_default
 
@@ -83,8 +83,8 @@ class MarkerOnlyControl(InquirerControl):
 def _checkbox_bindings(ic: InquirerControl) -> KeyBindings:
     """Build key bindings for a checkbox prompt over *ic*.
 
-    Clones questionary's checkbox defaults (abort, toggle, invert, select
-    all, arrow/j-k/emacs movement, confirm, catch-all) and adds an eager
+    Clones questionary's checkbox defaults (abort, toggle, arrow/j-k/emacs
+    movement, confirm, catch-all) and adds an eager
     ``Keys.Escape`` binding that exits the application with ``result=None``
     so the ``None`` → ``Cancelled()`` translation in :func:`_run_checkbox`
     fires.  questionary's own ``checkbox()`` builds bindings internally and
@@ -114,30 +114,6 @@ def _checkbox_bindings(ic: InquirerControl) -> KeyBindings:
             ic.selected_options.remove(pointed_choice)
         else:
             ic.selected_options.append(pointed_choice)
-
-    @bindings.add("i", eager=True)
-    def _invert(_event: object) -> None:
-        ic.selected_options = [
-            c.value
-            for c in ic.choices
-            if not isinstance(c, Separator)
-            and c.value not in ic.selected_options
-            and not c.disabled
-        ]
-
-    @bindings.add("a", eager=True)
-    def _select_all(_event: object) -> None:
-        all_selected = True
-        for c in ic.choices:
-            if (
-                not isinstance(c, Separator)
-                and c.value not in ic.selected_options
-                and not c.disabled
-            ):
-                ic.selected_options.append(c.value)
-                all_selected = False
-        if all_selected:
-            ic.selected_options = []
 
     def _move_down(_event: object) -> None:
         ic.select_next()

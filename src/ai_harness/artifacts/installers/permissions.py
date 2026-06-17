@@ -4,12 +4,11 @@ Deep-merges subagent tool allow-rules into ``~/.claude/settings.json``
 ``permissions.allow`` on install, removes them on uninstall, with
 idempotency, marker tracking, and safe fallback heuristics.
 
-Public surface (3 functions):
-  install_permissions    — full install recipe (resolve, backup, compute, merge)
-  uninstall_permissions  — full uninstall recipe (resolve, remove)
-  compute_required_rules — pure function: parse frontmatter, map tools, dedup
+Public surface:
+  install_permissions_from_tools — full install recipe from metadata tool lists
+  uninstall_permissions          — full uninstall recipe (resolve, remove)
 
-Private helpers (4 functions, module-internal):
+Private helpers (module-internal):
   _resolve_settings_path — CLAUDE_CONFIG_DIR or ~/.claude/settings.json
   _backup_settings       — copy-once backup with .ai-harness-backup suffix
   _merge_allow_rules     — deep-merge missing rules + write marker
@@ -20,7 +19,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from pathlib import Path
 
 _logger = logging.getLogger(__name__)
@@ -40,61 +38,7 @@ TOOL_TO_RULE: dict[str, str] = {
 # The five rule names the installer always manages (ADR-4 fallback).
 _MANAGED_RULE_NAMES: set[str] = {"Bash", "Read", "Edit", "Write", "Agent"}
 
-# ── Private helpers ───────────────────────────────────────────────────────────
-
-
-def _parse_frontmatter_tools(path: Path) -> list[str]:
-    """Extract the ``tools:`` list from a Markdown file's YAML frontmatter.
-
-    Handles both YAML flow sequences ``[A, B]`` and scalar values ``A``.
-    Returns an empty list when no ``tools:`` field is present.
-
-    Raises :exc:`ValueError` when the frontmatter is malformed.
-    """
-    text = path.read_text(encoding="utf-8")
-
-    # Frontmatter is the block between the first two ``---`` lines.
-    if not text.startswith("---"):
-        raise ValueError(f"No YAML frontmatter in {path}")
-
-    parts = text.split("---", 2)
-    if len(parts) < 3:
-        raise ValueError(f"Unclosed YAML frontmatter in {path}")
-
-    frontmatter = parts[1]
-
-    match = re.search(r"^tools:\s*(.+)$", frontmatter, re.MULTILINE)
-    if not match:
-        return []  # no tools field — valid, just empty
-
-    value = match.group(1).strip()
-
-    # YAML flow sequence:  [Read, Edit, Write, Bash]
-    if value.startswith("[") and value.endswith("]"):
-        inner = value[1:-1].strip()
-        if not inner:
-            return []
-        return [item.strip() for item in inner.split(",")]
-
-    # Scalar value
-    return [value]
-
-
 # ── Public surface ────────────────────────────────────────────────────────────
-
-
-def compute_required_rules(subagent_paths: list[Path]) -> set[str]:
-    """Parse every sub-agent frontmatter, map tools to rules, return deduplicated union.
-
-    Pure function — no I/O beyond reading the supplied paths.
-    """
-    rules: set[str] = set()
-    for path in subagent_paths:
-        tools = _parse_frontmatter_tools(path)
-        for tool in tools:
-            rule = TOOL_TO_RULE.get(tool, tool)
-            rules.add(rule)
-    return rules
 
 
 def install_permissions_from_tools(tool_lists: list[list[str]]) -> set[str]:
@@ -188,26 +132,6 @@ def _merge_allow_rules(
         json.dumps(sorted(rules), indent=2) + "\n", encoding="utf-8"
     )
     return added
-
-
-def install_permissions(subagent_paths: list[Path]) -> set[str]:
-    """Full install sequence (5-step recipe).
-
-    1. Resolve ``settings.json`` path (honouring ``CLAUDE_CONFIG_DIR``).
-    2. Back it up (no-op if backup already exists).
-    3. Compute the required permission rules from sub-agent frontmatters.
-    4. Deep-merge missing rules into ``permissions.allow``.
-    5. Write the marker file.
-
-    Returns the set of rules actually added (empty on idempotent reinstall).
-    """
-    settings_path = _resolve_settings_path()
-    _backup_settings(settings_path)
-    rules = compute_required_rules(subagent_paths)
-    if not rules:
-        return set()
-    marker_path = settings_path.parent / ".ai-harness-managed-allow.json"
-    return _merge_allow_rules(settings_path, rules, marker_path)
 
 
 def _remove_managed_rules(

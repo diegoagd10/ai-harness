@@ -146,3 +146,5 @@ Markdown: on-disk MUST equal `frontmatter_rstrip + "\n---\n" + body_bytes`. JSON
 
 - GIVEN `catalog.py`
 - THEN `OPENCODE_JSON_SRC` undefined
+</content>
+</invoke>

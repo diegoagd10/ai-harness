@@ -20,12 +20,12 @@ import json
 import os
 from pathlib import Path
 
+from ai_harness.artifacts.installers.copilot import _build_hook_json
+
 from . import harness
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 RESOURCES_DIR = REPO_ROOT / "src" / "ai_harness" / "resources"
-COPILOT_AGENTS_SRC = RESOURCES_DIR / "generated" / "copilot-cli" / "agents"
-COPILOT_HOOKS_SRC = RESOURCES_DIR / "generated" / "copilot-cli" / "hooks" / "sdd-pre-tool-use.json"
 SKILLS_SRC = RESOURCES_DIR / "skills"
 
 # ------------------------------------------------------------------ constants ---
@@ -48,10 +48,6 @@ _ALL_SUBAGENT_NAMES: tuple[str, ...] = (
 ) + _SDD_PHASE_NAMES + _JD_AGENT_NAMES + _REVIEWER_AGENT_NAMES
 
 assert len(_ALL_SUBAGENT_NAMES) == 16, f"expected 16 agents, got {len(_ALL_SUBAGENT_NAMES)}"
-
-# 15 allow-listed names: all 16 minus the orchestrator (15).
-_TASK_ALLOWLIST: tuple[str, ...] = _SDD_PHASE_NAMES + _JD_AGENT_NAMES + _REVIEWER_AGENT_NAMES
-assert len(_TASK_ALLOWLIST) == 15, f"expected 15, got {len(_TASK_ALLOWLIST)}"
 
 _HOOK_RELATIVE: Path = Path(".copilot/hooks/sdd-pre-tool-use.json")
 _AGENTS_TARGET_DIR: Path = Path(".copilot/agents")
@@ -152,7 +148,11 @@ def _assert_agent_frontmatter(home: str, label: str) -> None:
 
 
 def _assert_hook_installed(home: str, label: str) -> None:
-    """Assert sdd-pre-tool-use.json exists and passes structural checks."""
+    """Assert sdd-pre-tool-use.json matches the production-composed hook.
+
+    Expected content is self-composed from the production ``_build_hook_json``
+    (single source of truth) — no build-time fixture tree.
+    """
     hook = Path(home) / _HOOK_RELATIVE
     if not hook.is_file():
         raise AssertionError(f"{label}: hook file missing — {hook}")
@@ -162,48 +162,10 @@ def _assert_hook_installed(home: str, label: str) -> None:
     except json.JSONDecodeError as exc:
         raise AssertionError(f"{label}: hook file is not valid JSON") from exc
 
-    if doc.get("version") != 1:
+    expected = _build_hook_json()
+    if doc != expected:
         raise AssertionError(
-            f"{label}: hook version != 1 — got {doc.get('version')!r}"
-        )
-
-    pre_tool_use = doc.get("preToolUse")
-    if not isinstance(pre_tool_use, list):
-        raise AssertionError(
-            f"{label}: preToolUse is not a list"
-        )
-
-    task_matcher = None
-    for m in pre_tool_use:
-        if not isinstance(m, dict):
-            continue
-        if m.get("toolName") == "task":
-            task_matcher = m
-            break
-
-    if task_matcher is None:
-        raise AssertionError(
-            f"{label}: no preToolUse matcher for 'task' tool"
-        )
-
-    if not task_matcher.get("deny", False) and task_matcher.get("default") != "deny":
-        raise AssertionError(
-            f"{label}: 'task' matcher is not fail-closed (expected deny/default=deny)"
-        )
-
-    allowlist = task_matcher.get("allow") or task_matcher.get("agents")
-    if not isinstance(allowlist, list):
-        raise AssertionError(
-            f"{label}: 'task' matcher missing allowlist"
-        )
-
-    allowed_names = set(allowlist)
-    expected = set(_TASK_ALLOWLIST)
-    if allowed_names != expected:
-        raise AssertionError(
-            f"{label}: allowlist mismatch\n"
-            f"  missing: {sorted(expected - allowed_names)}\n"
-            f"  extra:   {sorted(allowed_names - expected)}"
+            f"{label}: installed hook does not match production _build_hook_json()"
         )
 
     print(f"  PASS: hook JSON validated ({label})")

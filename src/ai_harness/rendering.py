@@ -58,7 +58,11 @@ def render_dispatcher(status: Status) -> str:
             lines.append(f"- {reason}")
 
     # Section 3: next-phase instructions (conditional, concrete phases only)
-    phase = _phase_with_instructions(status.next_recommended)
+    phase = (
+        status.next_recommended
+        if status.next_recommended in _PHASES_WITH_INSTRUCTIONS
+        else None
+    )
     if phase is not None:
         lines.append("")
         lines.append(f"### Next Phase Instructions: {phase}")
@@ -72,16 +76,6 @@ def render_dispatcher(status: Status) -> str:
     lines.append(compat.status_to_json(status))
     lines.append("```")
     return "\n".join(lines)
-
-
-def _phase_with_instructions(next_recommended: str) -> str | None:
-    """Return the phase name when next_recommended has renderable instructions.
-
-    Only the three concrete phases qualify; sentinels return None.
-    """
-    if next_recommended in _PHASES_WITH_INSTRUCTIONS:
-        return next_recommended
-    return None
 
 
 def _instructions_for_phase(status: Status, phase: str) -> list[str]:
