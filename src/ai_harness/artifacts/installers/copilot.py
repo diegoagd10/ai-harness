@@ -25,7 +25,7 @@ from ai_harness.artifacts.installer import (
 from ai_harness.artifacts.installer import (
     uninstall as generic_uninstall,
 )
-from ai_harness.artifacts.installers.frontmatter import metadata_to_frontmatter
+from ai_harness.artifacts.installers.frontmatter import copilot_frontmatter
 from ai_harness.artifacts.manifest import (
     ArtifactManifest,
     ComposedFileArtifact,
@@ -89,6 +89,11 @@ _ALL_AGENT_IDS: list[str] = list(_PHASE_NAMES) + list(_INLINE_AGENTS)
 # 15 subagent names (all except orchestrator) for task allowlist
 _SUBAGENT_NAMES: list[str] = [n for n in _ALL_AGENT_IDS if n != "sdd-orchestrator"]
 
+# Model strings sourced from https://docs.github.com/en/copilot/reference/ai-models/supported-models
+# (display names as shown on the page; quarterly audit against the page is
+# the single source of truth).
+_SUBAGENT_MODEL: str = "Claude Haiku 4.5"
+
 # ── metadata ─────────────────────────────────────────────────────────────────
 
 # Per-agent frontmatter metadata (Copilot tool names).
@@ -97,87 +102,105 @@ _METADATA: dict[str, dict[str, object]] = {
     "sdd-orchestrator": {
         "name": "sdd-orchestrator",
         "description": "SDD Orchestrator — coordinates sub-agents, never does work inline",
-        "tools": ["Task", "Bash", "Edit", "View", "Create", "Glob", "Grep", "Read"],
+        "tools": ["agent", "Bash", "Edit", "View", "Create", "Glob", "Grep", "Read"],
+        "model": "GPT-5 mini",
+        "user-invocable": True,
+        "agents": sorted(_SUBAGENT_NAMES),
     },
     "sdd-explore": {
         "name": "sdd-explore",
         "description": "SDD Explore — explores the codebase to build understanding for design decisions",
         "tools": ["Bash", "Edit", "View", "Create", "Glob", "Grep", "Read", "Task"],
+        "model": _SUBAGENT_MODEL,
     },
     "sdd-propose": {
         "name": "sdd-propose",
         "description": "SDD Propose — drafts architectural proposals from exploration findings",
         "tools": ["Bash", "Edit", "View", "Create", "Glob", "Grep", "Read", "Task"],
+        "model": _SUBAGENT_MODEL,
     },
     "sdd-spec": {
         "name": "sdd-spec",
         "description": "SDD Spec — writes formal specification scenarios",
         "tools": ["Bash", "Edit", "View", "Create", "Glob", "Grep", "Read", "Task"],
+        "model": _SUBAGENT_MODEL,
     },
     "sdd-design": {
         "name": "sdd-design",
         "description": "SDD Design — produces architecture and design documents",
         "tools": ["Bash", "Edit", "View", "Create", "Glob", "Grep", "Read", "Task"],
+        "model": _SUBAGENT_MODEL,
     },
     "sdd-tasks": {
         "name": "sdd-tasks",
         "description": "SDD Tasks — generates implementation task checklists",
         "tools": ["Bash", "Edit", "View", "Create", "Glob", "Grep", "Read", "Task"],
+        "model": _SUBAGENT_MODEL,
     },
     "sdd-apply": {
         "name": "sdd-apply",
         "description": "SDD Apply — implements tasks from the checklist",
         "tools": ["Bash", "Edit", "View", "Create", "Glob", "Grep", "Read", "Task"],
+        "model": _SUBAGENT_MODEL,
     },
     "sdd-verify": {
         "name": "sdd-verify",
         "description": "SDD Verify — validates implementation against specs",
         "tools": ["Bash", "Edit", "View", "Create", "Glob", "Grep", "Read", "Task"],
+        "model": _SUBAGENT_MODEL,
     },
     "sdd-archive": {
         "name": "sdd-archive",
         "description": "SDD Archive — finalizes and archives completed changes",
         "tools": ["Bash", "Edit", "View", "Create", "Glob", "Grep", "Read", "Task"],
+        "model": _SUBAGENT_MODEL,
     },
     # Seven inline JD/reviewer agents
     "jd-fix-agent": {
         "name": "jd-fix-agent",
         "description": "Surgical fix agent for judgment-day protocol",
         "tools": ["Bash", "Edit", "View", "Create", "Task"],
+        "model": _SUBAGENT_MODEL,
     },
     "jd-judge-a": {
         "name": "jd-judge-a",
         "description": "Adversarial code reviewer — blind judge A for judgment-day protocol",
         "tools": ["View", "Bash", "Glob", "Grep", "Task"],
+        "model": _SUBAGENT_MODEL,
     },
     "jd-judge-b": {
         "name": "jd-judge-b",
         "description": "Adversarial code reviewer — blind judge B for judgment-day protocol",
         "tools": ["View", "Bash", "Glob", "Grep", "Task"],
+        "model": _SUBAGENT_MODEL,
     },
     "review-risk": {
         "name": "review-risk",
         "description": "R1 Risk reviewer — security, privilege boundaries, "
         "data exposure, dependency risks, and merge-blocking vulnerabilities",
         "tools": ["View", "Bash", "Glob", "Grep", "Task"],
+        "model": _SUBAGENT_MODEL,
     },
     "review-readability": {
         "name": "review-readability",
         "description": "R2 Readability reviewer — naming, complexity, intention, "
         "maintainability, review size, and context clarity",
         "tools": ["View", "Bash", "Glob", "Grep", "Task"],
+        "model": _SUBAGENT_MODEL,
     },
     "review-reliability": {
         "name": "review-reliability",
         "description": "R3 Reliability reviewer — behavior-first tests, coverage value, "
         "edge cases, determinism, contracts, and regressions",
         "tools": ["View", "Bash", "Glob", "Grep", "Task"],
+        "model": _SUBAGENT_MODEL,
     },
     "review-resilience": {
         "name": "review-resilience",
         "description": "R4 Resilience reviewer — fallbacks, retry/backoff, "
         "graceful degradation, observability, load, rollback, and SLO risks",
         "tools": ["View", "Bash", "Glob", "Grep", "Task"],
+        "model": _SUBAGENT_MODEL,
     },
 }
 
@@ -287,12 +310,12 @@ class CopilotInstaller:
         # SDD-phase + orchestrator agents — composed (metadata frontmatter + body).
         for name in _PHASE_NAMES:
             metadata = _METADATA[name]
-            fm_text = metadata_to_frontmatter(metadata)
+            fm_text = copilot_frontmatter(metadata)
             composed.append(
                 ComposedFileArtifact(
                     frontmatter_text=fm_text,
                     body_source=assets.prompts_dir / f"{name}.md",
-                    target_relative=Path(".copilot/agents") / f"{name}.md",
+                    target_relative=Path(".copilot/agents") / f"{name}.agent.md",
                 )
             )
 
@@ -301,12 +324,12 @@ class CopilotInstaller:
             namespace = "jd" if name.startswith("jd-") else "review"
             prompts_subdir = assets.jd_prompts_dir if namespace == "jd" else assets.review_prompts_dir
             metadata = _METADATA[name]
-            fm_text = metadata_to_frontmatter(metadata)
+            fm_text = copilot_frontmatter(metadata)
             composed.append(
                 ComposedFileArtifact(
                     frontmatter_text=fm_text,
                     body_source=prompts_subdir / f"{name}.md",
-                    target_relative=Path(".copilot/agents") / f"{name}.md",
+                    target_relative=Path(".copilot/agents") / f"{name}.agent.md",
                 )
             )
 

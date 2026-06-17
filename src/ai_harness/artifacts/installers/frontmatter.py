@@ -24,13 +24,9 @@ def metadata_to_frontmatter(m: dict[str, object]) -> str:
         model: opus   # only when "model" is present in *m*
         ---
 
-    *tools* may be a list (rendered as a flow sequence) or a scalar.
+    *tools* is a list of tool names (rendered as a flow sequence).
     """
-    tools = m["tools"]
-    if isinstance(tools, list):
-        tools_yaml = ", ".join(str(t) for t in tools)
-    else:
-        tools_yaml = str(tools)
+    tools_yaml = ", ".join(str(t) for t in m["tools"])
 
     lines = [
         "---",
@@ -40,5 +36,37 @@ def metadata_to_frontmatter(m: dict[str, object]) -> str:
     ]
     if "model" in m:
         lines.append(f"model: {m['model']}")
+    lines.append("---")
+    return "\n".join(lines)
+
+
+def copilot_frontmatter(m: dict[str, object]) -> str:
+    """Serialize a ``_METADATA`` entry to Copilot custom-agent YAML frontmatter.
+
+    Emits 7 unconditional keys in fixed order: name, description, tools,
+    target, user-invocable, disable-model-invocation, model.
+
+    Conditionally emits an 8th key ``agents:`` ONLY when ``m["agents"]`` is
+    truthy.  ``target`` and ``disable-model-invocation`` are constants
+    absorbed by the serializer — callers never pass them.
+
+    Copilot docs (``agents`` field):
+    https://code.visualstudio.com/docs/copilot/customization/custom-agents
+    """
+    tools_yaml = ", ".join(str(t) for t in m["tools"])
+
+    lines = [
+        "---",
+        f"name: {m['name']}",
+        f"description: {m['description']}",
+        f"tools: [{tools_yaml}]",
+        "target: github-copilot",
+        f"user-invocable: {'true' if m.get('user-invocable') else 'false'}",
+        "disable-model-invocation: true",
+    ]
+    if "model" in m:
+        lines.append(f"model: {m['model']}")
+    if m.get("agents"):
+        lines.append("agents: [" + ", ".join(map(str, m["agents"])) + "]")
     lines.append("---")
     return "\n".join(lines)
