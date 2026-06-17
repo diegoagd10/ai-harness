@@ -16,8 +16,10 @@ RESOURCES_DIR = Path(__file__).resolve().parent.parent / "resources"
 
 AGENTS_MD_SRC = RESOURCES_DIR / "AGENTS.md"
 SKILLS_SRC = RESOURCES_DIR / "skills"
-OPENCODE_JSON_SRC = RESOURCES_DIR / "agent-clis" / "opencode" / "opencode.json"
 OPENCODE_SDD_PROMPTS_SRC = RESOURCES_DIR / "prompts" / "sdd"
+JD_PROMPTS_SRC = RESOURCES_DIR / "prompts" / "jd"
+REVIEW_PROMPTS_SRC = RESOURCES_DIR / "prompts" / "review"
+ORCHESTRATOR_PROMPTS_SRC = RESOURCES_DIR / "prompts" / "orchestrator"
 
 AGENTS_MD_TARGETS: tuple[Path, ...] = (
     Path(".agents/AGENTS.md"),

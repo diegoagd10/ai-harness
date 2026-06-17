@@ -97,6 +97,30 @@ def compute_required_rules(subagent_paths: list[Path]) -> set[str]:
     return rules
 
 
+def install_permissions_from_tools(tool_lists: list[list[str]]) -> set[str]:
+    """Full install sequence using metadata tool lists instead of file parsing.
+
+    1. Resolve ``settings.json`` path (honouring ``CLAUDE_CONFIG_DIR``).
+    2. Back it up (no-op if backup already exists).
+    3. Compute required rules from the supplied tool lists.
+    4. Deep-merge missing rules into ``permissions.allow``.
+    5. Write the marker file.
+
+    Returns the set of rules actually added (empty on idempotent reinstall).
+    """
+    rules: set[str] = set()
+    for tools in tool_lists:
+        for tool in tools:
+            rule = TOOL_TO_RULE.get(tool, tool)
+            rules.add(rule)
+    if not rules:
+        return set()
+    settings_path = _resolve_settings_path()
+    _backup_settings(settings_path)
+    marker_path = settings_path.parent / ".ai-harness-managed-allow.json"
+    return _merge_allow_rules(settings_path, rules, marker_path)
+
+
 # ── Stubs for remaining functions (filled in tasks 2.2–2.7) ───────────────────
 
 

@@ -1,13 +1,14 @@
 """CopilotInstaller — builds a manifest for GitHub Copilot CLI artifacts.
 
 Covers: AGENTS.md → .copilot/copilot-instructions.md, 16 agent files
-(9 composed SDD-phase + orchestrator, 7 inline JD/reviewer) under
-.copilot/agents/, hook JSON under .copilot/hooks/, and skills under
-.copilot/skills/.
+(9 composed SDD-phase + orchestrator, 7 composed inline JD/reviewer with
+embedded metadata) under .copilot/agents/, hook JSON built in code under
+.copilot/hooks/, and skills under .copilot/skills/.
 """
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -28,9 +29,7 @@ from ai_harness.artifacts.manifest import (
 )
 
 # Nine SDD phases (including orchestrator) whose Copilot agent files are
-# composed at install time from a frontmatter source (agent-clis/copilot-cli
-# /agents/<phase>.md) and a body source (prompts/sdd/<phase>.md), joined
-# with ``---``.
+# composed at install time from embedded metadata + body from prompts/sdd/.
 _PHASE_NAMES: tuple[str, ...] = (
     "sdd-orchestrator",
     "sdd-explore",
@@ -43,8 +42,8 @@ _PHASE_NAMES: tuple[str, ...] = (
     "sdd-archive",
 )
 
-# Seven inline Copilot subagents that are copied verbatim (their complete
-# Markdown body lives in the resource file itself — no composition needed).
+# Seven inline Copilot subagents whose frontmatter is embedded as metadata
+# and whose body comes from canonical prompt files under prompts/<ns>/.
 _INLINE_AGENTS: tuple[str, ...] = (
     "jd-fix-agent",
     "jd-judge-a",
@@ -59,14 +58,186 @@ _INLINE_AGENTS: tuple[str, ...] = (
 # separator + body). Enforced at manifest-build time.
 _MAX_COMPOSED_CHARS: int = 30_000
 
+# ── deny paths — shared between Copilot hook JSON and OpenCode permission ────
+
+_DENY_PATHS: list[str] = [
+    "~/.ssh/**", "~/.aws/**", "~/.gnupg/**",
+    "~/.zshrc", "~/.bashrc", "~/.bash_history", "~/.zsh_history",
+    "~/.netrc", "~/.config/gh/**", "~/.docker/config.json",
+    "/tmp/**", "/etc/**", "/proc/**", "/sys/**", "/var/**",
+]
+
+# All 16 agent ids for hook allowlist
+_ALL_AGENT_IDS: list[str] = list(_PHASE_NAMES) + list(_INLINE_AGENTS)
+
+# 15 subagent names (all except orchestrator) for task allowlist
+_SUBAGENT_NAMES: list[str] = [n for n in _ALL_AGENT_IDS if n != "sdd-orchestrator"]
+
+# ── metadata ─────────────────────────────────────────────────────────────────
+
+# Per-agent frontmatter metadata (Copilot tool names).
+_METADATA: dict[str, dict[str, object]] = {
+    # Nine SDD phase + orchestrator
+    "sdd-orchestrator": {
+        "name": "sdd-orchestrator",
+        "description": "SDD Orchestrator — coordinates sub-agents, never does work inline",
+        "tools": ["Task", "Bash", "Edit", "View", "Create", "Glob", "Grep", "Read"],
+    },
+    "sdd-explore": {
+        "name": "sdd-explore",
+        "description": "SDD Explore — explores the codebase to build understanding for design decisions",
+        "tools": ["Bash", "Edit", "View", "Create", "Glob", "Grep", "Read", "Task"],
+    },
+    "sdd-propose": {
+        "name": "sdd-propose",
+        "description": "SDD Propose — drafts architectural proposals from exploration findings",
+        "tools": ["Bash", "Edit", "View", "Create", "Glob", "Grep", "Read", "Task"],
+    },
+    "sdd-spec": {
+        "name": "sdd-spec",
+        "description": "SDD Spec — writes formal specification scenarios",
+        "tools": ["Bash", "Edit", "View", "Create", "Glob", "Grep", "Read", "Task"],
+    },
+    "sdd-design": {
+        "name": "sdd-design",
+        "description": "SDD Design — produces architecture and design documents",
+        "tools": ["Bash", "Edit", "View", "Create", "Glob", "Grep", "Read", "Task"],
+    },
+    "sdd-tasks": {
+        "name": "sdd-tasks",
+        "description": "SDD Tasks — generates implementation task checklists",
+        "tools": ["Bash", "Edit", "View", "Create", "Glob", "Grep", "Read", "Task"],
+    },
+    "sdd-apply": {
+        "name": "sdd-apply",
+        "description": "SDD Apply — implements tasks from the checklist",
+        "tools": ["Bash", "Edit", "View", "Create", "Glob", "Grep", "Read", "Task"],
+    },
+    "sdd-verify": {
+        "name": "sdd-verify",
+        "description": "SDD Verify — validates implementation against specs",
+        "tools": ["Bash", "Edit", "View", "Create", "Glob", "Grep", "Read", "Task"],
+    },
+    "sdd-archive": {
+        "name": "sdd-archive",
+        "description": "SDD Archive — finalizes and archives completed changes",
+        "tools": ["Bash", "Edit", "View", "Create", "Glob", "Grep", "Read", "Task"],
+    },
+    # Seven inline JD/reviewer agents
+    "jd-fix-agent": {
+        "name": "jd-fix-agent",
+        "description": "Surgical fix agent for judgment-day protocol",
+        "tools": ["Bash", "Edit", "View", "Create", "Task"],
+    },
+    "jd-judge-a": {
+        "name": "jd-judge-a",
+        "description": "Adversarial code reviewer — blind judge A for judgment-day protocol",
+        "tools": ["View", "Bash", "Glob", "Grep", "Task"],
+    },
+    "jd-judge-b": {
+        "name": "jd-judge-b",
+        "description": "Adversarial code reviewer — blind judge B for judgment-day protocol",
+        "tools": ["View", "Bash", "Glob", "Grep", "Task"],
+    },
+    "review-risk": {
+        "name": "review-risk",
+        "description": "R1 Risk reviewer — security, privilege boundaries, data exposure, dependency risks, and merge-blocking vulnerabilities",
+        "tools": ["View", "Bash", "Glob", "Grep", "Task"],
+    },
+    "review-readability": {
+        "name": "review-readability",
+        "description": "R2 Readability reviewer — naming, complexity, intention, maintainability, review size, and context clarity",
+        "tools": ["View", "Bash", "Glob", "Grep", "Task"],
+    },
+    "review-reliability": {
+        "name": "review-reliability",
+        "description": "R3 Reliability reviewer — behavior-first tests, coverage value, edge cases, determinism, contracts, and regressions",
+        "tools": ["View", "Bash", "Glob", "Grep", "Task"],
+    },
+    "review-resilience": {
+        "name": "review-resilience",
+        "description": "R4 Resilience reviewer — fallbacks, retry/backoff, graceful degradation, observability, load, rollback, and SLO risks",
+        "tools": ["View", "Bash", "Glob", "Grep", "Task"],
+    },
+}
+
+
+def _metadata_to_frontmatter(m: dict[str, object]) -> str:
+    """Serialize a _METADATA entry to YAML frontmatter text."""
+    tools_list = m["tools"]
+    if isinstance(tools_list, list):
+        tools_yaml = ", ".join(str(t) for t in tools_list)
+    else:
+        tools_yaml = str(tools_list)
+    return (
+        f"---\n"
+        f"name: {m['name']}\n"
+        f"description: {m['description']}\n"
+        f"tools: [{tools_yaml}]\n"
+        f"---"
+    )
+
+
+def _build_hook_json() -> dict[str, object]:
+    """Build the sdd-pre-tool-use.json hook dict entirely in code.
+
+    Returns a deterministic dict ready for json.dumps().  Contains:
+      - version 1
+      - preToolUse with a task matcher (default deny, allow 15 subagent names)
+      - 5 write tools (Bash, Edit, View, Write, Create) each with
+        deny.paths matching _DENY_PATHS
+    """
+    hook: dict[str, object] = {
+        "version": 1,
+        "preToolUse": [
+            {
+                "toolName": "task",
+                "default": "deny",
+                "allow": sorted(_SUBAGENT_NAMES),
+                "description": "Allow only 15 SDD sub-agent names",
+            },
+            {
+                "toolName": "bash",
+                "default": "allow",
+                "deny": {"paths": list(_DENY_PATHS)},
+                "description": "Deny sensitive paths for bash",
+            },
+            {
+                "toolName": "edit",
+                "default": "allow",
+                "deny": {"paths": list(_DENY_PATHS)},
+                "description": "Deny sensitive paths for edit",
+            },
+            {
+                "toolName": "view",
+                "default": "allow",
+                "deny": {"paths": list(_DENY_PATHS)},
+                "description": "Deny sensitive paths for view",
+            },
+            {
+                "toolName": "write",
+                "default": "allow",
+                "deny": {"paths": list(_DENY_PATHS)},
+                "description": "Deny sensitive paths for write",
+            },
+            {
+                "toolName": "create",
+                "default": "allow",
+                "deny": {"paths": list(_DENY_PATHS)},
+                "description": "Deny sensitive paths for create",
+            },
+        ],
+    }
+    return hook
+
 
 @dataclass(frozen=True)
 class CopilotAssets:
     """Paths the CopilotInstaller composes from the catalog."""
 
-    agents_dir: Path
     prompts_dir: Path
-    hooks_dir: Path
+    jd_prompts_dir: Path
+    review_prompts_dir: Path
 
 
 class CopilotInstaller:
@@ -76,9 +247,13 @@ class CopilotInstaller:
         self._catalog = catalog
 
     def install(self, home: Path, console: Console) -> InstallResult:
-        """Build manifest from catalog and invoke generic installer."""
+        """Build manifest from catalog, invoke generic installer, and
+        write generated fixtures for e2e."""
         manifest = self._build_manifest(home)
-        return generic_install(manifest, home, console)
+        result = generic_install(manifest, home, console)
+        if result.success:
+            self._write_fixtures(manifest, home, console)
+        return result
 
     def uninstall(self, home: Path, console: Console) -> UninstallResult:
         """Build manifest and invoke generic uninstall."""
@@ -88,17 +263,13 @@ class CopilotInstaller:
     def _build_manifest(self, home: Path) -> ArtifactManifest:
         """Build the full artifact manifest for Copilot CLI.
 
-        Validates every agent's frontmatter (YAML with name/description/tools)
-        and enforces the 30 000-character budget on composed agents.
+        Validates every agent's frontmatter and enforces the
+        30 000-character budget on composed agents.
         """
         assets = CopilotAssets(
-            agents_dir=self._catalog.get_resource_dir(
-                Path("agent-clis/copilot-cli/agents")
-            ),
             prompts_dir=self._catalog.get_resource_dir(Path("prompts/sdd")),
-            hooks_dir=self._catalog.get_resource_dir(
-                Path("agent-clis/copilot-cli/hooks")
-            ),
+            jd_prompts_dir=self._catalog.get_resource_dir(Path("prompts/jd")),
+            review_prompts_dir=self._catalog.get_resource_dir(Path("prompts/review")),
         )
 
         instructions_src = self._catalog.get_main_instructions()
@@ -113,34 +284,47 @@ class CopilotInstaller:
             )
         )
 
-        # SDD-phase + orchestrator agents — composed (frontmatter + body).
+        # SDD-phase + orchestrator agents — composed (metadata frontmatter + body).
         for name in _PHASE_NAMES:
+            metadata = _METADATA[name]
+            fm_text = _metadata_to_frontmatter(metadata)
             composed.append(
                 ComposedFileArtifact(
-                    frontmatter_source=assets.agents_dir / f"{name}.md",
+                    frontmatter_text=fm_text,
                     body_source=assets.prompts_dir / f"{name}.md",
                     target_relative=Path(".copilot/agents") / f"{name}.md",
                 )
             )
 
-        # Inline subagents — verbatim copies.
+        # Inline JD/reviewer agents — composed with embedded metadata.
         for name in _INLINE_AGENTS:
-            files.append(
-                FileArtifact(
-                    source=assets.agents_dir / f"{name}.md",
+            namespace = "jd" if name.startswith("jd-") else "review"
+            prompts_subdir = (
+                assets.jd_prompts_dir if namespace == "jd"
+                else assets.review_prompts_dir
+            )
+            metadata = _METADATA[name]
+            fm_text = _metadata_to_frontmatter(metadata)
+            composed.append(
+                ComposedFileArtifact(
+                    frontmatter_text=fm_text,
+                    body_source=prompts_subdir / f"{name}.md",
                     target_relative=Path(".copilot/agents") / f"{name}.md",
                 )
             )
 
-        # Hook JSON — verbatim copy.
-        hook_src = assets.hooks_dir / "sdd-pre-tool-use.json"
-        if hook_src.is_file():
-            files.append(
-                FileArtifact(
-                    source=hook_src,
-                    target_relative=Path(".copilot/hooks/sdd-pre-tool-use.json"),
-                )
+        # Hook JSON — built from code, written to temp file for install.
+        hook_dict = _build_hook_json()
+        hook_json = json.dumps(hook_dict, indent=2) + "\n"
+        home.mkdir(parents=True, exist_ok=True)
+        tmp_hook = home / ".ai-harness-copilot-hook-tmp.json"
+        tmp_hook.write_text(hook_json, encoding="utf-8")
+        files.append(
+            FileArtifact(
+                source=tmp_hook,
+                target_relative=Path(".copilot/hooks/sdd-pre-tool-use.json"),
             )
+        )
 
         dirs: list[DirArtifact] = []
         # Skills → .copilot/skills/
@@ -155,69 +339,79 @@ class CopilotInstaller:
 
         # --- frontmatter + budget validation --------------------------------
         for artifact in composed:
-            self._validate_agent_frontmatter(artifact.frontmatter_source)
             self._validate_composed_budget(artifact)
-
-        for artifact in files:
-            target_name = str(artifact.target_relative)
-            if target_name.startswith(".copilot/agents/") and target_name.endswith(
-                ".md"
-            ):
-                self._validate_agent_frontmatter(artifact.source)
 
         return ArtifactManifest(files=files, dirs=dirs, composed=composed)
 
     # ------------------------------------------------------------------ validation ---
 
     @staticmethod
-    def _validate_agent_frontmatter(source: Path) -> None:
-        """Raise ``ValueError`` if *source* lacks required frontmatter keys.
-
-        Required keys: ``name``, ``description``, ``tools``.
-        """
-        import yaml  # deferred import — pyyaml is a dev dependency
-
-        content = source.read_text(encoding="utf-8")
-        if not content.startswith("---"):
-            raise ValueError(
-                f"Agent '{source.name}' missing opening frontmatter delimiter"
-            )
-
-        parts = content.split("---", 2)
-        if len(parts) < 2:
-            raise ValueError(
-                f"Agent '{source.name}' invalid frontmatter structure"
-            )
-
-        fm_text = parts[1]
-        try:
-            fm = yaml.safe_load(fm_text)
-        except yaml.YAMLError as exc:
-            raise ValueError(
-                f"Agent '{source.name}' invalid YAML frontmatter: {exc}"
-            ) from exc
-
-        if not isinstance(fm, dict):
-            raise ValueError(
-                f"Agent '{source.name}' frontmatter is not a mapping"
-            )
-
-        for key in ("name", "description", "tools"):
-            if key not in fm:
-                raise ValueError(
-                    f"Agent '{source.name}' missing required frontmatter "
-                    f"key: '{key}'"
-                )
-
-    @staticmethod
     def _validate_composed_budget(artifact: ComposedFileArtifact) -> None:
-        """Raise ``ValueError`` if the composed file exceeds the char budget."""
-        frontmatter = artifact.frontmatter_source.read_text(encoding="utf-8")
+        """Raise ``ValueError`` if the composed file exceeds the char budget.
+
+        Measures frontmatter_text directly (always present).
+        """
+        fm_text = artifact.frontmatter_text
         body = artifact.body_source.read_text(encoding="utf-8")
-        # Same join logic as installer._prepare_composed_content
-        total = len(frontmatter.rstrip("\n")) + len("\n---\n") + len(body)
+        total = len(fm_text.rstrip("\n")) + len("\n---\n") + len(body)
         if total > _MAX_COMPOSED_CHARS:
             raise ValueError(
                 f"Composed agent '{artifact.target_relative.name}' "
                 f"exceeds {_MAX_COMPOSED_CHARS} char budget: {total}"
             )
+
+    # ── generated fixtures for e2e ────────────────────────────────────────────
+
+    _GENERATED_DIR = (
+        Path(__file__).resolve().parent.parent.parent / "resources" / "generated"
+    )
+
+    @staticmethod
+    def _write_fixtures(
+        manifest: ArtifactManifest, home: Path, console: Console,
+    ) -> None:
+        """Write generated fixtures to resources/generated/copilot-cli/
+        so e2e source-path constants resolve.
+
+        Guarded by ``os.access(os.W_OK)`` — silent skip on read-only
+        source trees.
+        """
+        import os
+
+        from ai_harness.artifacts.installer import _prepare_composed_content
+
+        gen_dir = CopilotInstaller._GENERATED_DIR / "copilot-cli"
+        if not os.access(gen_dir.parent, os.W_OK):
+            return  # read-only source tree
+
+        agents_dir = gen_dir / "agents"
+        agents_dir.mkdir(parents=True, exist_ok=True)
+
+        # SDD phases (including orchestrator): write frontmatter-only
+        # Inline agents: write fully composed
+        for artifact in manifest.composed:
+            target_name = artifact.target_relative.name
+            is_phase = any(
+                target_name.startswith(p) for p in _PHASE_NAMES
+                if p in target_name
+            )
+            fixture_path = agents_dir / target_name
+            if is_phase:
+                # SDD phases: write frontmatter-only.
+                # The e2e reads this as frontmatter and composes
+                # ``frontmatter.rstrip("\n") + "\n---\n" + body`` itself.
+                content = artifact.frontmatter_text
+            else:
+                content = _prepare_composed_content(artifact, Path("/dev/null"))
+            fixture_path.write_text(content, encoding="utf-8")
+            console.print(f"Fixture written {fixture_path}")
+
+        # Hook JSON fixture
+        hooks_dir = gen_dir / "hooks"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        hook_dict = _build_hook_json()
+        hook_json = json.dumps(hook_dict, indent=2) + "\n"
+        (hooks_dir / "sdd-pre-tool-use.json").write_text(
+            hook_json, encoding="utf-8"
+        )
+        console.print(f"Fixture written {hooks_dir / 'sdd-pre-tool-use.json'}")

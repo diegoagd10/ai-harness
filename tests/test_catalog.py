@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from ai_harness.artifacts.catalog import ArtifactCatalog, Skill
 
 
@@ -57,8 +59,8 @@ def test_get_skills_ignores_files_not_directories(tmp_path: Path) -> None:
 def test_get_resource_dir_resolves_relative_path(tmp_path: Path) -> None:
     """get_resource_dir returns root / relative."""
     catalog = ArtifactCatalog(tmp_path)
-    result = catalog.get_resource_dir(Path("agent-clis/opencode"))
-    assert result == tmp_path / "agent-clis" / "opencode"
+    result = catalog.get_resource_dir(Path("prompts/sdd"))
+    assert result == tmp_path / "prompts" / "sdd"
 
 
 def test_get_skills_when_no_skills_dir(tmp_path: Path) -> None:
@@ -75,3 +77,17 @@ def test_skill_dataclass_is_frozen(tmp_path: Path) -> None:
     assert skill.name == "test"
     assert skill.source_dir == tmp_path / "skills" / "test"
     assert skill.skill_md == tmp_path / "skills" / "test" / "SKILL.md"
+
+
+# ── Phase 2.1 RED: OPENCODE_JSON_SRC absent from catalog ────────────────────
+
+
+def test_opencode_json_src_undefined() -> None:
+    """OPENCODE_JSON_SRC MUST NOT exist in catalog.py after the refactor.
+
+    Spec: "Catalog Drops OPENCODE_JSON_SRC"
+      - GIVEN catalog.py
+      - THEN OPENCODE_JSON_SRC undefined
+    """
+    with pytest.raises(ImportError):
+        from ai_harness.artifacts.catalog import OPENCODE_JSON_SRC  # noqa: F811
