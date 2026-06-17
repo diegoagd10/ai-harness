@@ -1,6 +1,8 @@
-# agent-clis-installer Specification (v3)
+# agent-clis-installer Specification (v4)
 
 ## Changelog
+
+- **2026-06-17** — `consolidate-agent-roster`: centralized identity registry (AGENT_CATALOG) replaces per-installer metadata; tools become capability-derived via 3-row TOOLS_BY_CAPABILITY maps in each adapter; e2e imports public catalog API instead of private installer symbols; Copilot jd-fix-agent gains Read/Glob/Grep. 5 requirements modified; 1 added.
 
 - **2026-06-17** — `copilot-hidden-subagents`: emit 16 `.agent.md` Copilot custom-agent files via `copilot_frontmatter()`; add `user-invocable`, `disable-model-invocation: true`, `target: github-copilot`; add per-agent `model` (orchestrator → `GPT-5 mini`; 15 subagents → `Claude Haiku 4.5`); orchestrator gets `agent` tool AND `agents:` allowlist of the 15 sub-agent names; snapshots self-compose with new serializer. 9 new requirements; 1 modified.
 - **2026-06-17** — `install-opencode-template`: split OpenCode prompt sourcing (9 `sdd-*` agents use `{file:}` refs, 7 `jd-*`/`review-*` agents inline the on-disk `.md` body); pin 7 sub-phase models; add `$schema` top-level key; extend `permission.edit: deny` to 4 `review-*` agents; drop orphan `sdd-init`/`sdd-onboard` orchestrator allowlist entries; introduce 8 new requirements (top-level structure, permission block, agent block shape, prompt sourcing, model pinning, read-only edit denial, task allowlist, snapshot test contract).
@@ -28,36 +30,35 @@ Each agent body MUST have one content-only file under `resources/prompts/` with 
 
 ### Requirement: Per-Provider Metadata
 
-Each installer MUST own `_METADATA` per agent (keys: `name`, `description`,
-`model`, `tools`, `mode`, `prompt`). OpenCode `prompt` MUST be a
-`{file:{{HOME}}/.config/opencode/prompts/<ns>/<name>.md}` template for the
-9 `sdd-*` agents and MUST be the inlined `.md` body for the 7
-`jd-*`/`review-*` agents. Claude/Copilot SHALL reference body paths.
+Installers MUST resolve the agent roster from `AGENT_CATALOG`, not from local
+dicts or dataclasses. Each installer SHALL keep only its dialect: a
+`TOOLS_BY_CAPABILITY` map (`ORCHESTRATOR`, `EDITS`, `READ_ONLY`) plus per-id
+fields that are genuinely target-specific (`model`, `description`). Tools
+SHALL be capability-derived, not per-agent.
 
-For Copilot output, the installer MUST use a dedicated
-`copilot_frontmatter(metadata)` serializer (in `frontmatter.py`) that emits
-six keys in fixed order: `name`, `description`, `tools`, `target:
-github-copilot`, `user-invocable`, `disable-model-invocation: true`. The
-shared `metadata_to_frontmatter` SHALL NOT emit these Copilot-only keys.
-(Previously: Copilot used the shared `metadata_to_frontmatter` serializer,
-which emitted only `name`, `description`, and `tools`.)
+Prompt placement remains adapter-owned: Claude SHALL preserve its two-body
+orchestrator split branched on `capability == ORCHESTRATOR`. OpenCode's
+`{file:}` vs inline split SHALL be driven by `namespace`, not per-id override.
 
-#### Scenario: Metadata separated from prompt body
+`installer.py` and `ArtifactManifest` are NOT changed.
 
-- GIVEN `OpencodeInstaller._METADATA["jd-judge-a"]`
-- THEN it has `name`, `description`, `tools`, `model`, `mode`; `prompt` is
-  the inlined body of `prompts/jd/jd-judge-a.md`
-- AND `_METADATA["sdd-orchestrator"]["prompt"]` is
-  `{file:{{HOME}}/.config/opencode/prompts/sdd/sdd-orchestrator.md}`
+(Previously: each installer owned `_METADATA` per agent with hardcoded per-agent tools,
+prompt paths, and mode/permission fields. The roster was duplicated across three modules.)
 
-#### Scenario: Copilot metadata drives copilot_frontmatter
+#### Scenario: Roster resolved from catalog; tools derived from capability
 
-- GIVEN `CopilotInstaller._METADATA["jd-judge-a"]`
-- WHEN `copilot_frontmatter(metadata)` serializes it
-- THEN the output contains exactly `name`, `description`, `tools`, `target`, `user-invocable`, `disable-model-invocation`, `model`
-- AND `target` is `github-copilot`
-- AND `disable-model-invocation` is `true`
-- AND `model` is `Claude Haiku 4.5`
+- GIVEN `AGENT_CATALOG` with 16 rows
+- WHEN any installer builds artifacts
+- THEN every agent id in the output matches a catalog row
+- AND `sdd-explore` and `sdd-spec` (both EDITS) receive the same tool list
+
+#### Scenario: Adapter preserves per-id model and prompt placement
+
+- GIVEN the Opencode installer consuming the catalog
+- WHEN `sdd-explore` (namespace `sdd`, model `kimi-k2.7-code`) and
+  `jd-judge-a` (namespace `jd`) are processed
+- THEN each receives its per-id model; both share `TOOLS_BY_CAPABILITY[EDITS]` tools
+- AND `sdd-explore.prompt` is a `{file:}` ref; `jd-judge-a.prompt` is inlined
 
 ### Requirement: Build-from-Code Determinism
 
@@ -102,14 +103,19 @@ Installers MUST NOT write to `agent-clis/`. Installers MUST write output ONLY to
 
 ### Requirement: E2E Self-Composes Expected Content
 
-End-to-end verification MUST derive expected artifact content directly from production code rather than from any build-time fixture tree. The e2e SHALL compose expectations using the canonical prompt bodies, the shared `_metadata_to_frontmatter` serializer, per-provider `_METADATA`, `_build_opencode_config`, and `_build_hook_json`.
+The e2e SHALL import the public `AGENT_CATALOG` symbol and adapter-level APIs.
+It MUST NOT import private installer internals (`_METADATA`, `_build_opencode_config`,
+`_build_hook_json`, `_CLAUDE_METADATA`).
 
-#### Scenario: Expected content built from production single source
+(Previously: the e2e imported `_METADATA`, `_metadata_to_frontmatter`,
+`_build_opencode_config`, and `_build_hook_json` from production.)
+
+#### Scenario: E2e imports public catalog, not private installer symbols
 
 - GIVEN the e2e suite
-- WHEN it computes the expected installed artifacts
-- THEN it imports `_metadata_to_frontmatter`, `_METADATA`, `_build_opencode_config`, and `_build_hook_json` from production
-- AND it does NOT read any `resources/generated/` tree
+- WHEN it self-composes expected Claude agents
+- THEN it imports `AGENT_CATALOG` and the Claude adapter API
+- AND no import of `claude._METADATA` or `claude._PHASE_NAMES` exists
 
 #### Scenario: E2E passes without a generated fixture tree
 
@@ -388,47 +394,19 @@ when the preferred `agent` key is present.
 
 ### Requirement: Copilot Orchestrator Subagent Allowlist
 
-`sdd-orchestrator`'s frontmatter MUST carry an `agents:` list naming exactly
-the 15 non-orchestrator agents. The list MUST equal `sorted(_SUBAGENT_NAMES)`.
-The 15 sub-agent `.agent.md` files MUST NOT carry an `agents:` field. The
-`agents:` field is the declarative sub-agent allowlist inherited from the
-VS Code `.agent.md` file format (see
-https://code.visualstudio.com/docs/copilot/customization/custom-agents,
-"agents" row of "Custom agent file structure"); Copilot CLI / cloud agent
-honor it because the file format is the same as VS Code's. This is the
-declarative equivalent of OpenCode's `sdd-orchestrator.permission.task`
-allowlist; the runtime hook `sdd-pre-tool-use.json` remains as defense-in-depth.
+`sdd-orchestrator`'s `agents:` list SHALL be derived from `AGENT_CATALOG`
+(all rows where `capability != ORCHESTRATOR`) rather than from a private
+`_SUBAGENT_NAMES` constant. The list MUST remain sorted lexicographically
+and contain exactly the same 15 ids as the pre-change output.
 
-#### Scenario: Orchestrator agents field lists exactly the 15 sub-agents
+(Previously: the allowlist equaled `sorted(_SUBAGENT_NAMES)`, a private constant in `copilot.py`.)
 
-- GIVEN installed `sdd-orchestrator.agent.md`
-- WHEN its `agents:` frontmatter value is parsed
-- THEN it is a YAML list of 15 strings
-- AND the set equals `set(_SUBAGENT_NAMES)`
-- AND the list is sorted lexicographically
+#### Scenario: Allowlist derived from catalog
 
-#### Scenario: Sub-agents lack an agents field
-
-- GIVEN the 15 installed sub-agent `.agent.md` files
-- WHEN their frontmatter is parsed for `agents`
-- THEN none of them contains an `agents:` key
-
-#### Scenario: Allowlist matches hook allowlist (single source of truth)
-
-- GIVEN `_SUBAGENT_NAMES` in the installer
-- WHEN the test compares three sources
-  - the orchestrator's `agents:` field
-  - the hook's `preToolUse[0].allow` list
-  - the set of `user-invocable: false` agent ids
-- THEN all three are equal as sets
-
-#### Scenario: agent tool presence is required when agents field is set
-
-- GIVEN the installed `sdd-orchestrator.agent.md`
-- WHEN both `tools:` and `agents:` are parsed
-- THEN `agent` is present in `tools:`
-- (per VS Code docs: "If you specify `agents`, ensure the `agent` tool is
-  included in the `tools` property")
+- GIVEN `AGENT_CATALOG`
+- WHEN the Copilot installer computes the orchestrator's `agents:` list
+- THEN it equals every `id` where `capability != ORCHESTRATOR`
+- AND the set is byte-identical to the pre-change `_SUBAGENT_NAMES` set
 
 ### Requirement: Copilot Frontmatter Serializer Isolation
 
@@ -462,42 +440,35 @@ byte-identical to pre-change output.
 
 ### Requirement: Copilot Hook-Frontmatter Alignment
 
-The existing `sdd-pre-tool-use.json` hook MUST remain unchanged and continue
-to gate the `task` tool with a `default: deny`, `allow:` list of exactly
-the 15 subagent names. The installer's `_SUBAGENT_NAMES` constant SHALL be
-the single source of truth for both the hook allowlist and the
-`user-invocable: false` frontmatter entries. Tests MUST assert the hook
-JSON is byte-identical to pre-change output.
+The `sdd-pre-tool-use.json` hook MUST remain byte-identical. Its allowlist
+SHALL be derived from `AGENT_CATALOG` rather than from `_SUBAGENT_NAMES`.
+The catalog is the single source of truth for the subagent set.
 
-#### Scenario: Hook allowlist covers all 15 subagents
+(Previously: `_SUBAGENT_NAMES` was the single source of truth for the hook
+allowlist and frontmatter entries.)
 
-- GIVEN `_SUBAGENT_NAMES` is `[n for n in _ALL_AGENT_IDS if n != "sdd-orchestrator"]`
-- WHEN `_build_hook_json()` generates the hook
-- THEN `preToolUse[0].allow` equals `sorted(_SUBAGENT_NAMES)`
-- AND the hook JSON is byte-identical to the pre-change hook
+#### Scenario: Hook JSON byte-identical to pre-change output
 
-#### Scenario: Frontmatter subagent set matches hook allowlist
-
-- GIVEN the set of agent ids with `user-invocable: false` in emitted frontmatter
-- THEN it equals `set(_SUBAGENT_NAMES)`
+- GIVEN the Copilot installer consuming `AGENT_CATALOG`
+- WHEN `sdd-pre-tool-use.json` is generated
+- THEN it is byte-identical to the pre-change hook
+- AND `preToolUse[0].allow` equals the sorted non-orchestrator catalog ids
 
 ### Requirement: Copilot Snapshot Test Contract
 
-The test suite MUST self-compose expected `.agent.md` content from production
-code: it SHALL import `copilot_frontmatter` and per-agent `_METADATA`, call
-`copilot_frontmatter(m)` to get the frontmatter block, and append
-`"\n---\n" + prompt_bytes(...)`. The test MUST deep-compare the installer's
-emitted output against the composed expectation. A mutation test MUST assert
-that editing a prompt body (e.g. `resources/prompts/review/review-risk.md`)
-and re-installing changes the inlined body byte-for-byte. The test MUST also
-assert N consecutive installs produce byte-identical `.agent.md` files.
+Tests SHALL self-compose expected `.agent.md` content using public
+`AGENT_CATALOG` and adapter APIs. Tests MUST NOT import `copilot._METADATA`
+or any private installer symbol.
 
-#### Scenario: Self-composed expectation matches emitted output
+(Previously: tests imported `_METADATA` from `copilot.py` directly.)
 
-- GIVEN the test imports `copilot_frontmatter` and `_METADATA` from production
-- WHEN it composes the expected `sdd-explore.agent.md` as
-  `copilot_frontmatter(_METADATA["sdd-explore"]).rstrip() + "\n---\n" + prompt_bytes("prompts/sdd/sdd-explore.md")`
-- THEN the result deep-equals the installer's emitted `sdd-explore.agent.md`
+#### Scenario: Self-composed expectation uses catalog-driven metadata
+
+- GIVEN the test imports `AGENT_CATALOG` and the Copilot adapter API
+- WHEN it composes expected `sdd-explore.agent.md`
+- THEN frontmatter is generated via `copilot_frontmatter(m)` where `m` comes
+  from the adapter, not from `copilot._METADATA["sdd-explore"]`
+- AND the output deep-equals the installer's emitted file
 
 #### Scenario: Mutation test catches prompt body changes
 
@@ -554,3 +525,19 @@ spec is implemented).
 - WHEN the test enumerates `sdd-orchestrator` and the 15 subagent ids
 - THEN exactly one entry per id carries a `model` key
 - AND removing the `model` key from any entry makes the snapshot test fail
+
+### Requirement: Copilot jd-fix-agent Gains Read Tools
+
+Copilot's `jd-fix-agent` SHALL include `Read`, `Glob`, and `Grep` in its
+tools, in addition to its existing tools (`Bash`, `Edit`, `Task`, `View`,
+`Create`). This is a behavioral change bundled with the catalog refactor.
+
+The e2e golden fixture for `jd-fix-agent.agent.md` SHALL be regenerated.
+
+#### Scenario: Installed jd-fix-agent.agent.md carries new tools
+
+- GIVEN `install --copilot` completes
+- WHEN `~/.copilot/agents/jd-fix-agent.agent.md` is inspected
+- THEN `tools:` includes `Read`, `Glob`, `Grep`, `Bash`, `Edit`, `Task`,
+  `View`, `Create`
+- AND the e2e golden fixture matches the new tool set

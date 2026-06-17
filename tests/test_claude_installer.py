@@ -1,54 +1,26 @@
-"""Unit tests for ClaudeInstaller refactored architecture.
+"""Unit tests for ClaudeInstaller — catalog-driven architecture.
 
 After the refactor:
-  - 8 SDD phase agents: ComposedFileArtifact (frontmatter .md + body from prompts/sdd/)
-  - 7 JD/reviewer agents: ComposedFileArtifact(frontmatter_text=metadata, body_source=canonical)
-  - Metadata is embedded in _METADATA dict per agent
-  - Shim writes to agent-clis/claude/agents/ on install
+  - 16 composed agents (1 orchestrator + 8 SDD phases + 7 JD/reviewer)
+  - ComposedFileArtifact with frontmatter_text from catalog-driven metadata
+  - Body sources from prompts/<ns>/ for non-orchestrator, prompts/orchestrator/ for orchestrator
+  - No _METADATA, _PHASE_NAMES, or _INLINE_AGENTS imports
 
 Spec scenarios:
   - "Metadata separated from prompt body"
   - "ClaudeInstaller composes frontmatter + body"
-  - "Shim written on install"
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
+from ai_harness.artifacts.agents import AGENT_CATALOG, Capability
 from ai_harness.artifacts.catalog import ArtifactCatalog
 from ai_harness.artifacts.installers.claude import (
-    _METADATA,
     ClaudeAssets,
     ClaudeInstaller,
 )
-
-# ------------------------------------------------------------------ constants ---
-
-_SDD_PHASE_NAMES: list[str] = [
-    "sdd-explore",
-    "sdd-propose",
-    "sdd-spec",
-    "sdd-design",
-    "sdd-tasks",
-    "sdd-apply",
-    "sdd-verify",
-    "sdd-archive",
-]
-
-_JD_NAMES: list[str] = ["jd-fix-agent", "jd-judge-a", "jd-judge-b"]
-
-_REVIEW_NAMES: list[str] = [
-    "review-risk",
-    "review-readability",
-    "review-reliability",
-    "review-resilience",
-]
-
-_ALL_AGENT_NAMES: list[str] = _SDD_PHASE_NAMES + _JD_NAMES + _REVIEW_NAMES
-
-assert len(_ALL_AGENT_NAMES) == 15
-
 
 # ------------------------------------------------------------------ helpers ---
 
@@ -64,11 +36,12 @@ def _make_catalog_root(tmp_path: Path) -> Path:
     # SDD prompt bodies
     prompts_dir = root / "prompts" / "sdd"
     prompts_dir.mkdir(parents=True)
-    for name in _SDD_PHASE_NAMES:
-        (prompts_dir / f"{name}.md").write_text(
-            f"# {name} prompt\n\nShared SDD phase prompt body.\n",
-            encoding="utf-8",
-        )
+    for agent_id in AGENT_CATALOG:
+        if AGENT_CATALOG[agent_id].namespace == "sdd":
+            (prompts_dir / f"{agent_id}.md").write_text(
+                f"# {agent_id} prompt\n\nShared prompt body.\n",
+                encoding="utf-8",
+            )
 
     # Orchestrator prompts
     orch_prompts_dir = root / "prompts" / "orchestrator"
@@ -78,23 +51,25 @@ def _make_catalog_root(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
 
-    # JD canonical bodies
+    # JD prompt bodies
     jd_dir = root / "prompts" / "jd"
     jd_dir.mkdir(parents=True)
-    for name in _JD_NAMES:
-        (jd_dir / f"{name}.md").write_text(
-            f"# {name} canonical body\n",
-            encoding="utf-8",
-        )
+    for agent_id in AGENT_CATALOG:
+        if AGENT_CATALOG[agent_id].namespace == "jd":
+            (jd_dir / f"{agent_id}.md").write_text(
+                f"# {agent_id} canonical body\n",
+                encoding="utf-8",
+            )
 
-    # Review canonical bodies
+    # Review prompt bodies
     review_dir = root / "prompts" / "review"
     review_dir.mkdir(parents=True)
-    for name in _REVIEW_NAMES:
-        (review_dir / f"{name}.md").write_text(
-            f"# {name} canonical body\n",
-            encoding="utf-8",
-        )
+    for agent_id in AGENT_CATALOG:
+        if AGENT_CATALOG[agent_id].namespace == "review":
+            (review_dir / f"{agent_id}.md").write_text(
+                f"# {agent_id} canonical body\n",
+                encoding="utf-8",
+            )
 
     # Skills
     skills_dir = root / "skills" / "example"
@@ -125,8 +100,7 @@ def _assets(root: Path) -> ClaudeAssets:
 
 
 def test_all_agents_are_composed_artifacts(tmp_path: Path) -> None:
-    """All 16 Claude artifacts (8 SDD phase + 7 JD/reviewer + 1 orchestrator)
-    must be ComposedFileArtifact — no FileArtifact for agents or orchestrator."""
+    """All 16 Claude artifacts must be ComposedFileArtifact."""
     root = _make_catalog_root(tmp_path)
     installer = _installer(root)
     home = tmp_path / "home"
@@ -134,17 +108,14 @@ def test_all_agents_are_composed_artifacts(tmp_path: Path) -> None:
 
     manifest = installer._build_manifest(home, _assets(root))
 
-    # 15 agents + 1 orchestrator = 16 composed artifacts
     assert len(manifest.composed) == 16, f"expected 16 composed artifacts, got {len(manifest.composed)}"
 
-    # No agent FileArtifacts
     agent_files = [f for f in manifest.files if str(f.target_relative).startswith(".claude/agents/")]
     assert len(agent_files) == 0, f"expected 0 FileArtifact agents, got {len(agent_files)}"
 
 
 def test_jd_agents_use_frontmatter_text_from_metadata(tmp_path: Path) -> None:
-    """JD inline agents use frontmatter_text (embedded metadata),
-    not frontmatter_source from a file."""
+    """JD inline agents use frontmatter_text, body from prompts/jd/."""
     root = _make_catalog_root(tmp_path)
     installer = _installer(root)
     home = tmp_path / "home"
@@ -152,20 +123,19 @@ def test_jd_agents_use_frontmatter_text_from_metadata(tmp_path: Path) -> None:
 
     manifest = installer._build_manifest(home, _assets(root))
 
+    jd_ids = {a.id for a in AGENT_CATALOG.values() if a.namespace == "jd"}
     jd_artifacts = [a for a in manifest.composed if str(a.target_relative).startswith(".claude/agents/jd-")]
-    assert len(jd_artifacts) == 3, f"expected 3 JD composed artifacts, got {len(jd_artifacts)}"
+    assert len(jd_artifacts) == len(jd_ids), f"expected {len(jd_ids)} JD composed artifacts, got {len(jd_artifacts)}"
 
     for artifact in jd_artifacts:
-        # Must have frontmatter_text from metadata
         assert artifact.frontmatter_text is not None, f"JD agent {artifact.target_relative} missing frontmatter_text"
-        # Must reference canonical body under prompts/jd/
         assert "prompts/jd" in str(artifact.body_source), (
             f"JD agent {artifact.target_relative} body not from prompts/jd/"
         )
 
 
 def test_review_agents_use_frontmatter_text_from_metadata(tmp_path: Path) -> None:
-    """Review agents use frontmatter_text from embedded metadata."""
+    """Review agents use frontmatter_text from catalog-driven metadata."""
     root = _make_catalog_root(tmp_path)
     installer = _installer(root)
     home = tmp_path / "home"
@@ -173,8 +143,11 @@ def test_review_agents_use_frontmatter_text_from_metadata(tmp_path: Path) -> Non
 
     manifest = installer._build_manifest(home, _assets(root))
 
+    review_ids = {a.id for a in AGENT_CATALOG.values() if a.namespace == "review"}
     review_artifacts = [a for a in manifest.composed if str(a.target_relative).startswith(".claude/agents/review-")]
-    assert len(review_artifacts) == 4, f"expected 4 review composed artifacts, got {len(review_artifacts)}"
+    assert len(review_artifacts) == len(review_ids), (
+        f"expected {len(review_ids)} review composed artifacts, got {len(review_artifacts)}"
+    )
 
     for artifact in review_artifacts:
         assert artifact.frontmatter_text is not None, (
@@ -185,14 +158,8 @@ def test_review_agents_use_frontmatter_text_from_metadata(tmp_path: Path) -> Non
         )
 
 
-def test_all_16_artifacts_use_frontmatter_text_from_metadata(tmp_path: Path) -> None:
-    """All 16 Claude artifacts (8 SDD + 7 inline + 1 orchestrator) must use
-    frontmatter_text from _METADATA.
-
-    Spec: "Both orchestrator variants exist"
-      - GIVEN the prompt tree
-      - THEN both orchestrator files exist and have distinct content
-    """
+def test_all_16_artifacts_use_frontmatter_text(tmp_path: Path) -> None:
+    """All 16 Claude artifacts must use frontmatter_text from catalog-driven metadata."""
     root = _make_catalog_root(tmp_path)
     installer = _installer(root)
     home = tmp_path / "home"
@@ -205,35 +172,17 @@ def test_all_16_artifacts_use_frontmatter_text_from_metadata(tmp_path: Path) -> 
     for artifact in manifest.composed:
         assert artifact.frontmatter_text is not None, f"artifact {artifact.target_relative} missing frontmatter_text"
 
-    # Orchestrator artifact uses sdd-orchestrator-agent.md body (Agent variant)
+    # Orchestrator artifact uses sdd-orchestrator-agent.md body
     orch = [a for a in manifest.composed if str(a.target_relative) == ".claude/skills/sdd-orchestrator/SKILL.md"]
     assert len(orch) == 1, "missing orchestrator composed artifact"
     assert "orchestrator" in str(orch[0].body_source), "orchestrator body is not from prompts/orchestrator/"
 
 
 def test_make_catalog_root_drops_agent_clis_claude_agents(tmp_path: Path) -> None:
-    """_make_catalog_root must NOT create agent-clis/claude/agents/ —
-    installers no longer read from that path.
-
-    Spec: "Build survives agent-clis absence"
-    """
+    """_make_catalog_root must NOT create agent-clis/claude/agents/."""
     root = _make_catalog_root(tmp_path)
     legacy = root / "agent-clis" / "claude" / "agents"
     assert not legacy.exists(), f"agent-clis/claude/agents/ must not exist: {legacy}"
-
-
-def test_metadata_contains_expected_keys() -> None:
-    """The _METADATA dict has required keys for all 16 agents + orchestrator."""
-    assert _METADATA, "_METADATA is empty"
-
-    all_ids = _ALL_AGENT_NAMES + ["sdd-orchestrator"]
-    for agent_id in all_ids:
-        assert agent_id in _METADATA, f"Missing metadata for {agent_id}"
-        agent_meta = _METADATA[agent_id]
-        assert "name" in agent_meta, f"{agent_id} metadata missing 'name'"
-        assert "description" in agent_meta, f"{agent_id} metadata missing 'description'"
-        assert "tools" in agent_meta, f"{agent_id} metadata missing 'tools'"
-        assert "model" in agent_meta, f"{agent_id} metadata missing 'model'"
 
 
 def test_claude_instructions_file_artifact_preserved(tmp_path: Path) -> None:
@@ -248,3 +197,34 @@ def test_claude_instructions_file_artifact_preserved(tmp_path: Path) -> None:
     instructions = [f for f in manifest.files if str(f.target_relative) == ".claude/CLAUDE.md"]
     assert len(instructions) == 1, "CLAUDE.md FileArtifact missing"
     assert instructions[0].source.is_file()
+
+
+def test_orchestrator_is_read_only_in_capability_check() -> None:
+    """sdd-orchestrator has ORCHESTRATOR capability (not EDITS or READ_ONLY)."""
+    assert AGENT_CATALOG["sdd-orchestrator"].capability == Capability.ORCHESTRATOR
+
+
+def test_capability_counts_in_catalog() -> None:
+    """Catalog has exactly 1 ORCHESTRATOR, 9 EDITS, 6 READ_ONLY."""
+    orch = sum(1 for a in AGENT_CATALOG.values() if a.capability == Capability.ORCHESTRATOR)
+    edits = sum(1 for a in AGENT_CATALOG.values() if a.capability == Capability.EDITS)
+    ro = sum(1 for a in AGENT_CATALOG.values() if a.capability == Capability.READ_ONLY)
+    assert orch == 1
+    assert edits == 9
+    assert ro == 6
+
+
+def test_sdd_phase_agents_use_prompts_sdd_body(tmp_path: Path) -> None:
+    """All SDD phase agents (non-orchestrator) get body from prompts/sdd/."""
+    root = _make_catalog_root(tmp_path)
+    installer = _installer(root)
+    home = tmp_path / "home"
+    home.mkdir()
+
+    manifest = installer._build_manifest(home, _assets(root))
+
+    sdd_edits = [a for a in AGENT_CATALOG.values() if a.namespace == "sdd" and a.capability != Capability.ORCHESTRATOR]
+    for agent in sdd_edits:
+        matching = [c for c in manifest.composed if str(c.target_relative) == f".claude/agents/{agent.id}.md"]
+        assert len(matching) == 1, f"Missing composed artifact for {agent.id}"
+        assert "prompts/sdd" in str(matching[0].body_source), f"{agent.id} body not from prompts/sdd/"
