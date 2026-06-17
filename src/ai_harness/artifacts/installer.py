@@ -72,7 +72,7 @@ def _prepare_composed_content(artifact: ComposedFileArtifact, home: Path) -> str
     """
     frontmatter = artifact.frontmatter_text
     body = artifact.body_source.read_text(encoding="utf-8")
-    text = frontmatter.rstrip("\n") + "\n---\n" + body
+    text = frontmatter.rstrip("\n") + "\n" + body
     if artifact.template:
         for placeholder, replacement in artifact.template.items():
             text = text.replace(placeholder, replacement)
@@ -203,7 +203,9 @@ def install(manifest: ArtifactManifest, home: Path, console: Console) -> Install
     return result
 
 
-def uninstall(manifest: ArtifactManifest, home: Path, console: Console) -> UninstallResult:
+def uninstall(
+    manifest: ArtifactManifest, home: Path, console: Console
+) -> UninstallResult:
     """Uninstall every artifact in *manifest* from *home*.
 
     FileArtifact:

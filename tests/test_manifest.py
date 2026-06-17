@@ -17,7 +17,6 @@ import pytest
 
 from ai_harness.artifacts.manifest import ComposedFileArtifact
 
-
 # ── 2.1 RED: frontmatter_text field ─────────────────────────────────────────
 
 
@@ -40,9 +39,7 @@ def test_composed_file_artifact_accepts_frontmatter_text(tmp_path: Path) -> None
         target_relative=Path(".claude/agents/test-agent.md"),
     )
 
-    assert artifact.frontmatter_text == (
-        "---\nname: test-agent\ntools: [Read]\n---\n"
-    )
+    assert artifact.frontmatter_text == ("---\nname: test-agent\ntools: [Read]\n---\n")
     assert artifact.body_source == body
     assert artifact.target_relative == Path(".claude/agents/test-agent.md")
 
@@ -91,4 +88,4 @@ def test_prepare_composed_content_uses_frontmatter_text(tmp_path: Path) -> None:
     )
 
     content = _prepare_composed_content(artifact, tmp_path)
-    assert content == "---\nname: my-agent\n---\n---\n# Canonical prompt body\n"
+    assert content == "---\nname: my-agent\n---\n# Canonical prompt body\n"

@@ -288,7 +288,7 @@ def test_composed_install_writes_frontmatter_and_body(
     target = tmp_path / target_rel
     # _prepare_composed_content uses frontmatter.rstrip("\n") + "\n---\n" + body
     assert target.read_text(encoding="utf-8") == (
-        "---\nname: test\n---\n---\nbody content here"
+        "---\nname: test\n---\nbody content here"
     )
 
 
@@ -318,9 +318,7 @@ def test_composed_install_rotates_existing_target_to_backup(
     assert backup.read_text(encoding="utf-8") == (
         "OLD USER CONTENT — must be backed up"
     )
-    assert target.read_text(encoding="utf-8") == (
-        "---\nname: test\n---\n---\nnew body"
-    )
+    assert target.read_text(encoding="utf-8") == ("---\nname: test\n---\nnew body")
 
 
 def test_composed_uninstall_removes_matching_target(
@@ -335,7 +333,7 @@ def test_composed_uninstall_removes_matching_target(
     target.parent.mkdir(parents=True, exist_ok=True)
     # Match the composed output exactly (using rstrip join as the installer does).
     target.write_text(
-        "---\nname: test\n---\n---\nbody content",
+        "---\nname: test\n---\nbody content",
         encoding="utf-8",
     )
 
@@ -351,9 +349,7 @@ def test_composed_uninstall_removes_matching_target(
     assert not target.exists(), "matching target should have been removed by uninstall"
 
 
-def test_composed_uninstall_restores_backup(
-    tmp_path: Path, console: Console
-) -> None:
+def test_composed_uninstall_restores_backup(tmp_path: Path, console: Console) -> None:
     """ComposedFileArtifact uninstall restores a backup when target is removed and backup exists."""
     body = tmp_path / "body.md"
     body.write_text("body content", encoding="utf-8")
@@ -381,9 +377,7 @@ def test_composed_uninstall_restores_backup(
 # ------------------------------------------------------- return contract ---
 
 
-def test_install_returns_install_result(
-    tmp_path: Path, console: Console
-) -> None:
+def test_install_returns_install_result(tmp_path: Path, console: Console) -> None:
     """install() returns an InstallResult, not None."""
     src = tmp_path / "src.md"
     src.write_text("# content\n", encoding="utf-8")
@@ -402,9 +396,7 @@ def test_install_returns_install_result(
     )
 
 
-def test_install_result_success_fields(
-    tmp_path: Path, console: Console
-) -> None:
+def test_install_result_success_fields(tmp_path: Path, console: Console) -> None:
     """InstallResult has success: bool and errors: list[str] on success."""
     src = tmp_path / "src.md"
     src.write_text("# content\n", encoding="utf-8")
