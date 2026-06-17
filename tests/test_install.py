@@ -8,7 +8,6 @@ from typer.testing import CliRunner
 
 from ai_harness.artifacts.catalog import (
     AGENTS_MD_SRC,
-    OPENCODE_JSON_SRC,
     OPENCODE_SDD_PROMPTS_SRC,
     SKILLS_SRC,
 )
@@ -81,12 +80,29 @@ def test_install_copies_opencode_configuration(
     result = runner.invoke(app, ["install", "--all"])
     assert result.exit_code == 0, result.output
 
-    opencode_json = OPENCODE_JSON_SRC.read_text(encoding="utf-8").replace(
-        "{{HOME}}", str(tmp_path)
-    )
-    assert (
-        tmp_path / ".config" / "opencode" / "opencode.json"
-    ).read_text(encoding="utf-8") == opencode_json
+    opencode_json_path = tmp_path / ".config" / "opencode" / "opencode.json"
+    data = json.loads(opencode_json_path.read_text(encoding="utf-8"))
+
+    # All 16 agents present
+    agent_names = set(data["agent"].keys())
+    expected = {
+        "sdd-orchestrator", "jd-fix-agent", "jd-judge-a", "jd-judge-b",
+        "review-readability", "review-reliability", "review-resilience", "review-risk",
+        "sdd-explore", "sdd-propose", "sdd-spec", "sdd-design",
+        "sdd-tasks", "sdd-apply", "sdd-verify", "sdd-archive",
+    }
+    assert agent_names == expected, f"agent mismatch: {agent_names ^ expected}"
+
+    # All prompt fields are {file:} refs
+    for agent_id, agent_data in data["agent"].items():
+        prompt = agent_data.get("prompt", "")
+        assert prompt.startswith("{file:"), (
+            f"{agent_id} prompt not a {{file:}} ref: {prompt}"
+        )
+
+    # Permission structure present
+    assert "external_directory" in data["permission"]
+    assert "read" in data["permission"]
 
     for prompt_file in OPENCODE_SDD_PROMPTS_SRC.glob("*.md"):
         target = (
@@ -94,6 +110,55 @@ def test_install_copies_opencode_configuration(
         )
         assert target.read_text(encoding="utf-8") == prompt_file.read_text(
             encoding="utf-8"
+        )
+
+
+# ── 5.1 RED: jd/review/orchestrator prompts copied; opencode.json uses {file:} refs ──
+
+
+def test_install_copies_jd_review_orchestrator_prompts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """After refactor, jd/, review/, orchestrator/ prompts are copied to
+    the opencode prompts dir, and opencode.json uses {file:} references
+    instead of inline prompt strings for jd/review agents."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    result = runner.invoke(app, ["install", "--all"])
+    assert result.exit_code == 0, result.output
+
+    prompts_base = tmp_path / ".config" / "opencode" / "prompts"
+
+    # JD prompts
+    for name in ["jd-fix-agent", "jd-judge-a", "jd-judge-b"]:
+        target = prompts_base / "jd" / f"{name}.md"
+        assert target.is_file(), f"Missing JD prompt: {target}"
+        content = target.read_text(encoding="utf-8")
+        # Must not have YAML frontmatter (canonical body)
+        assert not content.startswith("---"), f"JD prompt has frontmatter: {name}"
+
+    # Review prompts
+    for name in ["review-readability", "review-reliability", "review-resilience", "review-risk"]:
+        target = prompts_base / "review" / f"{name}.md"
+        assert target.is_file(), f"Missing review prompt: {target}"
+        content = target.read_text(encoding="utf-8")
+        assert not content.startswith("---"), f"review prompt has frontmatter: {name}"
+
+    # Orchestrator agent prompt
+    orch_target = prompts_base / "orchestrator" / "sdd-orchestrator-agent.md"
+    assert orch_target.is_file(), "Missing orchestrator agent prompt"
+
+    # opencode.json inline prompt strings replaced with {file:} refs
+    import json
+    opencode_json_path = tmp_path / ".config" / "opencode" / "opencode.json"
+    data = json.loads(opencode_json_path.read_text(encoding="utf-8"))
+    for agent_id in ["jd-fix-agent", "jd-judge-a", "jd-judge-b",
+                     "review-readability", "review-reliability",
+                     "review-resilience", "review-risk"]:
+        agent = data["agent"].get(agent_id, {})
+        prompt = agent.get("prompt", "")
+        assert prompt.startswith("{file:"), (
+            f"{agent_id} prompt should be a {{file:}} ref, got: {prompt}"
         )
 
 
@@ -116,10 +181,11 @@ def test_install_overrides_stale_opencode_configuration(
     result = runner.invoke(app, ["install", "--all"])
     assert result.exit_code == 0, result.output
 
-    expected_opencode_json = OPENCODE_JSON_SRC.read_text(encoding="utf-8").replace(
-        "{{HOME}}", str(tmp_path)
-    )
-    assert opencode_json.read_text(encoding="utf-8") == expected_opencode_json
+    # Stale content replaced with valid generated opencode.json
+    data = json.loads(opencode_json.read_text(encoding="utf-8"))
+    assert "agent" in data, "generated opencode.json missing 'agent' key"
+    assert "permission" in data, "generated opencode.json missing 'permission' key"
+
     assert (
         tmp_path
         / ".config"
@@ -423,3 +489,51 @@ def test_claude_install_writes_permissions_allow(
 
     backup = claude_dir / "settings.json.ai-harness-backup"
     assert backup.is_file()
+
+
+# ── Round 2 fix: Bug 2 — opencode fixture MUST preserve {{HOME}} (RED) ──
+
+
+def test_opencode_fixture_preserves_home_placeholder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The generated opencode.json fixture MUST contain {{HOME}} template
+    placeholders — NOT substituted home paths.
+
+    The e2e reads the fixture and does ``read_text().replace("{{HOME}}", home)``
+    at test time (see ``_assert_opencode_json``, line 54-55).  If the fixture
+    already has hardcoded paths the substitution becomes a no-op and the test
+    data will contain stale/temp paths.
+
+    Spec: "Generated Fixtures for E2E" — fixtures match e2e source-path contract.
+    """
+    import io
+    from rich.console import Console
+
+    from ai_harness.artifacts.installers.opencode import OpencodeInstaller
+
+    # Patch _GENERATED_DIR so fixture lands under tmp_path
+    gen_dir = tmp_path / "generated"
+    gen_dir.mkdir()
+    monkeypatch.setattr(OpencodeInstaller, "_GENERATED_DIR", gen_dir)
+
+    console = Console(file=io.StringIO())
+    OpencodeInstaller._write_fixture(tmp_path / "home", console)
+
+    fixture_path = gen_dir / "opencode" / "opencode.json"
+    assert fixture_path.exists(), "Fixture file not written"
+    fixture_text = fixture_path.read_text(encoding="utf-8")
+
+    # MUST contain {{HOME}} template placeholders
+    assert "{{HOME}}" in fixture_text, (
+        "opencode.json fixture must contain {{HOME}} placeholders — "
+        "e2e substitutes at test time.\n"
+        f"  fixture (first 200 chars): {fixture_text[:200]}"
+    )
+
+    # MUST NOT contain the actual home path
+    home_str = str(tmp_path / "home")
+    assert home_str not in fixture_text, (
+        f"opencode.json fixture must NOT contain home path '{home_str}'.\n"
+        f"  Found: {fixture_text[:300]}"
+    )

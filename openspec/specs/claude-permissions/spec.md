@@ -8,7 +8,7 @@ Defines how the Claude installer manages `settings.json` `permissions.allow` rul
 
 ### Requirement: Permissions Merge on Install
 
-On install, the system SHALL compute the union of `tools:` from all staged sub-agents and the orchestrator SKILL.md. It SHALL map tool names to rules (`Bash`, `Read`, `Edit`, `Write`, `Agent`), with `Glob` and `Grep` mapped to a single `Read` rule. Missing rules SHALL be deep-merged into `settings.json` `permissions.allow` without disturbing user-managed keys or existing entries. The merge MUST be idempotent.
+On install, the system SHALL compute the union of `tools:` from the installer's per-agent metadata for all agents being installed (including the orchestrator). It SHALL map tool names to rules (`Bash`, `Read`, `Edit`, `Write`, `Agent`), with `Glob` and `Grep` mapped to a single `Read` rule. Missing rules SHALL be deep-merged into `settings.json` `permissions.allow` without disturbing user-managed keys or existing entries. The merge MUST be idempotent.
 
 #### Scenario: Install on empty or missing allow
 
@@ -31,7 +31,7 @@ On install, the system SHALL compute the union of `tools:` from all staged sub-a
 
 #### Scenario: Tool-to-rule mapping
 
-- GIVEN a sub-agent frontmatter declares `tools: [Glob, Grep, Bash, Agent]`
+- GIVEN an agent's metadata declares `tools: [Glob, Grep, Bash, Agent]`
 - WHEN the tool union is mapped to permission rules
 - THEN `Glob` and `Grep` are both satisfied by a single `Read` rule
 - AND separate `Bash` and `Agent` rules are produced
@@ -42,6 +42,13 @@ On install, the system SHALL compute the union of `tools:` from all staged sub-a
 - WHEN install runs
 - THEN `/custom/claude/settings.json` `permissions.allow` is updated with the merged rules
 - AND `~/.claude/settings.json` is untouched
+
+#### Scenario: Metadata-driven tool union excludes non-installed agents
+
+- GIVEN installer metadata defines 15 agents, but only 3 are selected for install
+- WHEN the tool union is computed
+- THEN only the tools declared in the metadata of the 3 selected agents contribute to the union
+- AND tools from non-selected agents are excluded
 
 ### Requirement: Permissions Cleanup on Uninstall
 

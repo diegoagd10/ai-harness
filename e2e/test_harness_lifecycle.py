@@ -17,10 +17,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 RESOURCES_DIR = REPO_ROOT / "src" / "ai_harness" / "resources"
 AGENTS_MD_SRC = RESOURCES_DIR / "AGENTS.md"
 SKILLS_SRC = RESOURCES_DIR / "skills"
-OPENCODE_JSON_SRC = RESOURCES_DIR / "agent-clis" / "opencode" / "opencode.json"
+OPENCODE_JSON_SRC = RESOURCES_DIR / "generated" / "opencode" / "opencode.json"
 SDD_PROMPTS_SRC = RESOURCES_DIR / "prompts" / "sdd"
-CLAUDE_AGENTS_SRC = RESOURCES_DIR / "agent-clis" / "claude" / "agents"
-CLAUDE_ORCHESTRATOR_SRC = RESOURCES_DIR / "agent-clis" / "claude" / "sdd-orchestrator" / "SKILL.md"
+CLAUDE_AGENTS_SRC = RESOURCES_DIR / "generated" / "claude" / "agents"
+CLAUDE_ORCHESTRATOR_SRC = RESOURCES_DIR / "generated" / "claude" / "sdd-orchestrator" / "SKILL.md"
 
 # Eight SDD phases whose Claude agents are composed from frontmatter + prompt body.
 _SDD_PHASE_NAMES = (

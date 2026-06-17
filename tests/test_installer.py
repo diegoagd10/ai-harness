@@ -272,14 +272,12 @@ def test_composed_install_writes_frontmatter_and_body(
     tmp_path: Path, console: Console
 ) -> None:
     """ComposedFileArtifact install produces frontmatter + --- + body."""
-    fm = tmp_path / "frontmatter.md"
     body = tmp_path / "body.md"
-    fm.write_text("---\nname: test\n---\n", encoding="utf-8")
     body.write_text("body content here", encoding="utf-8")
 
     target_rel = Path(".claude/agents/sdd-apply.md")
     artifact = ComposedFileArtifact(
-        frontmatter_source=fm,
+        frontmatter_text="---\nname: test\n---\n",
         body_source=body,
         target_relative=target_rel,
     )
@@ -298,9 +296,7 @@ def test_composed_install_rotates_existing_target_to_backup(
     tmp_path: Path, console: Console
 ) -> None:
     """ComposedFileArtifact install backs up a different-content target before overwriting."""
-    fm = tmp_path / "frontmatter.md"
     body = tmp_path / "body.md"
-    fm.write_text("---\nname: test\n---\n", encoding="utf-8")
     body.write_text("new body", encoding="utf-8")
 
     target_rel = Path(".claude/agents/sdd-apply.md")
@@ -309,7 +305,7 @@ def test_composed_install_rotates_existing_target_to_backup(
     target.write_text("OLD USER CONTENT — must be backed up", encoding="utf-8")
 
     artifact = ComposedFileArtifact(
-        frontmatter_source=fm,
+        frontmatter_text="---\nname: test\n---\n",
         body_source=body,
         target_relative=target_rel,
     )
@@ -331,9 +327,7 @@ def test_composed_uninstall_removes_matching_target(
     tmp_path: Path, console: Console
 ) -> None:
     """ComposedFileArtifact uninstall removes a target whose content matches the composed output."""
-    fm = tmp_path / "frontmatter.md"
     body = tmp_path / "body.md"
-    fm.write_text("---\nname: test\n---\n", encoding="utf-8")
     body.write_text("body content", encoding="utf-8")
 
     target_rel = Path(".claude/agents/sdd-apply.md")
@@ -346,7 +340,7 @@ def test_composed_uninstall_removes_matching_target(
     )
 
     artifact = ComposedFileArtifact(
-        frontmatter_source=fm,
+        frontmatter_text="---\nname: test\n---\n",
         body_source=body,
         target_relative=target_rel,
     )
@@ -361,9 +355,7 @@ def test_composed_uninstall_restores_backup(
     tmp_path: Path, console: Console
 ) -> None:
     """ComposedFileArtifact uninstall restores a backup when target is removed and backup exists."""
-    fm = tmp_path / "frontmatter.md"
     body = tmp_path / "body.md"
-    fm.write_text("---\nname: test\n---\n", encoding="utf-8")
     body.write_text("body content", encoding="utf-8")
 
     target_rel = Path(".claude/agents/sdd-apply.md")
@@ -374,7 +366,7 @@ def test_composed_uninstall_restores_backup(
     backup.write_text("USER ORIGINAL", encoding="utf-8")
 
     artifact = ComposedFileArtifact(
-        frontmatter_source=fm,
+        frontmatter_text="---\nname: test\n---\n",
         body_source=body,
         target_relative=target_rel,
     )

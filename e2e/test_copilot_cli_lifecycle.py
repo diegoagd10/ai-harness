@@ -24,8 +24,8 @@ from . import harness
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 RESOURCES_DIR = REPO_ROOT / "src" / "ai_harness" / "resources"
-COPILOT_AGENTS_SRC = RESOURCES_DIR / "agent-clis" / "copilot-cli" / "agents"
-COPILOT_HOOKS_SRC = RESOURCES_DIR / "agent-clis" / "copilot-cli" / "hooks"
+COPILOT_AGENTS_SRC = RESOURCES_DIR / "generated" / "copilot-cli" / "agents"
+COPILOT_HOOKS_SRC = RESOURCES_DIR / "generated" / "copilot-cli" / "hooks" / "sdd-pre-tool-use.json"
 SKILLS_SRC = RESOURCES_DIR / "skills"
 
 # ------------------------------------------------------------------ constants ---

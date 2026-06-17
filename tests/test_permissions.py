@@ -28,6 +28,7 @@ from ai_harness.artifacts.installers.permissions import (
     _resolve_settings_path,
     compute_required_rules,
     install_permissions,
+    install_permissions_from_tools,
     uninstall_permissions,
 )
 
@@ -615,3 +616,93 @@ class TestUninstallPermissions:
         data = json.loads(settings.read_text())
         assert data["permissions"]["allow"] == []
         assert backup.is_file()
+
+
+# ── 6.1 RED: install_permissions_from_tools — metadata-driven ───────────────
+
+
+class TestInstallPermissionsFromTools:
+    """Tool lists from metadata, not file parsing."""
+
+    def test_single_agent_tool_list(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """install_permissions_from_tools accepts list of tool lists."""
+        config_dir = tmp_path / "claude"
+        config_dir.mkdir()
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
+        # Create empty settings.json
+        (config_dir / "settings.json").write_text('{"permissions": {}}')
+
+        result = install_permissions_from_tools([["Bash", "Read"], ["Edit"]])
+        assert result == {"Bash", "Read", "Edit"}
+
+    def test_empty_list_returns_empty_set(self) -> None:
+        result = install_permissions_from_tools([])
+        assert result == set()
+
+    def test_tool_union_excludes_non_installed_agents(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Only tools from the passed-in lists contribute — a caller
+        that passes 3 agents' tools gets only those 3 agents' rules."""
+        config_dir = tmp_path / "claude"
+        config_dir.mkdir()
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
+        (config_dir / "settings.json").write_text('{"permissions": {}}')
+
+        all_possible = [
+            ["Bash", "Read", "Edit", "Write", "Agent"],  # not selected
+            ["Read", "Glob"],                               # selected
+            ["Grep", "Bash"],                               # selected
+        ]
+        # Simulate selecting only agents at index 1 and 2
+        selected = [all_possible[1], all_possible[2]]
+        result = install_permissions_from_tools(selected)
+        # Glob→Read, Grep→Read, Bash→Bash, Read→Read
+        assert result == {"Read", "Bash"}
+        # Agent from agent[0] must NOT be present
+        assert "Agent" not in result
+        assert "Write" not in result
+        assert "Edit" not in result
+
+    def test_full_install_with_metadata(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Full install recipe works with tool lists from metadata."""
+        config_dir = tmp_path / "claude"
+        config_dir.mkdir()
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
+
+        settings = config_dir / "settings.json"
+        settings.write_text('{"permissions": {}}')
+
+        # Simulate metadata tool lists from 3 agents
+        tools = [["Bash", "Read"], ["Edit", "Write", "Agent"]]
+
+        result = install_permissions_from_tools(tools)
+
+        assert result == {"Bash", "Read", "Edit", "Write", "Agent"}
+        data = json.loads(settings.read_text())
+        assert set(data["permissions"]["allow"]) == {
+            "Bash", "Read", "Edit", "Write", "Agent",
+        }
+        marker = config_dir / ".ai-harness-managed-allow.json"
+        assert marker.is_file()
+
+    def test_reinstall_idempotent_with_tool_lists(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        config_dir = tmp_path / "claude"
+        config_dir.mkdir()
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
+
+        settings = config_dir / "settings.json"
+        settings.write_text(
+            json.dumps({"permissions": {"allow": ["Bash", "Read"]}})
+        )
+        original = settings.read_text()
+
+        result = install_permissions_from_tools([["Bash", "Read"]])
+        assert result == set()
+        assert settings.read_text() == original

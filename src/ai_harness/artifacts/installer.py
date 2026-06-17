@@ -64,13 +64,14 @@ def _prepare_content(artifact: FileArtifact, home: Path) -> str:
 
 
 def _prepare_composed_content(artifact: ComposedFileArtifact, home: Path) -> str:
-    """Read frontmatter and body sources, return concatenated text.
+    """Read body source and join with frontmatter_text, return concatenated text.
 
-    Produces ``frontmatter + "\\n---\\n" + body`` verbatim.  Template
-    substitution is applied to the FULL composed result (not to the
-    frontmatter or body individually).
+    Produces ``frontmatter_text + "\\n---\\n" + body`` verbatim.  Template
+    substitution is applied to the FULL composed result.
+
+    *frontmatter_text* is always required on the artifact.
     """
-    frontmatter = artifact.frontmatter_source.read_text(encoding="utf-8")
+    frontmatter = artifact.frontmatter_text
     body = artifact.body_source.read_text(encoding="utf-8")
     text = frontmatter.rstrip("\n") + "\n---\n" + body
     if artifact.template:

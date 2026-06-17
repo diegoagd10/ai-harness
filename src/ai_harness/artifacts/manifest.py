@@ -35,20 +35,24 @@ class DirArtifact:
 @dataclass(frozen=True)
 class ComposedFileArtifact:
     """An artifact whose target is produced at install time by joining a
-    frontmatter source with a body source.
+    frontmatter string with a body source.
 
-    The two sources are read and concatenated as::
+    The two are concatenated as::
 
-        frontmatter + "\\n---\\n" + body
+        frontmatter_text + "\\n---\\n" + body
 
     The composed result is written to ``home / target_relative`` with the
     same backup, conflict-rotation, and uninstall-restore policy as
     ``FileArtifact``.
+
+    *frontmatter_text* is always required.  *frontmatter_source* is kept
+    for backward-compatibility but is never set by v2 installers.
     """
 
-    frontmatter_source: Path
+    frontmatter_text: str
     body_source: Path
     target_relative: Path
+    frontmatter_source: Path | None = None
     template: dict[str, str] = field(default_factory=dict)
     backup_suffix: str = ".ai-harness-backup"
     conflict_suffix: str = ".ai-harness-conflict-backup"
