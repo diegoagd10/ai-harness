@@ -95,10 +95,35 @@ def test_install_copies_opencode_configuration(tmp_path: Path, monkeypatch: pyte
     }
     assert agent_names == expected, f"agent mismatch: {agent_names ^ expected}"
 
-    # All prompt fields are {file:} refs
-    for agent_id, agent_data in data["agent"].items():
-        prompt = agent_data.get("prompt", "")
+    # sdd-* agents use {file:} refs; jd-*/review-* agents inline their prompt body.
+    SDD_IDS = {
+        "sdd-orchestrator",
+        "sdd-explore",
+        "sdd-propose",
+        "sdd-spec",
+        "sdd-design",
+        "sdd-tasks",
+        "sdd-apply",
+        "sdd-verify",
+        "sdd-archive",
+    }
+    INLINE_IDS = {
+        "jd-fix-agent",
+        "jd-judge-a",
+        "jd-judge-b",
+        "review-readability",
+        "review-reliability",
+        "review-resilience",
+        "review-risk",
+    }
+    for agent_id in SDD_IDS:
+        prompt = data["agent"][agent_id].get("prompt", "")
         assert prompt.startswith("{file:"), f"{agent_id} prompt not a {{file:}} ref: {prompt}"
+    for agent_id in INLINE_IDS:
+        prompt = data["agent"][agent_id].get("prompt", "")
+        assert isinstance(prompt, str) and prompt and not prompt.startswith("{file:"), (
+            f"{agent_id} prompt must be an inlined non-empty string, got: {prompt!r}"
+        )
 
     # Permission structure present
     assert "external_directory" in data["permission"]
@@ -142,7 +167,7 @@ def test_install_copies_jd_review_orchestrator_prompts(tmp_path: Path, monkeypat
     orch_target = prompts_base / "orchestrator" / "sdd-orchestrator-agent.md"
     assert orch_target.is_file(), "Missing orchestrator agent prompt"
 
-    # opencode.json inline prompt strings replaced with {file:} refs
+    # opencode.json inlines the 7 jd-/review-* agent prompt bodies (not {file:} refs)
     import json
 
     opencode_json_path = tmp_path / ".config" / "opencode" / "opencode.json"
@@ -158,7 +183,77 @@ def test_install_copies_jd_review_orchestrator_prompts(tmp_path: Path, monkeypat
     ]:
         agent = data["agent"].get(agent_id, {})
         prompt = agent.get("prompt", "")
-        assert prompt.startswith("{file:"), f"{agent_id} prompt should be a {{file:}} ref, got: {prompt}"
+        assert isinstance(prompt, str) and prompt and not prompt.startswith("{file:"), (
+            f"{agent_id} prompt must be an inlined non-empty string, got: {prompt!r}"
+        )
+
+
+# ── Task 3.3 — snapshot test against the locked target reference ────────────
+
+
+def test_opencode_json_matches_target_reference(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Generated ``opencode.json`` deep-equals the locked target reference.
+
+    ADR-06 — this is the regression net for ALL 7 known gaps:
+    ``$schema`` key, per-subphase models, inlined jd-/review-* prompts,
+    per-agent ``permission.edit: deny``, orchestrator allowlist without
+    ``sdd-init``/``sdd-onboard``, expanded reviewer descriptions, and
+    orchestrator task allowlist shape.
+
+    Both the generated output AND the reference file are reviewed in
+    the PR — drift in either side is visible.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    result = runner.invoke(app, ["install", "--all"])
+    assert result.exit_code == 0, result.output
+
+    opencode_json_path = tmp_path / ".config" / "opencode" / "opencode.json"
+    actual = json.loads(opencode_json_path.read_text(encoding="utf-8"))
+
+    # Reference file: stable test fixture (independent of any change folder's lifecycle).
+    ref_path = Path(__file__).resolve().parent / "fixtures" / "opencode-target.json"
+    # Substitute the reference file's literal /home/diegoagd10/ prefix with
+    # the test home (which is what {{HOME}} resolves to at install time).
+    expected = json.loads(ref_path.read_text(encoding="utf-8").replace("/home/diegoagd10", str(tmp_path)))
+
+    # Deep-equal via stable JSON serialization (sort_keys eliminates key order noise).
+    actual_text = json.dumps(actual, indent=2, sort_keys=True)
+    expected_text = json.dumps(expected, indent=2, sort_keys=True)
+    assert actual_text == expected_text
+
+
+# ── Task 3.4 — mutation test (ADR-01 read-at-install-time) ──────────────────
+
+
+_MUTATION_MARKER = "MUTATION_MARKER "
+
+
+def test_inline_prompt_reflects_md_edit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Editing the on-disk ``.md`` body propagates to the next install.
+
+    ADR-01: the only I/O site for inlined prompt bodies is
+    ``_load_inlined_prompt``; this test proves the body is read at
+    install time, NOT cached at import. NEVER run in parallel — mutates
+    a real file in the repo (restored in ``finally``).
+    """
+    risk_md = _RESOURCES_DIR / "prompts" / "review" / "review-risk.md"
+    original = risk_md.read_text(encoding="utf-8")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    try:
+        risk_md.write_text(_MUTATION_MARKER + original, encoding="utf-8")
+
+        result = runner.invoke(app, ["install", "--all"])
+        assert result.exit_code == 0, result.output
+
+        opencode_json_path = tmp_path / ".config" / "opencode" / "opencode.json"
+        data = json.loads(opencode_json_path.read_text(encoding="utf-8"))
+        prompt = data["agent"]["review-risk"]["prompt"]
+        assert prompt.startswith(_MUTATION_MARKER), (
+            f"review-risk prompt must reflect on-disk edit; starts with: {prompt[:60]!r}"
+        )
+    finally:
+        risk_md.write_text(original, encoding="utf-8")
 
 
 def test_install_overrides_stale_opencode_configuration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

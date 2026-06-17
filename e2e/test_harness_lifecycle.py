@@ -65,10 +65,14 @@ def _assert_opencode_json(home: str, label: str) -> None:
     """Assert opencode.json was installed with {{HOME}} substitution.
 
     Expected content is self-composed from the production ``_build_opencode_config``
-    helper — no checked-in fixture tree is consulted.
+    helper — no checked-in fixture tree is consulted. The helper reads inlined
+    prompt bodies from on-disk .md files, so we point it at the real
+    ``resources/prompts`` directory.
     """
     actual = Path(home) / ".config" / "opencode" / "opencode.json"
-    expected_text = (json.dumps(_build_opencode_config(), indent=2) + "\n").replace("{{HOME}}", home)
+    expected_text = (json.dumps(_build_opencode_config(RESOURCES_DIR / "prompts"), indent=2) + "\n").replace(
+        "{{HOME}}", home
+    )
     if not actual.is_file():
         raise AssertionError(f"{label}: missing opencode.json — {actual}")
     actual_text = actual.read_text(encoding="utf-8")
