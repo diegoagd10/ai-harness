@@ -81,7 +81,7 @@ def _assert_agents_installed(home: str, label: str) -> None:
     if not agents_dir.is_dir():
         raise AssertionError(f"{label}: copilot agents dir missing — {agents_dir}")
 
-    actual_names = {f.stem for f in agents_dir.iterdir() if f.suffix == ".md"}
+    actual_names = {f.name.removesuffix(".agent.md") for f in agents_dir.iterdir() if f.suffix == ".md"}
     expected_names = set(_ALL_SUBAGENT_NAMES)
 
     missing = expected_names - actual_names
@@ -99,7 +99,7 @@ def _assert_agent_budget(home: str, label: str) -> None:
     """Assert every installed *.agent.md is ≤ 30,000 characters."""
     agents_dir = Path(home) / _AGENTS_TARGET_DIR
     for f in agents_dir.iterdir():
-        if f.suffix != ".md":
+        if not f.name.endswith(".agent.md"):
             continue
         content = f.read_text(encoding="utf-8")
         length = len(content)
@@ -108,13 +108,15 @@ def _assert_agent_budget(home: str, label: str) -> None:
 
 
 def _assert_agent_frontmatter(home: str, label: str) -> None:
-    """Assert every installed *.agent.md has valid YAML frontmatter
-    with name/description/tools keys."""
-    import yaml  # noqa: imported late so failure is visible
+    """Assert every installed *.agent.md has valid Copilot YAML frontmatter
+    with all required keys in order, correct model per agent role,
+    user-invocable split, and agents: field only on orchestrator."""
+    import yaml
 
     agents_dir = Path(home) / _AGENTS_TARGET_DIR
+
     for f in agents_dir.iterdir():
-        if f.suffix != ".md":
+        if not f.name.endswith(".agent.md"):
             continue
         content = f.read_text(encoding="utf-8")
 
@@ -135,9 +137,39 @@ def _assert_agent_frontmatter(home: str, label: str) -> None:
         if not isinstance(fm, dict):
             raise AssertionError(f"{label}: {f.name} frontmatter is not a mapping")
 
-        for key in ("name", "description", "tools"):
-            if key not in fm or not fm[key]:
+        # Basic keys everyone needs
+        for key in ("name", "description", "tools", "target", "user-invocable", "disable-model-invocation", "model"):
+            if key not in fm or fm[key] is None:
                 raise AssertionError(f"{label}: {f.name} missing or empty frontmatter key: {key!r}")
+
+        # Copilot protocol constants
+        if fm["target"] != "github-copilot":
+            raise AssertionError(f"{label}: {f.name} target is not github-copilot: {fm['target']!r}")
+        if fm["disable-model-invocation"] is not True:
+            raise AssertionError(f"{label}: {f.name} disable-model-invocation is not true")
+
+        agent_name = f.name.removesuffix(".agent.md")
+
+        # Orchestrator assertions
+        if agent_name == "sdd-orchestrator":
+            if fm.get("user-invocable") is not True:
+                raise AssertionError(f"{label}: orchestrator user-invocable must be true")
+            if "agents" not in fm:
+                raise AssertionError(f"{label}: orchestrator must have agents field")
+            if "agent" not in fm["tools"]:
+                raise AssertionError(f"{label}: orchestrator tools must include 'agent'")
+            if fm.get("model") != "GPT-5 mini":
+                raise AssertionError(f"{label}: orchestrator model mismatch: {fm.get('model')!r}")
+        else:
+            # Sub-agent assertions
+            if fm.get("user-invocable") is not False:
+                raise AssertionError(f"{label}: {agent_name} user-invocable must be false")
+            if "agents" in fm:
+                raise AssertionError(f"{label}: {agent_name} must NOT have agents field")
+            if "agent" in fm["tools"]:
+                raise AssertionError(f"{label}: {agent_name} must NOT include 'agent' in tools")
+            if fm.get("model") != "Claude Haiku 4.5":
+                raise AssertionError(f"{label}: {agent_name} model mismatch: {fm.get('model')!r}")
 
 
 def _assert_hook_installed(home: str, label: str) -> None:
@@ -216,8 +248,8 @@ def run_install_tests(bin_dir: str) -> None:
     user_agent = agents2 / "my-custom.md"
     user_agent.write_text("---\nname: custom\ndescription: user agent\ntools: []\n---\n# body\n", encoding="utf-8")
 
-    # Pre-seed stale project agent
-    stale_agent = agents2 / "sdd-explore.md"
+    # Pre-seed stale project agent (uses new .agent.md extension)
+    stale_agent = agents2 / "sdd-explore.agent.md"
     stale_agent.write_text(
         "---\nname: stale-sdd-explore\ndescription: old\ntools: [read]\n---\n# stale body\n",
         encoding="utf-8",
@@ -245,8 +277,8 @@ def run_install_tests(bin_dir: str) -> None:
         raise AssertionError("user-authored copilot agent NOT preserved")
     print("  PASS: user-authored agent preserved")
 
-    # Stale agent overridden (sdd-explore.md contents differ)
-    stale_backup = agents2 / "sdd-explore.md.ai-harness-backup"
+    # Stale agent overridden (sdd-explore.agent.md contents differ)
+    stale_backup = agents2 / "sdd-explore.agent.md.ai-harness-backup"
     harness.assert_file_exists(stale_backup, "stale copilot agent backup")
     print("  PASS: stale copilot agent overridden (backup created)")
 
@@ -302,7 +334,7 @@ def run_uninstall_tests(bin_dir: str) -> None:
 
     # Project agents removed
     for name in _ALL_SUBAGENT_NAMES:
-        agent_path = agents_dir / f"{name}.md"
+        agent_path = agents_dir / f"{name}.agent.md"
         harness.assert_file_missing(agent_path, f"copilot project agent removed: {name}")
 
     # Hook removed

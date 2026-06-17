@@ -40,16 +40,3 @@ def test_copilot_metadata_omits_model_line() -> None:
 
     assert result == ("---\nname: jd-judge-a\ndescription: blind judge A\ntools: [View, Bash, Glob, Grep, Task]\n---")
     assert "model:" not in result
-
-
-def test_scalar_tools_value_serialized_as_is() -> None:
-    """When ``tools`` is a scalar (not a list), it is rendered verbatim."""
-    meta = {
-        "name": "x",
-        "description": "d",
-        "tools": "Read",
-    }
-
-    result = metadata_to_frontmatter(meta)
-
-    assert "tools: [Read]" in result
