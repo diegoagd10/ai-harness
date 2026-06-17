@@ -10,8 +10,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from ai_harness import compat
 from ai_harness.sdd import resolve
 from conftest import seed_ready_change, write_file
@@ -117,8 +115,18 @@ def test_phase_instructions_present_when_populated(tmp_path: Path):
     assert "phaseInstructions" in payload
     # Must appear before nextRecommended in the JSON output
     assert raw.index('"phaseInstructions"') < raw.index('"nextRecommended"')
-    assert payload["phaseInstructions"]["apply"] == ["Change: thin", "State: ready", "hint1", "hint2"]
-    assert payload["phaseInstructions"]["verify"] == ["Change: thin", "State: blocked", "hint3", "hint4"]
+    assert payload["phaseInstructions"]["apply"] == [
+        "Change: thin",
+        "State: ready",
+        "hint1",
+        "hint2",
+    ]
+    assert payload["phaseInstructions"]["verify"] == [
+        "Change: thin",
+        "State: blocked",
+        "hint3",
+        "hint4",
+    ]
     assert payload["phaseInstructions"]["archive"] == ["Change: thin", "State: blocked", "hint5"]
 
 

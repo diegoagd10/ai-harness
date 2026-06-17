@@ -83,9 +83,7 @@ def test_save_creates_dir_and_file(tmp_path: Path) -> None:
     assert set(data["installed"]) == {"opencode"}
 
 
-def test_save_atomic_preserves_prior_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_save_atomic_preserves_prior_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """save_state preserves the original file when the write fails midway."""
     home = tmp_path / "home"
     home.mkdir()
@@ -94,8 +92,6 @@ def test_save_atomic_preserves_prior_file(
     state_file.write_text('{"installed": ["opencode"]}', encoding="utf-8")
 
     # Simulate a crash during the temp-file write by making json.dumps fail.
-    original_dumps = json.dumps
-
     def _failing_dumps(*args, **kwargs):
         raise OSError("simulated disk full")
 

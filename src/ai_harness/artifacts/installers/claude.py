@@ -17,8 +17,16 @@ from ai_harness.artifacts.catalog import ArtifactCatalog
 from ai_harness.artifacts.installer import (
     InstallResult,
     UninstallResult,
+)
+from ai_harness.artifacts.installer import (
     install as generic_install,
+)
+from ai_harness.artifacts.installer import (
     uninstall as generic_uninstall,
+)
+from ai_harness.artifacts.installers.frontmatter import metadata_to_frontmatter
+from ai_harness.artifacts.installers.permissions import (
+    uninstall_permissions,
 )
 from ai_harness.artifacts.manifest import (
     ArtifactManifest,
@@ -27,25 +35,29 @@ from ai_harness.artifacts.manifest import (
     FileArtifact,
 )
 
-from ai_harness.artifacts.installers.frontmatter import metadata_to_frontmatter
-
-from ai_harness.artifacts.installers.permissions import (
-    uninstall_permissions,
-)
-
 # Eight SDD phases whose Claude agent files are composed at install time
 # from a frontmatter source (agent-clis/claude/agents/<phase>.md) and a
 # body source (prompts/sdd/<phase>.md), joined with ``---``.
 _PHASE_NAMES: list[str] = [
-    "sdd-explore", "sdd-propose", "sdd-spec", "sdd-design",
-    "sdd-tasks", "sdd-apply", "sdd-verify", "sdd-archive",
+    "sdd-explore",
+    "sdd-propose",
+    "sdd-spec",
+    "sdd-design",
+    "sdd-tasks",
+    "sdd-apply",
+    "sdd-verify",
+    "sdd-archive",
 ]
 
 # Seven inline Claude subagents whose frontmatter is embedded as metadata
 # and whose body comes from canonical prompt files under prompts/<ns>/.
 _INLINE_AGENTS: list[str] = [
-    "jd-fix-agent", "jd-judge-a", "jd-judge-b",
-    "review-readability", "review-reliability", "review-resilience",
+    "jd-fix-agent",
+    "jd-judge-a",
+    "jd-judge-b",
+    "review-readability",
+    "review-reliability",
+    "review-resilience",
     "review-risk",
 ]
 
@@ -125,25 +137,29 @@ _METADATA: dict[str, dict[str, object]] = {
     },
     "review-risk": {
         "name": "review-risk",
-        "description": "R1 Risk reviewer — security, privilege boundaries, data exposure, dependency risks, and merge-blocking vulnerabilities",
+        "description": "R1 Risk reviewer — security, privilege boundaries, "
+        "data exposure, dependency risks, and merge-blocking vulnerabilities",
         "tools": ["Read", "Bash"],
         "model": "opus",
     },
     "review-readability": {
         "name": "review-readability",
-        "description": "R2 Readability reviewer — naming, complexity, intention, maintainability, review size, and context clarity",
+        "description": "R2 Readability reviewer — naming, complexity, intention, "
+        "maintainability, review size, and context clarity",
         "tools": ["Read", "Bash"],
         "model": "sonnet",
     },
     "review-reliability": {
         "name": "review-reliability",
-        "description": "R3 Reliability reviewer — behavior-first tests, coverage value, edge cases, determinism, contracts, and regressions",
+        "description": "R3 Reliability reviewer — behavior-first tests, coverage value, "
+        "edge cases, determinism, contracts, and regressions",
         "tools": ["Read", "Bash"],
         "model": "sonnet",
     },
     "review-resilience": {
         "name": "review-resilience",
-        "description": "R4 Resilience reviewer — fallbacks, retry/backoff, graceful degradation, observability, load, rollback, and SLO risks",
+        "description": "R4 Resilience reviewer — fallbacks, retry/backoff, "
+        "graceful degradation, observability, load, rollback, and SLO risks",
         "tools": ["Read", "Bash"],
         "model": "sonnet",
     },
@@ -177,9 +193,7 @@ class ClaudeInstaller:
         """Build the catalog-derived asset paths shared by install/uninstall."""
         return ClaudeAssets(
             prompts_dir=self._catalog.get_resource_dir(Path("prompts/sdd")),
-            orchestrator_prompts_dir=self._catalog.get_resource_dir(
-                Path("prompts/orchestrator")
-            ),
+            orchestrator_prompts_dir=self._catalog.get_resource_dir(Path("prompts/orchestrator")),
             jd_prompts_dir=self._catalog.get_resource_dir(Path("prompts/jd")),
             review_prompts_dir=self._catalog.get_resource_dir(Path("prompts/review")),
         )
@@ -218,9 +232,7 @@ class ClaudeInstaller:
             )
         return result
 
-    def _install_permissions(
-        self, manifest: ArtifactManifest, assets: ClaudeAssets
-    ) -> None:
+    def _install_permissions(self, manifest: ArtifactManifest, assets: ClaudeAssets) -> None:
         """Collect tool lists from metadata for installed agents,
         including SDD phases and the orchestrator, and delegate to
         :func:`~ai_harness.artifacts.installers.permissions.install_permissions_from_tools`.
@@ -281,10 +293,7 @@ class ClaudeInstaller:
         # Inline JD agents — composed (frontmatter_text from metadata + canonical body).
         for name in _INLINE_AGENTS:
             namespace = "jd" if name.startswith("jd-") else "review"
-            prompts_subdir = (
-                assets.jd_prompts_dir if namespace == "jd"
-                else assets.review_prompts_dir
-            )
+            prompts_subdir = assets.jd_prompts_dir if namespace == "jd" else assets.review_prompts_dir
             metadata = _METADATA[name]
             fm_text = metadata_to_frontmatter(metadata)
             composed.append(

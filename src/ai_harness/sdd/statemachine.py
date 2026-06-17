@@ -29,9 +29,7 @@ class StateMachine:
     reasons: list[str]
 
 
-def compute_state_machine(
-    artifacts: dict[str, str], tasks: TaskProgress, verify_passing: bool
-) -> StateMachine:
+def compute_state_machine(artifacts: dict[str, str], tasks: TaskProgress, verify_passing: bool) -> StateMachine:
     """Derive the apply state, per-phase dependencies, the next recommended
     action, and the blocked reasons from the artifact states, task progress, and
     whether the verify report is clearly passing."""
@@ -39,11 +37,7 @@ def compute_state_machine(
     apply_state = _resolve_apply_state(core_ready, tasks)
 
     reasons = _core_blocked_reasons(artifacts, tasks)
-    if (
-        artifacts["verifyReport"] == ARTIFACT_DONE
-        and not verify_passing
-        and apply_state != APPLY_READY
-    ):
+    if artifacts["verifyReport"] == ARTIFACT_DONE and not verify_passing and apply_state != APPLY_READY:
         reasons.append("verify-report.md is not clearly passing.")
 
     dependencies = _resolve_dependencies(artifacts, tasks, apply_state, core_ready, verify_passing)

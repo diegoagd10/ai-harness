@@ -18,22 +18,16 @@ _ASCII = re.ASCII
 
 # reportField parses an optionally-bulleted, optionally-bold "Label: value" line,
 # capturing the label and the value.
-_REPORT_FIELD = re.compile(
-    r"^\s*(?:[-*]\s+)?(?:\*\*)?([A-Za-z][A-Za-z\s-]*?)(?:\*\*)?\s*:\s*(.*)$", _ASCII
-)
+_REPORT_FIELD = re.compile(r"^\s*(?:[-*]\s+)?(?:\*\*)?([A-Za-z][A-Za-z\s-]*?)(?:\*\*)?\s*:\s*(.*)$", _ASCII)
 
 # passValue matches a value that, on its own, signals a pass.
-_PASS_VALUE = re.compile(
-    r"^(?:PASS|PASSED|PASS\s+WITH\s+WARNINGS|SUCCESS|SUCCESSFUL)$", re.I | _ASCII
-)
+_PASS_VALUE = re.compile(r"^(?:PASS|PASSED|PASS\s+WITH\s+WARNINGS|SUCCESS|SUCCESSFUL)$", re.I | _ASCII)
 
 # failValue matches a value that, on its own, signals a failure.
 _FAIL_VALUE = re.compile(r"^(?:FAIL|FAILED|FAILING|FAILURE|BLOCKED|UNTESTED)$", re.I | _ASCII)
 
 # glyphFailStatus matches a red-cross glyph followed by a fail keyword.
-_GLYPH_FAIL_STATUS = re.compile(
-    r"\u274c\s*(?:FAIL|FAILED|FAILING|FAILURE|BLOCKED|UNTESTED)\b", re.I | _ASCII
-)
+_GLYPH_FAIL_STATUS = re.compile(r"\u274c\s*(?:FAIL|FAILED|FAILING|FAILURE|BLOCKED|UNTESTED)\b", re.I | _ASCII)
 
 # passNegation matches "not passed"-style phrases or "pass: no" style denials.
 _PASS_NEGATION = re.compile(
@@ -169,7 +163,7 @@ def _strip_markdown_signal(value: str) -> str:
     value = value.strip()
     for prefix in ("\u2705", "\u274c", "\u26a0\ufe0f", "\u26a0"):
         if value.startswith(prefix):
-            value = value[len(prefix):].strip()
+            value = value[len(prefix) :].strip()
     return value.strip()
 
 

@@ -41,4 +41,4 @@ def test_opencode_json_src_undefined() -> None:
       - THEN OPENCODE_JSON_SRC undefined
     """
     with pytest.raises(ImportError):
-        from ai_harness.artifacts.catalog import OPENCODE_JSON_SRC  # noqa: F811
+        from ai_harness.artifacts.catalog import OPENCODE_JSON_SRC  # noqa: F401, F811

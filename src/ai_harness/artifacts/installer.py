@@ -203,9 +203,7 @@ def install(manifest: ArtifactManifest, home: Path, console: Console) -> Install
     return result
 
 
-def uninstall(
-    manifest: ArtifactManifest, home: Path, console: Console
-) -> UninstallResult:
+def uninstall(manifest: ArtifactManifest, home: Path, console: Console) -> UninstallResult:
     """Uninstall every artifact in *manifest* from *home*.
 
     FileArtifact:

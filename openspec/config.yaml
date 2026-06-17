@@ -19,6 +19,15 @@ testing:
     - CLI entry point is ai_harness.main:main.
     - End-to-end coverage runs in Docker and exercises the installed ai-harness binary lifecycle.
 
+validation:
+  default_commands:
+    - uv run ruff format --check .
+    - uv run ruff check .
+  notes:
+    - Validation runs in the SDD verify phase before tests.
+    - "`uv run ruff format .` fixes formatting; `uv run ruff check --fix .` auto-fixes safe lint issues."
+    - Ruff config lives in pyproject.toml under [tool.ruff]; dev dep is `ruff>=0.8`.
+
 rules:
   proposal:
     - Include a rollback plan for risky changes

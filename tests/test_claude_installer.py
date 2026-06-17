@@ -16,27 +16,33 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from ai_harness.artifacts.catalog import ArtifactCatalog
 from ai_harness.artifacts.installers.claude import (
+    _METADATA,
     ClaudeAssets,
     ClaudeInstaller,
-    _METADATA,
 )
-from ai_harness.artifacts.manifest import ComposedFileArtifact
 
 # ------------------------------------------------------------------ constants ---
 
 _SDD_PHASE_NAMES: list[str] = [
-    "sdd-explore", "sdd-propose", "sdd-spec", "sdd-design",
-    "sdd-tasks", "sdd-apply", "sdd-verify", "sdd-archive",
+    "sdd-explore",
+    "sdd-propose",
+    "sdd-spec",
+    "sdd-design",
+    "sdd-tasks",
+    "sdd-apply",
+    "sdd-verify",
+    "sdd-archive",
 ]
 
 _JD_NAMES: list[str] = ["jd-fix-agent", "jd-judge-a", "jd-judge-b"]
 
 _REVIEW_NAMES: list[str] = [
-    "review-risk", "review-readability", "review-reliability", "review-resilience",
+    "review-risk",
+    "review-readability",
+    "review-reliability",
+    "review-resilience",
 ]
 
 _ALL_AGENT_NAMES: list[str] = _SDD_PHASE_NAMES + _JD_NAMES + _REVIEW_NAMES
@@ -129,18 +135,11 @@ def test_all_agents_are_composed_artifacts(tmp_path: Path) -> None:
     manifest = installer._build_manifest(home, _assets(root))
 
     # 15 agents + 1 orchestrator = 16 composed artifacts
-    assert len(manifest.composed) == 16, (
-        f"expected 16 composed artifacts, got {len(manifest.composed)}"
-    )
+    assert len(manifest.composed) == 16, f"expected 16 composed artifacts, got {len(manifest.composed)}"
 
     # No agent FileArtifacts
-    agent_files = [
-        f for f in manifest.files
-        if str(f.target_relative).startswith(".claude/agents/")
-    ]
-    assert len(agent_files) == 0, (
-        f"expected 0 FileArtifact agents, got {len(agent_files)}"
-    )
+    agent_files = [f for f in manifest.files if str(f.target_relative).startswith(".claude/agents/")]
+    assert len(agent_files) == 0, f"expected 0 FileArtifact agents, got {len(agent_files)}"
 
 
 def test_jd_agents_use_frontmatter_text_from_metadata(tmp_path: Path) -> None:
@@ -153,19 +152,12 @@ def test_jd_agents_use_frontmatter_text_from_metadata(tmp_path: Path) -> None:
 
     manifest = installer._build_manifest(home, _assets(root))
 
-    jd_artifacts = [
-        a for a in manifest.composed
-        if str(a.target_relative).startswith(".claude/agents/jd-")
-    ]
-    assert len(jd_artifacts) == 3, (
-        f"expected 3 JD composed artifacts, got {len(jd_artifacts)}"
-    )
+    jd_artifacts = [a for a in manifest.composed if str(a.target_relative).startswith(".claude/agents/jd-")]
+    assert len(jd_artifacts) == 3, f"expected 3 JD composed artifacts, got {len(jd_artifacts)}"
 
     for artifact in jd_artifacts:
         # Must have frontmatter_text from metadata
-        assert artifact.frontmatter_text is not None, (
-            f"JD agent {artifact.target_relative} missing frontmatter_text"
-        )
+        assert artifact.frontmatter_text is not None, f"JD agent {artifact.target_relative} missing frontmatter_text"
         # Must reference canonical body under prompts/jd/
         assert "prompts/jd" in str(artifact.body_source), (
             f"JD agent {artifact.target_relative} body not from prompts/jd/"
@@ -181,13 +173,8 @@ def test_review_agents_use_frontmatter_text_from_metadata(tmp_path: Path) -> Non
 
     manifest = installer._build_manifest(home, _assets(root))
 
-    review_artifacts = [
-        a for a in manifest.composed
-        if str(a.target_relative).startswith(".claude/agents/review-")
-    ]
-    assert len(review_artifacts) == 4, (
-        f"expected 4 review composed artifacts, got {len(review_artifacts)}"
-    )
+    review_artifacts = [a for a in manifest.composed if str(a.target_relative).startswith(".claude/agents/review-")]
+    assert len(review_artifacts) == 4, f"expected 4 review composed artifacts, got {len(review_artifacts)}"
 
     for artifact in review_artifacts:
         assert artifact.frontmatter_text is not None, (
@@ -213,24 +200,15 @@ def test_all_16_artifacts_use_frontmatter_text_from_metadata(tmp_path: Path) -> 
 
     manifest = installer._build_manifest(home, _assets(root))
 
-    assert len(manifest.composed) == 16, (
-        f"expected 16 composed artifacts, got {len(manifest.composed)}"
-    )
+    assert len(manifest.composed) == 16, f"expected 16 composed artifacts, got {len(manifest.composed)}"
 
     for artifact in manifest.composed:
-        assert artifact.frontmatter_text is not None, (
-            f"artifact {artifact.target_relative} missing frontmatter_text"
-        )
+        assert artifact.frontmatter_text is not None, f"artifact {artifact.target_relative} missing frontmatter_text"
 
     # Orchestrator artifact uses sdd-orchestrator-agent.md body (Agent variant)
-    orch = [
-        a for a in manifest.composed
-        if str(a.target_relative) == ".claude/skills/sdd-orchestrator/SKILL.md"
-    ]
+    orch = [a for a in manifest.composed if str(a.target_relative) == ".claude/skills/sdd-orchestrator/SKILL.md"]
     assert len(orch) == 1, "missing orchestrator composed artifact"
-    assert "orchestrator" in str(orch[0].body_source), (
-        "orchestrator body is not from prompts/orchestrator/"
-    )
+    assert "orchestrator" in str(orch[0].body_source), "orchestrator body is not from prompts/orchestrator/"
 
 
 def test_make_catalog_root_drops_agent_clis_claude_agents(tmp_path: Path) -> None:
@@ -241,9 +219,7 @@ def test_make_catalog_root_drops_agent_clis_claude_agents(tmp_path: Path) -> Non
     """
     root = _make_catalog_root(tmp_path)
     legacy = root / "agent-clis" / "claude" / "agents"
-    assert not legacy.exists(), (
-        f"agent-clis/claude/agents/ must not exist: {legacy}"
-    )
+    assert not legacy.exists(), f"agent-clis/claude/agents/ must not exist: {legacy}"
 
 
 def test_metadata_contains_expected_keys() -> None:
@@ -269,9 +245,6 @@ def test_claude_instructions_file_artifact_preserved(tmp_path: Path) -> None:
 
     manifest = installer._build_manifest(home, _assets(root))
 
-    instructions = [
-        f for f in manifest.files
-        if str(f.target_relative) == ".claude/CLAUDE.md"
-    ]
+    instructions = [f for f in manifest.files if str(f.target_relative) == ".claude/CLAUDE.md"]
     assert len(instructions) == 1, "CLAUDE.md FileArtifact missing"
     assert instructions[0].source.is_file()

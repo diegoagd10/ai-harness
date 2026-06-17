@@ -40,60 +40,78 @@ def run_sdd_status_tests(bin_dir: str) -> None:
     ws = harness.workspace_root()
     harness.seed_openspec_change(Path(ws), "my-change", TASKS_ALL_DONE)
     proc = harness.run_in_sandbox(
-        ws, "ai-harness", "sdd-status", "my-change", "--cwd", ws,
+        ws,
+        "ai-harness",
+        "sdd-status",
+        "my-change",
+        "--cwd",
+        ws,
         extra_env=extra_env,
     )
     data = json.loads(proc.stdout.strip())
-    assert data["changeName"] == "my-change", \
-        f"Expected changeName=my-change, got {data['changeName']}"
-    assert data["schemaName"] == "ai-harness.sdd-status", \
-        f"Unexpected schemaName: {data['schemaName']}"
+    assert data["changeName"] == "my-change", f"Expected changeName=my-change, got {data['changeName']}"
+    assert data["schemaName"] == "ai-harness.sdd-status", f"Unexpected schemaName: {data['schemaName']}"
     assert "taskProgress" in data, "Missing taskProgress"
-    print(f"  PASS: explicit change — changeName={data['changeName']}, "
-          f"nextRecommended={data['nextRecommended']}")
+    print(f"  PASS: explicit change — changeName={data['changeName']}, nextRecommended={data['nextRecommended']}")
 
     # -- inferred change (no arg, single active) --------------------------
     print("=== SDD Lifecycle: sdd-status — inferred change")
     ws2 = harness.workspace_root()
     harness.seed_openspec_change(Path(ws2), "inferred", TASKS_ALL_DONE)
     proc = harness.run_in_sandbox(
-        ws2, "ai-harness", "sdd-status", "--cwd", ws2,
+        ws2,
+        "ai-harness",
+        "sdd-status",
+        "--cwd",
+        ws2,
         extra_env=extra_env,
     )
     data = json.loads(proc.stdout.strip())
-    assert data["changeName"] == "inferred", \
-        f"Expected inferred changeName=inferred, got {data['changeName']}"
+    assert data["changeName"] == "inferred", f"Expected inferred changeName=inferred, got {data['changeName']}"
     print(f"  PASS: inferred change — changeName={data['changeName']}")
 
     # -- --instructions flag ---------------------------------------------
     print("=== SDD Lifecycle: sdd-status — --instructions")
     proc = harness.run_in_sandbox(
-        ws, "ai-harness", "sdd-status", "my-change", "--cwd", ws,
-        "--instructions", extra_env=extra_env,
+        ws,
+        "ai-harness",
+        "sdd-status",
+        "my-change",
+        "--cwd",
+        ws,
+        "--instructions",
+        extra_env=extra_env,
     )
     data = json.loads(proc.stdout.strip())
     if data["nextRecommended"] in ("apply", "verify", "archive"):
-        assert "phaseInstructions" in data, \
-            f"phaseInstructions missing for concrete phase {data['nextRecommended']}"
+        assert "phaseInstructions" in data, f"phaseInstructions missing for concrete phase {data['nextRecommended']}"
         pi = data["phaseInstructions"]
         assert isinstance(pi, dict), "phaseInstructions should be a dict"
         print(f"  PASS: --instructions includes phaseInstructions for {data['nextRecommended']}")
     else:
         # Non-concrete phases don't get instructions
-        print(f"  PASS: --instructions with non-concrete next={data['nextRecommended']} "
-              f"(phaseInstructions {'present' if 'phaseInstructions' in data else 'absent'})")
+        print(
+            f"  PASS: --instructions with non-concrete next={data['nextRecommended']} "
+            f"(phaseInstructions {'present' if 'phaseInstructions' in data else 'absent'})"
+        )
 
     # -- missing-change error --------------------------------------------
     print("=== SDD Lifecycle: sdd-status — missing change")
     proc = harness.run_in_sandbox(
-        ws, "ai-harness", "sdd-status", "no-such-change", "--cwd", ws,
-        extra_env=extra_env, check=False,
+        ws,
+        "ai-harness",
+        "sdd-status",
+        "no-such-change",
+        "--cwd",
+        ws,
+        extra_env=extra_env,
+        check=False,
     )
     data = json.loads(proc.stdout.strip())
-    assert data["nextRecommended"] == "sdd-new", \
-        f"Expected sdd-new for missing change, got {data['nextRecommended']}"
-    assert any("not found" in r.lower() for r in data.get("blockedReasons", [])), \
+    assert data["nextRecommended"] == "sdd-new", f"Expected sdd-new for missing change, got {data['nextRecommended']}"
+    assert any("not found" in r.lower() for r in data.get("blockedReasons", [])), (
         f"Expected 'not found' in blockedReasons, got {data.get('blockedReasons')}"
+    )
     print(f"  PASS: missing change → sdd-new with blockedReasons")
 
     # -- no active changes -----------------------------------------------
@@ -101,12 +119,16 @@ def run_sdd_status_tests(bin_dir: str) -> None:
     ws_empty = harness.workspace_root()
     os.makedirs(os.path.join(ws_empty, "openspec", "changes"), exist_ok=True)
     proc = harness.run_in_sandbox(
-        ws_empty, "ai-harness", "sdd-status", "--cwd", ws_empty,
-        extra_env=extra_env, check=False,
+        ws_empty,
+        "ai-harness",
+        "sdd-status",
+        "--cwd",
+        ws_empty,
+        extra_env=extra_env,
+        check=False,
     )
     data = json.loads(proc.stdout.strip())
-    assert data["nextRecommended"] == "sdd-new", \
-        f"Expected sdd-new for empty workspace, got {data['nextRecommended']}"
+    assert data["nextRecommended"] == "sdd-new", f"Expected sdd-new for empty workspace, got {data['nextRecommended']}"
     print(f"  PASS: no active changes → sdd-new")
 
     # -- change-not-ready state (pending tasks) --------------------------
@@ -114,15 +136,23 @@ def run_sdd_status_tests(bin_dir: str) -> None:
     ws3 = harness.workspace_root()
     harness.seed_openspec_change(Path(ws3), "pending-change", TASKS_PENDING)
     proc = harness.run_in_sandbox(
-        ws3, "ai-harness", "sdd-status", "pending-change", "--cwd", ws3,
+        ws3,
+        "ai-harness",
+        "sdd-status",
+        "pending-change",
+        "--cwd",
+        ws3,
         extra_env=extra_env,
     )
     data = json.loads(proc.stdout.strip())
     tp = data["taskProgress"]
-    assert tp["total"] > tp["completed"], \
+    assert tp["total"] > tp["completed"], (
         f"Expected pending tasks (total > completed), got total={tp['total']}, completed={tp['completed']}"
-    print(f"  PASS: pending tasks — total={tp['total']}, completed={tp['completed']}, "
-          f"nextRecommended={data['nextRecommended']}")
+    )
+    print(
+        f"  PASS: pending tasks — total={tp['total']}, completed={tp['completed']}, "
+        f"nextRecommended={data['nextRecommended']}"
+    )
 
     print("=== SDD Lifecycle: all sdd-status assertions passed")
 
@@ -137,51 +167,62 @@ def run_sdd_continue_tests(bin_dir: str) -> None:
     ws = harness.workspace_root()
     harness.seed_openspec_change(Path(ws), "continue-change", TASKS_ALL_DONE)
     proc = harness.run_in_sandbox(
-        ws, "ai-harness", "sdd-continue", "continue-change", "--cwd", ws,
+        ws,
+        "ai-harness",
+        "sdd-continue",
+        "continue-change",
+        "--cwd",
+        ws,
         extra_env=extra_env,
     )
     output = proc.stdout.strip()
-    assert "Native SDD Dispatcher" in output, \
-        "Missing dispatcher header in markdown output"
-    assert "next_recommended:" in output, \
-        "Missing next_recommended in markdown output"
-    assert "Dependency States" in output, \
-        "Missing Dependency States section"
-    assert "JSON" in output, \
-        "Missing JSON fenced block in markdown"
-    assert "```json" in output, \
-        "Missing JSON fence in markdown"
+    assert "Native SDD Dispatcher" in output, "Missing dispatcher header in markdown output"
+    assert "next_recommended:" in output, "Missing next_recommended in markdown output"
+    assert "Dependency States" in output, "Missing Dependency States section"
+    assert "JSON" in output, "Missing JSON fenced block in markdown"
+    assert "```json" in output, "Missing JSON fence in markdown"
     print("  PASS: dispatcher markdown contains header, deps, next, JSON block")
 
     # -- --json mode ----------------------------------------------------
     print("=== SDD Lifecycle: sdd-continue — --json mode")
     proc = harness.run_in_sandbox(
-        ws, "ai-harness", "sdd-continue", "continue-change", "--cwd", ws,
-        "--json", extra_env=extra_env,
+        ws,
+        "ai-harness",
+        "sdd-continue",
+        "continue-change",
+        "--cwd",
+        ws,
+        "--json",
+        extra_env=extra_env,
     )
     data = json.loads(proc.stdout.strip())
-    assert data["changeName"] == "continue-change", \
-        f"Expected changeName=continue-change, got {data['changeName']}"
-    assert "phaseInstructions" in data, \
+    assert data["changeName"] == "continue-change", f"Expected changeName=continue-change, got {data['changeName']}"
+    assert "phaseInstructions" in data, (
         "phaseInstructions missing in --json mode (instructions are always included for continue)"
-    print(f"  PASS: --json mode — changeName={data['changeName']}, "
-          f"nextRecommended={data['nextRecommended']}, "
-          f"phaseInstructions={'present' if 'phaseInstructions' in data else 'absent'}")
+    )
+    print(
+        f"  PASS: --json mode — changeName={data['changeName']}, "
+        f"nextRecommended={data['nextRecommended']}, "
+        f"phaseInstructions={'present' if 'phaseInstructions' in data else 'absent'}"
+    )
 
     # -- multi-phase progression (pending → proposal-ready) -------------
     print("=== SDD Lifecycle: sdd-continue — pending tasks (not ready)")
     ws2 = harness.workspace_root()
     harness.seed_openspec_change(Path(ws2), "progression", TASKS_PENDING)
     proc = harness.run_in_sandbox(
-        ws2, "ai-harness", "sdd-continue", "progression", "--cwd", ws2,
+        ws2,
+        "ai-harness",
+        "sdd-continue",
+        "progression",
+        "--cwd",
+        ws2,
         extra_env=extra_env,
     )
     output = proc.stdout.strip()
-    assert "Native SDD Dispatcher" in output, \
-        "Missing dispatcher header for pending change"
+    assert "Native SDD Dispatcher" in output, "Missing dispatcher header for pending change"
     # Pending tasks should not produce a concrete phase recommendation
-    print(f"  PASS: dispatcher markdown for pending change — "
-          f"output length={len(output)}")
+    print(f"  PASS: dispatcher markdown for pending change — output length={len(output)}")
 
     print("=== SDD Lifecycle: all sdd-continue assertions passed")
 

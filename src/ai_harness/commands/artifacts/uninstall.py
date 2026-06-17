@@ -17,9 +17,7 @@ RESOURCES_DIR = Path(__file__).resolve().parent.parent.parent / "resources"
 
 
 def uninstall(
-    all: bool = typer.Option(
-        False, "--all", help="Uninstall all agents without prompting"
-    ),
+    all: bool = typer.Option(False, "--all", help="Uninstall all agents without prompting"),
 ) -> None:
     """Remove harness artifacts for supported CLIs."""
     home = Path.home()
@@ -35,9 +33,7 @@ def uninstall(
 
         # TTY guard — refuse to run without a terminal.
         if not sys.stdin.isatty():
-            console.print(
-                "[red]Error:[/red] Use --all when running in non-interactive mode."
-            )
+            console.print("[red]Error:[/red] Use --all when running in non-interactive mode.")
             raise typer.Exit(code=2)
 
         result = select_uninstall_targets(installed)

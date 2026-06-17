@@ -37,15 +37,11 @@ def load_state(home: Path) -> set[str]:
         raise StateFileError(f"Cannot parse {path}: {exc}") from exc
 
     if not isinstance(data, dict) or "installed" not in data:
-        raise StateFileError(
-            f"{path} is missing the 'installed' key"
-        )
+        raise StateFileError(f"{path} is missing the 'installed' key")
 
     raw = data["installed"]
     if not isinstance(raw, list):
-        raise StateFileError(
-            f"{path} 'installed' key must be a list, got {type(raw).__name__}"
-        )
+        raise StateFileError(f"{path} 'installed' key must be a list, got {type(raw).__name__}")
 
     return set(raw)
 

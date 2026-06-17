@@ -40,6 +40,7 @@ _WIZARD_STYLE = merge_styles_default(
 
 # ---- sentinels ----
 
+
 @dataclass(frozen=True)
 class Empty:
     """User confirmed with zero selections."""
@@ -51,6 +52,7 @@ class Cancelled:
 
 
 # ----------------------------------------------------------------- helpers ---
+
 
 class MarkerOnlyControl(InquirerControl):
     """An ``InquirerControl`` whose selected rows color ONLY the marker.
@@ -193,6 +195,7 @@ def _run_checkbox(question: questionary.Question) -> list[str] | Empty | Cancell
 
 
 # ------------------------------------------------------------------ select ---
+
 
 def select_install_targets(
     currently_installed: set[str],

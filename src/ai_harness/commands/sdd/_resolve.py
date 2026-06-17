@@ -23,9 +23,7 @@ def _run_sdd_resolve(
     output goes through render_dispatcher.
     """
     try:
-        status = resolve(
-            cwd, workspace_root, change_name, include_instructions=include_instructions
-        )
+        status = resolve(cwd, workspace_root, change_name, include_instructions=include_instructions)
     except SddError as err:
         typer.echo(f"ai-harness: {err}", err=True)
         raise typer.Exit(code=compat.EXIT_ERROR) from err

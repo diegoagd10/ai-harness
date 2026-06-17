@@ -160,11 +160,7 @@ def assert_file_content(actual: Path, expected: Path, label: str) -> None:
     actual_text = actual.read_text(encoding="utf-8")
     expected_text = expected.read_text(encoding="utf-8")
     if actual_text != expected_text:
-        raise AssertionError(
-            f"{label}: content mismatch\n"
-            f"  actual:   {actual}\n"
-            f"  expected: {expected}"
-        )
+        raise AssertionError(f"{label}: content mismatch\n  actual:   {actual}\n  expected: {expected}")
 
 
 def assert_file_missing(path: Path, label: str) -> None:

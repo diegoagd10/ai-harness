@@ -45,9 +45,7 @@ def test_cwd_flag_selects_workspace_and_change(tmp_path: Path):
 def test_positional_change_argument(tmp_path: Path):
     seed_ready_change(tmp_path, "wanted", "- [ ] 1.1 Work\n")
     seed_ready_change(tmp_path, "other", "- [ ] 1.1 Work\n")
-    result = runner.invoke(
-        app, ["sdd-status", "--json", "--cwd", str(tmp_path), "wanted"]
-    )
+    result = runner.invoke(app, ["sdd-status", "--json", "--cwd", str(tmp_path), "wanted"])
     assert result.exit_code == 0
     assert json.loads(result.stdout)["changeName"] == "wanted"
 
@@ -108,6 +106,7 @@ def test_sdd_continue_json_includes_instructions(tmp_path: Path):
 
 def test_sdd_continue_empty_workspace(tmp_path: Path):
     import os as _os
+
     _os.makedirs(tmp_path / "openspec" / "changes", exist_ok=True)
     result = runner.invoke(app, ["sdd-continue", "--cwd", str(tmp_path)])
     assert result.exit_code == 0
@@ -131,9 +130,7 @@ def test_sdd_continue_missing_change(tmp_path: Path):
 
 def test_sdd_status_instructions_flag(tmp_path: Path):
     seed_ready_change(tmp_path, "fix-auth", "- [ ] 1.1 Work\n")
-    result = runner.invoke(
-        app, ["sdd-status", "--json", "--instructions", "--cwd", str(tmp_path)]
-    )
+    result = runner.invoke(app, ["sdd-status", "--json", "--instructions", "--cwd", str(tmp_path)])
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert "phaseInstructions" in payload

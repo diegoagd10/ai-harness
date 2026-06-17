@@ -25,14 +25,7 @@ def test_claude_metadata_emits_model_line() -> None:
 
     result = metadata_to_frontmatter(meta)
 
-    assert result == (
-        "---\n"
-        "name: jd-judge-a\n"
-        "description: blind judge A\n"
-        "tools: [Read, Bash]\n"
-        "model: opus\n"
-        "---"
-    )
+    assert result == ("---\nname: jd-judge-a\ndescription: blind judge A\ntools: [Read, Bash]\nmodel: opus\n---")
 
 
 def test_copilot_metadata_omits_model_line() -> None:
@@ -45,13 +38,7 @@ def test_copilot_metadata_omits_model_line() -> None:
 
     result = metadata_to_frontmatter(meta)
 
-    assert result == (
-        "---\n"
-        "name: jd-judge-a\n"
-        "description: blind judge A\n"
-        "tools: [View, Bash, Glob, Grep, Task]\n"
-        "---"
-    )
+    assert result == ("---\nname: jd-judge-a\ndescription: blind judge A\ntools: [View, Bash, Glob, Grep, Task]\n---")
     assert "model:" not in result
 
 

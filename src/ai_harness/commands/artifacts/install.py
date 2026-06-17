@@ -29,9 +29,7 @@ def install(
     else:
         # TTY guard — refuse to run without a terminal.
         if not sys.stdin.isatty():
-            console.print(
-                "[red]Error:[/red] Use --all when running in non-interactive mode."
-            )
+            console.print("[red]Error:[/red] Use --all when running in non-interactive mode.")
             raise typer.Exit(code=2)
 
         installed = load_state(home)

@@ -18,7 +18,11 @@ from ai_harness.artifacts.catalog import ArtifactCatalog
 from ai_harness.artifacts.installer import (
     InstallResult,
     UninstallResult,
+)
+from ai_harness.artifacts.installer import (
     install as generic_install,
+)
+from ai_harness.artifacts.installer import (
     uninstall as generic_uninstall,
 )
 from ai_harness.artifacts.installers.frontmatter import metadata_to_frontmatter
@@ -62,10 +66,21 @@ _MAX_COMPOSED_CHARS: int = 30_000
 # ── deny paths — shared between Copilot hook JSON and OpenCode permission ────
 
 _DENY_PATHS: list[str] = [
-    "~/.ssh/**", "~/.aws/**", "~/.gnupg/**",
-    "~/.zshrc", "~/.bashrc", "~/.bash_history", "~/.zsh_history",
-    "~/.netrc", "~/.config/gh/**", "~/.docker/config.json",
-    "/tmp/**", "/etc/**", "/proc/**", "/sys/**", "/var/**",
+    "~/.ssh/**",
+    "~/.aws/**",
+    "~/.gnupg/**",
+    "~/.zshrc",
+    "~/.bashrc",
+    "~/.bash_history",
+    "~/.zsh_history",
+    "~/.netrc",
+    "~/.config/gh/**",
+    "~/.docker/config.json",
+    "/tmp/**",
+    "/etc/**",
+    "/proc/**",
+    "/sys/**",
+    "/var/**",
 ]
 
 # All 16 agent ids for hook allowlist
@@ -142,22 +157,26 @@ _METADATA: dict[str, dict[str, object]] = {
     },
     "review-risk": {
         "name": "review-risk",
-        "description": "R1 Risk reviewer — security, privilege boundaries, data exposure, dependency risks, and merge-blocking vulnerabilities",
+        "description": "R1 Risk reviewer — security, privilege boundaries, "
+        "data exposure, dependency risks, and merge-blocking vulnerabilities",
         "tools": ["View", "Bash", "Glob", "Grep", "Task"],
     },
     "review-readability": {
         "name": "review-readability",
-        "description": "R2 Readability reviewer — naming, complexity, intention, maintainability, review size, and context clarity",
+        "description": "R2 Readability reviewer — naming, complexity, intention, "
+        "maintainability, review size, and context clarity",
         "tools": ["View", "Bash", "Glob", "Grep", "Task"],
     },
     "review-reliability": {
         "name": "review-reliability",
-        "description": "R3 Reliability reviewer — behavior-first tests, coverage value, edge cases, determinism, contracts, and regressions",
+        "description": "R3 Reliability reviewer — behavior-first tests, coverage value, "
+        "edge cases, determinism, contracts, and regressions",
         "tools": ["View", "Bash", "Glob", "Grep", "Task"],
     },
     "review-resilience": {
         "name": "review-resilience",
-        "description": "R4 Resilience reviewer — fallbacks, retry/backoff, graceful degradation, observability, load, rollback, and SLO risks",
+        "description": "R4 Resilience reviewer — fallbacks, retry/backoff, "
+        "graceful degradation, observability, load, rollback, and SLO risks",
         "tools": ["View", "Bash", "Glob", "Grep", "Task"],
     },
 }
@@ -280,10 +299,7 @@ class CopilotInstaller:
         # Inline JD/reviewer agents — composed with embedded metadata.
         for name in _INLINE_AGENTS:
             namespace = "jd" if name.startswith("jd-") else "review"
-            prompts_subdir = (
-                assets.jd_prompts_dir if namespace == "jd"
-                else assets.review_prompts_dir
-            )
+            prompts_subdir = assets.jd_prompts_dir if namespace == "jd" else assets.review_prompts_dir
             metadata = _METADATA[name]
             fm_text = metadata_to_frontmatter(metadata)
             composed.append(
@@ -337,6 +353,5 @@ class CopilotInstaller:
         total = len(fm_text.rstrip("\n")) + len("\n---\n") + len(body)
         if total > _MAX_COMPOSED_CHARS:
             raise ValueError(
-                f"Composed agent '{artifact.target_relative.name}' "
-                f"exceeds {_MAX_COMPOSED_CHARS} char budget: {total}"
+                f"Composed agent '{artifact.target_relative.name}' exceeds {_MAX_COMPOSED_CHARS} char budget: {total}"
             )

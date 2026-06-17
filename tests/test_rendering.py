@@ -50,8 +50,7 @@ def _build_status(
         artifact_paths=ArtifactPaths(),
         context_files=ArtifactPaths(),
         artifacts={},
-        task_progress=task_progress
-        or TaskProgress(total=2, completed=0, pending=2, all_complete=False),
+        task_progress=task_progress or TaskProgress(total=2, completed=0, pending=2, all_complete=False),
         dependencies=deps or Dependencies(apply=DEP_READY),
         apply_state="ready",
         action_context=ActionContext(
@@ -183,8 +182,13 @@ def test_render_dispatcher_task_progress_line_present():
 def test_render_dispatcher_all_seven_dependencies_listed():
     status = _build_status(
         deps=Dependencies(
-            proposal=DEP_READY, specs=DEP_BLOCKED, design=DEP_BLOCKED,
-            tasks=DEP_READY, apply=DEP_BLOCKED, verify=DEP_BLOCKED, archive=DEP_BLOCKED,
+            proposal=DEP_READY,
+            specs=DEP_BLOCKED,
+            design=DEP_BLOCKED,
+            tasks=DEP_READY,
+            apply=DEP_BLOCKED,
+            verify=DEP_BLOCKED,
+            archive=DEP_BLOCKED,
         )
     )
     out = render_dispatcher(status)

@@ -16,9 +16,7 @@ SKILLS_SRC = _RESOURCES_DIR / "skills"
 OPENCODE_SDD_PROMPTS_SRC = _RESOURCES_DIR / "prompts" / "sdd"
 
 
-def test_install_copies_agents_md_to_agent_targets(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_install_copies_agents_md_to_agent_targets(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
 
     result = runner.invoke(app, ["install", "--all"])
@@ -27,17 +25,11 @@ def test_install_copies_agents_md_to_agent_targets(
     agents_md = AGENTS_MD_SRC.read_text(encoding="utf-8")
     assert (tmp_path / ".agents" / "AGENTS.md").read_text(encoding="utf-8") == agents_md
     assert (tmp_path / ".claude" / "CLAUDE.md").read_text(encoding="utf-8") == agents_md
-    assert (
-        tmp_path / ".copilot" / "copilot-instructions.md"
-    ).read_text(encoding="utf-8") == agents_md
-    assert (
-        tmp_path / ".config" / "opencode" / "AGENTS.md"
-    ).read_text(encoding="utf-8") == agents_md
+    assert (tmp_path / ".copilot" / "copilot-instructions.md").read_text(encoding="utf-8") == agents_md
+    assert (tmp_path / ".config" / "opencode" / "AGENTS.md").read_text(encoding="utf-8") == agents_md
 
 
-def test_install_copies_skills_to_agents_and_claude(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_install_copies_skills_to_agents_and_claude(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
 
     result = runner.invoke(app, ["install", "--all"])
@@ -72,9 +64,7 @@ def test_install_preserves_custom_skills_and_overrides_matching(
     assert stale_example.read_text(encoding="utf-8") == example_skill
 
 
-def test_install_copies_opencode_configuration(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_install_copies_opencode_configuration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
 
     result = runner.invoke(app, ["install", "--all"])
@@ -86,39 +76,43 @@ def test_install_copies_opencode_configuration(
     # All 16 agents present
     agent_names = set(data["agent"].keys())
     expected = {
-        "sdd-orchestrator", "jd-fix-agent", "jd-judge-a", "jd-judge-b",
-        "review-readability", "review-reliability", "review-resilience", "review-risk",
-        "sdd-explore", "sdd-propose", "sdd-spec", "sdd-design",
-        "sdd-tasks", "sdd-apply", "sdd-verify", "sdd-archive",
+        "sdd-orchestrator",
+        "jd-fix-agent",
+        "jd-judge-a",
+        "jd-judge-b",
+        "review-readability",
+        "review-reliability",
+        "review-resilience",
+        "review-risk",
+        "sdd-explore",
+        "sdd-propose",
+        "sdd-spec",
+        "sdd-design",
+        "sdd-tasks",
+        "sdd-apply",
+        "sdd-verify",
+        "sdd-archive",
     }
     assert agent_names == expected, f"agent mismatch: {agent_names ^ expected}"
 
     # All prompt fields are {file:} refs
     for agent_id, agent_data in data["agent"].items():
         prompt = agent_data.get("prompt", "")
-        assert prompt.startswith("{file:"), (
-            f"{agent_id} prompt not a {{file:}} ref: {prompt}"
-        )
+        assert prompt.startswith("{file:"), f"{agent_id} prompt not a {{file:}} ref: {prompt}"
 
     # Permission structure present
     assert "external_directory" in data["permission"]
     assert "read" in data["permission"]
 
     for prompt_file in OPENCODE_SDD_PROMPTS_SRC.glob("*.md"):
-        target = (
-            tmp_path / ".config" / "opencode" / "prompts" / "sdd" / prompt_file.name
-        )
-        assert target.read_text(encoding="utf-8") == prompt_file.read_text(
-            encoding="utf-8"
-        )
+        target = tmp_path / ".config" / "opencode" / "prompts" / "sdd" / prompt_file.name
+        assert target.read_text(encoding="utf-8") == prompt_file.read_text(encoding="utf-8")
 
 
 # ── 5.1 RED: jd/review/orchestrator prompts copied; opencode.json uses {file:} refs ──
 
 
-def test_install_copies_jd_review_orchestrator_prompts(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_install_copies_jd_review_orchestrator_prompts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """After refactor, jd/, review/, orchestrator/ prompts are copied to
     the opencode prompts dir, and opencode.json uses {file:} references
     instead of inline prompt strings for jd/review agents."""
@@ -150,21 +144,24 @@ def test_install_copies_jd_review_orchestrator_prompts(
 
     # opencode.json inline prompt strings replaced with {file:} refs
     import json
+
     opencode_json_path = tmp_path / ".config" / "opencode" / "opencode.json"
     data = json.loads(opencode_json_path.read_text(encoding="utf-8"))
-    for agent_id in ["jd-fix-agent", "jd-judge-a", "jd-judge-b",
-                     "review-readability", "review-reliability",
-                     "review-resilience", "review-risk"]:
+    for agent_id in [
+        "jd-fix-agent",
+        "jd-judge-a",
+        "jd-judge-b",
+        "review-readability",
+        "review-reliability",
+        "review-resilience",
+        "review-risk",
+    ]:
         agent = data["agent"].get(agent_id, {})
         prompt = agent.get("prompt", "")
-        assert prompt.startswith("{file:"), (
-            f"{agent_id} prompt should be a {{file:}} ref, got: {prompt}"
-        )
+        assert prompt.startswith("{file:"), f"{agent_id} prompt should be a {{file:}} ref, got: {prompt}"
 
 
-def test_install_overrides_stale_opencode_configuration(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_install_overrides_stale_opencode_configuration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
 
     opencode_json = tmp_path / ".config" / "opencode" / "opencode.json"
@@ -186,23 +183,16 @@ def test_install_overrides_stale_opencode_configuration(
     assert "agent" in data, "generated opencode.json missing 'agent' key"
     assert "permission" in data, "generated opencode.json missing 'permission' key"
 
-    assert (
-        tmp_path
-        / ".config"
-        / "opencode"
-        / "opencode.json.ai-harness-backup"
-    ).read_text(encoding="utf-8") == '{"original": true}\n'
-    assert stale_prompt.read_text(encoding="utf-8") == (
-        OPENCODE_SDD_PROMPTS_SRC / "sdd-apply.md"
-    ).read_text(encoding="utf-8")
-    assert stale_prompt.with_name(
-        "sdd-apply.md.ai-harness-backup"
-    ).read_text(encoding="utf-8") == "# stale prompt\n"
+    assert (tmp_path / ".config" / "opencode" / "opencode.json.ai-harness-backup").read_text(
+        encoding="utf-8"
+    ) == '{"original": true}\n'
+    assert stale_prompt.read_text(encoding="utf-8") == (OPENCODE_SDD_PROMPTS_SRC / "sdd-apply.md").read_text(
+        encoding="utf-8"
+    )
+    assert stale_prompt.with_name("sdd-apply.md.ai-harness-backup").read_text(encoding="utf-8") == "# stale prompt\n"
 
 
-def test_install_backs_up_existing_opencode_agents_md(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_install_backs_up_existing_opencode_agents_md(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
 
     opencode_agents_md = tmp_path / ".config" / "opencode" / "AGENTS.md"
@@ -212,12 +202,10 @@ def test_install_backs_up_existing_opencode_agents_md(
     result = runner.invoke(app, ["install", "--all"])
     assert result.exit_code == 0, result.output
 
-    assert opencode_agents_md.read_text(encoding="utf-8") == AGENTS_MD_SRC.read_text(
+    assert opencode_agents_md.read_text(encoding="utf-8") == AGENTS_MD_SRC.read_text(encoding="utf-8")
+    assert (tmp_path / ".config" / "opencode" / "AGENTS.md.ai-harness-backup").read_text(
         encoding="utf-8"
-    )
-    assert (
-        tmp_path / ".config" / "opencode" / "AGENTS.md.ai-harness-backup"
-    ).read_text(encoding="utf-8") == "# user instructions\n"
+    ) == "# user instructions\n"
 
 
 def test_reinstall_backs_up_modified_opencode_files_as_conflicts(
@@ -246,20 +234,20 @@ def test_reinstall_backs_up_modified_opencode_files_as_conflicts(
     second_install = runner.invoke(app, ["install", "--all"])
     assert second_install.exit_code == 0, second_install.output
 
-    assert opencode_json.with_name(
-        "opencode.json.ai-harness-conflict-backup"
-    ).read_text(encoding="utf-8") == '{"modified": true}\n'
-    assert opencode_agents_md.with_name(
-        "AGENTS.md.ai-harness-conflict-backup"
-    ).read_text(encoding="utf-8") == "# modified instructions\n"
-    assert prompt.with_name(
-        "sdd-apply.md.ai-harness-conflict-backup"
-    ).read_text(encoding="utf-8") == "# modified prompt\n"
+    assert (
+        opencode_json.with_name("opencode.json.ai-harness-conflict-backup").read_text(encoding="utf-8")
+        == '{"modified": true}\n'
+    )
+    assert (
+        opencode_agents_md.with_name("AGENTS.md.ai-harness-conflict-backup").read_text(encoding="utf-8")
+        == "# modified instructions\n"
+    )
+    assert (
+        prompt.with_name("sdd-apply.md.ai-harness-conflict-backup").read_text(encoding="utf-8") == "# modified prompt\n"
+    )
 
 
-def test_repeated_reinstall_keeps_existing_conflict_backups(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_repeated_reinstall_keeps_existing_conflict_backups(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
 
     opencode_json = tmp_path / ".config" / "opencode" / "opencode.json"
@@ -277,20 +265,20 @@ def test_repeated_reinstall_keeps_existing_conflict_backups(
     third_install = runner.invoke(app, ["install", "--all"])
     assert third_install.exit_code == 0, third_install.output
 
-    assert opencode_json.with_name(
-        "opencode.json.ai-harness-conflict-backup"
-    ).read_text(encoding="utf-8") == '{"modified": 1}\n'
-    assert opencode_json.with_name(
-        "opencode.json.ai-harness-conflict-backup.1"
-    ).read_text(encoding="utf-8") == '{"modified": 2}\n'
+    assert (
+        opencode_json.with_name("opencode.json.ai-harness-conflict-backup").read_text(encoding="utf-8")
+        == '{"modified": 1}\n'
+    )
+    assert (
+        opencode_json.with_name("opencode.json.ai-harness-conflict-backup.1").read_text(encoding="utf-8")
+        == '{"modified": 2}\n'
+    )
 
 
 # ================================================================ 4.1 RED ===
 
 
-def test_install_all_bypasses_wizard(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, monkeypatch_questionary
-) -> None:
+def test_install_all_bypasses_wizard(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, monkeypatch_questionary) -> None:
     """``--all`` installs all three agents without invoking the wizard."""
     monkeypatch.setenv("HOME", str(tmp_path))
 
@@ -300,9 +288,7 @@ def test_install_all_bypasses_wizard(
     assert result.exit_code == 0, f"Expected exit 0, got {result.exit_code}: {result.output}"
 
     # Wizard must NOT have been called.
-    assert len(monkeypatch_questionary.calls) == 0, (
-        "questionary.checkbox must not be invoked with --all"
-    )
+    assert len(monkeypatch_questionary.calls) == 0, "questionary.checkbox must not be invoked with --all"
 
     # State file must list all three agents.
     import json
@@ -346,16 +332,18 @@ def test_install_wizard_called_no_flag(
 
 @pytest.mark.questionary_return([])
 def test_install_empty_exits_zero(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, monkeypatch_questionary,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch_questionary,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Empty wizard selection prints a message and exits 0."""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
 
-    from ai_harness.commands.artifacts.install import install
-
     import typer
+
+    from ai_harness.commands.artifacts.install import install
 
     with pytest.raises(typer.Exit) as exc_info:
         install(all=False)
@@ -367,16 +355,18 @@ def test_install_empty_exits_zero(
 
 @pytest.mark.questionary_return(None)
 def test_install_escape_exits_one(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, monkeypatch_questionary,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch_questionary,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Pressing Escape during wizard exits with code 1."""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
 
-    from ai_harness.commands.artifacts.install import install
-
     import typer
+
+    from ai_harness.commands.artifacts.install import install
 
     with pytest.raises(typer.Exit) as exc_info:
         install(all=False)
@@ -390,9 +380,7 @@ def test_install_escape_exits_one(
 
 
 @pytest.mark.questionary_return(["opencode"])
-def test_install_state_on_success(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, monkeypatch_questionary
-) -> None:
+def test_install_state_on_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, monkeypatch_questionary) -> None:
     """When the wizard returns a selection, the state file is updated on success."""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
@@ -409,9 +397,7 @@ def test_install_state_on_success(
     assert "opencode" in data["installed"]
 
 
-def test_install_no_tty_errors(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_install_no_tty_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Without ``--all`` and with no TTY, the command errors with a clear message."""
     monkeypatch.setenv("HOME", str(tmp_path))
     # CliRunner provides a non-TTY sys.stdin by default, so no isatty
@@ -423,9 +409,7 @@ def test_install_no_tty_errors(
 
 
 @pytest.mark.questionary_return(["opencode", "claude"])
-def test_install_all_or_nothing(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, monkeypatch_questionary
-) -> None:
+def test_install_all_or_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, monkeypatch_questionary) -> None:
     """When one installer fails the state file must remain unchanged.
 
     We simulate this by forcing the opencode installer to fail.
@@ -456,14 +440,11 @@ def test_install_all_or_nothing(
     # at all — all-or-nothing semantics mean a partial install is a no-op.
     state_path = tmp_path / ".ai-harness" / "state.json"
     assert not state_path.exists(), (
-        "State file must NOT be created when any installer fails "
-        "(all-or-nothing: no partial state)"
+        "State file must NOT be created when any installer fails (all-or-nothing: no partial state)"
     )
 
 
-def test_claude_install_writes_permissions_allow(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_claude_install_writes_permissions_allow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """``ai-harness install --all`` produces ``settings.json`` with the 5
     required permission rules and a marker file. Uses ``--all`` because the
     e2e / non-TTY default requires it after the wizard refactor."""
@@ -489,5 +470,3 @@ def test_claude_install_writes_permissions_allow(
 
     backup = claude_dir / "settings.json.ai-harness-backup"
     assert backup.is_file()
-
-

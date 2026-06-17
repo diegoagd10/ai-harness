@@ -18,7 +18,6 @@ from ai_harness.artifacts.wizard import (
     select_uninstall_targets,
 )
 
-
 # ================================================== 1.3 upgrade canary ===
 
 
@@ -192,9 +191,7 @@ def test_select_install_targets_fresh_install_preselects_all_three(
     assert len(choices) == 3
     for i, expected_title in enumerate(("OpenCode", "Claude Code", "Copilot CLI")):
         assert choices[i].title == expected_title
-        assert choices[i].checked is True, (
-            f"{expected_title} must be pre-selected on fresh install"
-        )
+        assert choices[i].checked is True, f"{expected_title} must be pre-selected on fresh install"
 
     assert result == ["opencode"]
 
@@ -205,22 +202,14 @@ def test_wizard_passes_key_hint_footer(monkeypatch_questionary) -> None:
     select_install_targets(set())
 
     _, kwargs = monkeypatch_questionary.calls[0]
-    assert "instruction" in kwargs, (
-        "questionary.checkbox must receive the instruction parameter"
-    )
+    assert "instruction" in kwargs, "questionary.checkbox must receive the instruction parameter"
     instruction = kwargs["instruction"]
-    assert "↑↓" in instruction or "j k" in instruction, (
-        f"Footer key hints missing from instruction: {instruction!r}"
-    )
+    assert "↑↓" in instruction or "j k" in instruction, f"Footer key hints missing from instruction: {instruction!r}"
     assert "space" in instruction.lower() or "toggle" in instruction, (
         f"Toggle hint missing from instruction: {instruction!r}"
     )
-    assert "enter" in instruction.lower(), (
-        f"Enter hint missing from instruction: {instruction!r}"
-    )
-    assert "esc" in instruction.lower(), (
-        f"Escape hint missing from instruction: {instruction!r}"
-    )
+    assert "enter" in instruction.lower(), f"Enter hint missing from instruction: {instruction!r}"
+    assert "esc" in instruction.lower(), f"Escape hint missing from instruction: {instruction!r}"
 
 
 # ============================================================= 3.2 RED ===

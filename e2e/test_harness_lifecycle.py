@@ -68,9 +68,7 @@ def _assert_opencode_json(home: str, label: str) -> None:
     helper — no checked-in fixture tree is consulted.
     """
     actual = Path(home) / ".config" / "opencode" / "opencode.json"
-    expected_text = (json.dumps(_build_opencode_config(), indent=2) + "\n").replace(
-        "{{HOME}}", home
-    )
+    expected_text = (json.dumps(_build_opencode_config(), indent=2) + "\n").replace("{{HOME}}", home)
     if not actual.is_file():
         raise AssertionError(f"{label}: missing opencode.json — {actual}")
     actual_text = actual.read_text(encoding="utf-8")
@@ -86,9 +84,7 @@ def _assert_agents_md_targets(home: str, label: str) -> None:
     """Assert AGENTS.md was copied to all four agent dirs."""
     for relative_target in AGENTS_MD_RELATIVE_TARGETS:
         actual = Path(home) / relative_target
-        harness.assert_file_content(
-            actual, AGENTS_MD_SRC, f"AGENTS.md -> {relative_target} ({label})"
-        )
+        harness.assert_file_content(actual, AGENTS_MD_SRC, f"AGENTS.md -> {relative_target} ({label})")
 
 
 def _assert_skills_targets(home: str, label: str) -> None:
@@ -115,9 +111,7 @@ def _assert_sdd_prompts(home: str, label: str) -> None:
         if not prompt_file.is_file():
             continue
         actual = prompts_target / prompt_file.name
-        harness.assert_file_content(
-            actual, prompt_file, f"prompts/sdd/{prompt_file.name} ({label})"
-        )
+        harness.assert_file_content(actual, prompt_file, f"prompts/sdd/{prompt_file.name} ({label})")
 
 
 def _expected_claude_agent(name: str, body_dir: Path) -> str:
@@ -142,9 +136,7 @@ def _assert_claude_agents(home: str, label: str) -> None:
     SKILL.md must exist, and the agent directory must hold exactly 15 .md files.
     """
     agents_target = Path(home) / ".claude" / "agents"
-    orchestrator_target = (
-        Path(home) / ".claude" / "skills" / "sdd-orchestrator" / "SKILL.md"
-    )
+    orchestrator_target = Path(home) / ".claude" / "skills" / "sdd-orchestrator" / "SKILL.md"
 
     # 1. SDD phase agents — composed (frontmatter from metadata + body from prompts/sdd/)
     for name in _SDD_PHASE_NAMES:
@@ -165,9 +157,7 @@ def _assert_claude_agents(home: str, label: str) -> None:
     # 2. Inline agents — composed (frontmatter from metadata + body from prompts/<ns>/)
     for name in _INLINE_AGENT_NAMES:
         installed = agents_target / f"{name}.md"
-        harness.assert_file_exists(
-            installed, f"claude inline subagent {name} ({label})"
-        )
+        harness.assert_file_exists(installed, f"claude inline subagent {name} ({label})")
 
         body_dir = JD_PROMPTS_SRC if name.startswith("jd-") else REVIEW_PROMPTS_SRC
         actual = installed.read_text(encoding="utf-8")
@@ -182,9 +172,7 @@ def _assert_claude_agents(home: str, label: str) -> None:
             )
 
     # 3. Orchestrator SKILL.md
-    harness.assert_file_exists(
-        orchestrator_target, f"claude sdd-orchestrator SKILL.md ({label})"
-    )
+    harness.assert_file_exists(orchestrator_target, f"claude sdd-orchestrator SKILL.md ({label})")
 
     # 4. Agent count (8 phases + 7 inline) = 15
     if agents_target.is_dir():
@@ -192,9 +180,7 @@ def _assert_claude_agents(home: str, label: str) -> None:
     else:
         md_count = 0
     if md_count != 15:
-        raise AssertionError(
-            f"claude agents .md file count ({label}): expected 15, got {md_count}"
-        )
+        raise AssertionError(f"claude agents .md file count ({label}): expected 15, got {md_count}")
 
 
 _MANAGED_RULE_NAMES = {"Bash", "Read", "Edit", "Write", "Agent"}
@@ -244,9 +230,7 @@ def run_install_tests(bin_dir: str) -> None:
     # before ai-harness install runs).
     claude_dir1 = Path(home1) / ".claude"
     claude_dir1.mkdir(parents=True)
-    (claude_dir1 / "settings.json").write_text(
-        '{"statusLine": {"type": "command"}}', encoding="utf-8"
-    )
+    (claude_dir1 / "settings.json").write_text('{"statusLine": {"type": "command"}}', encoding="utf-8")
 
     harness.run_in_sandbox(home1, "ai-harness", "install", "--all", extra_env=extra_env)
     _assert_agents_md_targets(home1, "fresh")
@@ -254,9 +238,7 @@ def run_install_tests(bin_dir: str) -> None:
     _assert_sdd_prompts(home1, "fresh")
     _assert_claude_agents(home1, "fresh")
     _assert_opencode_json(home1, "fresh")
-    harness.assert_file_exists(
-        Path(home1) / ".config" / "opencode" / "AGENTS.md", "opencode AGENTS.md (fresh)"
-    )
+    harness.assert_file_exists(Path(home1) / ".config" / "opencode" / "AGENTS.md", "opencode AGENTS.md (fresh)")
     _assert_claude_permissions(home1, "fresh")
     print("  PASS: fresh install assertions")
 
@@ -270,21 +252,13 @@ def run_install_tests(bin_dir: str) -> None:
         "# my custom skill\n", encoding="utf-8"
     )
     (Path(home2) / ".claude" / "skills" / "example").mkdir(parents=True)
-    (Path(home2) / ".claude" / "skills" / "example" / "SKILL.md").write_text(
-        "# stale content\n", encoding="utf-8"
-    )
+    (Path(home2) / ".claude" / "skills" / "example" / "SKILL.md").write_text("# stale content\n", encoding="utf-8")
     # Pre-seed settings.json so permissions backup is created.
-    (Path(home2) / ".claude" / "settings.json").write_text(
-        '{"statusLine": {"type": "command"}}', encoding="utf-8"
-    )
+    (Path(home2) / ".claude" / "settings.json").write_text('{"statusLine": {"type": "command"}}', encoding="utf-8")
     # Stale opencode state
     (Path(home2) / ".config" / "opencode").mkdir(parents=True)
-    (Path(home2) / ".config" / "opencode" / "opencode.json").write_text(
-        '{"stale": true}\n', encoding="utf-8"
-    )
-    (Path(home2) / ".config" / "opencode" / "AGENTS.md").write_text(
-        "# user opencode instructions\n", encoding="utf-8"
-    )
+    (Path(home2) / ".config" / "opencode" / "opencode.json").write_text('{"stale": true}\n', encoding="utf-8")
+    (Path(home2) / ".config" / "opencode" / "AGENTS.md").write_text("# user opencode instructions\n", encoding="utf-8")
     # Stale + custom SDD prompts
     prompts_target2 = Path(home2) / ".config" / "opencode" / "prompts" / "sdd"
     prompts_custom = Path(home2) / ".config" / "opencode" / "prompts" / "custom"
@@ -304,9 +278,7 @@ def run_install_tests(bin_dir: str) -> None:
     # Stale project skill overridden
     stale_skill = Path(home2) / ".claude" / "skills" / "example" / "SKILL.md"
     expected_skill = SKILLS_SRC / "example" / "SKILL.md"
-    harness.assert_file_content(
-        stale_skill, expected_skill, "stale project skill overridden"
-    )
+    harness.assert_file_content(stale_skill, expected_skill, "stale project skill overridden")
 
     # Stale opencode.json overridden
     _assert_opencode_json(home2, "reinstall")
@@ -314,9 +286,7 @@ def run_install_tests(bin_dir: str) -> None:
     # Stale SDD prompt overridden
     stale_prompt = prompts_target2 / "sdd-apply.md"
     expected_prompt = SDD_PROMPTS_SRC / "sdd-apply.md"
-    harness.assert_file_content(
-        stale_prompt, expected_prompt, "stale SDD prompt overridden"
-    )
+    harness.assert_file_content(stale_prompt, expected_prompt, "stale SDD prompt overridden")
 
     # Custom SDD prompt preserved
     custom_prompt = prompts_custom / "user.md"
@@ -348,12 +318,8 @@ def run_uninstall_tests(bin_dir: str) -> None:
         "# my custom skill\n", encoding="utf-8"
     )
     (Path(home) / ".config" / "opencode").mkdir(parents=True)
-    (Path(home) / ".config" / "opencode" / "opencode.json").write_text(
-        '{"stale": true}\n', encoding="utf-8"
-    )
-    (Path(home) / ".config" / "opencode" / "AGENTS.md").write_text(
-        "# user opencode instructions\n", encoding="utf-8"
-    )
+    (Path(home) / ".config" / "opencode" / "opencode.json").write_text('{"stale": true}\n', encoding="utf-8")
+    (Path(home) / ".config" / "opencode" / "AGENTS.md").write_text("# user opencode instructions\n", encoding="utf-8")
     prompts_target = Path(home) / ".config" / "opencode" / "prompts" / "sdd"
     prompts_custom = Path(home) / ".config" / "opencode" / "prompts" / "custom"
     prompts_target.mkdir(parents=True)
@@ -366,9 +332,7 @@ def run_uninstall_tests(bin_dir: str) -> None:
     # already created it).
     claude_dir = Path(home) / ".claude"
     claude_dir.mkdir(parents=True)
-    (claude_dir / "settings.json").write_text(
-        '{"statusLine": {"type": "command"}}', encoding="utf-8"
-    )
+    (claude_dir / "settings.json").write_text('{"statusLine": {"type": "command"}}', encoding="utf-8")
 
     # Install (creates backups of pre-existing files)
     harness.run_in_sandbox(home, "ai-harness", "install", "--all", extra_env=extra_env)
@@ -376,22 +340,15 @@ def run_uninstall_tests(bin_dir: str) -> None:
 
     # Uninstall
     print("=== Harness Lifecycle: uninstall")
-    harness.run_in_sandbox(
-        home, "ai-harness", "uninstall", "--all", extra_env=extra_env
-    )
+    harness.run_in_sandbox(home, "ai-harness", "uninstall", "--all", extra_env=extra_env)
 
     # AGENTS.md targets removed
     for relative_target in AGENTS_MD_RELATIVE_TARGETS:
-        harness.assert_file_missing(
-            Path(home) / relative_target, f"AGENTS.md removed ({relative_target})"
-        )
+        harness.assert_file_missing(Path(home) / relative_target, f"AGENTS.md removed ({relative_target})")
 
     # opencode AGENTS.md restored from backup
     opencode_agents_path = Path(home) / ".config" / "opencode" / "AGENTS.md"
-    if (
-        opencode_agents_path.read_text(encoding="utf-8")
-        != "# user opencode instructions\n"
-    ):
+    if opencode_agents_path.read_text(encoding="utf-8") != "# user opencode instructions\n":
         raise AssertionError(
             f"pre-existing opencode AGENTS.md NOT restored correctly — "
             f"got: {opencode_agents_path.read_text(encoding='utf-8')}"
@@ -441,9 +398,7 @@ def run_uninstall_tests(bin_dir: str) -> None:
                 "sdd-apply.md backup removed",
             )
         else:
-            harness.assert_file_missing(
-                target, f"project SDD prompt removed: {prompt_file.name}"
-            )
+            harness.assert_file_missing(target, f"project SDD prompt removed: {prompt_file.name}")
 
     # User-authored skill preserved after uninstall
     user_skill = Path(home) / ".agents" / "skills" / "my-custom-skill" / "SKILL.md"
@@ -468,9 +423,7 @@ def run_uninstall_tests(bin_dir: str) -> None:
         allow = data.get("permissions", {}).get("allow", [])
         remaining_managed = _MANAGED_RULE_NAMES & set(allow)
         if remaining_managed:
-            raise AssertionError(
-                f"uninstall: managed rules not removed — {remaining_managed}"
-            )
+            raise AssertionError(f"uninstall: managed rules not removed — {remaining_managed}")
     print("  PASS: claude permissions rules removed on uninstall")
 
     # Marker must be deleted.

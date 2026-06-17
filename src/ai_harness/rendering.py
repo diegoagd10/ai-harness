@@ -34,8 +34,7 @@ def render_dispatcher(status: Status) -> str:
     lines: list[str] = [
         f"## Native SDD Dispatcher: {change}",
         "",
-        "Native status is authoritative. Route by next_recommended and "
-        "dependency state, not by prompt inference.",
+        "Native status is authoritative. Route by next_recommended and dependency state, not by prompt inference.",
         "",
         f"next_recommended: {status.next_recommended}",
         "",
@@ -58,11 +57,7 @@ def render_dispatcher(status: Status) -> str:
             lines.append(f"- {reason}")
 
     # Section 3: next-phase instructions (conditional, concrete phases only)
-    phase = (
-        status.next_recommended
-        if status.next_recommended in _PHASES_WITH_INSTRUCTIONS
-        else None
-    )
+    phase = status.next_recommended if status.next_recommended in _PHASES_WITH_INSTRUCTIONS else None
     if phase is not None:
         lines.append("")
         lines.append(f"### Next Phase Instructions: {phase}")

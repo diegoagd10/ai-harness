@@ -43,9 +43,7 @@ def resolve(
 
     selected, blocked = _select_change(active, change_name.strip())
     if blocked is not None:
-        status = _new_blocked_status(
-            root, blocked.change_name, blocked.next, blocked.reasons
-        )
+        status = _new_blocked_status(root, blocked.change_name, blocked.next, blocked.reasons)
     else:
         change_root = os.path.join(root, "openspec", "changes", selected)
         status = _resolve_change(root, selected, change_root)
@@ -98,9 +96,7 @@ def _select_change(active: list[str], requested: str) -> tuple[str, _ChangeBlock
     return requested, None
 
 
-def _resolve_change(
-    root: str, change_name: str, change_root: str
-) -> Status:
+def _resolve_change(root: str, change_name: str, change_root: str) -> Status:
     """Compute the full state machine for a concrete, existing change."""
     paths = discover_artifact_paths(change_root)
     artifacts = classify_artifacts(change_root, paths)

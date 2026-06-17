@@ -97,5 +97,6 @@ def test(ctx) -> None:
     sdd_continue(ctx)
     # Verify workspace cleanup tracking (no binary needed).
     from .test_sdd_lifecycle import run_workspace_cleanup_tests
+
     run_workspace_cleanup_tests()
     print("\n=== All e2e categories passed ===")

@@ -6,8 +6,8 @@ fixture and sdd-continue helpers (both out of scope for this slice).
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 import pytest
 from prompt_toolkit.input import PipeInput, create_pipe_input
@@ -73,9 +73,7 @@ class _StubCheckbox:
 
 
 @pytest.fixture
-def monkeypatch_questionary(
-    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
-) -> _StubCheckbox:
+def monkeypatch_questionary(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> _StubCheckbox:
     """Monkeypatch ``wizard._build_question`` with a configurable stub.
 
     Decorate your test with ``@pytest.mark.questionary_return(...)`` to

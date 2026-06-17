@@ -31,21 +31,15 @@ def _assert_state_file(home: str, expected: set[str], label: str) -> None:
     """
     state_path = Path(home) / STATE_FILE
     if not state_path.is_file():
-        raise AssertionError(
-            f"{label}: state file missing — {state_path}"
-        )
+        raise AssertionError(f"{label}: state file missing — {state_path}")
     try:
         doc = json.loads(state_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        raise AssertionError(
-            f"{label}: state file is not valid JSON"
-        ) from exc
+        raise AssertionError(f"{label}: state file is not valid JSON") from exc
     installed = set(doc.get("installed", []))
     if installed != expected:
         raise AssertionError(
-            f"{label}: unexpected installed set\n"
-            f"  expected: {sorted(expected)}\n"
-            f"  got:      {sorted(installed)}"
+            f"{label}: unexpected installed set\n  expected: {sorted(expected)}\n  got:      {sorted(installed)}"
         )
 
 
@@ -53,9 +47,7 @@ def _assert_state_file_missing(home: str, label: str) -> None:
     """Assert ``~/.ai-harness/state.json`` does not exist."""
     state_path = Path(home) / STATE_FILE
     if state_path.exists():
-        raise AssertionError(
-            f"{label}: state file still exists — {state_path}"
-        )
+        raise AssertionError(f"{label}: state file still exists — {state_path}")
 
 
 def run_state_file_tests(bin_dir: str) -> None:

@@ -87,9 +87,7 @@ def _backup_settings(settings_path: Path) -> None:
 
     Backup path: ``<settings_path>.ai-harness-backup``
     """
-    backup_path = settings_path.with_suffix(
-        settings_path.suffix + ".ai-harness-backup"
-    )
+    backup_path = settings_path.with_suffix(settings_path.suffix + ".ai-harness-backup")
     if backup_path.exists():
         return
     if not settings_path.is_file():
@@ -98,9 +96,7 @@ def _backup_settings(settings_path: Path) -> None:
     backup_path.write_bytes(settings_path.read_bytes())
 
 
-def _merge_allow_rules(
-    settings_path: Path, rules: set[str], marker_path: Path
-) -> set[str]:
+def _merge_allow_rules(settings_path: Path, rules: set[str], marker_path: Path) -> set[str]:
     """Deep-merge *rules* into ``permissions.allow``; write marker.
 
     Loads ``settings.json``, adds any missing *rules* to the
@@ -128,15 +124,11 @@ def _merge_allow_rules(
     settings_path.parent.mkdir(parents=True, exist_ok=True)
     settings_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     marker_path.parent.mkdir(parents=True, exist_ok=True)
-    marker_path.write_text(
-        json.dumps(sorted(rules), indent=2) + "\n", encoding="utf-8"
-    )
+    marker_path.write_text(json.dumps(sorted(rules), indent=2) + "\n", encoding="utf-8")
     return added
 
 
-def _remove_managed_rules(
-    settings_path: Path, marker_path: Path
-) -> set[str]:
+def _remove_managed_rules(settings_path: Path, marker_path: Path) -> set[str]:
     """Remove marker-tracked rules from ``permissions.allow``; delete marker.
 
     Reads the marker file to learn which rules were managed.  Removes

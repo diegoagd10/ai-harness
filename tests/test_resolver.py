@@ -388,8 +388,7 @@ GATES = [
     (
         "archive blocked todo pending",
         _seed_with_report(
-            "# Verify\nPASS\nTODO: finish audit\nPENDING: test run\n"
-            "Verification blocker: missing evidence\n"
+            "# Verify\nPASS\nTODO: finish audit\nPENDING: test run\nVerification blocker: missing evidence\n"
         ),
         "all_done",
         "all_done",
@@ -490,6 +489,7 @@ def test_include_instructions_true_populates_apply(tmp_path: Path):
 def test_include_instructions_true_blocked_status_omits(tmp_path: Path):
     # Empty workspace -> blocked status with sentinel next phase
     from pathlib import Path as _Path
+
     _Path(tmp_path / "openspec" / "changes").mkdir(parents=True, exist_ok=True)
     status = resolve(str(tmp_path), "", "", include_instructions=True)
     assert status.phase_instructions is None

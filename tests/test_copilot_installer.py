@@ -13,33 +13,36 @@ Spec scenarios:
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 
 from ai_harness.artifacts.catalog import ArtifactCatalog
 from ai_harness.artifacts.installers.copilot import CopilotInstaller
-from ai_harness.artifacts.manifest import (
-    ComposedFileArtifact,
-)
 
 # ------------------------------------------------------------------ constants ---
 
 _SDD_PHASE_NAMES: list[str] = [
-    "sdd-explore", "sdd-propose", "sdd-spec", "sdd-design",
-    "sdd-tasks", "sdd-apply", "sdd-verify", "sdd-archive",
+    "sdd-explore",
+    "sdd-propose",
+    "sdd-spec",
+    "sdd-design",
+    "sdd-tasks",
+    "sdd-apply",
+    "sdd-verify",
+    "sdd-archive",
 ]
 
 _JD_NAMES: list[str] = ["jd-fix-agent", "jd-judge-a", "jd-judge-b"]
 
 _REVIEW_NAMES: list[str] = [
-    "review-risk", "review-readability", "review-reliability", "review-resilience",
+    "review-risk",
+    "review-readability",
+    "review-reliability",
+    "review-resilience",
 ]
 
-_ALL_AGENT_NAMES: list[str] = (
-    ["sdd-orchestrator"] + _SDD_PHASE_NAMES + _JD_NAMES + _REVIEW_NAMES
-)
+_ALL_AGENT_NAMES: list[str] = ["sdd-orchestrator"] + _SDD_PHASE_NAMES + _JD_NAMES + _REVIEW_NAMES
 
 assert len(_ALL_AGENT_NAMES) == 16
 
@@ -115,18 +118,11 @@ def test_manifest_has_all_16_composed_agents(tmp_path: Path) -> None:
 
     manifest = installer._build_manifest(home)
 
-    assert len(manifest.composed) == 16, (
-        f"expected 16 composed agent artifacts, got {len(manifest.composed)}"
-    )
+    assert len(manifest.composed) == 16, f"expected 16 composed agent artifacts, got {len(manifest.composed)}"
 
     # No agent FileArtifacts
-    agent_files = [
-        f for f in manifest.files
-        if str(f.target_relative).startswith(".copilot/agents/")
-    ]
-    assert len(agent_files) == 0, (
-        f"expected 0 FileArtifact agents, got {len(agent_files)}"
-    )
+    agent_files = [f for f in manifest.files if str(f.target_relative).startswith(".copilot/agents/")]
+    assert len(agent_files) == 0, f"expected 0 FileArtifact agents, got {len(agent_files)}"
 
 
 def test_jd_agents_use_frontmatter_text(tmp_path: Path) -> None:
@@ -139,18 +135,11 @@ def test_jd_agents_use_frontmatter_text(tmp_path: Path) -> None:
 
     manifest = installer._build_manifest(home)
 
-    jd_artifacts = [
-        a for a in manifest.composed
-        if str(a.target_relative).startswith(".copilot/agents/jd-")
-    ]
-    assert len(jd_artifacts) == 3, (
-        f"expected 3 JD composed artifacts, got {len(jd_artifacts)}"
-    )
+    jd_artifacts = [a for a in manifest.composed if str(a.target_relative).startswith(".copilot/agents/jd-")]
+    assert len(jd_artifacts) == 3, f"expected 3 JD composed artifacts, got {len(jd_artifacts)}"
 
     for artifact in jd_artifacts:
-        assert artifact.frontmatter_text is not None, (
-            f"JD agent {artifact.target_relative} missing frontmatter_text"
-        )
+        assert artifact.frontmatter_text is not None, f"JD agent {artifact.target_relative} missing frontmatter_text"
         assert "prompts/jd" in str(artifact.body_source), (
             f"JD agent {artifact.target_relative} body not from prompts/jd/"
         )
@@ -165,13 +154,8 @@ def test_review_agents_use_frontmatter_text(tmp_path: Path) -> None:
 
     manifest = installer._build_manifest(home)
 
-    review_artifacts = [
-        a for a in manifest.composed
-        if str(a.target_relative).startswith(".copilot/agents/review-")
-    ]
-    assert len(review_artifacts) == 4, (
-        f"expected 4 review composed artifacts, got {len(review_artifacts)}"
-    )
+    review_artifacts = [a for a in manifest.composed if str(a.target_relative).startswith(".copilot/agents/review-")]
+    assert len(review_artifacts) == 4, f"expected 4 review composed artifacts, got {len(review_artifacts)}"
 
     for artifact in review_artifacts:
         assert artifact.frontmatter_text is not None, (
@@ -197,14 +181,10 @@ def test_all_16_agents_use_frontmatter_text_from_metadata(tmp_path: Path) -> Non
 
     manifest = installer._build_manifest(home)
 
-    assert len(manifest.composed) == 16, (
-        f"expected 16 composed agents, got {len(manifest.composed)}"
-    )
+    assert len(manifest.composed) == 16, f"expected 16 composed agents, got {len(manifest.composed)}"
 
     for artifact in manifest.composed:
-        assert artifact.frontmatter_text is not None, (
-            f"agent {artifact.target_relative} missing frontmatter_text"
-        )
+        assert artifact.frontmatter_text is not None, f"agent {artifact.target_relative} missing frontmatter_text"
 
 
 def test_hook_built_from_code_not_file_artifact(tmp_path: Path) -> None:
@@ -234,9 +214,7 @@ def test_hook_built_from_code_not_file_artifact(tmp_path: Path) -> None:
     task_entry = pre_tool_use[0]
     assert task_entry["toolName"] == "task"
     assert task_entry["default"] == "deny"
-    assert set(task_entry["allow"]) == set(
-        _SDD_PHASE_NAMES + _JD_NAMES + _REVIEW_NAMES
-    )
+    assert set(task_entry["allow"]) == set(_SDD_PHASE_NAMES + _JD_NAMES + _REVIEW_NAMES)
 
     # Write tools carry deny.paths
     for entry in pre_tool_use[1:]:
@@ -253,10 +231,7 @@ def test_manifest_contains_copilot_instructions(tmp_path: Path) -> None:
 
     manifest = installer._build_manifest(home)
 
-    instructions_artifacts = [
-        f for f in manifest.files
-        if str(f.target_relative) == ".copilot/copilot-instructions.md"
-    ]
+    instructions_artifacts = [f for f in manifest.files if str(f.target_relative) == ".copilot/copilot-instructions.md"]
     assert len(instructions_artifacts) == 1
     assert instructions_artifacts[0].source.is_file()
 
@@ -270,10 +245,7 @@ def test_skills_is_dir_artifact(tmp_path: Path) -> None:
 
     manifest = installer._build_manifest(home)
 
-    skills_artifacts = [
-        d for d in manifest.dirs
-        if str(d.target_relative) == ".copilot/skills"
-    ]
+    skills_artifacts = [d for d in manifest.dirs if str(d.target_relative) == ".copilot/skills"]
     assert len(skills_artifacts) == 1
 
 

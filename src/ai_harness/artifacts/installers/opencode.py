@@ -16,7 +16,11 @@ from ai_harness.artifacts.catalog import ArtifactCatalog
 from ai_harness.artifacts.installer import (
     InstallResult,
     UninstallResult,
+)
+from ai_harness.artifacts.installer import (
     install as generic_install,
+)
+from ai_harness.artifacts.installer import (
     uninstall as generic_uninstall,
 )
 from ai_harness.artifacts.manifest import ArtifactManifest, DirArtifact, FileArtifact
@@ -44,10 +48,21 @@ _DENY_PATHS: dict[str, str] = {
 # All 16 agent ids
 _ALL_AGENT_IDS: list[str] = [
     "sdd-orchestrator",
-    "sdd-explore", "sdd-propose", "sdd-spec", "sdd-design",
-    "sdd-tasks", "sdd-apply", "sdd-verify", "sdd-archive",
-    "jd-fix-agent", "jd-judge-a", "jd-judge-b",
-    "review-risk", "review-readability", "review-reliability", "review-resilience",
+    "sdd-explore",
+    "sdd-propose",
+    "sdd-spec",
+    "sdd-design",
+    "sdd-tasks",
+    "sdd-apply",
+    "sdd-verify",
+    "sdd-archive",
+    "jd-fix-agent",
+    "jd-judge-a",
+    "jd-judge-b",
+    "review-risk",
+    "review-readability",
+    "review-reliability",
+    "review-resilience",
 ]
 
 # 15 subagent names (all except orchestrator) for task allowlist
@@ -206,9 +221,7 @@ def _build_opencode_config() -> dict[str, object]:
 
         # Prompt: {file:{{HOME}}/.config/opencode/prompts/<ns>/<name>.md}
         ns = str(meta["prompt_ns"])
-        agent_entry["prompt"] = (
-            f"{{file:{{{{HOME}}}}/.config/opencode/prompts/{ns}/{agent_id}.md}}"
-        )
+        agent_entry["prompt"] = f"{{file:{{{{HOME}}}}/.config/opencode/prompts/{ns}/{agent_id}.md}}"
 
         agents[agent_id] = agent_entry
 
@@ -265,9 +278,7 @@ class OpencodeInstaller:
             prompts_dir=self._catalog.get_resource_dir(Path("prompts/sdd")),
             jd_prompts_dir=self._catalog.get_resource_dir(Path("prompts/jd")),
             review_prompts_dir=self._catalog.get_resource_dir(Path("prompts/review")),
-            orchestrator_prompts_dir=self._catalog.get_resource_dir(
-                Path("prompts/orchestrator")
-            ),
+            orchestrator_prompts_dir=self._catalog.get_resource_dir(Path("prompts/orchestrator")),
         )
 
     def install(self, home: Path, console: Console) -> InstallResult:
@@ -322,8 +333,7 @@ class OpencodeInstaller:
             files.append(
                 FileArtifact(
                     source=prompt_file,
-                    target_relative=Path(".config/opencode/prompts/sdd")
-                    / prompt_file.name,
+                    target_relative=Path(".config/opencode/prompts/sdd") / prompt_file.name,
                 )
             )
 
@@ -333,8 +343,7 @@ class OpencodeInstaller:
                 files.append(
                     FileArtifact(
                         source=prompt_file,
-                        target_relative=Path(".config/opencode/prompts/jd")
-                        / prompt_file.name,
+                        target_relative=Path(".config/opencode/prompts/jd") / prompt_file.name,
                     )
                 )
 
@@ -344,8 +353,7 @@ class OpencodeInstaller:
                 files.append(
                     FileArtifact(
                         source=prompt_file,
-                        target_relative=Path(".config/opencode/prompts/review")
-                        / prompt_file.name,
+                        target_relative=Path(".config/opencode/prompts/review") / prompt_file.name,
                     )
                 )
 
@@ -355,8 +363,7 @@ class OpencodeInstaller:
                 files.append(
                     FileArtifact(
                         source=prompt_file,
-                        target_relative=Path(".config/opencode/prompts/orchestrator")
-                        / prompt_file.name,
+                        target_relative=Path(".config/opencode/prompts/orchestrator") / prompt_file.name,
                     )
                 )
 

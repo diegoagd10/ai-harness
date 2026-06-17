@@ -14,7 +14,6 @@ from ai_harness.sdd.models import (
     DEP_BLOCKED,
     DEP_READY,
     PHASE_APPLY,
-    PHASE_VERIFY,
     SCHEMA_NAME,
     SCHEMA_VERSION,
     ActionContext,

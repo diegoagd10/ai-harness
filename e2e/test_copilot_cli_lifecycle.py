@@ -31,21 +31,32 @@ SKILLS_SRC = RESOURCES_DIR / "skills"
 # ------------------------------------------------------------------ constants ---
 
 _SDD_PHASE_NAMES: tuple[str, ...] = (
-    "sdd-explore", "sdd-propose", "sdd-spec", "sdd-design",
-    "sdd-tasks", "sdd-apply", "sdd-verify", "sdd-archive",
+    "sdd-explore",
+    "sdd-propose",
+    "sdd-spec",
+    "sdd-design",
+    "sdd-tasks",
+    "sdd-apply",
+    "sdd-verify",
+    "sdd-archive",
 )
 
 _JD_AGENT_NAMES: tuple[str, ...] = (
-    "jd-fix-agent", "jd-judge-a", "jd-judge-b",
+    "jd-fix-agent",
+    "jd-judge-a",
+    "jd-judge-b",
 )
 
 _REVIEWER_AGENT_NAMES: tuple[str, ...] = (
-    "review-risk", "review-readability", "review-reliability", "review-resilience",
+    "review-risk",
+    "review-readability",
+    "review-reliability",
+    "review-resilience",
 )
 
 _ALL_SUBAGENT_NAMES: tuple[str, ...] = (
-    "sdd-orchestrator",
-) + _SDD_PHASE_NAMES + _JD_AGENT_NAMES + _REVIEWER_AGENT_NAMES
+    ("sdd-orchestrator",) + _SDD_PHASE_NAMES + _JD_AGENT_NAMES + _REVIEWER_AGENT_NAMES
+)
 
 assert len(_ALL_SUBAGENT_NAMES) == 16, f"expected 16 agents, got {len(_ALL_SUBAGENT_NAMES)}"
 
@@ -70,22 +81,16 @@ def _assert_agents_installed(home: str, label: str) -> None:
     if not agents_dir.is_dir():
         raise AssertionError(f"{label}: copilot agents dir missing — {agents_dir}")
 
-    actual_names = {
-        f.stem for f in agents_dir.iterdir() if f.suffix == ".md"
-    }
+    actual_names = {f.stem for f in agents_dir.iterdir() if f.suffix == ".md"}
     expected_names = set(_ALL_SUBAGENT_NAMES)
 
     missing = expected_names - actual_names
     if missing:
-        raise AssertionError(
-            f"{label}: missing copilot agents: {sorted(missing)}"
-        )
+        raise AssertionError(f"{label}: missing copilot agents: {sorted(missing)}")
 
     extra = actual_names - expected_names
     if extra:
-        raise AssertionError(
-            f"{label}: unexpected copilot agents: {sorted(extra)}"
-        )
+        raise AssertionError(f"{label}: unexpected copilot agents: {sorted(extra)}")
 
     print(f"  PASS: all 16 copilot agents present ({label})")
 
@@ -99,9 +104,7 @@ def _assert_agent_budget(home: str, label: str) -> None:
         content = f.read_text(encoding="utf-8")
         length = len(content)
         if length > 30000:
-            raise AssertionError(
-                f"{label}: budget exceeded — {f.name}: {length} chars > 30000"
-            )
+            raise AssertionError(f"{label}: budget exceeded — {f.name}: {length} chars > 30000")
 
 
 def _assert_agent_frontmatter(home: str, label: str) -> None:
@@ -116,35 +119,25 @@ def _assert_agent_frontmatter(home: str, label: str) -> None:
         content = f.read_text(encoding="utf-8")
 
         if not content.startswith("---"):
-            raise AssertionError(
-                f"{label}: {f.name} missing opening frontmatter delimiter"
-            )
+            raise AssertionError(f"{label}: {f.name} missing opening frontmatter delimiter")
 
         # Extract frontmatter between first and second ---
         parts = content.split("---", 2)
         if len(parts) < 3:
-            raise AssertionError(
-                f"{label}: {f.name} missing closing frontmatter delimiter"
-            )
+            raise AssertionError(f"{label}: {f.name} missing closing frontmatter delimiter")
 
         fm_text = parts[1]
         try:
             fm = yaml.safe_load(fm_text)
         except yaml.YAMLError as exc:
-            raise AssertionError(
-                f"{label}: {f.name} invalid YAML frontmatter: {exc}"
-            ) from exc
+            raise AssertionError(f"{label}: {f.name} invalid YAML frontmatter: {exc}") from exc
 
         if not isinstance(fm, dict):
-            raise AssertionError(
-                f"{label}: {f.name} frontmatter is not a mapping"
-            )
+            raise AssertionError(f"{label}: {f.name} frontmatter is not a mapping")
 
         for key in ("name", "description", "tools"):
             if key not in fm or not fm[key]:
-                raise AssertionError(
-                    f"{label}: {f.name} missing or empty frontmatter key: {key!r}"
-                )
+                raise AssertionError(f"{label}: {f.name} missing or empty frontmatter key: {key!r}")
 
 
 def _assert_hook_installed(home: str, label: str) -> None:
@@ -164,9 +157,7 @@ def _assert_hook_installed(home: str, label: str) -> None:
 
     expected = _build_hook_json()
     if doc != expected:
-        raise AssertionError(
-            f"{label}: installed hook does not match production _build_hook_json()"
-        )
+        raise AssertionError(f"{label}: installed hook does not match production _build_hook_json()")
 
     print(f"  PASS: hook JSON validated ({label})")
 
@@ -188,10 +179,7 @@ def _assert_skills_installed(home: str, label: str) -> None:
         skill_md = skill_entry / "SKILL.md"
         if skill_md.is_file():
             actual = skills_dir / skill_entry.name / "SKILL.md"
-            harness.assert_file_content(
-                actual, skill_md,
-                f"skills/{skill_entry.name} -> ~/.copilot/skills/ ({label})"
-            )
+            harness.assert_file_content(actual, skill_md, f"skills/{skill_entry.name} -> ~/.copilot/skills/ ({label})")
 
 
 # ------------------------------------------------------------------ install ---
@@ -230,7 +218,10 @@ def run_install_tests(bin_dir: str) -> None:
 
     # Pre-seed stale project agent
     stale_agent = agents2 / "sdd-explore.md"
-    stale_agent.write_text("---\nname: stale-sdd-explore\ndescription: old\ntools: [read]\n---\n# stale body\n", encoding="utf-8")
+    stale_agent.write_text(
+        "---\nname: stale-sdd-explore\ndescription: old\ntools: [read]\n---\n# stale body\n",
+        encoding="utf-8",
+    )
 
     # Pre-seed stale hook
     hooks2 = Path(home2) / _HOOK_RELATIVE.parent
@@ -312,14 +303,10 @@ def run_uninstall_tests(bin_dir: str) -> None:
     # Project agents removed
     for name in _ALL_SUBAGENT_NAMES:
         agent_path = agents_dir / f"{name}.md"
-        harness.assert_file_missing(
-            agent_path, f"copilot project agent removed: {name}"
-        )
+        harness.assert_file_missing(agent_path, f"copilot project agent removed: {name}")
 
     # Hook removed
-    harness.assert_file_missing(
-        Path(home) / _HOOK_RELATIVE, "copilot hook removed"
-    )
+    harness.assert_file_missing(Path(home) / _HOOK_RELATIVE, "copilot hook removed")
 
     # Project skills removed
     skills_dir = Path(home) / _SKILLS_TARGET_DIR
@@ -328,29 +315,30 @@ def run_uninstall_tests(bin_dir: str) -> None:
             if not skill_entry.is_dir():
                 continue
             harness.assert_file_missing(
-                skills_dir / skill_entry.name,
-                f"copilot project skill removed: {skill_entry.name}"
+                skills_dir / skill_entry.name, f"copilot project skill removed: {skill_entry.name}"
             )
 
     # Instructions restored from backup
     inst_path = Path(home) / _INSTRUCTIONS_RELATIVE
     if inst_path.read_text(encoding="utf-8") != "# my instructions\n":
         raise AssertionError(
-            f"pre-existing copilot instructions NOT restored — "
-            f"got: {inst_path.read_text(encoding='utf-8')!r}"
+            f"pre-existing copilot instructions NOT restored — got: {inst_path.read_text(encoding='utf-8')!r}"
         )
     print("  PASS: pre-existing copilot instructions restored")
 
     # Backup files cleaned up
     harness.assert_file_missing(
         (Path(home) / _INSTRUCTIONS_RELATIVE).with_name("copilot-instructions.md.ai-harness-backup"),
-        "copilot instructions backup cleaned up"
+        "copilot instructions backup cleaned up",
     )
 
     # User-authored agent preserved
     if not user_agent.exists():
         raise AssertionError("user-authored agent removed during uninstall")
-    if user_agent.read_text(encoding="utf-8") != "---\nname: custom\ndescription: mine\ntools: [read]\n---\n# my body\n":
+    if (
+        user_agent.read_text(encoding="utf-8")
+        != "---\nname: custom\ndescription: mine\ntools: [read]\n---\n# my body\n"
+    ):
         raise AssertionError("user-authored agent content changed")
     print("  PASS: user-authored agent preserved after uninstall")
 

@@ -192,9 +192,7 @@ def test_dir_artifact_replace_matching(tmp_path: Path, console: Console) -> None
 # ---------------------------------------------------------------- uninstall ---
 
 
-def test_matching_content_removed_backup_restored(
-    tmp_path: Path, console: Console
-) -> None:
+def test_matching_content_removed_backup_restored(tmp_path: Path, console: Console) -> None:
     """Uninstall: matching content removed, backup restored to original path."""
     src = tmp_path / "src.md"
     src.write_text("# project content\n", encoding="utf-8")
@@ -268,9 +266,7 @@ def test_idempotent_uninstall(tmp_path: Path, console: Console) -> None:
 # ------------------------------------------------------- ComposedFileArtifact ---
 
 
-def test_composed_install_writes_frontmatter_and_body(
-    tmp_path: Path, console: Console
-) -> None:
+def test_composed_install_writes_frontmatter_and_body(tmp_path: Path, console: Console) -> None:
     """ComposedFileArtifact install produces frontmatter + --- + body."""
     body = tmp_path / "body.md"
     body.write_text("body content here", encoding="utf-8")
@@ -287,14 +283,10 @@ def test_composed_install_writes_frontmatter_and_body(
 
     target = tmp_path / target_rel
     # _prepare_composed_content uses frontmatter.rstrip("\n") + "\n---\n" + body
-    assert target.read_text(encoding="utf-8") == (
-        "---\nname: test\n---\nbody content here"
-    )
+    assert target.read_text(encoding="utf-8") == ("---\nname: test\n---\nbody content here")
 
 
-def test_composed_install_rotates_existing_target_to_backup(
-    tmp_path: Path, console: Console
-) -> None:
+def test_composed_install_rotates_existing_target_to_backup(tmp_path: Path, console: Console) -> None:
     """ComposedFileArtifact install backs up a different-content target before overwriting."""
     body = tmp_path / "body.md"
     body.write_text("new body", encoding="utf-8")
@@ -315,15 +307,11 @@ def test_composed_install_rotates_existing_target_to_backup(
 
     backup = tmp_path / (str(target_rel) + ".ai-harness-backup")
     assert backup.exists(), "backup should have been created"
-    assert backup.read_text(encoding="utf-8") == (
-        "OLD USER CONTENT — must be backed up"
-    )
+    assert backup.read_text(encoding="utf-8") == ("OLD USER CONTENT — must be backed up")
     assert target.read_text(encoding="utf-8") == ("---\nname: test\n---\nnew body")
 
 
-def test_composed_uninstall_removes_matching_target(
-    tmp_path: Path, console: Console
-) -> None:
+def test_composed_uninstall_removes_matching_target(tmp_path: Path, console: Console) -> None:
     """ComposedFileArtifact uninstall removes a target whose content matches the composed output."""
     body = tmp_path / "body.md"
     body.write_text("body content", encoding="utf-8")
@@ -391,9 +379,7 @@ def test_install_returns_install_result(tmp_path: Path, console: Console) -> Non
     from ai_harness.artifacts.installer import InstallResult
 
     result = install(manifest, home, console)
-    assert isinstance(result, InstallResult), (
-        f"Expected InstallResult, got {type(result).__name__}"
-    )
+    assert isinstance(result, InstallResult), f"Expected InstallResult, got {type(result).__name__}"
 
 
 def test_install_result_success_fields(tmp_path: Path, console: Console) -> None:

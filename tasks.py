@@ -4,8 +4,6 @@ This exists so ``uv run inv test`` (and per-category variants) work from
 both the repo root and the Docker container without ``-r`` flags.
 """
 
-from invoke import Collection
-
 from e2e.tasks import (
     copilot_cli_lifecycle,
     install,
@@ -15,6 +13,7 @@ from e2e.tasks import (
     tool_lifecycle,
     uninstall,
 )
+from invoke import Collection
 
 ns = Collection(
     copilot_cli_lifecycle,
