@@ -200,7 +200,7 @@ def test_review_agents_use_frontmatter_text_from_metadata(tmp_path: Path) -> Non
 
 def test_all_16_artifacts_use_frontmatter_text_from_metadata(tmp_path: Path) -> None:
     """All 16 Claude artifacts (8 SDD + 7 inline + 1 orchestrator) must use
-    frontmatter_text from _METADATA — no artifact reads frontmatter_source.
+    frontmatter_text from _METADATA.
 
     Spec: "Both orchestrator variants exist"
       - GIVEN the prompt tree
@@ -220,9 +220,6 @@ def test_all_16_artifacts_use_frontmatter_text_from_metadata(tmp_path: Path) -> 
     for artifact in manifest.composed:
         assert artifact.frontmatter_text is not None, (
             f"artifact {artifact.target_relative} missing frontmatter_text"
-        )
-        assert artifact.frontmatter_source is None, (
-            f"artifact {artifact.target_relative} has unexpected frontmatter_source"
         )
 
     # Orchestrator artifact uses sdd-orchestrator-agent.md body (Agent variant)
@@ -278,61 +275,3 @@ def test_claude_instructions_file_artifact_preserved(tmp_path: Path) -> None:
     ]
     assert len(instructions) == 1, "CLAUDE.md FileArtifact missing"
     assert instructions[0].source.is_file()
-
-
-# ── Round 2 fix: Bug 1 — fixture must be frontmatter-only (RED) ──
-
-
-def test_fixture_sdd_phase_contains_frontmatter_only(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """SDD phase fixtures MUST contain ONLY frontmatter_text.
-
-    The e2e reads the fixture as frontmatter and composes expected output
-    as ``frontmatter.rstrip("\\n") + "\\n---\\n" + body``.  If the fixture
-    already contains a trailing ``\\n---\\n``, the expected output has a
-    doubled separator — causing a 4-char length mismatch.
-
-    Spec: "Generated Fixtures for E2E" — fixtures match e2e source-path contract.
-    """
-    import io
-    from rich.console import Console
-
-    root = _make_catalog_root(tmp_path)
-    installer = _installer(root)
-    home = tmp_path / "home"
-    home.mkdir()
-
-    assets = _assets(root)
-    manifest = installer._build_manifest(home, assets)
-
-    # Patch _GENERATED_DIR so fixtures land under tmp_path
-    gen_dir = tmp_path / "generated"
-    gen_dir.mkdir()
-    monkeypatch.setattr(ClaudeInstaller, "_GENERATED_DIR", gen_dir)
-
-    console = Console(file=io.StringIO())
-    ClaudeInstaller._write_fixtures(manifest, console)
-
-    agents_dir = gen_dir / "claude" / "agents"
-    for phase_name in _SDD_PHASE_NAMES:
-        fixture_path = agents_dir / f"{phase_name}.md"
-        assert fixture_path.exists(), f"Missing fixture for {phase_name}"
-
-        content = fixture_path.read_text(encoding="utf-8")
-
-        # Find the ComposedFileArtifact for this phase
-        artifact = next(
-            a for a in manifest.composed
-            if a.target_relative.name == f"{phase_name}.md"
-            and ".claude/agents/" in str(a.target_relative)
-        )
-
-        # Fixture must be EXACTLY frontmatter_text — no extra separator
-        assert content == artifact.frontmatter_text, (
-            f"SDD phase fixture {phase_name} must contain ONLY frontmatter_text.\n"
-            f"  content length: {len(content)}\n"
-            f"  expected length: {len(artifact.frontmatter_text)}\n"
-            f"  content repr:   {repr(content)}\n"
-            f"  expected repr:  {repr(artifact.frontmatter_text)}"
-        )

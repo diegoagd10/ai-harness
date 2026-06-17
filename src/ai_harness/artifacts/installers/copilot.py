@@ -21,6 +21,7 @@ from ai_harness.artifacts.installer import (
     install as generic_install,
     uninstall as generic_uninstall,
 )
+from ai_harness.artifacts.installers.frontmatter import metadata_to_frontmatter
 from ai_harness.artifacts.manifest import (
     ArtifactManifest,
     ComposedFileArtifact,
@@ -162,22 +163,6 @@ _METADATA: dict[str, dict[str, object]] = {
 }
 
 
-def _metadata_to_frontmatter(m: dict[str, object]) -> str:
-    """Serialize a _METADATA entry to YAML frontmatter text."""
-    tools_list = m["tools"]
-    if isinstance(tools_list, list):
-        tools_yaml = ", ".join(str(t) for t in tools_list)
-    else:
-        tools_yaml = str(tools_list)
-    return (
-        f"---\n"
-        f"name: {m['name']}\n"
-        f"description: {m['description']}\n"
-        f"tools: [{tools_yaml}]\n"
-        f"---"
-    )
-
-
 def _build_hook_json() -> dict[str, object]:
     """Build the sdd-pre-tool-use.json hook dict entirely in code.
 
@@ -247,13 +232,9 @@ class CopilotInstaller:
         self._catalog = catalog
 
     def install(self, home: Path, console: Console) -> InstallResult:
-        """Build manifest from catalog, invoke generic installer, and
-        write generated fixtures for e2e."""
+        """Build manifest from catalog and invoke the generic installer."""
         manifest = self._build_manifest(home)
-        result = generic_install(manifest, home, console)
-        if result.success:
-            self._write_fixtures(manifest, home, console)
-        return result
+        return generic_install(manifest, home, console)
 
     def uninstall(self, home: Path, console: Console) -> UninstallResult:
         """Build manifest and invoke generic uninstall."""
@@ -287,7 +268,7 @@ class CopilotInstaller:
         # SDD-phase + orchestrator agents — composed (metadata frontmatter + body).
         for name in _PHASE_NAMES:
             metadata = _METADATA[name]
-            fm_text = _metadata_to_frontmatter(metadata)
+            fm_text = metadata_to_frontmatter(metadata)
             composed.append(
                 ComposedFileArtifact(
                     frontmatter_text=fm_text,
@@ -304,7 +285,7 @@ class CopilotInstaller:
                 else assets.review_prompts_dir
             )
             metadata = _METADATA[name]
-            fm_text = _metadata_to_frontmatter(metadata)
+            fm_text = metadata_to_frontmatter(metadata)
             composed.append(
                 ComposedFileArtifact(
                     frontmatter_text=fm_text,
@@ -359,59 +340,3 @@ class CopilotInstaller:
                 f"Composed agent '{artifact.target_relative.name}' "
                 f"exceeds {_MAX_COMPOSED_CHARS} char budget: {total}"
             )
-
-    # ── generated fixtures for e2e ────────────────────────────────────────────
-
-    _GENERATED_DIR = (
-        Path(__file__).resolve().parent.parent.parent / "resources" / "generated"
-    )
-
-    @staticmethod
-    def _write_fixtures(
-        manifest: ArtifactManifest, home: Path, console: Console,
-    ) -> None:
-        """Write generated fixtures to resources/generated/copilot-cli/
-        so e2e source-path constants resolve.
-
-        Guarded by ``os.access(os.W_OK)`` — silent skip on read-only
-        source trees.
-        """
-        import os
-
-        from ai_harness.artifacts.installer import _prepare_composed_content
-
-        gen_dir = CopilotInstaller._GENERATED_DIR / "copilot-cli"
-        if not os.access(gen_dir.parent, os.W_OK):
-            return  # read-only source tree
-
-        agents_dir = gen_dir / "agents"
-        agents_dir.mkdir(parents=True, exist_ok=True)
-
-        # SDD phases (including orchestrator): write frontmatter-only
-        # Inline agents: write fully composed
-        for artifact in manifest.composed:
-            target_name = artifact.target_relative.name
-            is_phase = any(
-                target_name.startswith(p) for p in _PHASE_NAMES
-                if p in target_name
-            )
-            fixture_path = agents_dir / target_name
-            if is_phase:
-                # SDD phases: write frontmatter-only.
-                # The e2e reads this as frontmatter and composes
-                # ``frontmatter.rstrip("\n") + "\n---\n" + body`` itself.
-                content = artifact.frontmatter_text
-            else:
-                content = _prepare_composed_content(artifact, Path("/dev/null"))
-            fixture_path.write_text(content, encoding="utf-8")
-            console.print(f"Fixture written {fixture_path}")
-
-        # Hook JSON fixture
-        hooks_dir = gen_dir / "hooks"
-        hooks_dir.mkdir(parents=True, exist_ok=True)
-        hook_dict = _build_hook_json()
-        hook_json = json.dumps(hook_dict, indent=2) + "\n"
-        (hooks_dir / "sdd-pre-tool-use.json").write_text(
-            hook_json, encoding="utf-8"
-        )
-        console.print(f"Fixture written {hooks_dir / 'sdd-pre-tool-use.json'}")

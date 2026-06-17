@@ -184,11 +184,11 @@ def test_review_agents_use_frontmatter_text(tmp_path: Path) -> None:
 
 def test_all_16_agents_use_frontmatter_text_from_metadata(tmp_path: Path) -> None:
     """All 16 Copilot agents (9 SDD+orchestrator + 7 JD/reviewer) must use
-    frontmatter_text from _METADATA — no agent reads frontmatter_source.
+    frontmatter_text from _METADATA.
 
     Spec: "Metadata separated from prompt body"
       - GIVEN CopilotInstaller._METADATA entries for all 16 agents
-      - THEN every composed artifact has frontmatter_text, not frontmatter_source
+      - THEN every composed artifact has frontmatter_text
     """
     root = _make_catalog_root(tmp_path)
     installer = _installer(root)
@@ -204,9 +204,6 @@ def test_all_16_agents_use_frontmatter_text_from_metadata(tmp_path: Path) -> Non
     for artifact in manifest.composed:
         assert artifact.frontmatter_text is not None, (
             f"agent {artifact.target_relative} missing frontmatter_text"
-        )
-        assert artifact.frontmatter_source is None, (
-            f"agent {artifact.target_relative} has unexpected frontmatter_source"
         )
 
 
@@ -296,59 +293,3 @@ def test_manifest_raises_on_30k_budget_exceeded(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="30000"):
         installer._build_manifest(home)
-
-
-# ── Round 2 fix: Bug 3 — fixture must be frontmatter-only (RED) ──
-
-
-def test_fixture_sdd_phase_contains_frontmatter_only(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Copilot SDD phase fixtures MUST contain ONLY frontmatter_text.
-
-    Same contract as the Claude e2e case: the fixture must not carry an
-    extra ``\\n---\\n`` separator.  While current Copilot e2e does not
-    byte-compare SDD phase content, this avoids the same latent bug.
-
-    Spec: "Generated Fixtures for E2E" — fixtures match e2e source-path contract.
-    """
-    import io
-    from rich.console import Console
-
-    root = _make_catalog_root(tmp_path)
-    installer = _installer(root)
-    home = tmp_path / "home"
-    home.mkdir()
-
-    manifest = installer._build_manifest(home)
-
-    # Patch _GENERATED_DIR so fixtures land under tmp_path
-    gen_dir = tmp_path / "generated"
-    gen_dir.mkdir()
-    monkeypatch.setattr(CopilotInstaller, "_GENERATED_DIR", gen_dir)
-
-    console = Console(file=io.StringIO())
-    CopilotInstaller._write_fixtures(manifest, tmp_path / "home", console)
-
-    agents_dir = gen_dir / "copilot-cli" / "agents"
-    for phase_name in _SDD_PHASE_NAMES:
-        fixture_path = agents_dir / f"{phase_name}.md"
-        assert fixture_path.exists(), f"Missing fixture for {phase_name}"
-
-        content = fixture_path.read_text(encoding="utf-8")
-
-        # Find the ComposedFileArtifact for this phase
-        artifact = next(
-            a for a in manifest.composed
-            if a.target_relative.name == f"{phase_name}.md"
-            and ".copilot/agents/" in str(a.target_relative)
-        )
-
-        # Fixture must be EXACTLY frontmatter_text — no extra separator
-        assert content == artifact.frontmatter_text, (
-            f"Copilot SDD phase fixture {phase_name} must contain ONLY frontmatter_text.\n"
-            f"  content length: {len(content)}\n"
-            f"  expected length: {len(artifact.frontmatter_text)}\n"
-            f"  content repr:   {repr(content)}\n"
-            f"  expected repr:  {repr(artifact.frontmatter_text)}"
-        )

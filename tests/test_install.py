@@ -6,14 +6,14 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from ai_harness.artifacts.catalog import (
-    AGENTS_MD_SRC,
-    OPENCODE_SDD_PROMPTS_SRC,
-    SKILLS_SRC,
-)
 from ai_harness.main import app
 
 runner = CliRunner()
+
+_RESOURCES_DIR = Path(__file__).resolve().parent.parent / "src" / "ai_harness" / "resources"
+AGENTS_MD_SRC = _RESOURCES_DIR / "AGENTS.md"
+SKILLS_SRC = _RESOURCES_DIR / "skills"
+OPENCODE_SDD_PROMPTS_SRC = _RESOURCES_DIR / "prompts" / "sdd"
 
 
 def test_install_copies_agents_md_to_agent_targets(
@@ -491,49 +491,3 @@ def test_claude_install_writes_permissions_allow(
     assert backup.is_file()
 
 
-# ── Round 2 fix: Bug 2 — opencode fixture MUST preserve {{HOME}} (RED) ──
-
-
-def test_opencode_fixture_preserves_home_placeholder(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The generated opencode.json fixture MUST contain {{HOME}} template
-    placeholders — NOT substituted home paths.
-
-    The e2e reads the fixture and does ``read_text().replace("{{HOME}}", home)``
-    at test time (see ``_assert_opencode_json``, line 54-55).  If the fixture
-    already has hardcoded paths the substitution becomes a no-op and the test
-    data will contain stale/temp paths.
-
-    Spec: "Generated Fixtures for E2E" — fixtures match e2e source-path contract.
-    """
-    import io
-    from rich.console import Console
-
-    from ai_harness.artifacts.installers.opencode import OpencodeInstaller
-
-    # Patch _GENERATED_DIR so fixture lands under tmp_path
-    gen_dir = tmp_path / "generated"
-    gen_dir.mkdir()
-    monkeypatch.setattr(OpencodeInstaller, "_GENERATED_DIR", gen_dir)
-
-    console = Console(file=io.StringIO())
-    OpencodeInstaller._write_fixture(tmp_path / "home", console)
-
-    fixture_path = gen_dir / "opencode" / "opencode.json"
-    assert fixture_path.exists(), "Fixture file not written"
-    fixture_text = fixture_path.read_text(encoding="utf-8")
-
-    # MUST contain {{HOME}} template placeholders
-    assert "{{HOME}}" in fixture_text, (
-        "opencode.json fixture must contain {{HOME}} placeholders — "
-        "e2e substitutes at test time.\n"
-        f"  fixture (first 200 chars): {fixture_text[:200]}"
-    )
-
-    # MUST NOT contain the actual home path
-    home_str = str(tmp_path / "home")
-    assert home_str not in fixture_text, (
-        f"opencode.json fixture must NOT contain home path '{home_str}'.\n"
-        f"  Found: {fixture_text[:300]}"
-    )

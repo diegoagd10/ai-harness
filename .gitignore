@@ -5,7 +5,3 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .coverage
-
-# Generated fixtures (written by installers on writable source trees)
-src/ai_harness/resources/generated/*
-!src/ai_harness/resources/generated/.gitkeep

@@ -16,7 +16,6 @@ from rich.console import Console
 from ai_harness.artifacts.manifest import (
     ArtifactManifest,
     ComposedFileArtifact,
-    DirArtifact,
     FileArtifact,
 )
 
@@ -80,6 +79,62 @@ def _prepare_composed_content(artifact: ComposedFileArtifact, home: Path) -> str
     return text
 
 
+def _place_file(
+    target: Path,
+    prepared: str,
+    backup_suffix: str,
+    conflict_suffix: str,
+    console: Console,
+) -> None:
+    """Write *prepared* to *target*, rotating a backup/conflict copy first.
+
+    When *target* already exists with different content: the first divergent
+    install copies it to ``<target><backup_suffix>``; subsequent ones copy to
+    the next available ``<target><conflict_suffix>`` path.  Then *prepared* is
+    written.  Hides the backup/conflict-rotation policy shared by every
+    install loop.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    if target.exists() and target.read_text(encoding="utf-8") != prepared:
+        backup = target.with_name(target.name + backup_suffix)
+        if not backup.exists():
+            shutil.copyfile(target, backup)
+            console.print(f"Backed up {target} to {backup}")
+        else:
+            conflict = target.with_name(target.name + conflict_suffix)
+            conflict = _next_available_path(conflict)
+            shutil.copyfile(target, conflict)
+            console.print(f"Backed up {target} to {conflict}")
+
+    target.write_text(prepared, encoding="utf-8")
+    console.print(f"Installed {target}")
+
+
+def _remove_file(
+    target: Path,
+    prepared: str,
+    backup_suffix: str,
+    console: Console,
+) -> None:
+    """Remove *target* when it matches *prepared*, then restore its backup.
+
+    Mirrors :func:`_place_file`: removes the target only when its content is
+    exactly what this installer wrote, then moves any ``<target><backup_suffix>``
+    back into place.  Hides the remove-if-match + restore policy shared by
+    every uninstall loop.
+    """
+    backup = target.with_name(target.name + backup_suffix)
+
+    if target.exists() and target.read_text(encoding="utf-8") == prepared:
+        target.unlink()
+        console.print(f"Removed {target}")
+
+    if not target.exists() and backup.exists():
+        shutil.move(str(backup), str(target))
+        console.print(f"Restored {target} from {backup}")
+
+
 def install(manifest: ArtifactManifest, home: Path, console: Console) -> InstallResult:
     """Install every artifact in *manifest* into *home*.
 
@@ -93,23 +148,14 @@ def install(manifest: ArtifactManifest, home: Path, console: Console) -> Install
     for artifact in manifest.files:
         try:
             target = home / artifact.target_relative
-            target.parent.mkdir(parents=True, exist_ok=True)
-
             prepared = _prepare_content(artifact, home)
-
-            if target.exists() and target.read_text(encoding="utf-8") != prepared:
-                backup = home / (str(artifact.target_relative) + artifact.backup_suffix)
-                if not backup.exists():
-                    shutil.copyfile(target, backup)
-                    console.print(f"Backed up {target} to {backup}")
-                else:
-                    conflict = home / (str(artifact.target_relative) + artifact.conflict_suffix)
-                    conflict = _next_available_path(conflict)
-                    shutil.copyfile(target, conflict)
-                    console.print(f"Backed up {target} to {conflict}")
-
-            target.write_text(prepared, encoding="utf-8")
-            console.print(f"Installed {target}")
+            _place_file(
+                target,
+                prepared,
+                artifact.backup_suffix,
+                artifact.conflict_suffix,
+                console,
+            )
         except OSError as exc:
             result.success = False
             result.errors.append(f"{artifact.target_relative}: {exc}")
@@ -119,23 +165,14 @@ def install(manifest: ArtifactManifest, home: Path, console: Console) -> Install
     for artifact in manifest.composed:
         try:
             target = home / artifact.target_relative
-            target.parent.mkdir(parents=True, exist_ok=True)
-
             prepared = _prepare_composed_content(artifact, home)
-
-            if target.exists() and target.read_text(encoding="utf-8") != prepared:
-                backup = home / (str(artifact.target_relative) + artifact.backup_suffix)
-                if not backup.exists():
-                    shutil.copyfile(target, backup)
-                    console.print(f"Backed up {target} to {backup}")
-                else:
-                    conflict = home / (str(artifact.target_relative) + artifact.conflict_suffix)
-                    conflict = _next_available_path(conflict)
-                    shutil.copyfile(target, conflict)
-                    console.print(f"Backed up {target} to {conflict}")
-
-            target.write_text(prepared, encoding="utf-8")
-            console.print(f"Installed {target}")
+            _place_file(
+                target,
+                prepared,
+                artifact.backup_suffix,
+                artifact.conflict_suffix,
+                console,
+            )
         except OSError as exc:
             result.success = False
             result.errors.append(f"{artifact.target_relative}: {exc}")
@@ -147,16 +184,15 @@ def install(manifest: ArtifactManifest, home: Path, console: Console) -> Install
             target_dir = home / artifact.target_relative
             target_dir.mkdir(parents=True, exist_ok=True)
 
-            if artifact.merge_mode == "replace_matching":
-                for source_entry in artifact.source.iterdir():
-                    if source_entry.is_dir():
-                        target_sub = target_dir / source_entry.name
-                        if target_sub.exists():
-                            shutil.rmtree(target_sub)
-                        shutil.copytree(source_entry, target_sub)
-                    elif source_entry.is_file():
-                        target_file = target_dir / source_entry.name
-                        shutil.copyfile(source_entry, target_file)
+            for source_entry in artifact.source.iterdir():
+                if source_entry.is_dir():
+                    target_sub = target_dir / source_entry.name
+                    if target_sub.exists():
+                        shutil.rmtree(target_sub)
+                    shutil.copytree(source_entry, target_sub)
+                elif source_entry.is_file():
+                    target_file = target_dir / source_entry.name
+                    shutil.copyfile(source_entry, target_file)
 
             console.print(f"Installed {target_dir}")
         except OSError as exc:
@@ -186,15 +222,7 @@ def uninstall(manifest: ArtifactManifest, home: Path, console: Console) -> Unins
         try:
             target = home / artifact.target_relative
             prepared = _prepare_content(artifact, home)
-            backup = home / (str(artifact.target_relative) + artifact.backup_suffix)
-
-            if target.exists() and target.read_text(encoding="utf-8") == prepared:
-                target.unlink()
-                console.print(f"Removed {target}")
-
-            if not target.exists() and backup.exists():
-                shutil.move(str(backup), str(target))
-                console.print(f"Restored {target} from {backup}")
+            _remove_file(target, prepared, artifact.backup_suffix, console)
         except OSError as exc:
             result.success = False
             result.errors.append(f"{artifact.target_relative}: {exc}")
@@ -205,15 +233,7 @@ def uninstall(manifest: ArtifactManifest, home: Path, console: Console) -> Unins
         try:
             target = home / artifact.target_relative
             prepared = _prepare_composed_content(artifact, home)
-            backup = home / (str(artifact.target_relative) + artifact.backup_suffix)
-
-            if target.exists() and target.read_text(encoding="utf-8") == prepared:
-                target.unlink()
-                console.print(f"Removed {target}")
-
-            if not target.exists() and backup.exists():
-                shutil.move(str(backup), str(target))
-                console.print(f"Restored {target} from {backup}")
+            _remove_file(target, prepared, artifact.backup_suffix, console)
         except OSError as exc:
             result.success = False
             result.errors.append(f"{artifact.target_relative}: {exc}")

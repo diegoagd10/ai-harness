@@ -162,8 +162,8 @@ def test_template_substitution(tmp_path: Path, console: Console) -> None:
 
 
 def test_dir_artifact_replace_matching(tmp_path: Path, console: Console) -> None:
-    """DirArtifact with merge_mode='replace_matching' copies source subdirs,
-    removing the matching target subdir first."""
+    """DirArtifact copies source subdirs, removing the matching target
+    subdir first while leaving unrelated entries intact."""
     src_dir = tmp_path / "prompts"
     (src_dir / "a.md").parent.mkdir(parents=True)
     (src_dir / "a.md").write_text("# a\n", encoding="utf-8")

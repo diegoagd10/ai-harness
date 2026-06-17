@@ -11,16 +11,19 @@ import json
 import os
 from pathlib import Path
 
+from ai_harness.artifacts.installers.claude import _METADATA as _CLAUDE_METADATA
+from ai_harness.artifacts.installers.frontmatter import metadata_to_frontmatter
+from ai_harness.artifacts.installers.opencode import _build_opencode_config
+
 from . import harness
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 RESOURCES_DIR = REPO_ROOT / "src" / "ai_harness" / "resources"
 AGENTS_MD_SRC = RESOURCES_DIR / "AGENTS.md"
 SKILLS_SRC = RESOURCES_DIR / "skills"
-OPENCODE_JSON_SRC = RESOURCES_DIR / "generated" / "opencode" / "opencode.json"
 SDD_PROMPTS_SRC = RESOURCES_DIR / "prompts" / "sdd"
-CLAUDE_AGENTS_SRC = RESOURCES_DIR / "generated" / "claude" / "agents"
-CLAUDE_ORCHESTRATOR_SRC = RESOURCES_DIR / "generated" / "claude" / "sdd-orchestrator" / "SKILL.md"
+JD_PROMPTS_SRC = RESOURCES_DIR / "prompts" / "jd"
+REVIEW_PROMPTS_SRC = RESOURCES_DIR / "prompts" / "review"
 
 # Eight SDD phases whose Claude agents are composed from frontmatter + prompt body.
 _SDD_PHASE_NAMES = (
@@ -49,11 +52,15 @@ def _bin_path(bin_dir: str) -> str:
 
 
 def _assert_opencode_json(home: str, label: str) -> None:
-    """Assert opencode.json was installed with {{HOME}} substitution."""
+    """Assert opencode.json was installed with {{HOME}} substitution.
+
+    Expected content is self-composed from the production ``_build_opencode_config``
+    helper — no checked-in fixture tree is consulted.
+    """
     actual = Path(home) / ".config" / "opencode" / "opencode.json"
-    expected_text = OPENCODE_JSON_SRC.read_text(encoding="utf-8").replace(
-        "{{HOME}}", home
-    )
+    expected_text = (
+        json.dumps(_build_opencode_config(), indent=2) + "\n"
+    ).replace("{{HOME}}", home)
     if not actual.is_file():
         raise AssertionError(f"{label}: missing opencode.json — {actual}")
     actual_text = actual.read_text(encoding="utf-8")
@@ -102,52 +109,64 @@ def _assert_sdd_prompts(home: str, label: str) -> None:
         )
 
 
+def _expected_claude_agent(name: str, body_dir: Path) -> str:
+    """Self-compose the expected installed Claude agent file.
+
+    Frontmatter comes from the production ``_METADATA`` + shared
+    ``metadata_to_frontmatter`` serializer; the body comes from the canonical
+    prompt file.  Reproduces ``_prepare_composed_content`` exactly:
+    ``frontmatter.rstrip("\\n") + "\\n---\\n" + body``.
+    """
+    frontmatter = metadata_to_frontmatter(_CLAUDE_METADATA[name])
+    body = (body_dir / f"{name}.md").read_text(encoding="utf-8")
+    return frontmatter.rstrip("\n") + "\n---\n" + body
+
+
 def _assert_claude_agents(home: str, label: str) -> None:
     """Assert Claude composer wrote composed agents + inline copies + orchestrator SKILL.md.
 
-    For each SDD phase name the installed file must start with the frontmatter
-    block from ``CLAUDE_AGENTS_SRC/<name>.md``, contain a ``---`` separator,
-    and end with the body from ``SDD_PROMPTS_SRC/<name>.md`` verbatim.
-
-    Inline agents are compared byte-for-byte with their source.  The orchestrator
+    Expected content is self-composed from the production ``_METADATA`` and the
+    shared ``metadata_to_frontmatter`` serializer joined with the canonical
+    prompt bodies — no checked-in fixture tree is consulted.  The orchestrator
     SKILL.md must exist, and the agent directory must hold exactly 15 .md files.
     """
     agents_target = Path(home) / ".claude" / "agents"
     orchestrator_target = Path(home) / ".claude" / "skills" / "sdd-orchestrator" / "SKILL.md"
 
-    # 1. SDD phase agents — composed (frontmatter + body)
+    # 1. SDD phase agents — composed (frontmatter from metadata + body from prompts/sdd/)
     for name in _SDD_PHASE_NAMES:
         installed = agents_target / f"{name}.md"
-        agent_src = CLAUDE_AGENTS_SRC / f"{name}.md"
-        body_src = SDD_PROMPTS_SRC / f"{name}.md"
-
         harness.assert_file_exists(installed, f"claude subagent {name} ({label})")
 
-        frontmatter = agent_src.read_text(encoding="utf-8")
-        body = body_src.read_text(encoding="utf-8")
         actual = installed.read_text(encoding="utf-8")
-
-        # Compose expected output: frontmatter (stripped of trailing
-        # newlines) + "\n---\n" separator + the prompt body verbatim.
-        expected = frontmatter.rstrip("\n") + "\n---\n" + body
+        expected = _expected_claude_agent(name, SDD_PROMPTS_SRC)
 
         if actual != expected:
             raise AssertionError(
                 f"claude subagent {name} ({label}): "
-                f"missing composed body from prompts/sdd/{name}.md\n"
+                f"composed content mismatch\n"
                 f"  actual length:   {len(actual)}\n"
-                f"  expected length: {len(expected)}\n"
-                f"  expected suffix:  ...--- + body({len(body)} chars)"
+                f"  expected length: {len(expected)}"
             )
 
-    # 2. Inline agents — verbatim copies
+    # 2. Inline agents — composed (frontmatter from metadata + body from prompts/<ns>/)
     for name in _INLINE_AGENT_NAMES:
         installed = agents_target / f"{name}.md"
-        agent_src = CLAUDE_AGENTS_SRC / f"{name}.md"
-        harness.assert_file_content(
-            installed, agent_src,
-            f"claude inline subagent {name} ({label})"
+        harness.assert_file_exists(
+            installed, f"claude inline subagent {name} ({label})"
         )
+
+        body_dir = JD_PROMPTS_SRC if name.startswith("jd-") else REVIEW_PROMPTS_SRC
+        actual = installed.read_text(encoding="utf-8")
+        expected = _expected_claude_agent(name, body_dir)
+
+        if actual != expected:
+            raise AssertionError(
+                f"claude inline subagent {name} ({label}): "
+                f"composed content mismatch\n"
+                f"  actual length:   {len(actual)}\n"
+                f"  expected length: {len(expected)}"
+            )
 
     # 3. Orchestrator SKILL.md
     harness.assert_file_exists(
