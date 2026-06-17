@@ -11,9 +11,10 @@ import json
 import os
 from pathlib import Path
 
-from ai_harness.artifacts.installers.claude import _METADATA as _CLAUDE_METADATA
+from ai_harness.artifacts.agents import AGENT_CATALOG
+from ai_harness.artifacts.installers.claude import metadata_for
 from ai_harness.artifacts.installers.frontmatter import metadata_to_frontmatter
-from ai_harness.artifacts.installers.opencode import _build_opencode_config
+from ai_harness.artifacts.installers.opencode import build_opencode_config
 
 from . import harness
 
@@ -70,7 +71,7 @@ def _assert_opencode_json(home: str, label: str) -> None:
     ``resources/prompts`` directory.
     """
     actual = Path(home) / ".config" / "opencode" / "opencode.json"
-    expected_text = (json.dumps(_build_opencode_config(RESOURCES_DIR / "prompts"), indent=2) + "\n").replace(
+    expected_text = (json.dumps(build_opencode_config(RESOURCES_DIR / "prompts"), indent=2) + "\n").replace(
         "{{HOME}}", home
     )
     if not actual.is_file():
@@ -126,7 +127,7 @@ def _expected_claude_agent(name: str, body_dir: Path) -> str:
     prompt file.  Reproduces ``_prepare_composed_content`` exactly:
     ``frontmatter.rstrip("\\n") + "\\n---\\n" + body``.
     """
-    frontmatter = metadata_to_frontmatter(_CLAUDE_METADATA[name])
+    frontmatter = metadata_to_frontmatter(metadata_for(name))
     body = (body_dir / f"{name}.md").read_text(encoding="utf-8")
     return frontmatter.rstrip("\n") + "\n" + body
 

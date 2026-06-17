@@ -4,6 +4,9 @@ Covers: AGENTS.md → .copilot/copilot-instructions.md, 16 agent files
 (9 composed SDD-phase + orchestrator, 7 composed inline JD/reviewer with
 embedded metadata) under .copilot/agents/, hook JSON built in code under
 .copilot/hooks/, and skills under .copilot/skills/.
+
+Agent identity comes from ``agents.AGENT_CATALOG``; per-target decoration
+(tools, model, description) lives in module-level dialect tables.
 """
 
 from __future__ import annotations
@@ -14,6 +17,7 @@ from pathlib import Path
 
 from rich.console import Console
 
+from ai_harness.artifacts.agents import Capability, all_agents
 from ai_harness.artifacts.catalog import ArtifactCatalog
 from ai_harness.artifacts.installer import (
     InstallResult,
@@ -33,31 +37,13 @@ from ai_harness.artifacts.manifest import (
     FileArtifact,
 )
 
-# Nine SDD phases (including orchestrator) whose Copilot agent files are
-# composed at install time from embedded metadata + body from prompts/sdd/.
-_PHASE_NAMES: tuple[str, ...] = (
-    "sdd-orchestrator",
-    "sdd-explore",
-    "sdd-propose",
-    "sdd-spec",
-    "sdd-design",
-    "sdd-tasks",
-    "sdd-apply",
-    "sdd-verify",
-    "sdd-archive",
-)
+# ── per-capability tools ─────────────────────────────────────────────────────
 
-# Seven inline Copilot subagents whose frontmatter is embedded as metadata
-# and whose body comes from canonical prompt files under prompts/<ns>/.
-_INLINE_AGENTS: tuple[str, ...] = (
-    "jd-fix-agent",
-    "jd-judge-a",
-    "jd-judge-b",
-    "review-risk",
-    "review-readability",
-    "review-reliability",
-    "review-resilience",
-)
+_TOOLS_BY_CAPABILITY: dict[Capability, list[str]] = {
+    Capability.ORCHESTRATOR: ["agent", "Bash", "Edit", "View", "Create", "Glob", "Grep", "Read"],
+    Capability.EDITS: ["Bash", "Edit", "View", "Create", "Glob", "Grep", "Read", "Task"],
+    Capability.READ_ONLY: ["View", "Bash", "Glob", "Grep", "Task"],
+}
 
 # Maximum allowed character count for a composed agent file (frontmatter +
 # separator + body). Enforced at manifest-build time.
@@ -83,129 +69,51 @@ _DENY_PATHS: list[str] = [
     "/var/**",
 ]
 
-# All 16 agent ids for hook allowlist
-_ALL_AGENT_IDS: list[str] = list(_PHASE_NAMES) + list(_INLINE_AGENTS)
-
-# 15 subagent names (all except orchestrator) for task allowlist
-_SUBAGENT_NAMES: list[str] = [n for n in _ALL_AGENT_IDS if n != "sdd-orchestrator"]
+# ── per-id model ─────────────────────────────────────────────────────────────
 
 # Model strings sourced from https://docs.github.com/en/copilot/reference/ai-models/supported-models
 # (display names as shown on the page; quarterly audit against the page is
 # the single source of truth).
 _SUBAGENT_MODEL: str = "Claude Haiku 4.5"
 
-# ── metadata ─────────────────────────────────────────────────────────────────
+_MODEL_BY_ID: dict[str, str] = {
+    "sdd-orchestrator": "GPT-5 mini",
+}
 
-# Per-agent frontmatter metadata (Copilot tool names).
-_METADATA: dict[str, dict[str, object]] = {
-    # Nine SDD phase + orchestrator
-    "sdd-orchestrator": {
-        "name": "sdd-orchestrator",
-        "description": "SDD Orchestrator — coordinates sub-agents, never does work inline",
-        "tools": ["agent", "Bash", "Edit", "View", "Create", "Glob", "Grep", "Read"],
-        "model": "GPT-5 mini",
-        "user-invocable": True,
-        "agents": sorted(_SUBAGENT_NAMES),
-    },
-    "sdd-explore": {
-        "name": "sdd-explore",
-        "description": "SDD Explore — explores the codebase to build understanding for design decisions",
-        "tools": ["Bash", "Edit", "View", "Create", "Glob", "Grep", "Read", "Task"],
-        "model": _SUBAGENT_MODEL,
-    },
-    "sdd-propose": {
-        "name": "sdd-propose",
-        "description": "SDD Propose — drafts architectural proposals from exploration findings",
-        "tools": ["Bash", "Edit", "View", "Create", "Glob", "Grep", "Read", "Task"],
-        "model": _SUBAGENT_MODEL,
-    },
-    "sdd-spec": {
-        "name": "sdd-spec",
-        "description": "SDD Spec — writes formal specification scenarios",
-        "tools": ["Bash", "Edit", "View", "Create", "Glob", "Grep", "Read", "Task"],
-        "model": _SUBAGENT_MODEL,
-    },
-    "sdd-design": {
-        "name": "sdd-design",
-        "description": "SDD Design — produces architecture and design documents",
-        "tools": ["Bash", "Edit", "View", "Create", "Glob", "Grep", "Read", "Task"],
-        "model": _SUBAGENT_MODEL,
-    },
-    "sdd-tasks": {
-        "name": "sdd-tasks",
-        "description": "SDD Tasks — generates implementation task checklists",
-        "tools": ["Bash", "Edit", "View", "Create", "Glob", "Grep", "Read", "Task"],
-        "model": _SUBAGENT_MODEL,
-    },
-    "sdd-apply": {
-        "name": "sdd-apply",
-        "description": "SDD Apply — implements tasks from the checklist",
-        "tools": ["Bash", "Edit", "View", "Create", "Glob", "Grep", "Read", "Task"],
-        "model": _SUBAGENT_MODEL,
-    },
-    "sdd-verify": {
-        "name": "sdd-verify",
-        "description": "SDD Verify — validates implementation against specs",
-        "tools": ["Bash", "Edit", "View", "Create", "Glob", "Grep", "Read", "Task"],
-        "model": _SUBAGENT_MODEL,
-    },
-    "sdd-archive": {
-        "name": "sdd-archive",
-        "description": "SDD Archive — finalizes and archives completed changes",
-        "tools": ["Bash", "Edit", "View", "Create", "Glob", "Grep", "Read", "Task"],
-        "model": _SUBAGENT_MODEL,
-    },
-    # Seven inline JD/reviewer agents
-    "jd-fix-agent": {
-        "name": "jd-fix-agent",
-        "description": "Surgical fix agent for judgment-day protocol",
-        "tools": ["Bash", "Edit", "View", "Create", "Task"],
-        "model": _SUBAGENT_MODEL,
-    },
-    "jd-judge-a": {
-        "name": "jd-judge-a",
-        "description": "Adversarial code reviewer — blind judge A for judgment-day protocol",
-        "tools": ["View", "Bash", "Glob", "Grep", "Task"],
-        "model": _SUBAGENT_MODEL,
-    },
-    "jd-judge-b": {
-        "name": "jd-judge-b",
-        "description": "Adversarial code reviewer — blind judge B for judgment-day protocol",
-        "tools": ["View", "Bash", "Glob", "Grep", "Task"],
-        "model": _SUBAGENT_MODEL,
-    },
-    "review-risk": {
-        "name": "review-risk",
-        "description": "R1 Risk reviewer — security, privilege boundaries, "
-        "data exposure, dependency risks, and merge-blocking vulnerabilities",
-        "tools": ["View", "Bash", "Glob", "Grep", "Task"],
-        "model": _SUBAGENT_MODEL,
-    },
-    "review-readability": {
-        "name": "review-readability",
-        "description": "R2 Readability reviewer — naming, complexity, intention, "
-        "maintainability, review size, and context clarity",
-        "tools": ["View", "Bash", "Glob", "Grep", "Task"],
-        "model": _SUBAGENT_MODEL,
-    },
-    "review-reliability": {
-        "name": "review-reliability",
-        "description": "R3 Reliability reviewer — behavior-first tests, coverage value, "
-        "edge cases, determinism, contracts, and regressions",
-        "tools": ["View", "Bash", "Glob", "Grep", "Task"],
-        "model": _SUBAGENT_MODEL,
-    },
-    "review-resilience": {
-        "name": "review-resilience",
-        "description": "R4 Resilience reviewer — fallbacks, retry/backoff, "
-        "graceful degradation, observability, load, rollback, and SLO risks",
-        "tools": ["View", "Bash", "Glob", "Grep", "Task"],
-        "model": _SUBAGENT_MODEL,
-    },
+# ── per-id description ───────────────────────────────────────────────────────
+
+_DESCRIPTION_BY_ID: dict[str, str] = {
+    "sdd-orchestrator": "SDD Orchestrator — coordinates sub-agents, never does work inline",
+    "sdd-explore": "SDD Explore — explores the codebase to build understanding for design decisions",
+    "sdd-propose": "SDD Propose — drafts architectural proposals from exploration findings",
+    "sdd-spec": "SDD Spec — writes formal specification scenarios",
+    "sdd-design": "SDD Design — produces architecture and design documents",
+    "sdd-tasks": "SDD Tasks — generates implementation task checklists",
+    "sdd-apply": "SDD Apply — implements tasks from the checklist",
+    "sdd-verify": "SDD Verify — validates implementation against specs",
+    "sdd-archive": "SDD Archive — finalizes and archives completed changes",
+    "jd-fix-agent": "Surgical fix agent for judgment-day protocol",
+    "jd-judge-a": "Adversarial code reviewer — blind judge A for judgment-day protocol",
+    "jd-judge-b": "Adversarial code reviewer — blind judge B for judgment-day protocol",
+    "review-risk": (
+        "R1 Risk reviewer — security, privilege boundaries, "
+        "data exposure, dependency risks, and merge-blocking vulnerabilities"
+    ),
+    "review-readability": (
+        "R2 Readability reviewer — naming, complexity, intention, maintainability, review size, and context clarity"
+    ),
+    "review-reliability": (
+        "R3 Reliability reviewer — behavior-first tests, coverage value, "
+        "edge cases, determinism, contracts, and regressions"
+    ),
+    "review-resilience": (
+        "R4 Resilience reviewer — fallbacks, retry/backoff, "
+        "graceful degradation, observability, load, rollback, and SLO risks"
+    ),
 }
 
 
-def _build_hook_json() -> dict[str, object]:
+def build_hook_json() -> dict[str, object]:
     """Build the sdd-pre-tool-use.json hook dict entirely in code.
 
     Returns a deterministic dict ready for json.dumps().  Contains:
@@ -213,14 +121,19 @@ def _build_hook_json() -> dict[str, object]:
       - preToolUse with a task matcher (default deny, allow 15 subagent names)
       - 5 write tools (Bash, Edit, View, Write, Create) each with
         deny.paths matching _DENY_PATHS
+
+    The 15 subagent names are derived from the catalog (all agents where
+    capability != ORCHESTRATOR), not from a private constant.
     """
+    subagent_names = sorted(a.id for a in all_agents() if a.capability != Capability.ORCHESTRATOR)
+
     hook: dict[str, object] = {
         "version": 1,
         "preToolUse": [
             {
                 "toolName": "task",
                 "default": "deny",
-                "allow": sorted(_SUBAGENT_NAMES),
+                "allow": subagent_names,
                 "description": "Allow only 15 SDD sub-agent names",
             },
             {
@@ -307,34 +220,21 @@ class CopilotInstaller:
             )
         )
 
-        # SDD-phase + orchestrator agents — composed (metadata frontmatter + body).
-        for name in _PHASE_NAMES:
-            metadata = _METADATA[name]
+        # All 16 agents — composed (metadata frontmatter + body from prompts/<ns>/).
+        for agent in all_agents():
+            metadata = self._build_metadata(agent)
             fm_text = copilot_frontmatter(metadata)
+            body_subdir = _prompt_subdir(assets, agent.namespace)
             composed.append(
                 ComposedFileArtifact(
                     frontmatter_text=fm_text,
-                    body_source=assets.prompts_dir / f"{name}.md",
-                    target_relative=Path(".copilot/agents") / f"{name}.agent.md",
-                )
-            )
-
-        # Inline JD/reviewer agents — composed with embedded metadata.
-        for name in _INLINE_AGENTS:
-            namespace = "jd" if name.startswith("jd-") else "review"
-            prompts_subdir = assets.jd_prompts_dir if namespace == "jd" else assets.review_prompts_dir
-            metadata = _METADATA[name]
-            fm_text = copilot_frontmatter(metadata)
-            composed.append(
-                ComposedFileArtifact(
-                    frontmatter_text=fm_text,
-                    body_source=prompts_subdir / f"{name}.md",
-                    target_relative=Path(".copilot/agents") / f"{name}.agent.md",
+                    body_source=body_subdir / f"{agent.id}.md",
+                    target_relative=Path(".copilot/agents") / f"{agent.id}.agent.md",
                 )
             )
 
         # Hook JSON — built from code, written to temp file for install.
-        hook_dict = _build_hook_json()
+        hook_dict = build_hook_json()
         hook_json = json.dumps(hook_dict, indent=2) + "\n"
         home.mkdir(parents=True, exist_ok=True)
         tmp_hook = home / ".ai-harness-copilot-hook-tmp.json"
@@ -363,6 +263,29 @@ class CopilotInstaller:
 
         return ArtifactManifest(files=files, dirs=dirs, composed=composed)
 
+    # ------------------------------------------------------------------ helpers ---
+
+    @staticmethod
+    def _build_metadata(agent) -> dict[str, object]:
+        """Build per-agent metadata dict from catalog + dialect tables.
+
+        The orchestrator gets special metadata: user-invocable=True and
+        the agents: allowlist (derived from catalog).
+        """
+        model = _MODEL_BY_ID.get(agent.id, _SUBAGENT_MODEL)
+        meta: dict[str, object] = {
+            "name": agent.id,
+            "description": _DESCRIPTION_BY_ID[agent.id],
+            "tools": _TOOLS_BY_CAPABILITY[agent.capability],
+            "model": model,
+        }
+        if agent.capability == Capability.ORCHESTRATOR:
+            meta["user-invocable"] = True
+            meta["agents"] = sorted(a.id for a in all_agents() if a.capability != Capability.ORCHESTRATOR)
+        else:
+            meta["user-invocable"] = False
+        return meta
+
     # ------------------------------------------------------------------ validation ---
 
     @staticmethod
@@ -378,3 +301,13 @@ class CopilotInstaller:
             raise ValueError(
                 f"Composed agent '{artifact.target_relative.name}' exceeds {_MAX_COMPOSED_CHARS} char budget: {total}"
             )
+
+
+def _prompt_subdir(assets: CopilotAssets, namespace: str) -> Path:
+    """Map a namespace to its prompt directory in *assets*."""
+    _NS_MAP: dict[str, Path] = {
+        "sdd": assets.prompts_dir,
+        "jd": assets.jd_prompts_dir,
+        "review": assets.review_prompts_dir,
+    }
+    return _NS_MAP[namespace]

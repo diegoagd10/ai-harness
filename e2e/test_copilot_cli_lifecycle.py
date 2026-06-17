@@ -20,7 +20,7 @@ import json
 import os
 from pathlib import Path
 
-from ai_harness.artifacts.installers.copilot import _build_hook_json
+from ai_harness.artifacts.installers.copilot import build_hook_json
 
 from . import harness
 
@@ -187,7 +187,7 @@ def _assert_hook_installed(home: str, label: str) -> None:
     except json.JSONDecodeError as exc:
         raise AssertionError(f"{label}: hook file is not valid JSON") from exc
 
-    expected = _build_hook_json()
+    expected = build_hook_json()
     if doc != expected:
         raise AssertionError(f"{label}: installed hook does not match production _build_hook_json()")
 

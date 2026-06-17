@@ -13,7 +13,7 @@ from __future__ import annotations
 
 
 def metadata_to_frontmatter(m: dict[str, object]) -> str:
-    """Serialize a ``_METADATA`` entry to YAML frontmatter text.
+    """Serialize a metadata dict to YAML frontmatter text.
 
     Produces lines like::
 
@@ -41,7 +41,7 @@ def metadata_to_frontmatter(m: dict[str, object]) -> str:
 
 
 def copilot_frontmatter(m: dict[str, object]) -> str:
-    """Serialize a ``_METADATA`` entry to Copilot custom-agent YAML frontmatter.
+    """Serialize a metadata dict to Copilot custom-agent YAML frontmatter.
 
     Emits 7 unconditional keys in fixed order: name, description, tools,
     target, user-invocable, disable-model-invocation, model.
