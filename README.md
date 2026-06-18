@@ -135,19 +135,6 @@ native configuration directories of every supported harness:
 | Claude Code | `~/.claude/` | `src/ai_harness/resources/agent-clis/claude/` |
 | GitHub Copilot CLI | `~/.copilot/` | [`docs/agents/copilot/README.md`](docs/agents/copilot/README.md) |
 
-### GitHub Copilot CLI
-
-The Copilot CLI adapter installs 16 agent definitions (1 orchestrator, 8 SDD
-phase agents, 3 judgment-day agents, 4 quality reviewers), a hook-based tool
-access policy, and the project skills under `~/.copilot/`. At install time the
-phase agents are composed from shared SDD prompt bodies and adapter-specific
-frontmatter.
-
-The [`Copilot CLI README`](docs/agents/copilot/README.md) covers the adapter
-layout, per-agent model gap, hook-based access control, and platform differences
-from OpenCode and Claude Code — and is the place to start when adapting the
-pipeline for a new project.
-
 ## Running tests
 
 Unit tests run against the Python source (no Docker needed):
