@@ -18,12 +18,20 @@ ARG AGENT_GID=1000
 # Rename the base image's "node" user to "agent" and align UID/GID.
 RUN groupmod -o -g $AGENT_GID node && usermod -o -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
 
-# Install OpenCode CLI (run as root before USER agent)
-RUN npm install -g opencode-ai@latest
-
 USER ${AGENT_UID}:${AGENT_GID}
 
 WORKDIR /home/agent
+
+# Install pnpm package manager
+RUN curl -fsSL https://get.pnpm.io/install.sh | sh -
+
+# The install script adds pnpm to the shell profile; expose it to
+# subsequent RUN commands and the runtime PATH explicitly.
+ENV PNPM_HOME="/home/agent/.local/share/pnpm"
+ENV PATH="${PNPM_HOME}:${PATH}"
+
+# Install OpenCode CLI and Claude Code globally via pnpm
+RUN pnpm add -g opencode-ai@latest @anthropic-ai/claude-code@latest
 
 # In worktree sandbox mode, Sandcastle bind-mounts the git worktree at ${SANDBOX_REPO_DIR}
 # and overrides the working directory to ${SANDBOX_REPO_DIR} at container start.
