@@ -74,6 +74,24 @@ def test_install_copilot_uses_github_persona_and_copilot_skills(tmp_path: Path) 
     _assert_persona_written(tmp_path / ".agents" / "AGENTS.md")
 
 
+def test_install_opencode_writes_config_and_prompts(tmp_path: Path) -> None:
+    install_targets([Target.OPENCODE], home=tmp_path)
+
+    config = tmp_path / ".config" / "opencode" / "opencode.json"
+    _assert_persona_written(config)
+    parsed = json.loads(config.read_text(encoding="utf-8"))
+    assert parsed["share"] == "disabled"
+    assert "sdd-orchestrator" in parsed["agent"]
+
+    prompts = tmp_path / ".config" / "opencode" / "prompts"
+    for sub in ("jd", "review", "sdd"):
+        assert (prompts / sub).is_dir(), f"prompts/{sub} missing"
+    assert (prompts / "sdd" / "sdd-orchestrator.md").is_file()
+    assert (prompts / "sdd" / "sdd-apply.md").is_file()
+    assert (prompts / "jd" / "jd-fix-agent.md").is_file()
+    assert (prompts / "review" / "review-risk.md").is_file()
+
+
 def test_install_manifest_records_targets_and_written_paths(tmp_path: Path) -> None:
     manifest = install_targets([Target.GENERIC, Target.CLAUDE], home=tmp_path)
 
@@ -213,6 +231,13 @@ def test_cli_install_only_claude_installs_generic_and_claude(isolated_home: Path
     assert result.exit_code == 0, result.stdout
     assert (isolated_home / ".agents" / "AGENTS.md").is_file()
     assert (isolated_home / ".claude" / "CLAUDE.md").is_file()
+
+
+def test_cli_install_only_opencode_installs_opencode_config(isolated_home: Path) -> None:
+    result = runner.invoke(app, ["install", "-o", "opencode"])
+    assert result.exit_code == 0, result.stdout
+    assert (isolated_home / ".config" / "opencode" / "opencode.json").is_file()
+    assert (isolated_home / ".config" / "opencode" / "prompts" / "sdd" / "sdd-orchestrator.md").is_file()
 
 
 def test_cli_install_invalid_target_errors(isolated_home: Path) -> None:

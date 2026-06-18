@@ -16,6 +16,8 @@ from pathlib import Path
 from e2e.harness import (
     assert_file_exists,
     assert_file_missing,
+    assert_opencode_exists,
+    assert_opencode_missing,
     run_in_sandbox,
     sandbox_home,
     sandboxed_tool_install,
@@ -78,6 +80,8 @@ def run(cli_dir: str) -> None:
         _test_install_only_claude(path_env)
         _test_install_only_copilot(path_env)
         _test_install_claude_and_copilot(path_env)
+        _test_install_only_opencode(path_env)
+        _test_install_opencode_and_claude(path_env)
     finally:
         sandboxed_tool_uninstall()
 
@@ -91,6 +95,7 @@ def _test_install_no_args(path_env: dict[str, str]) -> None:
     _assert_generic_exists(h)
     _assert_claude_missing(h)
     _assert_copilot_missing(h)
+    assert_opencode_missing(h)
     _assert_manifest_exists(h)
 
 
@@ -103,6 +108,7 @@ def _test_install_only_claude(path_env: dict[str, str]) -> None:
     _assert_generic_exists(h)
     _assert_claude_exists(h)
     _assert_copilot_missing(h)
+    assert_opencode_missing(h)
     _assert_manifest_exists(h)
 
 
@@ -115,6 +121,7 @@ def _test_install_only_copilot(path_env: dict[str, str]) -> None:
     _assert_generic_exists(h)
     _assert_copilot_exists(h)
     _assert_claude_missing(h)
+    assert_opencode_missing(h)
     _assert_manifest_exists(h)
 
 
@@ -127,4 +134,31 @@ def _test_install_claude_and_copilot(path_env: dict[str, str]) -> None:
     _assert_generic_exists(h)
     _assert_claude_exists(h)
     _assert_copilot_exists(h)
+    assert_opencode_missing(h)
+    _assert_manifest_exists(h)
+
+
+def _test_install_only_opencode(path_env: dict[str, str]) -> None:
+    """`ai-harness install -o opencode` -> generic + opencode, no claude/copilot."""
+    home = sandbox_home()
+    run_in_sandbox(home, "ai-harness", "install", "-o", "opencode", extra_env=path_env)
+    h = Path(home)
+
+    _assert_generic_exists(h)
+    assert_opencode_exists(h)
+    _assert_claude_missing(h)
+    _assert_copilot_missing(h)
+    _assert_manifest_exists(h)
+
+
+def _test_install_opencode_and_claude(path_env: dict[str, str]) -> None:
+    """`ai-harness install -o opencode,claude` -> generic + opencode + claude, no copilot."""
+    home = sandbox_home()
+    run_in_sandbox(home, "ai-harness", "install", "-o", "opencode,claude", extra_env=path_env)
+    h = Path(home)
+
+    _assert_generic_exists(h)
+    assert_opencode_exists(h)
+    _assert_claude_exists(h)
+    _assert_copilot_missing(h)
     _assert_manifest_exists(h)

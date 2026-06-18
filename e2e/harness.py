@@ -33,6 +33,15 @@ from pathlib import Path
 _SANDBOXES: list[str] = []
 _UV_TOOL_DIR: str | None = None
 
+# Prompt files expected after installing the opencode target.
+# (subdirectory, filename) — relative to ~/.config/opencode/prompts/.
+EXPECTED_OPENCODE_PROMPTS: tuple[tuple[str, str], ...] = (
+    ("jd", "jd-fix-agent.md"),
+    ("review", "review-risk.md"),
+    ("sdd", "sdd-orchestrator.md"),
+    ("sdd", "sdd-apply.md"),
+)
+
 
 def _cleanup() -> None:
     """atexit handler: remove all synthetic directories."""
@@ -173,6 +182,25 @@ def assert_file_exists(path: Path, label: str) -> None:
     """Assert *path* exists; raise otherwise."""
     if not path.exists():
         raise AssertionError(f"{label}: missing — {path}")
+
+
+def assert_opencode_exists(h: Path) -> None:
+    """Assert opencode target paths exist under *h*."""
+    opencode_json = h / ".config" / "opencode" / "opencode.json"
+    assert_file_exists(opencode_json, "opencode ~/.config/opencode/opencode.json")
+    assert opencode_json.stat().st_size > 0, f"opencode.json is empty: {opencode_json}"
+    prompts_dir = h / ".config" / "opencode" / "prompts"
+    for sub, filename in EXPECTED_OPENCODE_PROMPTS:
+        assert_file_exists(prompts_dir / sub / filename, f"opencode prompts/{sub}/{filename}")
+
+
+def assert_opencode_missing(h: Path) -> None:
+    """Assert opencode target paths do NOT exist under *h*."""
+    opencode_json = h / ".config" / "opencode" / "opencode.json"
+    assert_file_missing(opencode_json, "opencode ~/.config/opencode/opencode.json")
+    prompts_dir = h / ".config" / "opencode" / "prompts"
+    for sub, filename in EXPECTED_OPENCODE_PROMPTS:
+        assert_file_missing(prompts_dir / sub / filename, f"opencode prompts/{sub}/{filename}")
 
 
 # ------- workspace seeding --------------------------------------------------

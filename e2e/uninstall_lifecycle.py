@@ -17,6 +17,8 @@ from pathlib import Path
 from e2e.harness import (
     assert_file_exists,
     assert_file_missing,
+    assert_opencode_exists,
+    assert_opencode_missing,
     run_in_sandbox,
     sandbox_home,
     sandboxed_tool_install,
@@ -76,6 +78,7 @@ def run(cli_dir: str) -> None:
         _test_uninstall_no_args(path_env)
         _test_uninstall_only_claude(path_env)
         _test_uninstall_only_copilot(path_env)
+        _test_uninstall_only_opencode(path_env)
         _test_uninstall_only_generic(path_env)
         _test_uninstall_multiple_targets(path_env)
         _test_uninstall_nothing_installed(path_env)
@@ -89,19 +92,21 @@ def _test_uninstall_no_args(path_env: dict[str, str]) -> None:
     home = sandbox_home()
     h = Path(home)
 
-    # Setup: install to claude + copilot (generic always included)
-    run_in_sandbox(home, "ai-harness", "install", "-o", "claude,copilot", extra_env=path_env)
+    # Setup: install to claude + copilot + opencode (generic always included)
+    run_in_sandbox(home, "ai-harness", "install", "-o", "claude,copilot,opencode", extra_env=path_env)
     _assert_generic_exists(h)
     _assert_claude_exists(h)
     _assert_copilot_exists(h)
+    assert_opencode_exists(h)
 
     # Act: uninstall with no args
     run_in_sandbox(home, "ai-harness", "uninstall", extra_env=path_env)
 
-    # Assert: everything removed (generic + claude + copilot)
+    # Assert: everything removed (generic + claude + copilot + opencode)
     _assert_generic_missing(h)
     _assert_claude_missing(h)
     _assert_copilot_missing(h)
+    assert_opencode_missing(h)
 
 
 def _test_uninstall_only_claude(path_env: dict[str, str]) -> None:
@@ -142,6 +147,24 @@ def _test_uninstall_only_copilot(path_env: dict[str, str]) -> None:
     _assert_copilot_missing(h)
     _assert_generic_exists(h)
     _assert_claude_exists(h)
+
+
+def _test_uninstall_only_opencode(path_env: dict[str, str]) -> None:
+    """`ai-harness uninstall -o opencode` -> remove only opencode, generic survives."""
+    home = sandbox_home()
+    h = Path(home)
+
+    # Setup: install to opencode (generic always included)
+    run_in_sandbox(home, "ai-harness", "install", "-o", "opencode", extra_env=path_env)
+    _assert_generic_exists(h)
+    assert_opencode_exists(h)
+
+    # Act: uninstall only opencode
+    run_in_sandbox(home, "ai-harness", "uninstall", "-o", "opencode", extra_env=path_env)
+
+    # Assert: opencode removed, generic survives
+    assert_opencode_missing(h)
+    _assert_generic_exists(h)
 
 
 def _test_uninstall_only_generic(path_env: dict[str, str]) -> None:
@@ -196,6 +219,7 @@ def _test_uninstall_nothing_installed(path_env: dict[str, str]) -> None:
     _assert_generic_missing(h)
     _assert_claude_missing(h)
     _assert_copilot_missing(h)
+    assert_opencode_missing(h)
     assert_file_missing(h / ".ai-harness" / "installed.json", "manifest (never installed)")
 
 
@@ -219,4 +243,5 @@ def _test_uninstall_idempotent(path_env: dict[str, str]) -> None:
     _assert_generic_missing(h)
     _assert_claude_missing(h)
     _assert_copilot_missing(h)
+    assert_opencode_missing(h)
     assert_file_missing(h / ".ai-harness" / "installed.json", "manifest (already uninstalled)")

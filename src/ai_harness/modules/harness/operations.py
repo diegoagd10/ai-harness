@@ -22,11 +22,13 @@ from ai_harness.modules.harness.models import InstallManifest, Target
 
 # --- the secret knowledge this module hides -------------------------------
 #
-# Each target's persona file and skills live at target-specific locations
-# relative to the user's home. The persona source (resources/AGENTS.md) is
-# copied with a per-target rename; the skills tree is copied verbatim.
-# Concentrating this map here means callers state intent ("install claude")
-# and never assemble paths, filenames, or directory layout themselves.
+# Each target maps a single config file and a supporting tree from the
+# bundled resources onto target-specific locations under the user's home.
+# AI-harness personas copy resources/AGENTS.md with a per-target rename
+# alongside a verbatim skills tree; the opencode target copies its
+# opencode.json config and a prompts tree. Concentrating this map here
+# means callers state intent ("install claude") and never assemble paths,
+# filenames, or directory layout themselves.
 
 _MANIFEST_DIR = ".ai-harness"
 _MANIFEST_FILENAME = "installed.json"
@@ -34,22 +36,49 @@ _MANIFEST_VERSION = 1
 
 _RESOURCE_PACKAGE = "ai_harness"
 _RESOURCE_ROOT = "resources"
-_PERSONA_SOURCE = "AGENTS.md"
-_SKILLS_SOURCE_DIR = "skills"
 
 
 @dataclass(frozen=True, slots=True)
 class _TargetLayout:
-    """Where one target's persona file and skills tree live, relative to home."""
+    """Where one target's config file and tree live, relative to home, plus their sources.
 
-    persona_path: str  # e.g. ".claude/CLAUDE.md"
-    skills_dir: str  # e.g. ".claude/skills"
+    ``config_*`` describes a single file (persona for AI harnesses, opencode.json
+    for the opencode target). ``tree_*`` describes a directory of supporting
+    artifacts (skills for AI harnesses, prompts for opencode). The persona
+    pattern and the opencode config pattern share the same shape.
+    """
+
+    config_dest: str  # e.g. ".claude/CLAUDE.md" or ".config/opencode/opencode.json"
+    config_source: str  # e.g. "AGENTS.md" or "opencode.json"
+    tree_dest: str  # e.g. ".claude/skills" or ".config/opencode/prompts"
+    tree_source: str  # e.g. "skills" or "prompts"
 
 
 _TARGET_LAYOUTS: dict[Target, _TargetLayout] = {
-    Target.GENERIC: _TargetLayout(".agents/AGENTS.md", ".agents/skills"),
-    Target.CLAUDE: _TargetLayout(".claude/CLAUDE.md", ".claude/skills"),
-    Target.COPILOT: _TargetLayout(".github/copilot-instructions.md", ".copilot/skills"),
+    Target.GENERIC: _TargetLayout(
+        config_dest=".agents/AGENTS.md",
+        config_source="AGENTS.md",
+        tree_dest=".agents/skills",
+        tree_source="skills",
+    ),
+    Target.CLAUDE: _TargetLayout(
+        config_dest=".claude/CLAUDE.md",
+        config_source="AGENTS.md",
+        tree_dest=".claude/skills",
+        tree_source="skills",
+    ),
+    Target.COPILOT: _TargetLayout(
+        config_dest=".github/copilot-instructions.md",
+        config_source="AGENTS.md",
+        tree_dest=".copilot/skills",
+        tree_source="skills",
+    ),
+    Target.OPENCODE: _TargetLayout(
+        config_dest=".config/opencode/opencode.json",
+        config_source="opencode.json",
+        tree_dest=".config/opencode/prompts",
+        tree_source="prompts",
+    ),
 }
 
 
@@ -134,8 +163,6 @@ def install_targets(targets: list[Target], *, home: Path | None = None) -> Insta
     """
     home = home if home is not None else Path.home()
     resources = _resources_root()
-    persona_src = resources / _PERSONA_SOURCE
-    skills_src = resources / _SKILLS_SOURCE_DIR
 
     written_paths: list[Path] = []
     files_by_target: dict[str, list[str]] = {}
@@ -143,17 +170,19 @@ def install_targets(targets: list[Target], *, home: Path | None = None) -> Insta
     for target in targets:
         layout = _TARGET_LAYOUTS[target]
 
-        persona_dest = home / layout.persona_path
-        persona_dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(persona_src, persona_dest)
-        written_paths.append(persona_dest)
+        config_src = resources / layout.config_source
+        config_dest = home / layout.config_dest
+        config_dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(config_src, config_dest)
+        written_paths.append(config_dest)
 
-        skills_dest = home / layout.skills_dir
-        shutil.copytree(skills_src, skills_dest, dirs_exist_ok=True)
-        skill_files = _walk_files(skills_dest)
-        written_paths.extend(skill_files)
+        tree_src = resources / layout.tree_source
+        tree_dest = home / layout.tree_dest
+        shutil.copytree(tree_src, tree_dest, dirs_exist_ok=True)
+        tree_files = _walk_files(tree_dest)
+        written_paths.extend(tree_files)
 
-        rel_files = [_relative_to(home, persona_dest), *(_relative_to(home, p) for p in skill_files)]
+        rel_files = [_relative_to(home, config_dest), *(_relative_to(home, p) for p in tree_files)]
         files_by_target[target.value] = rel_files
 
     manifest = InstallManifest(targets=list(targets), written_paths=written_paths)
