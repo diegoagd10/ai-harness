@@ -24,37 +24,14 @@ Before writing, read `openspec/config.yaml` for project-specific rules (`rules.t
 
 ## What to Do
 
-### Step 1: Load Skills
-
-Resolve and read every skill named in the orchestrator's launch prompt before doing any task-specific work.
-
-Resolution protocol:
-1. Look for a `## Skills to load` block in the launch prompt. It names the required skills for this phase.
-2. Scan the installed skills directory for `*/SKILL.md`. Default search paths:
-   - User: `~/.config/opencode/skills/`
-   - Project: `{project-root}/skills/`
-   - Project: `{project-root}/.opencode/skills/`
-   - Project: `{project-root}/.agents/skills/`
-   - Project: `{project-root}/.claude/skills/`
-   - Project: `{project-root}/.copilot/skills/`
-3. For each name in the `## Skills to load` block, find the matching `SKILL.md` by its `name` frontmatter field and read the file.
-4. If any named skill is missing, STOP and return `status: blocked` with the missing names in `risks`. Do not silently substitute a different skill.
-5. If the launch prompt has no `## Skills to load` block, fall back to the standard required skills for this phase (see below).
-6. If nothing matches, proceed without extra skills.
-
-Skip `sdd-*`, `_shared`, and `skill-registry` directories during the scan.
-
-**Standard required skills for this phase** (fallback only — the orchestrator's hint takes priority):
-- (none)
-
-### Step 2: Analyze the Design
+### Step 1: Analyze the Design
 
 From the design document, identify:
 - All files that need to be created/modified/deleted
 - The dependency order (what must come first)
 - Testing requirements per component
 
-### Step 3: Write tasks.md
+### Step 2: Write tasks.md
 
 Create the task file:
 

@@ -44,14 +44,9 @@ Resolution protocol:
 Skip `sdd-*`, `_shared`, and `skill-registry` directories during the scan.
 
 **Standard required skills for this phase** (fallback only — the orchestrator's hint takes priority):
-- `coding-guidelines` (role: ARCHITECT + DEVELOPER)
+- `codebase-design` 
 
 When loading `coding-guidelines`, use it with this specific intent:
-- Read `references/deep-modules.md` first (mandatory — the yardstick for every boundary)
-- Read `references/information-hiding.md` (what knowledge to hide behind each interface)
-- Read `references/layers.md` (does each layer add a new abstraction)
-- Read `references/classes.md` (together or apart by knowledge)
-- Read `references/general-purpose.md` (interface generality)
 - Hold question: *"Where does each piece of knowledge live, and does every boundary I draw hide something real without pushing rituals upward?"*
 
 ### Step 2: Read the Codebase

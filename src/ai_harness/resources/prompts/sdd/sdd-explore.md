@@ -22,36 +22,13 @@ Before starting, read `openspec/config.yaml` and `openspec/specs/` to gather con
 
 ## What to Do
 
-### Step 1: Load Skills
-
-Resolve and read every skill named in the orchestrator's launch prompt before doing any task-specific work.
-
-Resolution protocol:
-1. Look for a `## Skills to load` block in the launch prompt. It names the required skills for this phase.
-2. Scan the installed skills directory for `*/SKILL.md`. Default search paths:
-   - User: `~/.config/opencode/skills/`
-   - Project: `{project-root}/skills/`
-   - Project: `{project-root}/.opencode/skills/`
-   - Project: `{project-root}/.agents/skills/`
-   - Project: `{project-root}/.claude/skills/`
-   - Project: `{project-root}/.copilot/skills/`
-3. For each name in the `## Skills to load` block, find the matching `SKILL.md` by its `name` frontmatter field and read the file.
-4. If any named skill is missing, STOP and return `status: blocked` with the missing names in `risks`. Do not silently substitute a different skill.
-5. If the launch prompt has no `## Skills to load` block, fall back to the standard required skills for this phase (see below).
-6. If nothing matches, proceed without extra skills.
-
-Skip `sdd-*`, `_shared`, and `skill-registry` directories during the scan.
-
-**Standard required skills for this phase** (fallback only — the orchestrator's hint takes priority):
-- (none)
-
-### Step 2: Understand the Request
+### Step 1: Understand the Request
 
 Parse what the user wants to explore:
 - Is this a new feature? A bug fix? A refactor?
 - What domain does it touch?
 
-### Step 3: Investigate the Codebase
+### Step 2: Investigate the Codebase
 
 Read relevant code to understand:
 - Current architecture and patterns
@@ -68,7 +45,7 @@ INVESTIGATE:
 └── Identify dependencies and coupling
 ```
 
-### Step 4: Analyze Options
+### Step 3: Analyze Options
 
 If there are multiple approaches, compare them:
 
@@ -77,7 +54,7 @@ If there are multiple approaches, compare them:
 | Option A | ... | ... | Low/Med/High |
 | Option B | ... | ... | Low/Med/High |
 
-### Step 5: Persist Artifact
+### Step 4: Persist Artifact
 
 **This step is MANDATORY when tied to a named change — do NOT skip it.** Skipping it breaks the pipeline: downstream phases will not find your output.
 
@@ -85,7 +62,7 @@ Write the exploration report to `openspec/changes/{change-name}/exploration.md`:
 - If the change directory doesn't exist yet, create it first.
 - If `exploration.md` already exists, read it first and update it — don't overwrite blindly.
 
-### Step 6: Return Structured Analysis
+### Step 5: Return Structured Analysis
 
 Write the exploration report:
 

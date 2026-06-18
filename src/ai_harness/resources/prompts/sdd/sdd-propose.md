@@ -40,30 +40,7 @@ Before writing, read `openspec/config.yaml` for project-specific rules (`rules.p
   10. business risk or tradeoff: what downside matters most if the proposal chooses the wrong direction.
 - Prefer 3-5 concrete product questions per round. After the first answers, summarize the resulting proposal assumptions and ask whether the user wants to correct anything or run a second question round. Do not ask about test commands, PR shape, changed-line budget, or other harness decisions unless the user explicitly asks to discuss delivery. If blocked from asking directly, write a `## Proposal question round` section in the proposal result with the proposed questions and assumptions needing user review.
 
-### Step 1: Load Skills
-
-Resolve and read every skill named in the orchestrator's launch prompt before doing any task-specific work.
-
-Resolution protocol:
-1. Look for a `## Skills to load` block in the launch prompt. It names the required skills for this phase.
-2. Scan the installed skills directory for `*/SKILL.md`. Default search paths:
-   - User: `~/.config/opencode/skills/`
-   - Project: `{project-root}/skills/`
-   - Project: `{project-root}/.opencode/skills/`
-   - Project: `{project-root}/.agents/skills/`
-   - Project: `{project-root}/.claude/skills/`
-   - Project: `{project-root}/.copilot/skills/`
-3. For each name in the `## Skills to load` block, find the matching `SKILL.md` by its `name` frontmatter field and read the file.
-4. If any named skill is missing, STOP and return `status: blocked` with the missing names in `risks`. Do not silently substitute a different skill.
-5. If the launch prompt has no `## Skills to load` block, fall back to the standard required skills for this phase (see below).
-6. If nothing matches, proceed without extra skills.
-
-Skip `sdd-*`, `_shared`, and `skill-registry` directories during the scan.
-
-**Standard required skills for this phase** (fallback only - the orchestrator's hint takes priority):
-- (none)
-
-### Step 2: Create Change Directory
+### Step 1: Create Change Directory
 
 Create the change folder if it doesn't exist yet:
 
@@ -72,7 +49,7 @@ openspec/changes/{change-name}/
 +-- proposal.md
 ```
 
-### Step 3: Write proposal.md
+### Step 2: Write proposal.md
 
 ```markdown
 # Proposal: {Change Title}
@@ -142,7 +119,7 @@ Reference the recommended approach from exploration if available.}
 - [ ] {Measurable outcome}
 ```
 
-### Step 4: Persist Artifact
+### Step 3: Persist Artifact
 
 **This step is MANDATORY - do NOT skip it.** Skipping it breaks the pipeline: downstream phases will not find your output.
 
@@ -150,7 +127,7 @@ Write the proposal to `openspec/changes/{change-name}/proposal.md`:
 - If the change directory doesn't exist yet, create it first.
 - If `proposal.md` already exists, read it first and update it - don't overwrite blindly.
 
-### Step 5: Return Summary
+### Step 4: Return Summary
 
 This summary is the `detailed_report` for the return envelope below:
 

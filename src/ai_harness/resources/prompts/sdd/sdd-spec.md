@@ -23,30 +23,7 @@ Before writing, read `openspec/config.yaml` for project-specific rules (`rules.s
 
 ## What to Do
 
-### Step 1: Load Skills
-
-Resolve and read every skill named in the orchestrator's launch prompt before doing any task-specific work.
-
-Resolution protocol:
-1. Look for a `## Skills to load` block in the launch prompt. It names the required skills for this phase.
-2. Scan the installed skills directory for `*/SKILL.md`. Default search paths:
-   - User: `~/.config/opencode/skills/`
-   - Project: `{project-root}/skills/`
-   - Project: `{project-root}/.opencode/skills/`
-   - Project: `{project-root}/.agents/skills/`
-   - Project: `{project-root}/.claude/skills/`
-   - Project: `{project-root}/.copilot/skills/`
-3. For each name in the `## Skills to load` block, find the matching `SKILL.md` by its `name` frontmatter field and read the file.
-4. If any named skill is missing, STOP and return `status: blocked` with the missing names in `risks`. Do not silently substitute a different skill.
-5. If the launch prompt has no `## Skills to load` block, fall back to the standard required skills for this phase (see below).
-6. If nothing matches, proceed without extra skills.
-
-Skip `sdd-*`, `_shared`, and `skill-registry` directories during the scan.
-
-**Standard required skills for this phase** (fallback only - the orchestrator's hint takes priority):
-- (none)
-
-### Step 2: Identify Affected Domains
+### Step 1: Identify Affected Domains
 
 Read the proposal's **Capabilities section** - this is your primary contract:
 
@@ -62,11 +39,11 @@ FOR EACH entry under "Modified Capabilities":
 
 If the proposal has no Capabilities section (older format), fall back to inferring from "Affected Areas". But always prefer the explicit Capabilities mapping when present.
 
-### Step 3: Read Existing Specs
+### Step 2: Read Existing Specs
 
 If `openspec/specs/{domain}/spec.md` exists, read it to understand CURRENT behavior. Your delta specs describe CHANGES to this behavior.
 
-### Step 4: Write Delta Specs
+### Step 3: Write Delta Specs
 
 Create specs inside the change folder:
 
@@ -180,7 +157,7 @@ The system {MUST/SHALL/SHOULD} {behavior}.
 - THEN {outcome}
 ```
 
-### Step 5: Persist Artifact
+### Step 4: Persist Artifact
 
 **This step is MANDATORY - do NOT skip it.** Skipping it breaks the pipeline: downstream phases will not find your output.
 

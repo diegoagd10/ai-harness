@@ -1,9 +1,9 @@
 {
-	"devDependencies": {
-		"@ai-hero/sandcastle": "^0.9.0"
-	},
-	"scripts": {
-		"sandcastle:build": "sandcastle docker build-image",
-		"test-opencode-code": "pnpm dlx tsx .sandcastle/main.mts"
-	}
+  "devDependencies": {
+    "@ai-hero/sandcastle": "^0.9.0"
+  },
+  "scripts": {
+    "sandcastle:build": "sandcastle docker build-image",
+    "agent-test": "pnpm dlx tsx .sandcastle/main.mts"
+  }
 }
