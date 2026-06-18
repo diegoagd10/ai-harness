@@ -10,7 +10,17 @@ await run({
   name: "worker",
 
   // Sandbox provider — runs the agent inside an isolated container.
-  sandbox: docker(),
+  // Bind-mount the host's opencode auth.json read-only into the sandbox so
+  // the agent authenticates without baking credentials into the image.
+  sandbox: docker({
+    mounts: [
+      {
+        hostPath: "~/.local/share/opencode/auth.json",
+        sandboxPath: "~/.local/share/opencode/auth.json",
+        readonly: true,
+      },
+    ],
+  }),
 
   // The agent provider. Pass a model string to opencode() — sonnet balances
   // capability and speed for most tasks. Switch to claude-opus-4-7 for harder

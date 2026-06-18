@@ -22,16 +22,26 @@ USER ${AGENT_UID}:${AGENT_GID}
 
 WORKDIR /home/agent
 
-# Install pnpm package manager
-RUN curl -fsSL https://get.pnpm.io/install.sh | sh -
+# Install pnpm package manager.
+# SHELL is set to bash and ~/.bashrc is touched because the install script
+# needs a shell config file to write the PATH export into — in a Docker RUN
+# the agent user has no profile by default, which makes the script abort
+# with ERR_PNPM_NO_SHELL_CONFIG. We don't rely on the profile edit anyway;
+# PATH is set via ENV below.
+ENV SHELL=/bin/bash
+RUN touch ~/.bashrc && curl -fsSL https://get.pnpm.io/install.sh | sh -
 
 # The install script adds pnpm to the shell profile; expose it to
 # subsequent RUN commands and the runtime PATH explicitly.
 ENV PNPM_HOME="/home/agent/.local/share/pnpm"
-ENV PATH="${PNPM_HOME}:${PATH}"
+ENV PATH="${PNPM_HOME}/bin:${PATH}"
 
-# Install OpenCode CLI and Claude Code globally via pnpm
-RUN pnpm add -g opencode-ai@latest @anthropic-ai/claude-code@latest
+# Install OpenCode CLI and Claude Code globally via pnpm.
+# --allow-build whitelists opencode-ai's postinstall (pnpm 10+ blocks
+# postinstall by default for supply-chain safety). opencode-ai needs its
+# postinstall.mjs to install its native binary; without it the CLI aborts
+# at startup with "postinstall script was not run".
+RUN pnpm add -g --allow-build=opencode-ai opencode-ai@latest @anthropic-ai/claude-code@latest
 
 # In worktree sandbox mode, Sandcastle bind-mounts the git worktree at ${SANDBOX_REPO_DIR}
 # and overrides the working directory to ${SANDBOX_REPO_DIR} at container start.
