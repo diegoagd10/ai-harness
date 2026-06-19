@@ -1,64 +1,141 @@
-import { run, opencode, claudeCode, RunResult } from "@ai-hero/sandcastle";
+// Sequential Reviewer — implement-then-review loop
+//
+// This template drives a two-phase workflow per issue:
+//   Phase 1 (Implement): A sonnet agent picks an open issue, works on it
+//                        on a dedicated branch, commits the changes, and signals
+//                        completion.
+//   Phase 2 (Review):    A second sonnet agent reviews the branch diff and either
+//                        approves it or makes corrections directly on the branch.
+//
+// Both phases share a single sandbox created via createSandbox(), so the
+// implementer and reviewer work on the same explicit branch.
+//
+// The outer loop repeats up to MAX_ITERATIONS times, processing one issue per
+// iteration and stopping early once the backlog is exhausted (an implement
+// phase that produces no commits). This is a middle-complexity option between
+// the simple-loop (no review gate) and the parallel-planner (concurrent
+// execution with a planning phase).
+//
+// Usage:
+//   npx tsx .sandcastle/main.mts
+// Or add to package.json:
+//   "scripts": { "sandcastle": "npx tsx .sandcastle/main.mts" }
+
+import * as sandcastle from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 
-const appliedResult: RunResult = await run({
-  name: "worker",
-  sandbox: docker({
-    mounts: [
-      {
-        hostPath: "~/.local/share/opencode/auth.json",
-        sandboxPath: "~/.local/share/opencode/auth.json",
-        readonly: true,
-      },
-      {
-        hostPath: "~/.config/opencode/promps",
-        sandboxPath: "~/.config/opencode/prompts",
-        readonly: true,
-      },
-      {
-        hostPath: ".sandcastle/opencode.json",
-        sandboxPath: "~/.config/opencode/opencode.json",
-        readonly: true,
-      },
-      {
-        hostPath: "~/.agents",
-        sandboxPath: "~/.agents",
-        readonly: true,
-      },
-    ],
-  }),
-  agent: opencode("opencode-go/glm-5.2"),
-  promptFile: ".sandcastle/prompt.md",
-  promptArgs: {
-    OPEN_SPEC_CHANGE: "2026-06-18-handoff-deepening-rename-generic-to-agents",
-  },
+// ---------------------------------------------------------------------------
+// Configuration
+// ---------------------------------------------------------------------------
 
-  // Branch strategy — merge-to-head creates a temporary branch for the agent
-  // to work on, then merges the result back to HEAD when the run completes.
-  // This is required when using copyToWorktree, since head mode bind-mounts
-  // the host directory directly (no worktree to copy into).
-  branchStrategy: { type: "merge-to-head" },
+// Maximum number of implement→review cycles to run before stopping.
+// Each cycle works on one issue. Raise this to process more issues per run.
+const MAX_ITERATIONS = 10;
 
-  // Copy node_modules from the host into the worktree before the sandbox
-  // starts. This avoids a full npm install from scratch on every iteration.
-  // The onSandboxReady hook still runs npm install as a safety net to handle
-  // platform-specific binaries and any packages added since the last copy.
-  copyToWorktree: ["node_modules", ".venv"],
-  //
-  // Lifecycle hooks — commands grouped by where they run (host or sandbox).
-  hooks: {
-    sandbox: {
-      // onSandboxReady runs once after the sandbox is initialised and the repo is
-      // synced in, before the agent starts. Use it to install dependencies or run
-      // any other setup steps your project needs.
-      onSandboxReady: [{ command: "uv sync" }],
-    },
-  },
-});
+// Hooks run inside the sandbox before the agent starts each iteration.
+// uv sync ensures the sandbox always has fresh dependencies.
+const hooks = {
+  sandbox: { onSandboxReady: [{ command: "uv sync" }] },
+};
 
-console.log(appliedResult.iterations.length); // number of iterations executed
-console.log(appliedResult.iterations); // number of iterations executed
-console.log(appliedResult.completionSignal); // matched signal string, or undefined if none fired
-console.log(appliedResult.commits); // array of { sha } for commits created
-console.log(appliedResult.branch);
-console.log(appliedResult.stdout);
+// Copy node_modules from the host into the worktree before each sandbox
+// starts. Avoids a full uv sync from scratch; the hook above handles
+// platform-specific binaries and any packages added since the last copy.
+const copyToWorktree = ["node_modules", ".venv"];
+
+// ---------------------------------------------------------------------------
+// Main loop
+// ---------------------------------------------------------------------------
+
+for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
+  console.log(`\n=== Iteration ${iteration}/${MAX_ITERATIONS} ===\n`);
+
+  // Generate a unique branch name for this iteration.
+  const branch = `sandcastle/sequential-reviewer/${Date.now()}`;
+
+  // Create a single sandbox that both the implementer and reviewer share.
+  // This gives both agents a real, named branch that persists across phases.
+  const sandbox = await sandcastle.createSandbox({
+    branch,
+    sandbox: docker({
+      mounts: [
+        {
+          hostPath: "~/.local/share/opencode/auth.json",
+          sandboxPath: "~/.local/share/opencode/auth.json",
+          readonly: true,
+        },
+        {
+          hostPath: "~/.agents",
+          sandboxPath: "~/.agents",
+          readonly: true,
+        },
+        // Bind-mount the host's pnpm store at the path recorded in
+        // node_modules/.modules.yaml. copyToWorktree carries that file in
+        // with storeDir=/home/<host-user>/.../pnpm/store/v11 baked in,
+        // so the container must resolve that exact path or pnpm reads fail.
+        {
+          hostPath: "~/.local/share/pnpm",
+          sandboxPath: "/home/diegoagd10/.local/share/pnpm",
+          readonly: true,
+        },
+      ],
+    }),
+    hooks,
+    copyToWorktree,
+  });
+
+  try {
+    // -----------------------------------------------------------------------
+    // Phase 1: Implement
+    //
+    // A sonnet agent picks the next open issue, writes the
+    // implementation (using RGR: Red → Green → Repeat → Refactor), and
+    // commits the result.
+    //
+    // The agent signals completion via <promise>COMPLETE</promise> when done.
+    // -----------------------------------------------------------------------
+    // One iteration so each outer pass implements a single issue on its own
+    // branch, then hands it to the reviewer. A higher value lets the agent
+    // drain the whole backlog onto this one branch in a single pass, which
+    // defeats the per-issue review.
+    const implement = await sandbox.run({
+      name: "implementer",
+      maxIterations: 1,
+      agent: sandcastle.opencode("opencode-go/glm-5.2"),
+      promptFile: "./.sandcastle/implement-prompt.md",
+    });
+
+    if (!implement.commits.length) {
+      // No commits means the backlog is empty or every remaining issue is
+      // blocked — there is nothing left to implement or review, so stop.
+      console.log("Implementation agent made no commits. Stopping.");
+      break;
+    }
+
+    console.log(`\nImplementation complete on branch: ${branch}`);
+    console.log(`Commits: ${implement.commits.length}`);
+
+    // -----------------------------------------------------------------------
+    // Phase 2: Review
+    //
+    // A second sonnet agent reviews the diff of the branch produced by
+    // Phase 1. It uses the {{BRANCH}} prompt argument to inspect the right
+    // branch, and either approves or makes corrections directly on the branch.
+    // -----------------------------------------------------------------------
+    await sandbox.run({
+      name: "reviewer",
+      maxIterations: 1,
+      agent: sandcastle.opencode("opencode-go/kimi-k2.6"),
+      promptFile: "./.sandcastle/review-prompt.md",
+      promptArgs: {
+        BRANCH: branch,
+      },
+    });
+
+    console.log("\nReview complete.");
+  } finally {
+    await sandbox.close();
+  }
+}
+
+console.log("\nAll done.");

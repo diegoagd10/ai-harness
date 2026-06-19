@@ -5,9 +5,35 @@ RUN apt-get update && apt-get install -y \
   git \
   curl \
   jq \
+  # Playwright Chromium runtime libraries. Installed here (as root, before
+  # the USER switch) because the chromium binary downloaded at sandbox
+  # runtime cannot find libnspr4/libnss3/etc. on the bare bookworm image.
+  libnss3 \
+  libnspr4 \
+  libdbus-1-3 \
+  libatk1.0-0 \
+  libatk-bridge2.0-0 \
+  libatspi2.0-0 \
+  libxcomposite1 \
+  libxdamage1 \
+  libxfixes3 \
+  libxrandr2 \
+  libxkbcommon0 \
+  libgbm1 \
+  libasound2 \
+  libcups2 \
+  libdrm2 \
+  libpango-1.0-0 \
+  libcairo2 \
   && rm -rf /var/lib/apt/lists/*
 
-# TODO: install your issue tracker's CLI here. See .sandcastle/SETUP_ISSUE_TRACKER.md
+# Install GitHub CLI
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+  | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+  | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+  && apt-get update && apt-get install -y gh \
+  && rm -rf /var/lib/apt/lists/*
 
 # Build-args for UID/GID alignment: sandcastle docker build-image
 # defaults these to the host user's UID/GID so image-built files
@@ -35,11 +61,6 @@ RUN touch ~/.bashrc && curl -fsSL https://get.pnpm.io/install.sh | sh -
 # subsequent RUN commands and the runtime PATH explicitly.
 ENV PNPM_HOME="/home/agent/.local/share/pnpm"
 ENV PATH="${PNPM_HOME}/bin:${PATH}"
-
-# Install uv (Python package manager). The standalone installer drops
-# the binary in ~/.local/bin, so prepend that to PATH.
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-ENV PATH="/home/agent/.local/bin:${PATH}"
 
 # Install OpenCode CLI and Claude Code globally via pnpm.
 # --allow-build whitelists opencode-ai's postinstall (pnpm 10+ blocks
