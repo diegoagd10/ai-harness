@@ -36,6 +36,11 @@ RUN touch ~/.bashrc && curl -fsSL https://get.pnpm.io/install.sh | sh -
 ENV PNPM_HOME="/home/agent/.local/share/pnpm"
 ENV PATH="${PNPM_HOME}/bin:${PATH}"
 
+# Install uv (Python package manager). The standalone installer drops
+# the binary in ~/.local/bin, so prepend that to PATH.
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/home/agent/.local/bin:${PATH}"
+
 # Install OpenCode CLI and Claude Code globally via pnpm.
 # --allow-build whitelists opencode-ai's postinstall (pnpm 10+ blocks
 # postinstall by default for supply-chain safety). opencode-ai needs its
