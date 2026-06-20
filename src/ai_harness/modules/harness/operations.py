@@ -23,18 +23,13 @@ from __future__ import annotations
 
 import json
 import shutil
-from dataclasses import dataclass
+from collections.abc import Callable
+from functools import partial
 from importlib.resources import files
 from pathlib import Path
 
 from ai_harness.modules.harness.models import AgentCli, InstallManifest
-from ai_harness.modules.harness.renderers import (
-    _discover_loop_agents,
-    _get_agent_mode,
-    render_claude_agent,
-    render_claude_skill,
-    render_opencode_agent,
-)
+from ai_harness.modules.harness.renderers import render_agents
 
 # --- the secret knowledge this module hides -------------------------------
 #
@@ -53,39 +48,6 @@ _RESOURCE_ROOT = "resources"
 
 _CONFIG_SOURCE = "AGENTS.md"
 _TREE_SOURCE = "skills"
-
-
-@dataclass(frozen=True, slots=True)
-class _AgentCliPaths:
-    """Destination paths for one agent CLI's persona file and skills tree, relative to home.
-
-    Only destinations are stored — source artifacts are identical across all agent CLIs.
-    """
-
-    config_dest: str  # e.g. ".claude/CLAUDE.md"
-    tree_dest: str  # e.g. ".claude/skills"
-
-
-_AGENT_CLI_PATHS: dict[AgentCli, _AgentCliPaths] = {
-    AgentCli.GENERIC: _AgentCliPaths(
-        config_dest=".agents/AGENTS.md",
-        tree_dest=".agents/skills",
-    ),
-    AgentCli.CLAUDE: _AgentCliPaths(
-        config_dest=".claude/CLAUDE.md",
-        tree_dest=".claude/skills",
-    ),
-    AgentCli.COPILOT: _AgentCliPaths(
-        config_dest=".github/copilot-instructions.md",
-        tree_dest=".copilot/skills",
-    ),
-}
-
-# Agent CLIs that install loop agents instead of persona+skills.
-# Mapping: AgentCli -> agent destination directory (relative to home).
-_AGENT_CLI_AGENT_DIRS: dict[AgentCli, str] = {
-    AgentCli.OPENCODE: ".config/opencode/agent",
-}
 
 
 # --- resource access ------------------------------------------------------
@@ -158,6 +120,70 @@ def _prune_empty_dirs(dirs: set[Path], stop_at: Path) -> None:
             pass
 
 
+# --- install artifact writers ---------------------------------------------
+#
+# Each writer takes *home* and returns the absolute paths it wrote. Per-CLI
+# destination knowledge lives in the writers' bound arguments (the persona
+# writer) or in the render seam (the rendered-agents writer) — never in a
+# CLI-keyed path table inside the install loop.
+
+
+def _write_persona_and_skills(home: Path, *, config_dest_rel: str, tree_dest_rel: str) -> list[Path]:
+    """Copy the persona file + skills tree into *home*; return absolute paths written."""
+    resources = _resources_root()
+    written: list[Path] = []
+
+    config_dest = home / config_dest_rel
+    config_dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(resources / _CONFIG_SOURCE, config_dest)
+    written.append(config_dest)
+
+    tree_dest = home / tree_dest_rel
+    shutil.copytree(resources / _TREE_SOURCE, tree_dest, dirs_exist_ok=True)
+    written.extend(_walk_files(tree_dest))
+
+    return written
+
+
+def _write_rendered_agents(home: Path, *, cli: AgentCli) -> list[Path]:
+    """Render the loop agents for *cli* into *home*; return absolute paths written."""
+    written: list[Path] = []
+    for rel, content in render_agents(cli):
+        dest = home / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(content, encoding="utf-8")
+        written.append(dest)
+    return written
+
+
+# --- data-driven install plan --------------------------------------------
+#
+# One table maps each agent CLI to its ordered list of artifact writers. The
+# install loop dispatches purely through this table — adding a CLI is one entry.
+
+_InstallWriter = Callable[[Path], list[Path]]
+
+_INSTALL_PLAN: dict[AgentCli, list[_InstallWriter]] = {
+    AgentCli.GENERIC: [
+        partial(_write_persona_and_skills, config_dest_rel=".agents/AGENTS.md", tree_dest_rel=".agents/skills"),
+    ],
+    AgentCli.CLAUDE: [
+        partial(_write_persona_and_skills, config_dest_rel=".claude/CLAUDE.md", tree_dest_rel=".claude/skills"),
+        partial(_write_rendered_agents, cli=AgentCli.CLAUDE),
+    ],
+    AgentCli.COPILOT: [
+        partial(
+            _write_persona_and_skills,
+            config_dest_rel=".github/copilot-instructions.md",
+            tree_dest_rel=".copilot/skills",
+        ),
+    ],
+    AgentCli.OPENCODE: [
+        partial(_write_rendered_agents, cli=AgentCli.OPENCODE),
+    ],
+}
+
+
 # --- public operations ----------------------------------------------------
 
 
@@ -167,71 +193,21 @@ def install_for_agent_clis(agent_clis: list[AgentCli], *, home: Path | None = No
 
     Generic is always included in *agent_clis* — callers must prepend it.
 
-    Agent CLIs that support native agents (OpenCode) get the loop agent
-    templates rendered into their agent directory. All other agent CLIs get
-    the persona file + skills tree.
+    Each agent CLI's artifacts are described by ``_INSTALL_PLAN``: the persona
+    file + skills tree, the rendered loop agents, or both. An agent CLI absent
+    from the plan writes nothing.
     """
     home = home if home is not None else Path.home()
-    resources = _resources_root()
 
     written_paths: list[Path] = []
     files_by_agent_cli: dict[str, list[str]] = {}
 
-    config_src = resources / _CONFIG_SOURCE
-    tree_src = resources / _TREE_SOURCE
-
     for agent_cli in agent_clis:
         agent_files: list[str] = []
-
-        # --- Persona+skills for all agent CLIs with paths defined ---
-        if agent_cli in _AGENT_CLI_PATHS:
-            paths = _AGENT_CLI_PATHS[agent_cli]
-
-            config_dest = home / paths.config_dest
-            config_dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(config_src, config_dest)
-            written_paths.append(config_dest)
-            agent_files.append(_relative_to(home, config_dest))
-
-            tree_dest = home / paths.tree_dest
-            shutil.copytree(tree_src, tree_dest, dirs_exist_ok=True)
-            tree_files = _walk_files(tree_dest)
-            written_paths.extend(tree_files)
-            agent_files.extend(_relative_to(home, p) for p in tree_files)
-
-        # --- Claude: loop agents as ADDITION ---
-        if agent_cli == AgentCli.CLAUDE:
-            agents_dir = home / ".claude" / "agents"
-            skill_dir = home / ".claude" / "skills" / "loop-orchestrator"
-            agents_dir.mkdir(parents=True, exist_ok=True)
-            skill_dir.mkdir(parents=True, exist_ok=True)
-
-            for name in _discover_loop_agents():
-                mode = _get_agent_mode(name)
-                if mode == "primary":
-                    filename, content = render_claude_skill(name)
-                    dest = skill_dir / filename
-                else:
-                    filename, content = render_claude_agent(name)
-                    dest = agents_dir / filename
-
-                dest.write_text(content, encoding="utf-8")
-                written_paths.append(dest)
-                agent_files.append(_relative_to(home, dest))
-
-        # --- OpenCode: loop agents ---
-        if agent_cli in _AGENT_CLI_AGENT_DIRS:
-            agent_dir_rel = _AGENT_CLI_AGENT_DIRS[agent_cli]
-            agent_dir = home / agent_dir_rel
-            agent_dir.mkdir(parents=True, exist_ok=True)
-
-            for name in _discover_loop_agents():
-                filename, content = render_opencode_agent(name)
-                dest = agent_dir / filename
-                dest.write_text(content, encoding="utf-8")
-                written_paths.append(dest)
-                agent_files.append(_relative_to(home, dest))
-
+        for write in _INSTALL_PLAN.get(agent_cli, []):
+            written = write(home)
+            written_paths.extend(written)
+            agent_files.extend(_relative_to(home, p) for p in written)
         files_by_agent_cli[agent_cli.value] = agent_files
 
     manifest = InstallManifest(agent_clis=list(agent_clis), written_paths=written_paths)

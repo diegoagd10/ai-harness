@@ -7,14 +7,11 @@ permissions) lives in ``_AGENT_META`` below.
 
 Public surface
 --------------
-render_opencode_agent   Turn an agent template into an OpenCode agent file.
-render_claude_agent     Turn a subagent template into a Claude Code agent file.
-render_claude_skill     Turn the primary template into a Claude Code skill file.
-_discover_loop_agents   Return sorted list of loop agent template names.
-_read_template_source   Return the raw template text for a named agent.
-_read_template_body     Return the prompt body for a named agent.
+render_agents           Render loop agents for a CLI as home-relative (path, content) pairs.
 get_agent_meta          Return the metadata dict for a named agent.
-_get_agent_mode         Return the mode (subagent|primary) for a named agent.
+
+All other render mechanics (per-CLI render functions, discovery, mode dispatch,
+destination layout) are private and owned by ``render_agents``.
 """
 
 from __future__ import annotations
@@ -23,6 +20,8 @@ from importlib.resources import files
 from importlib.resources.abc import Traversable
 
 import yaml
+
+from ai_harness.modules.harness.models import AgentCli
 
 _LOOP_AGENT_PACKAGE = "ai_harness.resources"
 _LOOP_AGENT_DIR = "loop-agent"
@@ -160,7 +159,7 @@ def _yaml_dump_frontmatter(data: dict[str, object]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def render_opencode_agent(name: str) -> tuple[str, str]:
+def _render_opencode_agent(name: str) -> tuple[str, str]:
     """Render a loop agent template into an OpenCode agent file.
 
     Returns (filename, content) where filename is ``<name>.md`` and content is
@@ -190,7 +189,7 @@ def render_opencode_agent(name: str) -> tuple[str, str]:
     return f"{name}.md", rendered
 
 
-def render_claude_agent(name: str) -> tuple[str, str]:
+def _render_claude_agent(name: str) -> tuple[str, str]:
     """Render a loop agent template into a Claude Code agent file.
 
     Returns (filename, content) where filename is ``<name>.md`` and content is
@@ -207,7 +206,7 @@ def render_claude_agent(name: str) -> tuple[str, str]:
 
     mode = meta.get("mode", "subagent")
     if mode == "primary":
-        raise ValueError(f"Template {name}: mode=primary — use render_claude_skill for the primary agent")
+        raise ValueError(f"Template {name}: mode=primary — use _render_claude_skill for the primary agent")
 
     claude_frontmatter: dict[str, object] = {
         "description": meta.get("description", ""),
@@ -225,7 +224,7 @@ def render_claude_agent(name: str) -> tuple[str, str]:
     return f"{name}.md", rendered
 
 
-def render_claude_skill(name: str) -> tuple[str, str]:
+def _render_claude_skill(name: str) -> tuple[str, str]:
     """Render the primary loop agent template into a Claude Code skill file.
 
     Returns (filename, content) where filename is ``SKILL.md`` and content is
@@ -254,3 +253,53 @@ def render_claude_skill(name: str) -> tuple[str, str]:
     yaml_text = _yaml_dump_frontmatter(claude_frontmatter)
     rendered = f"---\n{yaml_text}\n---\n{body}"
     return "SKILL.md", rendered
+
+
+# ---------------------------------------------------------------------------
+# Agent-render seam — the sole public entry for rendered-agent emission.
+# Owns skill-vs-agent mode dispatch, destination directory layout, and
+# filename. Callers state the CLI; they never assemble paths themselves.
+# ---------------------------------------------------------------------------
+
+_CLAUDE_AGENTS_DIR = ".claude/agents"
+_CLAUDE_SKILL_DIR = ".claude/skills/loop-orchestrator"
+_OPENCODE_AGENT_DIR = ".config/opencode/agent"
+
+
+def _render_claude(name: str) -> tuple[str, str]:
+    """Render one Claude loop agent as a home-relative (path, content) pair.
+
+    Primary agents become the orchestrator skill; all others become subagents.
+    """
+    if _get_agent_mode(name) == "primary":
+        filename, content = _render_claude_skill(name)
+        return f"{_CLAUDE_SKILL_DIR}/{filename}", content
+    filename, content = _render_claude_agent(name)
+    return f"{_CLAUDE_AGENTS_DIR}/{filename}", content
+
+
+def _render_opencode(name: str) -> tuple[str, str]:
+    """Render one OpenCode loop agent as a home-relative (path, content) pair."""
+    filename, content = _render_opencode_agent(name)
+    return f"{_OPENCODE_AGENT_DIR}/{filename}", content
+
+
+def render_agents(cli: AgentCli, names: list[str] | None = None) -> list[tuple[str, str]]:
+    """Render the loop agents for *cli* as home-relative (path, content) pairs.
+
+    The sole public agent-render entry. Owns skill-vs-agent mode dispatch,
+    destination directory layout, and filename. Returns POSIX home-relative
+    paths in discovery (sorted) order so output is byte-identical to the prior
+    inline emission.
+
+    *names* defaults to the discovered loop agents; pass an explicit list to
+    render a subset. CLIs without native agent support return an empty list.
+    """
+    if names is None:
+        names = _discover_loop_agents()
+
+    if cli == AgentCli.CLAUDE:
+        return [_render_claude(name) for name in names]
+    if cli == AgentCli.OPENCODE:
+        return [_render_opencode(name) for name in names]
+    return []
