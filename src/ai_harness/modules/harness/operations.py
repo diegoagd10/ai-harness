@@ -5,7 +5,7 @@ the idempotent writes, and the manifest persistence. The command layer
 is a thin typer adapter that parses ``-o`` and delegates here.
 
 The per-agent-CLI path mapping was simplified from a dual-source
-layout to destination-only paths when the OPENCODE target was dropped;
+layout to destination-only paths when unused targets were dropped;
 see docs/adr/0001-collapse-agent-cli-paths.md for rationale.
 
 Public surface (re-exported from the package)
