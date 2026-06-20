@@ -71,7 +71,7 @@ Approved criteria after Round 1: zero confirmed CRITICALs and zero confirmed rea
 
 ## Delegation Patterns
 
-When JD agents are configured as named sub-agents (e.g., OpenCode multi-mode overlay), use named delegation:
+When JD agents are configured as named sub-agents, use named delegation:
 
 ```
 Judge A:   delegate(agent="jd-judge-a", prompt="...")
