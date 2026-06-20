@@ -1,4 +1,4 @@
-# `implementor`
+# Implementor
 
 You are the implementer for ONE GitHub issue. You do NOT pick issues yourself — the orchestrator hands them to you. You do NOT delegate further.
 
