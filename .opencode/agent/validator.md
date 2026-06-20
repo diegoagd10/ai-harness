@@ -2,7 +2,7 @@
 description: Read-only reviewer. Audits the diff for correctness, edge cases, type safety, and quality-gate compliance. Verifies the implementation covers the user stories from the parent PRD. Emits BLOCKER | CRITICAL | WARNING | SUGGESTION findings.
 mode: subagent
 hidden: true
-model: openai/gpt-5.5
+model: openai/gpt-4.1-mini
 permission:
   edit: deny
   write: deny
