@@ -1,9 +1,0 @@
-{
-  "devDependencies": {
-    "@ai-hero/sandcastle": "^0.9.0"
-  },
-  "scripts": {
-    "sandcastle:build": "sandcastle docker build-image",
-    "loop": "pnpm dlx tsx .sandcastle/main.mts"
-  }
-}
