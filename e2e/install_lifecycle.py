@@ -40,16 +40,21 @@ def _assert_generic_exists(h: Path) -> None:
 
 
 def _assert_claude_exists(h: Path) -> None:
-    """Assert claude agent CLI paths exist (~/.claude/)."""
-    claude_md = h / ".claude" / "CLAUDE.md"
-    assert_file_exists(claude_md, "claude ~/.claude/CLAUDE.md")
-    assert claude_md.stat().st_size > 0, f"CLAUDE.md is empty: {claude_md}"
-    _assert_skills_exist(h / ".claude" / "skills", "claude")
+    """Assert Claude loop agents and orchestrator skill exist (~/.claude/agents/ + ~/.claude/skills/)."""
+    for name in ("explorer", "implementor", "validator"):
+        agent_path = h / ".claude" / "agents" / f"{name}.md"
+        assert_file_exists(agent_path, f"claude agent {name}")
+        assert agent_path.stat().st_size > 0, f"claude agent {name} is empty: {agent_path}"
+    skill_path = h / ".claude" / "skills" / "loop-orchestrator" / "SKILL.md"
+    assert_file_exists(skill_path, "claude orchestrator skill")
+    assert skill_path.stat().st_size > 0, f"claude skill is empty: {skill_path}"
 
 
 def _assert_claude_missing(h: Path) -> None:
-    """Assert claude agent CLI paths do NOT exist."""
-    assert_file_missing(h / ".claude" / "CLAUDE.md", "claude ~/.claude/CLAUDE.md")
+    """Assert Claude loop agents and skill do NOT exist."""
+    for name in ("explorer", "implementor", "validator"):
+        assert_file_missing(h / ".claude" / "agents" / f"{name}.md", f"claude agent {name}")
+    assert_file_missing(h / ".claude" / "skills" / "loop-orchestrator" / "SKILL.md", "claude skill")
 
 
 def _assert_copilot_exists(h: Path) -> None:

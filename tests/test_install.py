@@ -647,6 +647,34 @@ def test_install_claude_is_byte_identical_on_reinstall(tmp_path: Path) -> None:
     assert skill_path.read_bytes() == first_pass["skill"], "skill: claude reinstall not byte-identical"
 
 
+def test_install_claude_rendered_body_matches_template_verbatim(tmp_path: Path) -> None:
+    """Rendered Claude agent and skill body text matches template body verbatim."""
+    from importlib.resources import files
+
+    install_for_agent_clis([AgentCli.GENERIC, AgentCli.CLAUDE], home=tmp_path)
+    templates_dir = files("ai_harness.resources") / "loop-agent"
+
+    for name in _CLAUDE_SUBAGENT_NAMES:
+        # Read template source from resources
+        template_source = (templates_dir / f"{name}.md").read_text(encoding="utf-8")
+        template_body = template_source.split("---", 2)[2]
+
+        # Read rendered file from disk
+        rendered = (tmp_path / ".claude" / "agents" / f"{name}.md").read_text(encoding="utf-8")
+        rendered_body = rendered.split("---", 2)[2]
+
+        assert rendered_body == template_body, f"{name}: body does not match template verbatim"
+
+    # Orchestrator skill — same check
+    template_source = (templates_dir / f"{_CLAUDE_SKILL_NAME}.md").read_text(encoding="utf-8")
+    template_body = template_source.split("---", 2)[2]
+
+    rendered = (tmp_path / ".claude" / "skills" / _CLAUDE_SKILL_NAME / "SKILL.md").read_text(encoding="utf-8")
+    rendered_body = rendered.split("---", 2)[2]
+
+    assert rendered_body == template_body, f"{_CLAUDE_SKILL_NAME}: body does not match template verbatim"
+
+
 # ---------------------------------------------------------------------------
 # Claude Code uninstall — observable behaviour
 # ---------------------------------------------------------------------------
