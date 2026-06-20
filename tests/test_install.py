@@ -328,7 +328,14 @@ def _build_expected_opencode() -> dict[str, dict]:
 
 
 def _build_expected_claude() -> dict[str, dict]:
-    """Build Claude expected frontmatter from agent metadata."""
+    """Build Claude expected frontmatter from agent metadata.
+
+    Claude frontmatter includes ``name`` (agent key) and ``model`` for
+    subagents; the skill (primary) carries only ``description``.
+    ``mode`` is absent — Claude has no mode concept.
+    Read-only agents carry a ``tools`` allow-list translated from the
+    OpenCode ``permission`` block.
+    """
     from copy import deepcopy
 
     result: dict[str, dict] = {}
@@ -336,16 +343,20 @@ def _build_expected_claude() -> dict[str, dict]:
         meta = get_agent_meta(name)
         entry: dict[str, object] = {
             "description": meta["description"],
-            "mode": meta["mode"],
         }
-        # Subagents carry model; skill (primary) does not
-        if meta["mode"] != "primary":
+        is_primary = meta.get("mode") == "primary"
+        # Subagents carry name + model; skill (primary) does not
+        if not is_primary:
+            entry["name"] = name
             entry["model"] = meta["model"]["claude"]
-        # Read-only narrowing: tools allow-list
+        # Translate OpenCode permission to Claude-native tools allow-list
         permission = meta.get("permission")
         if isinstance(permission, dict) and permission.get("edit") == "deny" and permission.get("write") == "deny":
-            if meta["mode"] != "primary":
-                entry["tools"] = "Read, Grep, Glob, Bash"
+            if not is_primary:
+                tools = ["Read", "Grep", "Glob", "Bash"]
+                if permission.get("bash") == "deny":
+                    tools.remove("Bash")
+                entry["tools"] = ", ".join(tools)
         result[name] = deepcopy(entry)
     return result
 
@@ -547,6 +558,16 @@ def test_install_claude_writes_subagents_and_skill(tmp_path: Path) -> None:
     assert len(claude_files) == 9
 
 
+def test_install_claude_subagents_have_name_field(tmp_path: Path) -> None:
+    """Every Claude subagent frontmatter includes ``name: <agent>``."""
+    install_for_agent_clis([AgentCli.GENERIC, AgentCli.CLAUDE], home=tmp_path)
+
+    for name in _CLAUDE_SUBAGENT_NAMES:
+        path = tmp_path / ".claude" / "agents" / f"{name}.md"
+        fm = _read_frontmatter(path)
+        assert fm.get("name") == name, f"{name}: expected name={name!r}, got {fm.get('name')!r}"
+
+
 def test_install_claude_readonly_agents_have_tools_allowlist(tmp_path: Path) -> None:
     """Validator and explorer carry tools: Read, Grep, Glob, Bash — no Edit/Write."""
     install_for_agent_clis([AgentCli.GENERIC, AgentCli.CLAUDE], home=tmp_path)
@@ -580,6 +601,19 @@ def test_install_claude_orchestrator_skill_has_no_tools(tmp_path: Path) -> None:
 
     skill_path = tmp_path / ".claude" / "skills" / _CLAUDE_SKILL_NAME / "SKILL.md"
     _assert_claude_frontmatter_absent(skill_path, "tools")
+
+
+def test_install_claude_output_has_no_mode_field(tmp_path: Path) -> None:
+    """``mode`` is absent from all Claude rendered frontmatter (subagents and skill)."""
+    install_for_agent_clis([AgentCli.GENERIC, AgentCli.CLAUDE], home=tmp_path)
+
+    # Subagents
+    for name in _CLAUDE_SUBAGENT_NAMES:
+        path = tmp_path / ".claude" / "agents" / f"{name}.md"
+        _assert_claude_frontmatter_absent(path, "mode")
+    # Skill
+    skill_path = tmp_path / ".claude" / "skills" / _CLAUDE_SKILL_NAME / "SKILL.md"
+    _assert_claude_frontmatter_absent(skill_path, "mode")
 
 
 def test_install_claude_includes_persona_and_skills(tmp_path: Path) -> None:

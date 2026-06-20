@@ -209,15 +209,18 @@ def _render_claude_agent(name: str) -> tuple[str, str]:
         raise ValueError(f"Template {name}: mode=primary — use _render_claude_skill for the primary agent")
 
     claude_frontmatter: dict[str, object] = {
+        "name": name,
         "description": meta.get("description", ""),
-        "mode": mode,
         "model": model_map["claude"],
     }
 
-    # Read-only narrowing: if permission denies edit AND write, emit tools allow-list
+    # Translate OpenCode permission block to Claude-native tools allow-list
     permission = meta.get("permission")
     if isinstance(permission, dict) and permission.get("edit") == "deny" and permission.get("write") == "deny":
-        claude_frontmatter["tools"] = "Read, Grep, Glob, Bash"
+        tools = ["Read", "Grep", "Glob", "Bash"]
+        if permission.get("bash") == "deny":
+            tools.remove("Bash")
+        claude_frontmatter["tools"] = ", ".join(tools)
 
     yaml_text = _yaml_dump_frontmatter(claude_frontmatter)
     rendered = f"---\n{yaml_text}\n---\n{body}"
@@ -245,10 +248,12 @@ def _render_claude_skill(name: str) -> tuple[str, str]:
 
     claude_frontmatter: dict[str, object] = {
         "description": meta.get("description", ""),
-        "mode": mode,
     }
+    # No name field — skills aren't spawned by name.
     # No model field — skills run on the session model.
     # No tools field — unrestricted.
+    # No mode field — Claude has no mode concept; skill-vs-agent is determined
+    # by destination directory, not frontmatter.
 
     yaml_text = _yaml_dump_frontmatter(claude_frontmatter)
     rendered = f"---\n{yaml_text}\n---\n{body}"
