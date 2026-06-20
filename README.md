@@ -97,11 +97,12 @@ configuration directories of every supported agent CLI:
 
 | Agent CLI | Configuration home | Persona path |
 |-----------|-------------------|--------------|
+| Generic | `~/.agents/` | `~/.agents/AGENTS.md` |
 | Claude Code | `~/.claude/` | `~/.claude/CLAUDE.md` |
 | GitHub Copilot CLI | `~/.copilot/` | `~/.github/copilot-instructions.md` |
 
-Generic (`~/.agents/AGENTS.md`) is always installed for any agent CLI that reads
-from the standard `~/.agents/` directory.
+Generic is always installed. It provides the persona for any agent CLI
+that reads from the standard `~/.agents/` directory.
 
 ## Running tests
 
