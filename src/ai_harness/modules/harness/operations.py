@@ -28,13 +28,7 @@ from importlib.resources import files
 from pathlib import Path
 
 from ai_harness.modules.harness.models import AgentCli, InstallManifest
-from ai_harness.modules.harness.renderers import (
-    _discover_loop_agents,
-    _get_agent_mode,
-    render_claude_agent,
-    render_claude_skill,
-    render_opencode_agent,
-)
+from ai_harness.modules.harness.renderers import render_agents
 
 # --- the secret knowledge this module hides -------------------------------
 #
@@ -81,11 +75,9 @@ _AGENT_CLI_PATHS: dict[AgentCli, _AgentCliPaths] = {
     ),
 }
 
-# Agent CLIs that install loop agents instead of persona+skills.
-# Mapping: AgentCli -> agent destination directory (relative to home).
-_AGENT_CLI_AGENT_DIRS: dict[AgentCli, str] = {
-    AgentCli.OPENCODE: ".config/opencode/agent",
-}
+# Agent CLIs that support native agents (Claude, OpenCode) get the loop
+# agent templates rendered via ``render_agents``; that seam owns the
+# destination layout, so operations no longer mirrors it here.
 
 
 # --- resource access ------------------------------------------------------
@@ -199,38 +191,13 @@ def install_for_agent_clis(agent_clis: list[AgentCli], *, home: Path | None = No
             written_paths.extend(tree_files)
             agent_files.extend(_relative_to(home, p) for p in tree_files)
 
-        # --- Claude: loop agents as ADDITION ---
-        if agent_cli == AgentCli.CLAUDE:
-            agents_dir = home / ".claude" / "agents"
-            skill_dir = home / ".claude" / "skills" / "loop-orchestrator"
-            agents_dir.mkdir(parents=True, exist_ok=True)
-            skill_dir.mkdir(parents=True, exist_ok=True)
-
-            for name in _discover_loop_agents():
-                mode = _get_agent_mode(name)
-                if mode == "primary":
-                    filename, content = render_claude_skill(name)
-                    dest = skill_dir / filename
-                else:
-                    filename, content = render_claude_agent(name)
-                    dest = agents_dir / filename
-
-                dest.write_text(content, encoding="utf-8")
-                written_paths.append(dest)
-                agent_files.append(_relative_to(home, dest))
-
-        # --- OpenCode: loop agents ---
-        if agent_cli in _AGENT_CLI_AGENT_DIRS:
-            agent_dir_rel = _AGENT_CLI_AGENT_DIRS[agent_cli]
-            agent_dir = home / agent_dir_rel
-            agent_dir.mkdir(parents=True, exist_ok=True)
-
-            for name in _discover_loop_agents():
-                filename, content = render_opencode_agent(name)
-                dest = agent_dir / filename
-                dest.write_text(content, encoding="utf-8")
-                written_paths.append(dest)
-                agent_files.append(_relative_to(home, dest))
+        # --- Native loop agents (Claude, OpenCode) via the render seam ---
+        for rel, content in render_agents(agent_cli):
+            dest = home / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(content, encoding="utf-8")
+            written_paths.append(dest)
+            agent_files.append(_relative_to(home, dest))
 
         files_by_agent_cli[agent_cli.value] = agent_files
 
