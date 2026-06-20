@@ -1,14 +1,13 @@
 """Deep sandbox module for the e2e test suite.
 
 Hides synthetic HOME lifecycle, isolated uv tool directories, subprocess
-invocation, file assertions, and OpenSpec workspace seeding behind a small
-interface. Lifecycle-specific knowledge lives in the lifecycle test files —
-this module owns only the shared infrastructure.
+invocation, and file assertions behind a small interface. Lifecycle-specific
+knowledge lives in the lifecycle test files — this module owns only the shared
+infrastructure.
 
 Public surface
 --------------
 sandbox_home()          Create synthetic HOME; cleans up via atexit.
-workspace_root()        Create temp workspace dir; cleans up via atexit.
 sandboxed_tool_install  uv tool install into isolated UV_TOOL_DIR/UV_TOOL_BIN_DIR.
 sandboxed_tool_reinstall uv tool install --reinstall into same isolated dirs.
 sandboxed_tool_uninstall Remove isolated tool installation + cleanup.
@@ -16,7 +15,6 @@ run_in_sandbox          Execute a subprocess with HOME= and optional extra env.
 assert_file_content     Compare actual file content against expected.
 assert_file_missing     Assert that a path does NOT exist.
 assert_file_exists      Assert that a path exists.
-seed_openspec_change    Create a minimal ready change tree under a workspace root.
 """
 
 from __future__ import annotations
@@ -32,15 +30,6 @@ from pathlib import Path
 
 _SANDBOXES: list[str] = []
 _UV_TOOL_DIR: str | None = None
-
-# Prompt files expected after installing the opencode target.
-# (subdirectory, filename) — relative to ~/.config/opencode/prompts/.
-EXPECTED_OPENCODE_PROMPTS: tuple[tuple[str, str], ...] = (
-    ("jd", "jd-fix-agent.md"),
-    ("review", "review-risk.md"),
-    ("sdd", "sdd-orchestrator.md"),
-    ("sdd", "sdd-apply.md"),
-)
 
 
 def _cleanup() -> None:
@@ -59,18 +48,6 @@ atexit.register(_cleanup)
 def sandbox_home() -> str:
     """Create a synthetic HOME directory; it is removed via atexit."""
     path = tempfile.mkdtemp(prefix="e2e-home-")
-    _SANDBOXES.append(path)
-    return path
-
-
-def workspace_root() -> str:
-    """Create a temp workspace directory registered for atexit cleanup.
-
-    Returns an absolute path to a directory suitable for seeding OpenSpec
-    change trees. The directory is tracked in ``_SANDBOXES`` and will be
-    removed by the atexit handler alongside synthetic HOME and uv-tool dirs.
-    """
-    path = tempfile.mkdtemp(prefix="e2e-sdd-ws-")
     _SANDBOXES.append(path)
     return path
 
@@ -182,44 +159,3 @@ def assert_file_exists(path: Path, label: str) -> None:
     """Assert *path* exists; raise otherwise."""
     if not path.exists():
         raise AssertionError(f"{label}: missing — {path}")
-
-
-def assert_opencode_exists(h: Path) -> None:
-    """Assert opencode target paths exist under *h*."""
-    opencode_json = h / ".config" / "opencode" / "opencode.json"
-    assert_file_exists(opencode_json, "opencode ~/.config/opencode/opencode.json")
-    assert opencode_json.stat().st_size > 0, f"opencode.json is empty: {opencode_json}"
-    prompts_dir = h / ".config" / "opencode" / "prompts"
-    for sub, filename in EXPECTED_OPENCODE_PROMPTS:
-        assert_file_exists(prompts_dir / sub / filename, f"opencode prompts/{sub}/{filename}")
-
-
-def assert_opencode_missing(h: Path) -> None:
-    """Assert opencode target paths do NOT exist under *h*."""
-    opencode_json = h / ".config" / "opencode" / "opencode.json"
-    assert_file_missing(opencode_json, "opencode ~/.config/opencode/opencode.json")
-    prompts_dir = h / ".config" / "opencode" / "prompts"
-    for sub, filename in EXPECTED_OPENCODE_PROMPTS:
-        assert_file_missing(prompts_dir / sub / filename, f"opencode prompts/{sub}/{filename}")
-
-
-# ------- workspace seeding --------------------------------------------------
-
-
-def seed_openspec_change(root: Path, name: str, tasks_md: str) -> Path:
-    """Create a minimal ready OpenSpec change tree under *root*.
-
-    Returns the change root directory (``root/openspec/changes/<name>``).
-    """
-    change_root = root / "openspec" / "changes" / name
-    _write_file(change_root / "proposal.md", "# Proposal\n")
-    _write_file(change_root / "specs" / "auth" / "spec.md", "# Auth Spec\n")
-    _write_file(change_root / "design.md", "# Design\n")
-    _write_file(change_root / "tasks.md", tasks_md)
-    return change_root
-
-
-def _write_file(path: Path, content: str) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
-    return path

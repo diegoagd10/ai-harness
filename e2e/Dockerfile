@@ -1,7 +1,7 @@
 # Base image: Debian "bookworm-slim" with Python 3.12 and the `uv` binary
 # already installed. Provides uv + the cli source; the e2e suite runs via
 # ``uv run inv test`` which exercises the full install/reinstall/uninstall
-# lifecycle plus sdd-status / sdd-continue coverage.
+# lifecycle.
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
 # Set the working directory for subsequent instructions (created if missing).

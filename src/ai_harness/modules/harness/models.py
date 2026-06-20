@@ -1,4 +1,4 @@
-"""Harness domain models — target vocabulary and the install→uninstall contract.
+"""Harness domain models — agent CLI vocabulary and the install→uninstall contract.
 
 No operations live here. This module is the typed vocabulary shared by the
 harness operations and the command layer.
@@ -11,19 +11,18 @@ from enum import StrEnum
 from pathlib import Path
 
 
-class Target(StrEnum):
+class AgentCli(StrEnum):
     GENERIC = "generic"
     CLAUDE = "claude"
     COPILOT = "copilot"
-    OPENCODE = "opencode"
 
 
 @dataclass(frozen=True, slots=True)
 class InstallManifest:
-    """The exact record ``uninstall_targets`` consumes.
+    """The exact record ``uninstall_for_agent_clis`` consumes.
 
     Persisted to ``~/.ai-harness/installed.json``.
     """
 
-    targets: list[Target]
+    agent_clis: list[AgentCli]
     written_paths: list[Path]

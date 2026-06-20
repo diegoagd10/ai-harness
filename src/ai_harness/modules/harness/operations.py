@@ -6,8 +6,8 @@ is a thin typer adapter that parses ``-o`` and delegates here.
 
 Public surface (re-exported from the package)
 ---------------------------------------------
-install_targets     Map bundled resources to target paths, write, record manifest.
-uninstall_targets   Remove files recorded in the manifest.
+install_for_agent_clis     Map bundled resources to agent CLI paths, write, record manifest.
+uninstall_for_agent_clis   Remove files recorded in the manifest.
 """
 
 from __future__ import annotations
@@ -18,17 +18,15 @@ from dataclasses import dataclass
 from importlib.resources import files
 from pathlib import Path
 
-from ai_harness.modules.harness.models import InstallManifest, Target
+from ai_harness.modules.harness.models import AgentCli, InstallManifest
 
 # --- the secret knowledge this module hides -------------------------------
 #
-# Each target maps a single config file and a supporting tree from the
-# bundled resources onto target-specific locations under the user's home.
-# AI-harness personas copy resources/AGENTS.md with a per-target rename
-# alongside a verbatim skills tree; the opencode target copies its
-# opencode.json config and a prompts tree. Concentrating this map here
-# means callers state intent ("install claude") and never assemble paths,
-# filenames, or directory layout themselves.
+# Every agent CLI installs the same two source artifacts — a persona file
+# (AGENTS.md) and a skills tree (skills/) — into agent-CLI-specific
+# destination paths under the user's home. The OPERATIONS module owns the
+# mapping; callers state intent ("install claude") and never assemble
+# paths, filenames, or directory layouts themselves.
 
 _MANIFEST_DIR = ".ai-harness"
 _MANIFEST_FILENAME = "installed.json"
@@ -37,47 +35,33 @@ _MANIFEST_VERSION = 1
 _RESOURCE_PACKAGE = "ai_harness"
 _RESOURCE_ROOT = "resources"
 
+_CONFIG_SOURCE = "AGENTS.md"
+_TREE_SOURCE = "skills"
+
 
 @dataclass(frozen=True, slots=True)
-class _TargetLayout:
-    """Where one target's config file and tree live, relative to home, plus their sources.
+class _AgentCliPaths:
+    """Destination paths for one agent CLI's persona file and skills tree, relative to home.
 
-    ``config_*`` describes a single file (persona for AI harnesses, opencode.json
-    for the opencode target). ``tree_*`` describes a directory of supporting
-    artifacts (skills for AI harnesses, prompts for opencode). The persona
-    pattern and the opencode config pattern share the same shape.
+    Only destinations are stored — source artifacts are identical across all agent CLIs.
     """
 
-    config_dest: str  # e.g. ".claude/CLAUDE.md" or ".config/opencode/opencode.json"
-    config_source: str  # e.g. "AGENTS.md" or "opencode.json"
-    tree_dest: str  # e.g. ".claude/skills" or ".config/opencode/prompts"
-    tree_source: str  # e.g. "skills" or "prompts"
+    config_dest: str  # e.g. ".claude/CLAUDE.md"
+    tree_dest: str  # e.g. ".claude/skills"
 
 
-_TARGET_LAYOUTS: dict[Target, _TargetLayout] = {
-    Target.GENERIC: _TargetLayout(
+_AGENT_CLI_PATHS: dict[AgentCli, _AgentCliPaths] = {
+    AgentCli.GENERIC: _AgentCliPaths(
         config_dest=".agents/AGENTS.md",
-        config_source="AGENTS.md",
         tree_dest=".agents/skills",
-        tree_source="skills",
     ),
-    Target.CLAUDE: _TargetLayout(
+    AgentCli.CLAUDE: _AgentCliPaths(
         config_dest=".claude/CLAUDE.md",
-        config_source="AGENTS.md",
         tree_dest=".claude/skills",
-        tree_source="skills",
     ),
-    Target.COPILOT: _TargetLayout(
+    AgentCli.COPILOT: _AgentCliPaths(
         config_dest=".github/copilot-instructions.md",
-        config_source="AGENTS.md",
         tree_dest=".copilot/skills",
-        tree_source="skills",
-    ),
-    Target.OPENCODE: _TargetLayout(
-        config_dest=".config/opencode/opencode.json",
-        config_source="opencode.json",
-        tree_dest=".config/opencode/prompts",
-        tree_source="prompts",
     ),
 }
 
@@ -97,11 +81,11 @@ def _manifest_path(home: Path) -> Path:
     return home / _MANIFEST_DIR / _MANIFEST_FILENAME
 
 
-def _write_manifest(home: Path, targets: list[Target], files_by_target: dict[str, list[str]]) -> None:
+def _write_manifest(home: Path, agent_clis: list[AgentCli], files_by_agent_cli: dict[str, list[str]]) -> None:
     data = {
         "version": _MANIFEST_VERSION,
-        "targets": [t.value for t in targets],
-        "files_by_target": files_by_target,
+        "agent_clis": [a.value for a in agent_clis],
+        "files_by_agent_cli": files_by_agent_cli,
     }
     path = _manifest_path(home)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -132,7 +116,7 @@ def _prune_empty_dirs(dirs: set[Path], stop_at: Path) -> None:
     """Remove now-empty directories created by install, never touching *stop_at*.
 
     Only directories that are actually empty are removed (``rmdir`` refuses
-    non-empty dirs), so user files that happen to live alongside a target's
+    non-empty dirs), so user files that happen to live alongside an agent CLI's
     directory (e.g. an existing ~/.github/) are preserved.
     """
     candidates: set[Path] = set()
@@ -155,46 +139,47 @@ def _prune_empty_dirs(dirs: set[Path], stop_at: Path) -> None:
 # --- public operations ----------------------------------------------------
 
 
-def install_targets(targets: list[Target], *, home: Path | None = None) -> InstallManifest:
-    """Map bundled resources to each target's native paths, write them
+def install_for_agent_clis(agent_clis: list[AgentCli], *, home: Path | None = None) -> InstallManifest:
+    """Map bundled resources to each agent CLI's native paths, write them
     idempotently (byte-identical reinstall), and record the manifest.
 
-    Generic is always included in *targets* — callers must prepend it.
+    Generic is always included in *agent_clis* — callers must prepend it.
     """
     home = home if home is not None else Path.home()
     resources = _resources_root()
 
     written_paths: list[Path] = []
-    files_by_target: dict[str, list[str]] = {}
+    files_by_agent_cli: dict[str, list[str]] = {}
 
-    for target in targets:
-        layout = _TARGET_LAYOUTS[target]
+    config_src = resources / _CONFIG_SOURCE
+    tree_src = resources / _TREE_SOURCE
 
-        config_src = resources / layout.config_source
-        config_dest = home / layout.config_dest
+    for agent_cli in agent_clis:
+        paths = _AGENT_CLI_PATHS[agent_cli]
+
+        config_dest = home / paths.config_dest
         config_dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(config_src, config_dest)
         written_paths.append(config_dest)
 
-        tree_src = resources / layout.tree_source
-        tree_dest = home / layout.tree_dest
+        tree_dest = home / paths.tree_dest
         shutil.copytree(tree_src, tree_dest, dirs_exist_ok=True)
         tree_files = _walk_files(tree_dest)
         written_paths.extend(tree_files)
 
         rel_files = [_relative_to(home, config_dest), *(_relative_to(home, p) for p in tree_files)]
-        files_by_target[target.value] = rel_files
+        files_by_agent_cli[agent_cli.value] = rel_files
 
-    manifest = InstallManifest(targets=list(targets), written_paths=written_paths)
-    _write_manifest(home, list(targets), files_by_target)
+    manifest = InstallManifest(agent_clis=list(agent_clis), written_paths=written_paths)
+    _write_manifest(home, list(agent_clis), files_by_agent_cli)
     return manifest
 
 
-def uninstall_targets(targets: list[Target] | None, *, home: Path | None = None) -> None:
+def uninstall_for_agent_clis(agent_clis: list[AgentCli] | None, *, home: Path | None = None) -> None:
     """Remove files recorded in the manifest.
 
-    *targets* ``None`` → remove everything (no-args semantics).
-    *targets* list → remove only those targets; others survive.
+    *agent_clis* ``None`` → remove everything (no-args semantics).
+    *agent_clis* list → remove only those agent CLIs; others survive.
     A missing manifest is a no-op (no prior install).
     """
     home = home if home is not None else Path.home()
@@ -202,25 +187,25 @@ def uninstall_targets(targets: list[Target] | None, *, home: Path | None = None)
     if data is None:
         return
 
-    files_by_target: dict[str, list[str]] = data.get("files_by_target", {})
-    recorded_targets = [Target(t) for t in data.get("targets", [])]
+    files_by_agent_cli: dict[str, list[str]] = data.get("files_by_agent_cli", {})
+    recorded_agent_clis = [AgentCli(a) for a in data.get("agent_clis", [])]
 
-    to_remove = set(targets) if targets is not None else set(recorded_targets)
+    to_remove = set(agent_clis) if agent_clis is not None else set(recorded_agent_clis)
 
     touched_dirs: set[Path] = set()
-    for target in to_remove:
-        for rel in files_by_target.get(target.value, []):
+    for agent_cli in to_remove:
+        for rel in files_by_agent_cli.get(agent_cli.value, []):
             path = home / rel
             path.unlink(missing_ok=True)
             touched_dirs.add(path.parent)
 
     _prune_empty_dirs(touched_dirs, home)
 
-    remaining = [t for t in recorded_targets if t not in to_remove]
+    remaining = [a for a in recorded_agent_clis if a not in to_remove]
     if not remaining:
         manifest_path = _manifest_path(home)
         manifest_path.unlink(missing_ok=True)
         _prune_empty_dirs({manifest_path.parent}, home)
     else:
-        remaining_files = {t.value: files_by_target[t.value] for t in remaining if t.value in files_by_target}
+        remaining_files = {a.value: files_by_agent_cli[a.value] for a in remaining if a.value in files_by_agent_cli}
         _write_manifest(home, remaining, remaining_files)

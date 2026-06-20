@@ -2,10 +2,10 @@
 
 Provisions the CLI via `uv tool install` into an isolated sandbox, then
 asserts the install command writes AGENTS.md + skills to the correct
-target paths.
+agent CLI paths.
 
 Semantics: generic (~/.agents/) is ALWAYS installed. The -o flag adds
-additional harnesses on top of generic.
+additional agent CLIs on top of generic.
 """
 
 from __future__ import annotations
@@ -16,8 +16,6 @@ from pathlib import Path
 from e2e.harness import (
     assert_file_exists,
     assert_file_missing,
-    assert_opencode_exists,
-    assert_opencode_missing,
     run_in_sandbox,
     sandbox_home,
     sandboxed_tool_install,
@@ -34,7 +32,7 @@ def _assert_skills_exist(skills_dir: Path, label: str) -> None:
 
 
 def _assert_generic_exists(h: Path) -> None:
-    """Assert generic target paths exist (~/.agents/)."""
+    """Assert generic agent CLI paths exist (~/.agents/)."""
     agents_md = h / ".agents" / "AGENTS.md"
     assert_file_exists(agents_md, "generic ~/.agents/AGENTS.md")
     assert agents_md.stat().st_size > 0, f"AGENTS.md is empty: {agents_md}"
@@ -42,7 +40,7 @@ def _assert_generic_exists(h: Path) -> None:
 
 
 def _assert_claude_exists(h: Path) -> None:
-    """Assert claude target paths exist (~/.claude/)."""
+    """Assert claude agent CLI paths exist (~/.claude/)."""
     claude_md = h / ".claude" / "CLAUDE.md"
     assert_file_exists(claude_md, "claude ~/.claude/CLAUDE.md")
     assert claude_md.stat().st_size > 0, f"CLAUDE.md is empty: {claude_md}"
@@ -50,12 +48,12 @@ def _assert_claude_exists(h: Path) -> None:
 
 
 def _assert_claude_missing(h: Path) -> None:
-    """Assert claude target paths do NOT exist."""
+    """Assert claude agent CLI paths do NOT exist."""
     assert_file_missing(h / ".claude" / "CLAUDE.md", "claude ~/.claude/CLAUDE.md")
 
 
 def _assert_copilot_exists(h: Path) -> None:
-    """Assert copilot target paths exist (~/.github/ + ~/.copilot/skills/)."""
+    """Assert copilot agent CLI paths exist (~/.github/ + ~/.copilot/skills/)."""
     copilot_md = h / ".github" / "copilot-instructions.md"
     assert_file_exists(copilot_md, "copilot ~/.github/copilot-instructions.md")
     assert copilot_md.stat().st_size > 0, f"copilot-instructions.md is empty: {copilot_md}"
@@ -63,7 +61,7 @@ def _assert_copilot_exists(h: Path) -> None:
 
 
 def _assert_copilot_missing(h: Path) -> None:
-    """Assert copilot target paths do NOT exist."""
+    """Assert copilot agent CLI paths do NOT exist."""
     assert_file_missing(h / ".github" / "copilot-instructions.md", "copilot ~/.github/copilot-instructions.md")
 
 
@@ -80,8 +78,6 @@ def run(cli_dir: str) -> None:
         _test_install_only_claude(path_env)
         _test_install_only_copilot(path_env)
         _test_install_claude_and_copilot(path_env)
-        _test_install_only_opencode(path_env)
-        _test_install_opencode_and_claude(path_env)
     finally:
         sandboxed_tool_uninstall()
 
@@ -95,7 +91,6 @@ def _test_install_no_args(path_env: dict[str, str]) -> None:
     _assert_generic_exists(h)
     _assert_claude_missing(h)
     _assert_copilot_missing(h)
-    assert_opencode_missing(h)
     _assert_manifest_exists(h)
 
 
@@ -108,7 +103,6 @@ def _test_install_only_claude(path_env: dict[str, str]) -> None:
     _assert_generic_exists(h)
     _assert_claude_exists(h)
     _assert_copilot_missing(h)
-    assert_opencode_missing(h)
     _assert_manifest_exists(h)
 
 
@@ -121,7 +115,6 @@ def _test_install_only_copilot(path_env: dict[str, str]) -> None:
     _assert_generic_exists(h)
     _assert_copilot_exists(h)
     _assert_claude_missing(h)
-    assert_opencode_missing(h)
     _assert_manifest_exists(h)
 
 
@@ -134,31 +127,4 @@ def _test_install_claude_and_copilot(path_env: dict[str, str]) -> None:
     _assert_generic_exists(h)
     _assert_claude_exists(h)
     _assert_copilot_exists(h)
-    assert_opencode_missing(h)
-    _assert_manifest_exists(h)
-
-
-def _test_install_only_opencode(path_env: dict[str, str]) -> None:
-    """`ai-harness install -o opencode` -> generic + opencode, no claude/copilot."""
-    home = sandbox_home()
-    run_in_sandbox(home, "ai-harness", "install", "-o", "opencode", extra_env=path_env)
-    h = Path(home)
-
-    _assert_generic_exists(h)
-    assert_opencode_exists(h)
-    _assert_claude_missing(h)
-    _assert_copilot_missing(h)
-    _assert_manifest_exists(h)
-
-
-def _test_install_opencode_and_claude(path_env: dict[str, str]) -> None:
-    """`ai-harness install -o opencode,claude` -> generic + opencode + claude, no copilot."""
-    home = sandbox_home()
-    run_in_sandbox(home, "ai-harness", "install", "-o", "opencode,claude", extra_env=path_env)
-    h = Path(home)
-
-    _assert_generic_exists(h)
-    assert_opencode_exists(h)
-    _assert_claude_exists(h)
-    _assert_copilot_missing(h)
     _assert_manifest_exists(h)

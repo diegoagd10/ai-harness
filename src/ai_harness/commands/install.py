@@ -1,6 +1,6 @@
-"""Install command — thin typer adapter over ``install_targets``.
+"""Install command — thin typer adapter over ``install_for_agent_clis``.
 
-Parses ``-o`` into a target list, always prepends generic, delegates to the
+Parses ``-o`` into an agent CLI list, always prepends generic, delegates to the
 harness module, and renders the result. Generic is always installed; -o adds
 on top.
 """
@@ -11,8 +11,8 @@ from typing import Annotated
 
 import typer
 
-from ai_harness.commands import parse_targets
-from ai_harness.modules.harness import Target, install_targets
+from ai_harness.commands import parse_agent_clis
+from ai_harness.modules.harness import AgentCli, install_for_agent_clis
 
 
 def install(
@@ -21,23 +21,23 @@ def install(
         typer.Option(
             "-o",
             "--only",
-            help="Comma-separated targets (claude,copilot,generic). Omit → generic only.",
+            help="Comma-separated agent CLIs (claude,copilot,generic). Omit → generic only.",
         ),
     ] = "",
 ) -> None:
-    """Install AGENTS.md + skills into each target harness's native config dir.
+    """Install AGENTS.md + skills into each agent CLI's native config dir.
 
     Generic (~/.agents/) is always installed. The -o flag adds additional
-    harnesses on top of generic.
+    agent CLIs on top of generic.
     """
-    targets = _with_generic(parse_targets(to))
-    manifest = install_targets(targets)
-    typer.echo(f"Installed {len(targets)} target(s): {', '.join(t.value for t in targets)}.")
+    agent_clis = _with_generic(parse_agent_clis(to))
+    manifest = install_for_agent_clis(agent_clis)
+    typer.echo(f"Installed {len(agent_clis)} agent CLI(s): {', '.join(a.value for a in agent_clis)}.")
     typer.echo(f"Wrote {len(manifest.written_paths)} file(s).")
 
 
-def _with_generic(targets: list[Target]) -> list[Target]:
+def _with_generic(agent_clis: list[AgentCli]) -> list[AgentCli]:
     """Prepend generic, dropping duplicates so the list stays canonical."""
-    result = [Target.GENERIC]
-    result.extend(t for t in targets if t not in result)
+    result = [AgentCli.GENERIC]
+    result.extend(a for a in agent_clis if a not in result)
     return result

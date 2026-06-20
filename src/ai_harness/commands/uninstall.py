@@ -1,6 +1,6 @@
-"""Uninstall command — thin typer adapter over ``uninstall_targets``.
+"""Uninstall command — thin typer adapter over ``uninstall_for_agent_clis``.
 
-Parses ``-o`` into a target list, delegates to the harness module, and
+Parses ``-o`` into an agent CLI list, delegates to the harness module, and
 renders the result. No-args removes everything; -o removes only selected.
 """
 
@@ -10,8 +10,8 @@ from typing import Annotated
 
 import typer
 
-from ai_harness.commands import parse_targets
-from ai_harness.modules.harness import uninstall_targets
+from ai_harness.commands import parse_agent_clis
+from ai_harness.modules.harness import uninstall_for_agent_clis
 
 
 def uninstall(
@@ -20,21 +20,21 @@ def uninstall(
         typer.Option(
             "-o",
             "--only",
-            help="Comma-separated targets to remove. Omit → remove everything in the manifest.",
+            help="Comma-separated agent CLIs to remove. Omit → remove everything in the manifest.",
         ),
     ] = "",
 ) -> None:
     """Remove exactly the files ai-harness install wrote.
 
     No-args removes everything recorded in the manifest. -o removes only
-    the specified targets; generic and other targets survive.
+    the specified agent CLIs; generic and other agent CLIs survive.
     """
     raw = to.strip()
     if not raw:
-        uninstall_targets(None)
-        typer.echo("Removed all installed targets.")
+        uninstall_for_agent_clis(None)
+        typer.echo("Removed all installed agent CLIs.")
         return
 
-    targets = parse_targets(to)
-    uninstall_targets(targets)
-    typer.echo(f"Removed {len(targets)} target(s): {', '.join(t.value for t in targets)}.")
+    agent_clis = parse_agent_clis(to)
+    uninstall_for_agent_clis(agent_clis)
+    typer.echo(f"Removed {len(agent_clis)} agent CLI(s): {', '.join(a.value for a in agent_clis)}.")
