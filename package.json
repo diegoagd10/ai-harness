@@ -4,6 +4,6 @@
   },
   "scripts": {
     "sandcastle:build": "sandcastle docker build-image",
-    "agent-test": "pnpm dlx tsx .sandcastle/main.mts"
+    "loop": "pnpm dlx tsx .sandcastle/main.mts"
   }
 }

@@ -64,6 +64,14 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
           sandboxPath: "~/.local/share/opencode/auth.json",
           readonly: true,
         },
+        // Mirror ~/.claude so agent toolchains that auto-discover skills from
+        // ~/.claude/skills/ resolve. ~/.agents is mounted next; together they
+        // cover both skill namespaces.
+        {
+          hostPath: "~/.claude",
+          sandboxPath: "~/.claude",
+          readonly: true,
+        },
         {
           hostPath: "~/.agents",
           sandboxPath: "~/.agents",
@@ -98,11 +106,17 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     // branch, then hands it to the reviewer. A higher value lets the agent
     // drain the whole backlog onto this one branch in a single pass, which
     // defeats the per-issue review.
+    // BRANCH is passed to BOTH phases so they share an explicit, timestamped
+    // name. The implementer must commit on this exact branch (not a sub-branch
+    // or scratch branch) so the reviewer's diff target resolves.
     const implement = await sandbox.run({
       name: "implementer",
       maxIterations: 1,
       agent: sandcastle.opencode("opencode-go/glm-5.2"),
       promptFile: "./.sandcastle/implement-prompt.md",
+      promptArgs: {
+        BRANCH: branch,
+      },
     });
 
     if (!implement.commits.length) {
