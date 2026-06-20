@@ -3,6 +3,7 @@ description: Read-only investigator. Given a GitHub issue, returns a focused pla
 mode: subagent
 model:
   opencode: opencode-go/kimi-k2.7-code
+  claude: sonnet
 permission:
   edit: deny
   write: deny

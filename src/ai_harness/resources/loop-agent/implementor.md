@@ -3,6 +3,7 @@ description: Implements one GitHub issue on an assigned branch. TDD, quality gat
 mode: subagent
 model:
   opencode: opencode-go/deepseek-v4-pro
+  claude: sonnet
 ---
 
 # `implementor`

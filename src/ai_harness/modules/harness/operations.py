@@ -28,7 +28,13 @@ from importlib.resources import files
 from pathlib import Path
 
 from ai_harness.modules.harness.models import AgentCli, InstallManifest
-from ai_harness.modules.harness.renderers import _discover_loop_agents, render_opencode_agent
+from ai_harness.modules.harness.renderers import (
+    _discover_loop_agents,
+    _parse_template,
+    render_claude_agent,
+    render_claude_skill,
+    render_opencode_agent,
+)
 
 # --- the secret knowledge this module hides -------------------------------
 #
@@ -175,6 +181,32 @@ def install_for_agent_clis(agent_clis: list[AgentCli], *, home: Path | None = No
     tree_src = resources / _TREE_SOURCE
 
     for agent_cli in agent_clis:
+        # --- Claude: loop agents rendered to agents/ + skill ---
+        if agent_cli == AgentCli.CLAUDE:
+            agents_dir = home / ".claude" / "agents"
+            skill_dir = home / ".claude" / "skills" / "loop-orchestrator"
+            agents_dir.mkdir(parents=True, exist_ok=True)
+            skill_dir.mkdir(parents=True, exist_ok=True)
+
+            claude_files: list[str] = []
+            for name in _discover_loop_agents():
+                _frontmatter, _ = _parse_template(name)
+                mode = _frontmatter.get("mode", "subagent")
+
+                if mode == "primary":
+                    filename, content = render_claude_skill(name)
+                    dest = skill_dir / filename
+                else:
+                    filename, content = render_claude_agent(name)
+                    dest = agents_dir / filename
+
+                dest.write_text(content, encoding="utf-8")
+                written_paths.append(dest)
+                claude_files.append(_relative_to(home, dest))
+
+            files_by_agent_cli[agent_cli.value] = claude_files
+            continue
+
         # --- agent-based CLIs: render loop agents ---
         if agent_cli in _AGENT_CLI_AGENT_DIRS:
             agent_dir_rel = _AGENT_CLI_AGENT_DIRS[agent_cli]

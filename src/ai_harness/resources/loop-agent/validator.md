@@ -3,6 +3,7 @@ description: Read-only reviewer. Audits the diff for correctness, edge cases, ty
 mode: subagent
 model:
   opencode: openai/gpt-4.1-mini
+  claude: sonnet
 permission:
   edit: deny
   write: deny

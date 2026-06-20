@@ -3,6 +3,7 @@ description: Loop orchestrator — drains ready-for-agent GitHub issues onto one
 mode: primary
 model:
   opencode: openai/gpt-5.5
+  claude: sonnet
 permission:
   task:
     "*": deny
