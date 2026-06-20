@@ -24,7 +24,7 @@ One `loop-run/<ts>` parent branch holds the whole session's work. Each issue lan
 
 ## Inputs
 
-- `LOOP_LABEL` (default `ready-for-agent`) — the GitHub label that marks issues as ready for the loop. Override via env if you must.
+- `LOOP_LABEL` (default `loop`) — the GitHub label that marks issues as ready for the loop. Override via env if you must.
 - `LOOP_MAX_ITERATIONS` (default `20`) — hard cap on outer loop iterations (one per issue) for this session. Also the point at which the session's PR opens even if issues remain.
 - `LOOP_FIXUP_MAX_ITERATIONS` (default `5`) — hard cap on implementor↔validator fix-up rounds for a single issue, so a stuck validator can't loop forever.
 - `gh` CLI authenticated for this repo, with push access to `origin`.
