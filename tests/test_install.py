@@ -17,6 +17,7 @@ from typer.testing import CliRunner
 
 from ai_harness.main import app
 from ai_harness.modules.harness import AgentCli, InstallManifest, install_for_agent_clis, uninstall_for_agent_clis
+from ai_harness.modules.harness.renderers import get_agent_meta
 
 EXPECTED_SKILLS = ("branch-pr", "grill-me-one-by-one", "judgment-day")
 MANIFEST_REL = ".ai-harness/installed.json"
@@ -55,21 +56,18 @@ def test_install_generic_writes_agents_md_and_skills(tmp_path: Path) -> None:
 
 
 def test_install_claude_writes_loop_agents(tmp_path: Path) -> None:
-    """Claude gets loop agents (subagents + skill), not persona+skills."""
+    """Claude gets persona+skills AND loop agents (subagents + skill)."""
     install_for_agent_clis([AgentCli.GENERIC, AgentCli.CLAUDE], home=tmp_path)
 
     # Generic gets persona+skills
     _assert_persona_written(tmp_path / ".agents" / "AGENTS.md")
     _assert_skills_written(tmp_path / ".agents" / "skills", "generic")
 
-    # Claude gets loop agents, not CLAUDE.md or claude/skills/
-    assert not (tmp_path / ".claude" / "CLAUDE.md").exists(), "CLAUDE.md should not exist (loop agents replace persona)"
-    for name in EXPECTED_SKILLS:
-        assert not (tmp_path / ".claude" / "skills" / name / "SKILL.md").exists(), (
-            f"claude skills/{name}/SKILL.md should not exist (loop agents replace skills)"
-        )
+    # Claude gets persona+skills too
+    _assert_persona_written(tmp_path / ".claude" / "CLAUDE.md")
+    _assert_skills_written(tmp_path / ".claude" / "skills", "claude")
 
-    # Claude subagents and skill exist
+    # Claude ALSO gets loop agents (addition, not replacement)
     for name in _CLAUDE_SUBAGENT_NAMES:
         assert (tmp_path / ".claude" / "agents" / f"{name}.md").is_file(), f"claude subagent {name} missing"
     assert (tmp_path / ".claude" / "skills" / _CLAUDE_SKILL_NAME / "SKILL.md").is_file(), (
@@ -110,10 +108,11 @@ def test_install_manifest_disk_json_maps_agent_clis_to_files(tmp_path: Path) -> 
     assert set(data["files_by_agent_cli"]) == {"generic", "claude"}
     # paths are stored relative to home (portable, JSON-serialisable)
     assert ".agents/AGENTS.md" in data["files_by_agent_cli"]["generic"]
-    # Claude gets loop agents, not CLAUDE.md
-    assert any(".claude/agents/" in f or ".claude/skills/" in f for f in data["files_by_agent_cli"]["claude"]), (
-        "claude manifest should contain agent/skill paths"
-    )
+    # Claude gets persona+skills AND loop agents in its manifest
+    claude_entries = data["files_by_agent_cli"]["claude"]
+    assert any(".claude/CLAUDE.md" in f for f in claude_entries), "claude manifest should contain CLAUDE.md"
+    assert any(".claude/agents/" in f for f in claude_entries), "claude manifest should contain agent paths"
+    assert any(".claude/skills/" in f for f in claude_entries), "claude manifest should contain skill paths"
 
 
 def test_install_is_idempotent_byte_identical(tmp_path: Path) -> None:
@@ -140,6 +139,10 @@ def test_uninstall_no_args_removes_everything_and_manifest(tmp_path: Path) -> No
     assert not (tmp_path / ".agents" / "AGENTS.md").exists()
     assert not (tmp_path / ".claude" / "CLAUDE.md").exists()
     assert not (tmp_path / ".github" / "copilot-instructions.md").exists()
+    # Claude loop agents and skill removed
+    for name in _CLAUDE_SUBAGENT_NAMES:
+        assert not (tmp_path / ".claude" / "agents" / f"{name}.md").exists()
+    assert not (tmp_path / ".claude" / "skills" / _CLAUDE_SKILL_NAME / "SKILL.md").exists()
     for name in EXPECTED_SKILLS:
         assert not (tmp_path / ".agents" / "skills" / name / "SKILL.md").exists()
     assert not (tmp_path / MANIFEST_REL).exists()
@@ -152,6 +155,10 @@ def test_uninstall_only_claude_keeps_generic_and_copilot(tmp_path: Path) -> None
     assert not (tmp_path / ".claude" / "CLAUDE.md").exists()
     for name in EXPECTED_SKILLS:
         assert not (tmp_path / ".claude" / "skills" / name / "SKILL.md").exists()
+    # Loop agents also removed
+    for name in _CLAUDE_SUBAGENT_NAMES:
+        assert not (tmp_path / ".claude" / "agents" / f"{name}.md").exists()
+    assert not (tmp_path / ".claude" / "skills" / _CLAUDE_SKILL_NAME / "SKILL.md").exists()
     # survivors
     assert (tmp_path / ".agents" / "AGENTS.md").is_file()
     assert (tmp_path / ".github" / "copilot-instructions.md").is_file()
@@ -177,6 +184,10 @@ def test_uninstall_multiple_agent_clis_keeps_remaining(tmp_path: Path) -> None:
 
     assert not (tmp_path / ".claude" / "CLAUDE.md").exists()
     assert not (tmp_path / ".github" / "copilot-instructions.md").exists()
+    # Loop agents also removed
+    for name in _CLAUDE_SUBAGENT_NAMES:
+        assert not (tmp_path / ".claude" / "agents" / f"{name}.md").exists()
+    assert not (tmp_path / ".claude" / "skills" / _CLAUDE_SKILL_NAME / "SKILL.md").exists()
     assert (tmp_path / ".agents" / "AGENTS.md").is_file()
 
 
@@ -234,7 +245,8 @@ def test_cli_install_only_claude_installs_generic_and_claude(isolated_home: Path
     result = runner.invoke(app, ["install", "-o", "claude"])
     assert result.exit_code == 0, result.stdout
     assert (isolated_home / ".agents" / "AGENTS.md").is_file()
-    # Claude gets loop agents, not CLAUDE.md
+    # Claude gets persona+skills AND loop agents
+    assert (isolated_home / ".claude" / "CLAUDE.md").is_file(), "claude persona missing"
     assert (isolated_home / ".claude" / "agents" / "explorer.md").is_file(), "claude agent explorer missing"
     assert (isolated_home / ".claude" / "skills" / _CLAUDE_SKILL_NAME / "SKILL.md").is_file(), "claude skill missing"
 
@@ -247,10 +259,12 @@ def test_cli_install_invalid_agent_cli_errors(isolated_home: Path) -> None:
 def test_cli_uninstall_no_args_removes_everything(isolated_home: Path) -> None:
     runner.invoke(app, ["install", "-o", "claude,copilot"])
     assert (isolated_home / ".claude" / "agents" / "explorer.md").is_file(), "expected claude loop agents"
+    assert (isolated_home / ".claude" / "CLAUDE.md").is_file(), "expected claude persona"
 
     result = runner.invoke(app, ["uninstall"])
     assert result.exit_code == 0, result.stdout
     assert not (isolated_home / ".claude" / "agents" / "explorer.md").exists()
+    assert not (isolated_home / ".claude" / "CLAUDE.md").exists()
     assert not (isolated_home / ".agents" / "AGENTS.md").exists()
 
 
@@ -291,60 +305,53 @@ def _read_frontmatter(path: Path) -> dict:
     return yaml.safe_load(parts[1])
 
 
-# Expected frontmatter values per loop agent as rendered by render_opencode_agent.
-# These assert that the provider model, mode, and permission block are preserved
-# exactly — not just that the keys exist.
-_EXPECTED_OPENCODE_FRONTMATTER: dict[str, dict] = {
-    "explorer": {
-        "description": (
-            "Read-only investigator. Given a GitHub issue, returns a focused plan "
-            "(affected files, steps, edge cases, test surface, risks) before implementation begins."
-        ),
-        "mode": "subagent",
-        "model": "opencode-go/kimi-k2.7-code",
-        "permission": {"edit": "deny", "write": "deny"},
-    },
-    "implementor": {
-        "description": (
-            "Implements one GitHub issue on an assigned branch. TDD, quality gates, "
-            "ONE conventional commit with `Closes"
-        ),
-        "mode": "subagent",
-        "model": "opencode-go/deepseek-v4-pro",
-    },
-    "validator": {
-        "description": (
-            "Read-only reviewer. Audits the diff for correctness, edge cases, type safety, "
-            "and quality-gate compliance. Verifies the implementation covers the user stories "
-            "from the parent PRD. Emits BLOCKER | CRITICAL | WARNING | SUGGESTION findings."
-        ),
-        "mode": "subagent",
-        "model": "openai/gpt-4.1-mini",
-        "permission": {"edit": "deny", "write": "deny"},
-    },
-    "loop-orchestrator": {
-        "description": (
-            "Loop orchestrator — drains ready-for-agent GitHub issues onto one per-session "
-            "loop branch via explorer → implementor → validator subagents, looping "
-            "implementor↔validator on any finding until clean, then opens ONE PR for "
-            "the whole session. Never touches local main directly; closes each issue itself "
-            "right after its validator pass is clean."
-        ),
-        "mode": "primary",
-        "model": "openai/gpt-5.5",
-        "permission": {
-            "bash": "allow",
-            "edit": "deny",
-            "task": {
-                "*": "deny",
-                "explorer": "allow",
-                "implementor": "allow",
-                "validator": "allow",
-            },
-            "write": "deny",
-        },
-    },
-}
+# ---------------------------------------------------------------------------
+# Expected frontmatter — computed from get_agent_meta so values stay in
+# sync with the single source of truth without duplicate-code warnings.
+# ---------------------------------------------------------------------------
+
+
+def _build_expected_opencode() -> dict[str, dict]:
+    """Build OpenCode expected frontmatter from agent metadata."""
+    result: dict[str, dict] = {}
+    for name in _LOOP_AGENT_NAMES:
+        meta = get_agent_meta(name)
+        entry: dict[str, object] = {
+            "description": meta["description"],
+            "mode": meta["mode"],
+            "model": meta["model"]["opencode"],
+        }
+        if "permission" in meta:
+            entry["permission"] = meta["permission"]
+        result[name] = entry
+    return result
+
+
+def _build_expected_claude() -> dict[str, dict]:
+    """Build Claude expected frontmatter from agent metadata."""
+    from copy import deepcopy
+
+    result: dict[str, dict] = {}
+    for name in _LOOP_AGENT_NAMES:
+        meta = get_agent_meta(name)
+        entry: dict[str, object] = {
+            "description": meta["description"],
+            "mode": meta["mode"],
+        }
+        # Subagents carry model; skill (primary) does not
+        if meta["mode"] != "primary":
+            entry["model"] = meta["model"]["claude"]
+        # Read-only narrowing: tools allow-list
+        permission = meta.get("permission")
+        if isinstance(permission, dict) and permission.get("edit") == "deny" and permission.get("write") == "deny":
+            if meta["mode"] != "primary":
+                entry["tools"] = "Read, Grep, Glob, Bash"
+        result[name] = deepcopy(entry)
+    return result
+
+
+_EXPECTED_OPENCODE_FRONTMATTER = _build_expected_opencode()
+_EXPECTED_CLAUDE_FRONTMATTER = _build_expected_claude()
 
 
 def _assert_frontmatter_matches(path: Path, expected: dict) -> None:
@@ -490,47 +497,6 @@ def test_cli_uninstall_opencode_removes_agents(isolated_home: Path) -> None:
 _CLAUDE_SUBAGENT_NAMES = ("explorer", "implementor", "validator")
 _CLAUDE_SKILL_NAME = "loop-orchestrator"
 
-# Expected frontmatter values per Claude agent as rendered by render_claude_agent / render_claude_skill.
-_EXPECTED_CLAUDE_FRONTMATTER: dict[str, dict] = {
-    "explorer": {
-        "description": (
-            "Read-only investigator. Given a GitHub issue, returns a focused plan "
-            "(affected files, steps, edge cases, test surface, risks) before implementation begins."
-        ),
-        "mode": "subagent",
-        "model": "sonnet",
-        "tools": "Read, Grep, Glob, Bash",
-    },
-    "implementor": {
-        "description": (
-            "Implements one GitHub issue on an assigned branch. TDD, quality gates, "
-            "ONE conventional commit with `Closes"
-        ),
-        "mode": "subagent",
-        "model": "sonnet",
-    },
-    "validator": {
-        "description": (
-            "Read-only reviewer. Audits the diff for correctness, edge cases, type safety, "
-            "and quality-gate compliance. Verifies the implementation covers the user stories "
-            "from the parent PRD. Emits BLOCKER | CRITICAL | WARNING | SUGGESTION findings."
-        ),
-        "mode": "subagent",
-        "model": "sonnet",
-        "tools": "Read, Grep, Glob, Bash",
-    },
-    "loop-orchestrator": {
-        "description": (
-            "Loop orchestrator — drains ready-for-agent GitHub issues onto one per-session "
-            "loop branch via explorer → implementor → validator subagents, looping "
-            "implementor↔validator on any finding until clean, then opens ONE PR for "
-            "the whole session. Never touches local main directly; closes each issue itself "
-            "right after its validator pass is clean."
-        ),
-        "mode": "primary",
-    },
-}
-
 
 def _assert_claude_agent_written(base: Path, name: str) -> Path:
     """Assert a Claude subagent file exists and return its path."""
@@ -577,8 +543,8 @@ def test_install_claude_writes_subagents_and_skill(tmp_path: Path) -> None:
     data = json.loads((tmp_path / MANIFEST_REL).read_text(encoding="utf-8"))
     assert "claude" in data["files_by_agent_cli"]
     claude_files = data["files_by_agent_cli"]["claude"]
-    # 3 subagents + 1 skill
-    assert len(claude_files) == len(_CLAUDE_SUBAGENT_NAMES) + 1
+    # 5 persona+skills (CLAUDE.md + 3 skills + 1 nested ref) + 3 subagents + 1 skill = 9
+    assert len(claude_files) == 9
 
 
 def test_install_claude_readonly_agents_have_tools_allowlist(tmp_path: Path) -> None:
@@ -616,16 +582,22 @@ def test_install_claude_orchestrator_skill_has_no_tools(tmp_path: Path) -> None:
     _assert_claude_frontmatter_absent(skill_path, "tools")
 
 
-def test_install_claude_skips_persona_and_skills(tmp_path: Path) -> None:
-    """Claude loop agents replace persona+skills — no CLAUDE.md or claude skills written."""
+def test_install_claude_includes_persona_and_skills(tmp_path: Path) -> None:
+    """Claude loop agents are ADDITIONAL — persona+skills are also written."""
     install_for_agent_clis([AgentCli.GENERIC, AgentCli.CLAUDE], home=tmp_path)
 
-    # Claude gets loop agents, not persona+skills
-    assert not (tmp_path / ".claude" / "CLAUDE.md").exists()
+    # Claude gets persona+skills
+    assert (tmp_path / ".claude" / "CLAUDE.md").is_file(), "CLAUDE.md should exist alongside loop agents"
     for name in EXPECTED_SKILLS:
-        assert not (tmp_path / ".claude" / "skills" / name / "SKILL.md").exists(), (
-            f"claude skills/{name}/SKILL.md should not exist when loop agents installed"
+        assert (tmp_path / ".claude" / "skills" / name / "SKILL.md").is_file(), (
+            f"claude skills/{name}/SKILL.md should exist alongside loop agents"
         )
+    # Loop agents are also present
+    for name in _CLAUDE_SUBAGENT_NAMES:
+        assert (tmp_path / ".claude" / "agents" / f"{name}.md").is_file(), f"claude subagent {name} missing"
+    assert (tmp_path / ".claude" / "skills" / _CLAUDE_SKILL_NAME / "SKILL.md").is_file(), (
+        "claude orchestrator skill missing"
+    )
 
 
 def test_install_claude_is_byte_identical_on_reinstall(tmp_path: Path) -> None:
@@ -655,19 +627,17 @@ def test_install_claude_rendered_body_matches_template_verbatim(tmp_path: Path) 
     templates_dir = files("ai_harness.resources") / "loop-agent"
 
     for name in _CLAUDE_SUBAGENT_NAMES:
-        # Read template source from resources
-        template_source = (templates_dir / f"{name}.md").read_text(encoding="utf-8")
-        template_body = template_source.split("---", 2)[2]
+        # Template body is the entire file (no frontmatter)
+        template_body = (templates_dir / f"{name}.md").read_text(encoding="utf-8")
 
-        # Read rendered file from disk
+        # Rendered file has frontmatter injected by code — extract body
         rendered = (tmp_path / ".claude" / "agents" / f"{name}.md").read_text(encoding="utf-8")
         rendered_body = rendered.split("---", 2)[2]
 
         assert rendered_body == template_body, f"{name}: body does not match template verbatim"
 
     # Orchestrator skill — same check
-    template_source = (templates_dir / f"{_CLAUDE_SKILL_NAME}.md").read_text(encoding="utf-8")
-    template_body = template_source.split("---", 2)[2]
+    template_body = (templates_dir / f"{_CLAUDE_SKILL_NAME}.md").read_text(encoding="utf-8")
 
     rendered = (tmp_path / ".claude" / "skills" / _CLAUDE_SKILL_NAME / "SKILL.md").read_text(encoding="utf-8")
     rendered_body = rendered.split("---", 2)[2]
@@ -745,9 +715,10 @@ def test_cli_install_claude_writes_agents_and_skill(isolated_home: Path) -> None
         "CLI install: claude skill missing"
     )
 
-    # Generic (1 persona + 3 skill dirs + 1 nested ref = 5 files) + 4 Claude artifacts = 9 total.
-    assert "9 file(s)" in result.stdout, (
-        f"stdout should report 9 written files (5 generic + 4 claude artifacts), got: {result.stdout!r}"
+    # Generic (5 files: 1 persona + 3 skill dirs + 1 nested ref)
+    # + Claude (9 files: 5 persona+skills + 4 loop artifacts) = 14 total.
+    assert "14 file(s)" in result.stdout, (
+        f"stdout should report 14 written files (5 generic + 9 claude), got: {result.stdout!r}"
     )
 
 

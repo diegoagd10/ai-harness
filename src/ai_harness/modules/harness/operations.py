@@ -30,7 +30,7 @@ from pathlib import Path
 from ai_harness.modules.harness.models import AgentCli, InstallManifest
 from ai_harness.modules.harness.renderers import (
     _discover_loop_agents,
-    _parse_template,
+    _get_agent_mode,
     render_claude_agent,
     render_claude_skill,
     render_opencode_agent,
@@ -181,18 +181,33 @@ def install_for_agent_clis(agent_clis: list[AgentCli], *, home: Path | None = No
     tree_src = resources / _TREE_SOURCE
 
     for agent_cli in agent_clis:
-        # --- Claude: loop agents rendered to agents/ + skill ---
+        agent_files: list[str] = []
+
+        # --- Persona+skills for all agent CLIs with paths defined ---
+        if agent_cli in _AGENT_CLI_PATHS:
+            paths = _AGENT_CLI_PATHS[agent_cli]
+
+            config_dest = home / paths.config_dest
+            config_dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(config_src, config_dest)
+            written_paths.append(config_dest)
+            agent_files.append(_relative_to(home, config_dest))
+
+            tree_dest = home / paths.tree_dest
+            shutil.copytree(tree_src, tree_dest, dirs_exist_ok=True)
+            tree_files = _walk_files(tree_dest)
+            written_paths.extend(tree_files)
+            agent_files.extend(_relative_to(home, p) for p in tree_files)
+
+        # --- Claude: loop agents as ADDITION ---
         if agent_cli == AgentCli.CLAUDE:
             agents_dir = home / ".claude" / "agents"
             skill_dir = home / ".claude" / "skills" / "loop-orchestrator"
             agents_dir.mkdir(parents=True, exist_ok=True)
             skill_dir.mkdir(parents=True, exist_ok=True)
 
-            claude_files: list[str] = []
             for name in _discover_loop_agents():
-                _frontmatter, _ = _parse_template(name)
-                mode = _frontmatter.get("mode", "subagent")
-
+                mode = _get_agent_mode(name)
                 if mode == "primary":
                     filename, content = render_claude_skill(name)
                     dest = skill_dir / filename
@@ -202,43 +217,22 @@ def install_for_agent_clis(agent_clis: list[AgentCli], *, home: Path | None = No
 
                 dest.write_text(content, encoding="utf-8")
                 written_paths.append(dest)
-                claude_files.append(_relative_to(home, dest))
+                agent_files.append(_relative_to(home, dest))
 
-            files_by_agent_cli[agent_cli.value] = claude_files
-            continue
-
-        # --- agent-based CLIs: render loop agents ---
+        # --- OpenCode: loop agents ---
         if agent_cli in _AGENT_CLI_AGENT_DIRS:
             agent_dir_rel = _AGENT_CLI_AGENT_DIRS[agent_cli]
             agent_dir = home / agent_dir_rel
             agent_dir.mkdir(parents=True, exist_ok=True)
 
-            rel_files: list[str] = []
             for name in _discover_loop_agents():
                 filename, content = render_opencode_agent(name)
                 dest = agent_dir / filename
                 dest.write_text(content, encoding="utf-8")
                 written_paths.append(dest)
-                rel_files.append(_relative_to(home, dest))
+                agent_files.append(_relative_to(home, dest))
 
-            files_by_agent_cli[agent_cli.value] = rel_files
-            continue
-
-        # --- persona+skills CLIs ---
-        paths = _AGENT_CLI_PATHS[agent_cli]
-
-        config_dest = home / paths.config_dest
-        config_dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(config_src, config_dest)
-        written_paths.append(config_dest)
-
-        tree_dest = home / paths.tree_dest
-        shutil.copytree(tree_src, tree_dest, dirs_exist_ok=True)
-        tree_files = _walk_files(tree_dest)
-        written_paths.extend(tree_files)
-
-        rel_files = [_relative_to(home, config_dest), *(_relative_to(home, p) for p in tree_files)]
-        files_by_agent_cli[agent_cli.value] = rel_files
+        files_by_agent_cli[agent_cli.value] = agent_files
 
     manifest = InstallManifest(agent_clis=list(agent_clis), written_paths=written_paths)
     _write_manifest(home, list(agent_clis), files_by_agent_cli)
