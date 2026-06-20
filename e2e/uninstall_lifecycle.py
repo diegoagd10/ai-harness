@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """E2e lifecycle for the `ai-harness uninstall` command.
 
 Provisions the CLI, installs to specific agent CLIs, then asserts uninstall
@@ -49,13 +50,35 @@ def _assert_generic_missing(h: Path) -> None:
 
 
 def _assert_claude_exists(h: Path) -> None:
+    """Assert Claude persona+skills AND loop agents exist."""
     assert_file_exists(h / ".claude" / "CLAUDE.md", "claude ~/.claude/CLAUDE.md")
     _assert_skills_exist(h / ".claude" / "skills", "claude")
+    # Loop agents
+    for name in ("explorer", "implementor", "validator"):
+        assert_file_exists(h / ".claude" / "agents" / f"{name}.md", f"claude agent {name}")
+    assert_file_exists(h / ".claude" / "skills" / "loop-orchestrator" / "SKILL.md", "claude orchestrator skill")
 
 
 def _assert_claude_missing(h: Path) -> None:
+    """Assert Claude persona, skills, and loop agents do NOT exist after uninstall."""
     assert_file_missing(h / ".claude" / "CLAUDE.md", "claude ~/.claude/CLAUDE.md")
-    _assert_skills_missing(h / ".claude" / "skills", "claude")
+    for name in EXPECTED_SKILLS:
+        assert_file_missing(h / ".claude" / "skills" / name / "SKILL.md", f"claude skills/{name}/SKILL.md")
+    for name in ("explorer", "implementor", "validator"):
+        assert_file_missing(h / ".claude" / "agents" / f"{name}.md", f"claude agent {name}")
+    assert_file_missing(h / ".claude" / "skills" / "loop-orchestrator" / "SKILL.md", "claude orchestrator skill")
+
+
+def _assert_opencode_exists(h: Path) -> None:
+    """Assert OpenCode loop agent files exist for uninstall teardown check."""
+    for name in ("explorer", "implementor", "validator", "loop-orchestrator"):
+        assert_file_exists(h / ".config" / "opencode" / "agent" / f"{name}.md", f"opencode agent {name}")
+
+
+def _assert_opencode_missing(h: Path) -> None:
+    """Assert OpenCode loop agent files do NOT exist after uninstall."""
+    for name in ("explorer", "implementor", "validator", "loop-orchestrator"):
+        assert_file_missing(h / ".config" / "opencode" / "agent" / f"{name}.md", f"opencode agent {name}")
 
 
 def _assert_copilot_exists(h: Path) -> None:
@@ -80,6 +103,8 @@ def run(cli_dir: str) -> None:
         _test_uninstall_multiple_agent_clis(path_env)
         _test_uninstall_nothing_installed(path_env)
         _test_uninstall_idempotent(path_env)
+        _test_uninstall_only_opencode(path_env)
+        _test_uninstall_opencode_leaves_others(path_env)
     finally:
         sandboxed_tool_uninstall()
 
@@ -94,6 +119,7 @@ def _test_uninstall_no_args(path_env: dict[str, str]) -> None:
     _assert_generic_exists(h)
     _assert_claude_exists(h)
     _assert_copilot_exists(h)
+    _assert_opencode_missing(h)
 
     # Act: uninstall with no args
     run_in_sandbox(home, "ai-harness", "uninstall", extra_env=path_env)
@@ -102,6 +128,7 @@ def _test_uninstall_no_args(path_env: dict[str, str]) -> None:
     _assert_generic_missing(h)
     _assert_claude_missing(h)
     _assert_copilot_missing(h)
+    _assert_opencode_missing(h)
 
 
 def _test_uninstall_only_claude(path_env: dict[str, str]) -> None:
@@ -114,14 +141,16 @@ def _test_uninstall_only_claude(path_env: dict[str, str]) -> None:
     _assert_generic_exists(h)
     _assert_claude_exists(h)
     _assert_copilot_exists(h)
+    _assert_opencode_missing(h)
 
     # Act: uninstall only claude
     run_in_sandbox(home, "ai-harness", "uninstall", "-o", "claude", extra_env=path_env)
 
-    # Assert: claude removed, generic + copilot survive
+    # Assert: claude removed, generic + copilot + opencode (not installed) survive
     _assert_claude_missing(h)
     _assert_generic_exists(h)
     _assert_copilot_exists(h)
+    _assert_opencode_missing(h)
 
 
 def _test_uninstall_only_copilot(path_env: dict[str, str]) -> None:
@@ -208,15 +237,60 @@ def _test_uninstall_idempotent(path_env: dict[str, str]) -> None:
     run_in_sandbox(home, "ai-harness", "install", "-o", "claude", extra_env=path_env)
     _assert_generic_exists(h)
     _assert_claude_exists(h)
+    _assert_opencode_missing(h)
 
     # Act: uninstall everything, then uninstall again
     run_in_sandbox(home, "ai-harness", "uninstall", extra_env=path_env)
     _assert_generic_missing(h)
     _assert_claude_missing(h)
+    _assert_opencode_missing(h)
 
     # Second uninstall must not error and must not create anything
     run_in_sandbox(home, "ai-harness", "uninstall", extra_env=path_env)
     _assert_generic_missing(h)
     _assert_claude_missing(h)
     _assert_copilot_missing(h)
+    _assert_opencode_missing(h)
     assert_file_missing(h / ".ai-harness" / "installed.json", "manifest (already uninstalled)")
+
+
+def _test_uninstall_only_opencode(path_env: dict[str, str]) -> None:
+    """`ai-harness uninstall -o opencode` -> remove only opencode, generic survives."""
+    home = sandbox_home()
+    h = Path(home)
+
+    # Setup: install to opencode (generic always included)
+    run_in_sandbox(home, "ai-harness", "install", "-o", "opencode", extra_env=path_env)
+    _assert_generic_exists(h)
+    _assert_opencode_exists(h)
+    _assert_claude_missing(h)
+
+    # Act: uninstall only opencode
+    run_in_sandbox(home, "ai-harness", "uninstall", "-o", "opencode", extra_env=path_env)
+
+    # Assert: opencode removed, generic survives
+    _assert_opencode_missing(h)
+    _assert_generic_exists(h)
+    _assert_claude_missing(h)
+
+
+def _test_uninstall_opencode_leaves_others(path_env: dict[str, str]) -> None:
+    """`ai-harness uninstall -o opencode` leaves claude + copilot intact."""
+    home = sandbox_home()
+    h = Path(home)
+
+    # Setup: install to claude + copilot + opencode (generic always included)
+    run_in_sandbox(home, "ai-harness", "install", "-o", "claude,copilot,opencode", extra_env=path_env)
+    _assert_generic_exists(h)
+    _assert_claude_exists(h)
+    _assert_copilot_exists(h)
+    _assert_opencode_exists(h)
+
+    # Act: uninstall only opencode
+    run_in_sandbox(home, "ai-harness", "uninstall", "-o", "opencode", extra_env=path_env)
+
+    # Assert: opencode removed, generic + claude + copilot survive
+    _assert_opencode_missing(h)
+    _assert_generic_exists(h)
+    _assert_claude_exists(h)
+    _assert_copilot_exists(h)

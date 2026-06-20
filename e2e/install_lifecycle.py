@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """E2e lifecycle for the `ai-harness install` command.
 
 Provisions the CLI via `uv tool install` into an isolated sandbox, then
@@ -40,16 +41,44 @@ def _assert_generic_exists(h: Path) -> None:
 
 
 def _assert_claude_exists(h: Path) -> None:
-    """Assert claude agent CLI paths exist (~/.claude/)."""
+    """Assert Claude persona+skills AND loop agents exist."""
+    # Persona + skills (previous behavior, kept)
     claude_md = h / ".claude" / "CLAUDE.md"
     assert_file_exists(claude_md, "claude ~/.claude/CLAUDE.md")
     assert claude_md.stat().st_size > 0, f"CLAUDE.md is empty: {claude_md}"
     _assert_skills_exist(h / ".claude" / "skills", "claude")
+    # Loop agents (addition)
+    for name in ("explorer", "implementor", "validator"):
+        agent_path = h / ".claude" / "agents" / f"{name}.md"
+        assert_file_exists(agent_path, f"claude agent {name}")
+        assert agent_path.stat().st_size > 0, f"claude agent {name} is empty: {agent_path}"
+    skill_path = h / ".claude" / "skills" / "loop-orchestrator" / "SKILL.md"
+    assert_file_exists(skill_path, "claude orchestrator skill")
+    assert skill_path.stat().st_size > 0, f"claude skill is empty: {skill_path}"
 
 
 def _assert_claude_missing(h: Path) -> None:
-    """Assert claude agent CLI paths do NOT exist."""
+    """Assert Claude persona, skills, and loop agents do NOT exist after install-only test."""
     assert_file_missing(h / ".claude" / "CLAUDE.md", "claude ~/.claude/CLAUDE.md")
+    for name in EXPECTED_SKILLS:
+        assert_file_missing(h / ".claude" / "skills" / name / "SKILL.md", f"claude skills/{name}/SKILL.md")
+    for name in ("explorer", "implementor", "validator"):
+        assert_file_missing(h / ".claude" / "agents" / f"{name}.md", f"claude agent {name}")
+    assert_file_missing(h / ".claude" / "skills" / "loop-orchestrator" / "SKILL.md", "claude loop-orchestrator skill")
+
+
+def _assert_opencode_exists(h: Path) -> None:
+    """Assert OpenCode loop agent files exist (~/.config/opencode/agent/)."""
+    for name in ("explorer", "implementor", "validator", "loop-orchestrator"):
+        agent_path = h / ".config" / "opencode" / "agent" / f"{name}.md"
+        assert_file_exists(agent_path, f"opencode agent {name}")
+        assert agent_path.stat().st_size > 0, f"opencode agent {name} is empty: {agent_path}"
+
+
+def _assert_opencode_missing(h: Path) -> None:
+    """Assert OpenCode loop agent files are absent (install-only)."""
+    for name in ("explorer", "implementor", "validator", "loop-orchestrator"):
+        assert_file_missing(h / ".config" / "opencode" / "agent" / f"{name}.md", f"opencode agent {name}")
 
 
 def _assert_copilot_exists(h: Path) -> None:
@@ -78,6 +107,8 @@ def run(cli_dir: str) -> None:
         _test_install_only_claude(path_env)
         _test_install_only_copilot(path_env)
         _test_install_claude_and_copilot(path_env)
+        _test_install_only_opencode(path_env)
+        _test_install_claude_and_opencode(path_env)
     finally:
         sandboxed_tool_uninstall()
 
@@ -127,4 +158,31 @@ def _test_install_claude_and_copilot(path_env: dict[str, str]) -> None:
     _assert_generic_exists(h)
     _assert_claude_exists(h)
     _assert_copilot_exists(h)
+    _assert_opencode_missing(h)
+    _assert_manifest_exists(h)
+
+
+def _test_install_only_opencode(path_env: dict[str, str]) -> None:
+    """`ai-harness install -o opencode` -> generic + opencode, no claude/copilot."""
+    home = sandbox_home()
+    run_in_sandbox(home, "ai-harness", "install", "-o", "opencode", extra_env=path_env)
+    h = Path(home)
+
+    _assert_generic_exists(h)
+    _assert_opencode_exists(h)
+    _assert_claude_missing(h)
+    _assert_copilot_missing(h)
+    _assert_manifest_exists(h)
+
+
+def _test_install_claude_and_opencode(path_env: dict[str, str]) -> None:
+    """`ai-harness install -o claude,opencode` -> generic + claude + opencode, no copilot."""
+    home = sandbox_home()
+    run_in_sandbox(home, "ai-harness", "install", "-o", "claude,opencode", extra_env=path_env)
+    h = Path(home)
+
+    _assert_generic_exists(h)
+    _assert_claude_exists(h)
+    _assert_opencode_exists(h)
+    _assert_copilot_missing(h)
     _assert_manifest_exists(h)
