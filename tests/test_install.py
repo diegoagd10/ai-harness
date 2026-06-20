@@ -267,21 +267,88 @@ def _read_frontmatter(path: Path) -> dict:
     return yaml.safe_load(parts[1])
 
 
-_AGENTS_WITH_PERMISSION = {"explorer", "validator", "loop-orchestrator"}
+# Expected frontmatter values per loop agent as rendered by render_opencode_agent.
+# These assert that the provider model, mode, and permission block are preserved
+# exactly — not just that the keys exist.
+_EXPECTED_OPENCODE_FRONTMATTER: dict[str, dict] = {
+    "explorer": {
+        "description": (
+            "Read-only investigator. Given a GitHub issue, returns a focused plan "
+            "(affected files, steps, edge cases, test surface, risks) before implementation begins."
+        ),
+        "mode": "subagent",
+        "model": "opencode-go/kimi-k2.7-code",
+        "permission": {"edit": "deny", "write": "deny"},
+    },
+    "implementor": {
+        "description": (
+            "Implements one GitHub issue on an assigned branch. TDD, quality gates, "
+            "ONE conventional commit with `Closes"
+        ),
+        "mode": "subagent",
+        "model": "opencode-go/deepseek-v4-pro",
+    },
+    "validator": {
+        "description": (
+            "Read-only reviewer. Audits the diff for correctness, edge cases, type safety, "
+            "and quality-gate compliance. Verifies the implementation covers the user stories "
+            "from the parent PRD. Emits BLOCKER | CRITICAL | WARNING | SUGGESTION findings."
+        ),
+        "mode": "subagent",
+        "model": "openai/gpt-4.1-mini",
+        "permission": {"edit": "deny", "write": "deny"},
+    },
+    "loop-orchestrator": {
+        "description": (
+            "Loop orchestrator — drains ready-for-agent GitHub issues onto one per-session "
+            "loop branch via explorer → implementor → validator subagents, looping "
+            "implementor↔validator on any finding until clean, then opens ONE PR for "
+            "the whole session. Never touches local main directly; closes each issue itself "
+            "right after its validator pass is clean."
+        ),
+        "mode": "primary",
+        "model": "openai/gpt-5.5",
+        "permission": {
+            "bash": "allow",
+            "edit": "deny",
+            "task": {
+                "*": "deny",
+                "explorer": "allow",
+                "implementor": "allow",
+                "validator": "allow",
+            },
+            "write": "deny",
+        },
+    },
+}
+
+
+def _assert_frontmatter_matches(path: Path, expected: dict) -> None:
+    """Assert the rendered frontmatter exactly matches *expected* for every key present in *expected*.
+
+    Uses ``startswith`` for ``description`` because YAML may fold long lines
+    (the template's first line is always long enough to distinguish).
+    """
+    fm = _read_frontmatter(path)
+    for key, expected_val in expected.items():
+        actual = fm.get(key)
+        if key == "description" and isinstance(expected_val, str) and isinstance(actual, str):
+            assert actual.startswith(expected_val), (
+                f"description mismatch in {path.name}: expected prefix {expected_val!r}, got {actual!r}"
+            )
+        else:
+            assert actual == expected_val, (
+                f"key {key!r} mismatch in {path.name}: expected {expected_val!r}, got {actual!r}"
+            )
 
 
 def test_install_opencode_writes_agents_and_manifest(tmp_path: Path) -> None:
     manifest = install_for_agent_clis([AgentCli.GENERIC, AgentCli.OPENCODE], home=tmp_path)
 
-    # Agents written
+    # Agents written with exact frontmatter values
     for name in _LOOP_AGENT_NAMES:
         path = _assert_opencode_agent_written(tmp_path, name)
-        fm = _read_frontmatter(path)
-        assert "description" in fm, f"{name}: missing description in frontmatter"
-        assert fm.get("mode") in ("primary", "subagent"), f"{name}: missing/invalid mode"
-        assert "model" in fm, f"{name}: missing model in frontmatter"
-        if name in _AGENTS_WITH_PERMISSION:
-            assert "permission" in fm, f"{name}: missing permission in frontmatter"
+        _assert_frontmatter_matches(path, _EXPECTED_OPENCODE_FRONTMATTER[name])
 
     # Generic still installed
     assert (tmp_path / ".agents" / "AGENTS.md").is_file()
@@ -374,6 +441,12 @@ def test_cli_install_opencode_writes_agents(isolated_home: Path) -> None:
     agent_dir = isolated_home / ".config" / "opencode" / "agent"
     for name in _LOOP_AGENT_NAMES:
         assert (agent_dir / f"{name}.md").is_file(), f"CLI install: {name} missing"
+
+    # PRD story 17: stdout reports file count including the four OpenCode agents.
+    # Generic (1 persona + 3 skill dirs + 1 nested ref = 5 files) + 4 OpenCode agents = 9 total.
+    assert "9 file(s)" in result.stdout, (
+        f"stdout should report 9 written files (5 generic + 4 opencode agents), got: {result.stdout!r}"
+    )
 
 
 def test_cli_uninstall_opencode_removes_agents(isolated_home: Path) -> None:
