@@ -21,7 +21,7 @@ def install(
         typer.Option(
             "-o",
             "--only",
-            help="Comma-separated agent CLIs (claude,copilot,generic). Omit → generic only.",
+            help="Comma-separated agent CLIs (claude,copilot,generic,opencode). Omit → generic only.",
         ),
     ] = "",
 ) -> None:

@@ -241,3 +241,146 @@ def test_cli_uninstall_only_claude_keeps_generic(isolated_home: Path) -> None:
 def test_cli_uninstall_invalid_agent_cli_errors(isolated_home: Path) -> None:
     result = runner.invoke(app, ["uninstall", "-o", "bogus"])
     assert result.exit_code != 0
+
+
+# ---------------------------------------------------------------------------
+# OpenCode agent install — observable behaviour
+# ---------------------------------------------------------------------------
+
+_LOOP_AGENT_NAMES = ("explorer", "implementor", "validator", "loop-orchestrator")
+
+
+def _assert_opencode_agent_written(base: Path, name: str) -> Path:
+    path = base / ".config" / "opencode" / "agent" / f"{name}.md"
+    assert path.is_file(), f"opencode agent missing: {path}"
+    assert path.stat().st_size > 0, f"opencode agent empty: {path}"
+    return path
+
+
+def _read_frontmatter(path: Path) -> dict:
+    """Parse YAML frontmatter between --- delimiters, return dict."""
+    import yaml
+
+    text = path.read_text(encoding="utf-8")
+    parts = text.split("---")
+    assert len(parts) >= 3, f"No frontmatter found in {path}"
+    return yaml.safe_load(parts[1])
+
+
+_AGENTS_WITH_PERMISSION = {"explorer", "validator", "loop-orchestrator"}
+
+
+def test_install_opencode_writes_agents_and_manifest(tmp_path: Path) -> None:
+    manifest = install_for_agent_clis([AgentCli.GENERIC, AgentCli.OPENCODE], home=tmp_path)
+
+    # Agents written
+    for name in _LOOP_AGENT_NAMES:
+        path = _assert_opencode_agent_written(tmp_path, name)
+        fm = _read_frontmatter(path)
+        assert "description" in fm, f"{name}: missing description in frontmatter"
+        assert fm.get("mode") in ("primary", "subagent"), f"{name}: missing/invalid mode"
+        assert "model" in fm, f"{name}: missing model in frontmatter"
+        if name in _AGENTS_WITH_PERMISSION:
+            assert "permission" in fm, f"{name}: missing permission in frontmatter"
+
+    # Generic still installed
+    assert (tmp_path / ".agents" / "AGENTS.md").is_file()
+
+    # Manifest records opencode
+    assert AgentCli.OPENCODE in manifest.agent_clis
+    assert (tmp_path / MANIFEST_REL).is_file()
+
+    data = json.loads((tmp_path / MANIFEST_REL).read_text(encoding="utf-8"))
+    assert "opencode" in data["files_by_agent_cli"]
+    opencode_files = data["files_by_agent_cli"]["opencode"]
+    assert len(opencode_files) == len(_LOOP_AGENT_NAMES)
+
+
+def test_install_opencode_skips_persona_and_skills(tmp_path: Path) -> None:
+    install_for_agent_clis([AgentCli.GENERIC, AgentCli.OPENCODE], home=tmp_path)
+
+    # No AGENTS.md or skills under opencode's directory
+    assert not (tmp_path / ".config" / "opencode" / "AGENTS.md").exists()
+    assert not (tmp_path / ".config" / "opencode" / "skills").exists()
+
+
+def test_generic_and_copilot_do_not_get_loop_agents(tmp_path: Path) -> None:
+    install_for_agent_clis([AgentCli.GENERIC, AgentCli.COPILOT], home=tmp_path)
+
+    # No loop agents under generic or copilot paths
+    for base_dir in (".agents", ".github", ".copilot"):
+        for name in _LOOP_AGENT_NAMES:
+            assert not (tmp_path / base_dir / f"{name}.md").exists(), f"loop agent leaked to {base_dir}/{name}.md"
+
+
+def test_install_opencode_is_byte_identical_on_reinstall(tmp_path: Path) -> None:
+    install_for_agent_clis([AgentCli.GENERIC, AgentCli.OPENCODE], home=tmp_path)
+
+    agent_dir = tmp_path / ".config" / "opencode" / "agent"
+    first_pass: dict[str, bytes] = {}
+    for name in _LOOP_AGENT_NAMES:
+        first_pass[name] = (agent_dir / f"{name}.md").read_bytes()
+
+    # Reinstall
+    install_for_agent_clis([AgentCli.GENERIC, AgentCli.OPENCODE], home=tmp_path)
+    for name in _LOOP_AGENT_NAMES:
+        second = (agent_dir / f"{name}.md").read_bytes()
+        assert second == first_pass[name], f"{name}: reinstall not byte-identical"
+
+
+# ---------------------------------------------------------------------------
+# OpenCode uninstall — observable behaviour
+# ---------------------------------------------------------------------------
+
+
+def test_uninstall_only_opencode_keeps_generic(tmp_path: Path) -> None:
+    install_for_agent_clis([AgentCli.GENERIC, AgentCli.OPENCODE], home=tmp_path)
+    uninstall_for_agent_clis([AgentCli.OPENCODE], home=tmp_path)
+
+    # OpenCode agents removed
+    agent_dir = tmp_path / ".config" / "opencode" / "agent"
+    for name in _LOOP_AGENT_NAMES:
+        assert not (agent_dir / f"{name}.md").exists(), f"{name}: still present after opencode uninstall"
+
+    # Generic survives
+    assert (tmp_path / ".agents" / "AGENTS.md").is_file()
+    # Manifest still exists (has generic)
+    assert (tmp_path / MANIFEST_REL).is_file()
+    # Manifest no longer references opencode
+    data = json.loads((tmp_path / MANIFEST_REL).read_text(encoding="utf-8"))
+    assert "opencode" not in data["files_by_agent_cli"]
+
+
+def test_uninstall_no_args_removes_opencode_agents(tmp_path: Path) -> None:
+    install_for_agent_clis([AgentCli.GENERIC, AgentCli.OPENCODE], home=tmp_path)
+    uninstall_for_agent_clis(None, home=tmp_path)
+
+    agent_dir = tmp_path / ".config" / "opencode" / "agent"
+    for name in _LOOP_AGENT_NAMES:
+        assert not (agent_dir / f"{name}.md").exists(), f"{name}: still present after full uninstall"
+    assert not (tmp_path / ".agents" / "AGENTS.md").exists()
+    assert not (tmp_path / MANIFEST_REL).exists()
+
+
+# ---------------------------------------------------------------------------
+# CLI adapter — opencode
+# ---------------------------------------------------------------------------
+
+
+def test_cli_install_opencode_writes_agents(isolated_home: Path) -> None:
+    result = runner.invoke(app, ["install", "-o", "opencode"])
+    assert result.exit_code == 0, result.stderr
+
+    agent_dir = isolated_home / ".config" / "opencode" / "agent"
+    for name in _LOOP_AGENT_NAMES:
+        assert (agent_dir / f"{name}.md").is_file(), f"CLI install: {name} missing"
+
+
+def test_cli_uninstall_opencode_removes_agents(isolated_home: Path) -> None:
+    runner.invoke(app, ["install", "-o", "opencode"])
+    result = runner.invoke(app, ["uninstall", "-o", "opencode"])
+    assert result.exit_code == 0, result.stderr
+
+    agent_dir = isolated_home / ".config" / "opencode" / "agent"
+    for name in _LOOP_AGENT_NAMES:
+        assert not (agent_dir / f"{name}.md").exists(), f"CLI uninstall: {name} remaining"

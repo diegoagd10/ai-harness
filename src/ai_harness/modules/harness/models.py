@@ -15,6 +15,7 @@ class AgentCli(StrEnum):
     GENERIC = "generic"
     CLAUDE = "claude"
     COPILOT = "copilot"
+    OPENCODE = "opencode"
 
 
 @dataclass(frozen=True, slots=True)
