@@ -186,7 +186,7 @@ def render_opencode_agent(name: str) -> tuple[str, str]:
         opencode_frontmatter["permission"] = meta["permission"]
 
     yaml_text = _yaml_dump_frontmatter(opencode_frontmatter)
-    rendered = f"---\n{yaml_text}\n---{body}"
+    rendered = f"---\n{yaml_text}\n---\n{body}"
     return f"{name}.md", rendered
 
 
@@ -221,7 +221,7 @@ def render_claude_agent(name: str) -> tuple[str, str]:
         claude_frontmatter["tools"] = "Read, Grep, Glob, Bash"
 
     yaml_text = _yaml_dump_frontmatter(claude_frontmatter)
-    rendered = f"---\n{yaml_text}\n---{body}"
+    rendered = f"---\n{yaml_text}\n---\n{body}"
     return f"{name}.md", rendered
 
 
@@ -252,5 +252,5 @@ def render_claude_skill(name: str) -> tuple[str, str]:
     # No tools field — unrestricted.
 
     yaml_text = _yaml_dump_frontmatter(claude_frontmatter)
-    rendered = f"---\n{yaml_text}\n---{body}"
+    rendered = f"---\n{yaml_text}\n---\n{body}"
     return "SKILL.md", rendered
