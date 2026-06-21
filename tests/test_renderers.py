@@ -7,6 +7,8 @@ for each agent CLI that supports native agents.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -329,3 +331,532 @@ def test_invalid_meta_raises_value_error(
     ):
         with pytest.raises(ValueError, match=error_match):
             render_agents(cli, [agent_name])
+
+
+# ---------------------------------------------------------------------------
+# Override store — partial deep-merge over _AGENT_META template defaults
+# ---------------------------------------------------------------------------
+
+
+def test_get_agent_meta_without_overrides_is_unchanged(tmp_path: Path) -> None:
+    """Calling get_agent_meta without explicit overrides auto-loads from home;
+    an absent overrides.json at home is a no-op (template defaults).
+    """
+    meta = get_agent_meta("implementor", home=tmp_path)
+
+    assert meta["model"]["opencode"] == "opencode-go/deepseek-v4-pro"
+    assert meta["model"]["claude"] == "sonnet"
+
+
+def test_get_agent_meta_with_empty_overrides_is_unchanged() -> None:
+    """An empty overrides dict is a no-op."""
+    meta = get_agent_meta("implementor", overrides={})
+
+    assert meta["model"]["opencode"] == "opencode-go/deepseek-v4-pro"
+
+
+def test_get_agent_meta_override_wins_on_model() -> None:
+    """An override under the agent key replaces the matching model entry."""
+    overrides = {"implementor": {"model": {"opencode": "openai/gpt-5.4"}}}
+
+    meta = get_agent_meta("implementor", overrides=overrides)
+
+    assert meta["model"]["opencode"] == "openai/gpt-5.4"
+    # Unset CLI in the override falls back to the template default
+    assert meta["model"]["claude"] == "sonnet"
+
+
+def test_get_agent_meta_partial_merge_preserves_defaults() -> None:
+    """Partial override: untouched fields keep template defaults."""
+    overrides = {"implementor": {"model": {"opencode": "openai/gpt-5.4"}}}
+
+    meta = get_agent_meta("implementor", overrides=overrides)
+
+    assert meta["description"].startswith("Implements one GitHub issue")
+    assert meta["mode"] == "subagent"
+    # Different agent not in overrides keeps its defaults
+    explorer_meta = get_agent_meta("explorer", overrides=overrides)
+    assert explorer_meta["model"]["opencode"] == "opencode-go/kimi-k2.7-code"
+
+
+def test_get_agent_meta_returns_a_copy_not_the_template() -> None:
+    """get_agent_meta must not let callers mutate the template via the returned dict."""
+    overrides = {"implementor": {"model": {"opencode": "openai/gpt-5.4"}}}
+    first = get_agent_meta("implementor", overrides=overrides)
+    first["model"]["opencode"] = "mutated"
+    first["extra"] = "added"
+
+    second = get_agent_meta("implementor", overrides=overrides)
+    assert second["model"]["opencode"] == "openai/gpt-5.4"
+    assert "extra" not in second
+
+
+def test_get_agent_meta_unknown_override_agent_ignored() -> None:
+    """Overrides keyed by an agent name not in the template are silently ignored."""
+    overrides = {"unknown-agent": {"model": {"opencode": "openai/gpt-5.4"}}}
+
+    meta = get_agent_meta("implementor", overrides=overrides)
+
+    assert meta["model"]["opencode"] == "opencode-go/deepseek-v4-pro"
+
+
+def test_get_agent_meta_does_not_alias_overrides_dict() -> None:
+    """Mutating the overrides dict after the call must not change the returned meta."""
+    overrides = {"implementor": {"model": {"opencode": "openai/gpt-5.4"}}}
+    meta = get_agent_meta("implementor", overrides=overrides)
+    overrides["implementor"]["model"]["opencode"] = "openai/gpt-5.5"
+
+    again = get_agent_meta("implementor", overrides=overrides)
+    # Same call must reflect the new override state
+    assert again["model"]["opencode"] == "openai/gpt-5.5"
+    # Previously-returned dict must not have been mutated
+    assert meta["model"]["opencode"] == "openai/gpt-5.4"
+
+
+def test_render_agents_override_changes_opencode_model_in_frontmatter() -> None:
+    """Override flows through render_agents and changes the rendered OpenCode frontmatter."""
+    overrides = {"implementor": {"model": {"opencode": "openai/gpt-5.4"}}}
+
+    pairs = render_agents(AgentCli.OPENCODE, ["implementor"], overrides=overrides)
+
+    assert len(pairs) == 1
+    fm = _parse_frontmatter(pairs[0][1])
+    assert fm["model"] == "openai/gpt-5.4"
+
+
+def test_render_agents_override_changes_claude_model_in_frontmatter() -> None:
+    """Override flows through render_agents and changes the rendered Claude frontmatter."""
+    overrides = {"implementor": {"model": {"claude": "opus"}}}
+
+    pairs = render_agents(AgentCli.CLAUDE, ["implementor"], overrides=overrides)
+
+    fm = _parse_frontmatter(pairs[0][1])
+    assert fm["model"] == "opus"
+
+
+def test_render_agents_byte_identical_when_no_overrides() -> None:
+    """render_agents with overrides=None produces identical output to omit-overrides calls."""
+    baseline = render_agents(AgentCli.CLAUDE)
+    no_arg = render_agents(AgentCli.CLAUDE, overrides=None)
+
+    assert baseline == no_arg
+
+
+# ---------------------------------------------------------------------------
+# Effort field emission per CLI — omit when unset
+# ---------------------------------------------------------------------------
+
+
+def test_opencode_emits_reasoning_effort_when_set() -> None:
+    """OpenCode renderer emits ``reasoningEffort`` when override map has opencode."""
+    overrides = {"implementor": {"effort": {"opencode": "high"}}}
+
+    pairs = render_agents(AgentCli.OPENCODE, ["implementor"], overrides=overrides)
+
+    fm = _parse_frontmatter(pairs[0][1])
+    assert fm["reasoningEffort"] == "high"
+
+
+def test_claude_emits_effort_when_set() -> None:
+    """Claude renderer emits ``effort`` when override map has claude."""
+    overrides = {"implementor": {"effort": {"claude": "high"}}}
+
+    pairs = render_agents(AgentCli.CLAUDE, ["implementor"], overrides=overrides)
+
+    fm = _parse_frontmatter(pairs[0][1])
+    assert fm["effort"] == "high"
+
+
+def test_opencode_omits_effort_when_unset() -> None:
+    """No effort override → no ``reasoningEffort`` key in OpenCode frontmatter."""
+    pairs = render_agents(AgentCli.OPENCODE, ["implementor"])
+
+    fm = _parse_frontmatter(pairs[0][1])
+    assert "reasoningEffort" not in fm
+
+
+def test_claude_omits_effort_when_unset() -> None:
+    """No effort override → no ``effort`` key in Claude frontmatter."""
+    pairs = render_agents(AgentCli.CLAUDE, ["implementor"])
+
+    fm = _parse_frontmatter(pairs[0][1])
+    assert "effort" not in fm
+
+
+def test_opencode_effort_only_for_overridden_cli() -> None:
+    """Effort map keyed only for opencode → Claude gets no effort, OpenCode does."""
+    overrides = {"implementor": {"effort": {"opencode": "high"}}}
+
+    opencode_pairs = render_agents(AgentCli.OPENCODE, ["implementor"], overrides=overrides)
+    claude_pairs = render_agents(AgentCli.CLAUDE, ["implementor"], overrides=overrides)
+
+    assert _parse_frontmatter(opencode_pairs[0][1]).get("reasoningEffort") == "high"
+    assert "effort" not in _parse_frontmatter(claude_pairs[0][1])
+
+
+def test_claude_effort_only_for_overridden_cli() -> None:
+    """Effort map keyed only for claude → OpenCode gets no reasoningEffort, Claude does."""
+    overrides = {"implementor": {"effort": {"claude": "high"}}}
+
+    opencode_pairs = render_agents(AgentCli.OPENCODE, ["implementor"], overrides=overrides)
+    claude_pairs = render_agents(AgentCli.CLAUDE, ["implementor"], overrides=overrides)
+
+    assert "reasoningEffort" not in _parse_frontmatter(opencode_pairs[0][1])
+    assert _parse_frontmatter(claude_pairs[0][1]).get("effort") == "high"
+
+
+# ---------------------------------------------------------------------------
+# Override + model-and-effort together, orchestrator-skill untouched
+# ---------------------------------------------------------------------------
+
+
+def test_override_with_both_model_and_effort() -> None:
+    """Both model and effort overrides apply on the same agent."""
+    overrides = {
+        "implementor": {
+            "model": {"opencode": "openai/gpt-5.4"},
+            "effort": {"opencode": "high", "claude": "high"},
+        }
+    }
+
+    opencode_pairs = render_agents(AgentCli.OPENCODE, ["implementor"], overrides=overrides)
+    claude_pairs = render_agents(AgentCli.CLAUDE, ["implementor"], overrides=overrides)
+
+    opencode_fm = _parse_frontmatter(opencode_pairs[0][1])
+    claude_fm = _parse_frontmatter(claude_pairs[0][1])
+    assert opencode_fm["model"] == "openai/gpt-5.4"
+    assert opencode_fm["reasoningEffort"] == "high"
+    assert claude_fm["model"] == "sonnet"  # no claude override → default
+    assert claude_fm["effort"] == "high"
+
+
+# ---------------------------------------------------------------------------
+# Cleared effort — ``None`` means "drop the field"; non-reasoning models
+# must not emit ``reasoningEffort: null`` (issue #46 fix-up).
+# ---------------------------------------------------------------------------
+
+
+def test_opencode_omits_reasoning_effort_when_override_value_is_none() -> None:
+    """An override clearing effort (``{"effort": {"opencode": None}}``) must not
+    leave ``reasoningEffort: null`` in the rendered OpenCode frontmatter.
+
+    The wizard writes ``None`` for non-reasoning models so a prior reasoning-
+    model override does not leak forward. The renderer must honour that
+    "drop the field" semantics — emitting ``null`` violates "non-reasoning
+    models skip effort" and pollutes the agent file with stale frontmatter.
+    """
+    overrides = {"validator": {"effort": {"opencode": None}}}
+
+    pairs = render_agents(AgentCli.OPENCODE, ["validator"], overrides=overrides)
+
+    content = pairs[0][1]
+    fm = _parse_frontmatter(content)
+    assert "reasoningEffort" not in fm, (
+        f"reasoningEffort must be omitted when override value is None; got {fm.get('reasoningEffort')!r}"
+    )
+    # Belt-and-braces: the YAML literal must not appear either.
+    assert "reasoningEffort: null" not in content, f"raw frontmatter still contains reasoningEffort: null:\n{content}"
+
+
+def test_claude_omits_effort_when_override_value_is_none() -> None:
+    """Same contract for Claude: ``{"effort": {"claude": None}}`` must drop ``effort``."""
+    overrides = {"validator": {"effort": {"claude": None}}}
+
+    pairs = render_agents(AgentCli.CLAUDE, ["validator"], overrides=overrides)
+
+    content = pairs[0][1]
+    fm = _parse_frontmatter(content)
+    assert "effort" not in fm, f"effort must be omitted when override value is None; got {fm.get('effort')!r}"
+    assert "effort: null" not in content, f"raw frontmatter still contains effort: null:\n{content}"
+
+
+def test_opencode_non_reasoning_selection_omits_reasoning_effort() -> None:
+    """Full non-reasoning selection: model override + cleared effort → no reasoningEffort.
+
+    This mirrors what the wizard writes when the user picks a non-reasoning
+    model after having set effort for a previous reasoning one — the diff
+    must end up with neither ``reasoningEffort`` nor ``reasoningEffort: null``
+    in the rendered agent file.
+    """
+    overrides = {
+        "validator": {
+            "model": {"opencode": "openai/gpt-5.5-mini"},
+            "effort": {"opencode": None},
+        }
+    }
+
+    pairs = render_agents(AgentCli.OPENCODE, ["validator"], overrides=overrides)
+
+    content = pairs[0][1]
+    fm = _parse_frontmatter(content)
+    assert fm["model"] == "openai/gpt-5.5-mini"
+    assert "reasoningEffort" not in fm
+    assert "reasoningEffort: null" not in content
+
+
+def test_claude_non_reasoning_selection_omits_effort() -> None:
+    """Claude counterpart: model override + cleared effort → no ``effort`` field."""
+    overrides = {
+        "validator": {
+            "model": {"claude": "haiku"},
+            "effort": {"claude": None},
+        }
+    }
+
+    pairs = render_agents(AgentCli.CLAUDE, ["validator"], overrides=overrides)
+
+    content = pairs[0][1]
+    fm = _parse_frontmatter(content)
+    assert fm["model"] == "haiku"
+    assert "effort" not in fm
+    assert "effort: null" not in content
+
+
+def test_opencode_partial_effort_clear_keeps_other_cli_unset() -> None:
+    """Clearing only OpenCode effort does not leak into Claude effort emission."""
+    overrides = {"validator": {"effort": {"opencode": None}}}
+
+    opencode_pairs = render_agents(AgentCli.OPENCODE, ["validator"], overrides=overrides)
+    claude_pairs = render_agents(AgentCli.CLAUDE, ["validator"], overrides=overrides)
+
+    assert "reasoningEffort" not in _parse_frontmatter(opencode_pairs[0][1])
+    assert "effort" not in _parse_frontmatter(claude_pairs[0][1])
+
+
+def test_effort_value_none_does_not_override_concrete_value_for_other_cli() -> None:
+    """``None`` for one CLI must not suppress a concrete value on the other CLI."""
+    overrides = {
+        "validator": {
+            "effort": {"opencode": None, "claude": "high"},
+        }
+    }
+
+    opencode_pairs = render_agents(AgentCli.OPENCODE, ["validator"], overrides=overrides)
+    claude_pairs = render_agents(AgentCli.CLAUDE, ["validator"], overrides=overrides)
+
+    opencode_fm = _parse_frontmatter(opencode_pairs[0][1])
+    claude_fm = _parse_frontmatter(claude_pairs[0][1])
+    assert "reasoningEffort" not in opencode_fm
+    assert claude_fm["effort"] == "high"
+
+
+def test_orchestrator_skill_unaffected_by_overrides() -> None:
+    """Claude orchestrator skill — rendered via _render_claude_skill — carries no model/effort
+    regardless of overrides.
+    """
+    overrides = {
+        "loop-orchestrator": {
+            "model": {"claude": "opus"},
+            "effort": {"claude": "high"},
+        }
+    }
+
+    pairs = render_agents(AgentCli.CLAUDE, ["loop-orchestrator"], overrides=overrides)
+    fm = _parse_frontmatter(pairs[0][1])
+
+    assert "model" not in fm, f"skill should not have model, got {fm.get('model')!r}"
+    assert "effort" not in fm, f"skill should not have effort, got {fm.get('effort')!r}"
+    assert "description" in fm
+
+
+def test_orchestrator_skill_unchanged_when_only_other_agents_overridden() -> None:
+    """Override on implementor must not leak into the orchestrator skill."""
+    overrides = {"implementor": {"model": {"claude": "opus"}, "effort": {"claude": "high"}}}
+
+    pairs = render_agents(AgentCli.CLAUDE, overrides=overrides)
+    orchestrator = _find_pair(pairs, "loop-orchestrator")
+    assert orchestrator is not None
+    fm = _parse_frontmatter(orchestrator[1])
+
+    assert "model" not in fm
+    assert "effort" not in fm
+
+
+def test_template_meta_not_mutated_by_overrides_across_calls(tmp_path: Path) -> None:
+    """Repeated calls with different overrides must not bleed state into each other."""
+    overrides_a = {"implementor": {"model": {"opencode": "openai/gpt-5.4"}}}
+    overrides_b = {"implementor": {"model": {"opencode": "openai/gpt-5.5"}}}
+
+    first = get_agent_meta("implementor", overrides=overrides_a)
+    second = get_agent_meta("implementor", overrides=overrides_b)
+    third = get_agent_meta("implementor", home=tmp_path)  # absent store → template default
+
+    assert first["model"]["opencode"] == "openai/gpt-5.4"
+    assert second["model"]["opencode"] == "openai/gpt-5.5"
+    assert third["model"]["opencode"] == "opencode-go/deepseek-v4-pro"
+
+    # No leftover mutation from any of the override calls
+    assert first["model"]["claude"] == "sonnet"
+    assert second["model"]["claude"] == "sonnet"
+
+
+# ---------------------------------------------------------------------------
+# Override store auto-load from home/.ai-harness/overrides.json
+# ---------------------------------------------------------------------------
+
+
+def _write_overrides_store(home: Path, payload: dict) -> Path:
+    """Write *payload* to ``home/.ai-harness/overrides.json`` and return its path."""
+    path = home / ".ai-harness" / "overrides.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
+def test_get_agent_meta_auto_loads_override_store_from_home(tmp_path: Path) -> None:
+    """get_agent_meta(name) with no overrides arg reads from home/.ai-harness/overrides.json."""
+    _write_overrides_store(tmp_path, {"implementor": {"model": {"opencode": "openai/gpt-5.4"}}})
+
+    meta = get_agent_meta("implementor", home=tmp_path)
+
+    assert meta["model"]["opencode"] == "openai/gpt-5.4"
+    # Unset CLI falls back to template default
+    assert meta["model"]["claude"] == "sonnet"
+
+
+def test_get_agent_meta_auto_load_missing_store_is_noop(tmp_path: Path) -> None:
+    """No overrides.json at home → get_agent_meta returns template defaults."""
+    # No file written at tmp_path/.ai-harness/overrides.json
+    meta = get_agent_meta("implementor", home=tmp_path)
+
+    assert meta["model"]["opencode"] == "opencode-go/deepseek-v4-pro"
+    assert meta["model"]["claude"] == "sonnet"
+    assert meta["description"].startswith("Implements one GitHub issue")
+
+
+def test_get_agent_meta_auto_load_partial_override_preserves_others(tmp_path: Path) -> None:
+    """Partial override leaves untouched fields and untouched agents at template defaults."""
+    _write_overrides_store(
+        tmp_path,
+        {"implementor": {"model": {"opencode": "openai/gpt-5.4"}, "effort": {"opencode": "high"}}},
+    )
+
+    implementor = get_agent_meta("implementor", home=tmp_path)
+    explorer = get_agent_meta("explorer", home=tmp_path)
+
+    assert implementor["model"]["opencode"] == "openai/gpt-5.4"
+    assert implementor["effort"] == {"opencode": "high"}
+    assert implementor["model"]["claude"] == "sonnet"  # not overridden → default
+    assert implementor["mode"] == "subagent"  # not in override → default
+    # Explorer untouched
+    assert explorer["model"]["opencode"] == "opencode-go/kimi-k2.7-code"
+    assert "effort" not in explorer
+
+
+def test_get_agent_meta_auto_load_unknown_override_agent_ignored(tmp_path: Path) -> None:
+    """Overrides keyed by an unknown agent are silently ignored on auto-load."""
+    _write_overrides_store(tmp_path, {"unknown-agent": {"model": {"opencode": "openai/gpt-5.4"}}})
+
+    meta = get_agent_meta("implementor", home=tmp_path)
+
+    assert meta["model"]["opencode"] == "opencode-go/deepseek-v4-pro"
+
+
+def test_get_agent_meta_auto_load_malformed_store_raises(tmp_path: Path) -> None:
+    """Malformed JSON in overrides.json raises JSONDecodeError (no silent fallback)."""
+    bad_path = tmp_path / ".ai-harness" / "overrides.json"
+    bad_path.parent.mkdir(parents=True, exist_ok=True)
+    bad_path.write_text("{not valid json", encoding="utf-8")
+
+    with pytest.raises(json.JSONDecodeError):
+        get_agent_meta("implementor", home=tmp_path)
+
+
+def test_get_agent_meta_explicit_overrides_wins_over_store(tmp_path: Path) -> None:
+    """An explicit overrides=... arg skips the store lookup entirely."""
+    _write_overrides_store(tmp_path, {"implementor": {"model": {"opencode": "openai/gpt-5.4"}}})
+
+    meta = get_agent_meta("implementor", overrides={"implementor": {"model": {"opencode": "override"}}}, home=tmp_path)
+
+    assert meta["model"]["opencode"] == "override"
+
+
+def test_render_agents_auto_loads_override_store_from_home(tmp_path: Path) -> None:
+    """render_agents(cli, home=home) reads the store once and threads it through."""
+    _write_overrides_store(tmp_path, {"implementor": {"model": {"opencode": "openai/gpt-5.4"}}})
+
+    pairs = render_agents(AgentCli.OPENCODE, ["implementor"], home=tmp_path)
+
+    fm = _parse_frontmatter(pairs[0][1])
+    assert fm["model"] == "openai/gpt-5.4"
+
+
+# ---------------------------------------------------------------------------
+# render_agents with explicit overrides must be isolated from ambient HOME state
+# ---------------------------------------------------------------------------
+
+
+def test_render_agents_explicit_overrides_skips_malformed_home_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """render_agents with explicit overrides= must not read ~/.ai-harness/overrides.json
+    at the ambient HOME — even if that file is malformed. Confirms the mode lookup
+    inside the Claude dispatch path also flows through the in-memory overrides.
+    """
+    # Malformed overrides.json at HOME — any reader would crash on json.loads.
+    bad_path = tmp_path / ".ai-harness" / "overrides.json"
+    bad_path.parent.mkdir(parents=True, exist_ok=True)
+    bad_path.write_text("{not valid json", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    # Explicit empty overrides — must NOT read HOME. Pass home=tmp_path so the
+    # frontmatter pass still uses tmp_path (no home store either, but explicit
+    # overrides sidestep ambient state regardless of the home arg).
+    pairs = render_agents(
+        AgentCli.CLAUDE,
+        ["implementor"],
+        overrides={},
+        home=tmp_path,
+    )
+
+    fm = _parse_frontmatter(pairs[0][1])
+    assert fm["model"] == "sonnet"  # template default — proves HOME was not read
+
+
+def test_render_agents_explicit_overrides_sidestep_home_store_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A well-formed but conflicting HOME store must NOT bleed into render_agents
+    when the caller passed explicit overrides — including for the mode lookup
+    (a HOME-only override for ``mode`` must not redirect dispatch).
+    """
+    _write_overrides_store(
+        tmp_path,
+        {"implementor": {"model": {"claude": "home-value"}, "mode": "primary"}},
+    )
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    pairs = render_agents(
+        AgentCli.CLAUDE,
+        ["implementor"],
+        overrides={"implementor": {"model": {"claude": "explicit-value"}}},
+    )
+
+    # Explicit overrides win on model...
+    fm = _parse_frontmatter(pairs[0][1])
+    assert fm["model"] == "explicit-value"
+    # ...and the explicit empty mode keeps dispatch in the subagent branch
+    # (not the skill branch), proving the mode lookup also saw the in-memory
+    # overrides, not HOME.
+    pair = _find_pair(pairs, "implementor")
+    assert pair is not None
+    assert pair[0] == ".claude/agents/implementor.md"
+
+
+def test_render_agents_mode_override_routes_through_dispatch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """When an explicit override flips an agent's mode to primary, render_agents
+    must route it to the Claude skill directory (not the agents directory).
+    Confirms overrides thread all the way through mode lookup, not just frontmatter.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path))  # no overrides.json on disk
+
+    pairs = render_agents(
+        AgentCli.CLAUDE,
+        ["implementor"],
+        overrides={"implementor": {"mode": "primary"}},
+    )
+
+    # Primary → skill directory, with SKILL.md as the leaf filename.
+    skill_paths = [path for path, _ in pairs if path.endswith("/SKILL.md")]
+    assert skill_paths, f"expected a SKILL.md dispatch, got {[p for p, _ in pairs]}"
+    assert skill_paths[0].endswith("/loop-orchestrator/SKILL.md")

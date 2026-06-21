@@ -16,8 +16,11 @@ destination layout) are private and owned by ``render_agents``.
 
 from __future__ import annotations
 
+import copy
+import json
 from importlib.resources import files
 from importlib.resources.abc import Traversable
+from pathlib import Path
 
 import yaml
 
@@ -105,6 +108,63 @@ def _loop_agent_dir() -> Traversable:
     return files(_LOOP_AGENT_PACKAGE) / _LOOP_AGENT_DIR
 
 
+# ---------------------------------------------------------------------------
+# Override store — ``<home>/.ai-harness/overrides.json``
+# ---------------------------------------------------------------------------
+
+_OVERRIDES_REL = ".ai-harness/overrides.json"
+
+
+def _load_override_store(home: Path) -> dict:
+    """Return the per-agent override store at ``home/.ai-harness/overrides.json``.
+
+    Returns ``{}`` when the file is missing (no-op override). Malformed JSON
+    is raised as-is so the user can fix it instead of silently rendering
+    template defaults. Owned here — next to the merge logic that consumes
+    it — so the operations layer doesn't need to know about the store path.
+    """
+    path = home / _OVERRIDES_REL
+    if not path.is_file():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def write_override_store(home: Path, payload: dict) -> None:
+    """Deep-merge *payload* into the per-agent override store and write it back.
+
+    Public so the ``set-models`` wizard can persist user choices without
+    re-implementing the store path. Existing entries for other agents, or
+    for the same agent under different fields, are preserved — only the
+    keys present in *payload* change. The file is written atomically: an
+    in-memory merge, then a single write to ``~/.ai-harness/overrides.json``.
+    Malformed existing JSON is raised as-is (matching the loader's contract).
+    """
+    existing = _load_override_store(home)
+    merged = _deep_merge_override_store(existing, payload)
+    path = home / _OVERRIDES_REL
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(merged, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _deep_merge_override_store(base: dict, override: dict) -> dict:
+    """Recursively merge *override* into *base*, returning a fresh dict.
+
+    Same shape as ``_deep_merge`` (used at render time) but operates on
+    a fresh copy of *base* rather than the in-place render path so the
+    wizard can keep its source-of-truth pristine between calls.
+    """
+    import copy
+
+    result = copy.deepcopy(base)
+    for key, value in override.items():
+        base_value = result.get(key)
+        if isinstance(base_value, dict) and isinstance(value, dict):
+            result[key] = _deep_merge_override_store(base_value, value)
+        else:
+            result[key] = copy.deepcopy(value)
+    return result
+
+
 def _discover_loop_agents() -> list[str]:
     """Return sorted list of loop agent template names (without .md extension)."""
     root = _loop_agent_dir()
@@ -121,20 +181,62 @@ def _read_template_source(name: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def get_agent_meta(name: str) -> dict:
+def get_agent_meta(name: str, overrides: dict | None = None, *, home: Path | None = None) -> dict:
     """Return the metadata dict for a named agent (from ``_AGENT_META``).
+
+    *overrides* is an optional per-agent partial overlay (see project docs).
+    When ``None`` (the default), the override store is loaded from
+    ``home/.ai-harness/overrides.json`` (``Path.home()`` when *home* is
+    ``None``); an absent file is a no-op, a malformed file raises
+    ``json.JSONDecodeError``. When provided, the dict is used verbatim —
+    callers can pass ``{}`` for an explicit empty store, sidestepping the
+    disk lookup. The override entry for *name* is deep-merged over the
+    template defaults; absent or unknown agents keep their template values.
+    The returned dict is always a fresh copy so callers cannot mutate the
+    shared template state.
 
     Public so tests can derive expected frontmatter from the same source.
     """
     meta = _AGENT_META.get(name)
     if meta is None:
         raise ValueError(f"Unknown agent template: {name!r}")
-    return meta
+    if overrides is None:
+        overrides = _load_override_store(home if home is not None else Path.home())
+    override_entry = overrides.get(name, {})
+    return _deep_merge(meta, override_entry)
 
 
-def _get_agent_mode(name: str) -> str:
-    """Return the mode (subagent|primary) for a named agent."""
-    return get_agent_meta(name).get("mode", "subagent")
+def _deep_merge(base: dict, override: dict) -> dict:
+    """Return a fresh dict with *override* recursively merged over *base*.
+
+    Dicts merge key-by-key (recursively); scalars and lists in *override*
+    replace those in *base*. The original *base* is never mutated; the
+    returned dict (and any nested dicts inside it) are fresh copies.
+    """
+    result = copy.deepcopy(base)
+    for key, value in override.items():
+        base_value = result.get(key)
+        if isinstance(base_value, dict) and isinstance(value, dict):
+            result[key] = _deep_merge(base_value, value)
+        else:
+            result[key] = copy.deepcopy(value)
+    return result
+
+
+def _get_agent_mode(
+    name: str,
+    overrides: dict | None = None,
+    *,
+    home: Path | None = None,
+) -> str:
+    """Return the mode (subagent|primary) for a named agent.
+
+    Threads *overrides* and *home* through to :func:`get_agent_meta` so the
+    mode lookup shares the same resolution path as the frontmatter pass — an
+    explicit ``overrides=`` arg (including ``{}``) must NOT fall through to a
+    ``~/.ai-harness/overrides.json`` read at the ambient ``$HOME``.
+    """
+    return get_agent_meta(name, overrides=overrides, home=home).get("mode", "subagent")
 
 
 def _read_template_body(name: str) -> str:
@@ -160,7 +262,7 @@ def _yaml_dump_frontmatter(data: dict[str, object]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _render_opencode_agent(name: str) -> tuple[str, str]:
+def _render_opencode_agent(name: str, overrides: dict | None = None) -> tuple[str, str]:
     """Render a loop agent template into an OpenCode agent file.
 
     Returns (filename, content) where filename is ``<name>.md`` and content is
@@ -168,7 +270,7 @@ def _render_opencode_agent(name: str) -> tuple[str, str]:
 
     Raises ValueError if the agent's metadata lacks ``model.opencode``.
     """
-    meta = get_agent_meta(name)
+    meta = get_agent_meta(name, overrides=overrides)
     body = _read_template_body(name)
 
     model_map = meta.get("model")
@@ -180,6 +282,16 @@ def _render_opencode_agent(name: str) -> tuple[str, str]:
         "mode": meta.get("mode", "subagent"),
         "model": model_map["opencode"],
     }
+
+    # Emit effort as OpenCode's ``reasoningEffort`` only when configured for this CLI.
+    # ``None`` means the wizard deliberately cleared a stale override (e.g. when
+    # switching to a non-reasoning model); rendering that as ``null`` would
+    # leave stale frontmatter on disk, so we treat ``None`` the same as unset.
+    effort_map = meta.get("effort")
+    if isinstance(effort_map, dict):
+        opencode_effort = effort_map.get("opencode")
+        if opencode_effort is not None:
+            opencode_frontmatter["reasoningEffort"] = opencode_effort
 
     # Pass through the permission block if present
     if "permission" in meta:
@@ -195,7 +307,7 @@ def _render_opencode_agent(name: str) -> tuple[str, str]:
     return f"{name}.md", rendered
 
 
-def _render_claude_agent(name: str) -> tuple[str, str]:
+def _render_claude_agent(name: str, overrides: dict | None = None) -> tuple[str, str]:
     """Render a loop agent template into a Claude Code agent file.
 
     Returns (filename, content) where filename is ``<name>.md`` and content is
@@ -203,7 +315,7 @@ def _render_claude_agent(name: str) -> tuple[str, str]:
 
     Raises ValueError if the agent lacks ``model.claude`` or has ``mode: primary``.
     """
-    meta = get_agent_meta(name)
+    meta = get_agent_meta(name, overrides=overrides)
     body = _read_template_body(name)
 
     model_map = meta.get("model")
@@ -220,6 +332,16 @@ def _render_claude_agent(name: str) -> tuple[str, str]:
         "model": model_map["claude"],
     }
 
+    # Emit effort as Claude's ``effort`` only when configured for this CLI.
+    # ``None`` means the wizard deliberately cleared a stale override; rendering
+    # that as ``null`` would leave stale frontmatter on disk, so we treat
+    # ``None`` the same as unset.
+    effort_map = meta.get("effort")
+    if isinstance(effort_map, dict):
+        claude_effort = effort_map.get("claude")
+        if claude_effort is not None:
+            claude_frontmatter["effort"] = claude_effort
+
     # Translate OpenCode permission block to Claude-native tools allow-list
     permission = meta.get("permission")
     if isinstance(permission, dict) and permission.get("edit") == "deny" and permission.get("write") == "deny":
@@ -233,15 +355,19 @@ def _render_claude_agent(name: str) -> tuple[str, str]:
     return f"{name}.md", rendered
 
 
-def _render_claude_skill(name: str) -> tuple[str, str]:
+def _render_claude_skill(name: str, overrides: dict | None = None) -> tuple[str, str]:
     """Render the primary loop agent template into a Claude Code skill file.
 
     Returns (filename, content) where filename is ``SKILL.md`` and content is
     the full rendered frontmatter + body.
 
+    The skill carries only ``description`` in frontmatter — no model, effort,
+    or tools. Overrides are intentionally ignored: skills run on the session
+    model and inherit the user's effort setting.
+
     Raises ValueError if the agent lacks ``model.claude`` or has mode other than ``primary``.
     """
-    meta = get_agent_meta(name)
+    meta = get_agent_meta(name, overrides=overrides)
     body = _read_template_body(name)
 
     model_map = meta.get("model")
@@ -257,6 +383,7 @@ def _render_claude_skill(name: str) -> tuple[str, str]:
     }
     # No name field — skills aren't spawned by name.
     # No model field — skills run on the session model.
+    # No effort field — skills inherit the user's session effort setting.
     # No tools field — unrestricted.
     # No mode field — Claude has no mode concept; skill-vs-agent is determined
     # by destination directory, not frontmatter.
@@ -299,25 +426,36 @@ _CLAUDE_SKILL_DIR = ".claude/skills/loop-orchestrator"
 _OPENCODE_AGENT_DIR = ".config/opencode/agent"
 
 
-def _render_claude(name: str) -> tuple[str, str]:
+def _render_claude(
+    name: str,
+    overrides: dict | None = None,
+    *,
+    home: Path | None = None,
+) -> tuple[str, str]:
     """Render one Claude loop agent as a home-relative (path, content) pair.
 
     Primary agents become the orchestrator skill; all others become subagents.
     """
-    if _get_agent_mode(name) == "primary":
-        filename, content = _render_claude_skill(name)
+    if _get_agent_mode(name, overrides=overrides, home=home) == "primary":
+        filename, content = _render_claude_skill(name, overrides=overrides)
         return f"{_CLAUDE_SKILL_DIR}/{filename}", content
-    filename, content = _render_claude_agent(name)
+    filename, content = _render_claude_agent(name, overrides=overrides)
     return f"{_CLAUDE_AGENTS_DIR}/{filename}", content
 
 
-def _render_opencode(name: str) -> tuple[str, str]:
+def _render_opencode(name: str, overrides: dict | None = None) -> tuple[str, str]:
     """Render one OpenCode loop agent as a home-relative (path, content) pair."""
-    filename, content = _render_opencode_agent(name)
+    filename, content = _render_opencode_agent(name, overrides=overrides)
     return f"{_OPENCODE_AGENT_DIR}/{filename}", content
 
 
-def render_agents(cli: AgentCli, names: list[str] | None = None) -> list[tuple[str, str]]:
+def render_agents(
+    cli: AgentCli,
+    names: list[str] | None = None,
+    overrides: dict | None = None,
+    *,
+    home: Path | None = None,
+) -> list[tuple[str, str]]:
     """Render the loop agents for *cli* as home-relative (path, content) pairs.
 
     The sole public agent-render entry. Owns skill-vs-agent mode dispatch,
@@ -326,13 +464,20 @@ def render_agents(cli: AgentCli, names: list[str] | None = None) -> list[tuple[s
     inline emission.
 
     *names* defaults to the discovered loop agents; pass an explicit list to
-    render a subset. CLIs without native agent support return an empty list.
+    render a subset. *overrides* is an optional per-agent partial overlay
+    deep-merged over the template defaults; ``None`` loads the override
+    store from ``home/.ai-harness/overrides.json`` (default
+    ``Path.home()``), ``{}`` is an explicit no-op. CLIs without native
+    agent support return an empty list.
     """
     if names is None:
         names = _discover_loop_agents()
 
+    if overrides is None:
+        overrides = _load_override_store(home if home is not None else Path.home())
+
     if cli == AgentCli.CLAUDE:
-        return [_render_claude(name) for name in names]
+        return [_render_claude(name, overrides=overrides) for name in names]
     if cli == AgentCli.OPENCODE:
-        return [_render_opencode(name) for name in names]
+        return [_render_opencode(name, overrides=overrides) for name in names]
     return []

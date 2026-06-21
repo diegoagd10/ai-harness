@@ -12,6 +12,7 @@ from pathlib import Path
 from invoke import task
 
 from e2e.install_lifecycle import run as run_install_lifecycle
+from e2e.set_models_lifecycle import run as run_set_models_lifecycle
 from e2e.uninstall_lifecycle import run as run_uninstall_lifecycle
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -29,9 +30,16 @@ def uninstall(ctx) -> None:
     run_uninstall_lifecycle(str(REPO_ROOT))
 
 
+@task
+def set_models(ctx) -> None:
+    """Run the set-models lifecycle e2e test (arg validation only; interactive is unit-tested)."""
+    run_set_models_lifecycle(str(REPO_ROOT))
+
+
 @task(default=True)
 def test(ctx) -> None:
     """Run all e2e categories (default task)."""
     install(ctx)
     uninstall(ctx)
+    set_models(ctx)
     print("\n=== All e2e categories passed ===")
