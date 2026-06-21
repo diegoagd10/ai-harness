@@ -38,6 +38,7 @@ from ai_harness.modules.wizard.pure import (
     build_confirmation_rows,
     build_effort_picker_rows,
     build_model_picker_rows,
+    build_override_payload,
     claude_wizard_agents,
 )
 
@@ -286,8 +287,15 @@ def run_claude_wizard(*, home: Path) -> bool:
     _print_header("set-models · claude")
     _print_footer()
 
-    # Phase 1: model pass
-    models: dict[str, str] = {agent: _current_claude_model(agent, home) for agent in claude_wizard_agents()}
+    # Phase 1: model pass — snapshot the baseline so Phase 3 can tell what
+    # the user actually changed. Seeding `models` from the baseline also
+    # means "continue without picking an agent" leaves that agent at its
+    # baseline value (no implicit default overwrite).
+    baseline_models: dict[str, str] = {agent: _current_claude_model(agent, home) for agent in claude_wizard_agents()}
+    baseline_efforts: dict[str, str | None] = {
+        agent: _current_claude_effort(agent, home) for agent in claude_wizard_agents()
+    }
+    models: dict[str, str] = dict(baseline_models)
     while True:
         pick = _ask_continue_or_agent("model", models)
         if pick is None:  # Ctrl+C
@@ -302,7 +310,7 @@ def run_claude_wizard(*, home: Path) -> bool:
         models[pick] = new_model
 
     # Phase 2: effort pass
-    efforts: dict[str, str | None] = {agent: _current_claude_effort(agent, home) for agent in claude_wizard_agents()}
+    efforts: dict[str, str | None] = dict(baseline_efforts)
     while True:
         # Show current effort alongside (placeholder if unset)
         display = {agent: (efforts[agent] or "(unset)") for agent in efforts}
@@ -324,13 +332,21 @@ def run_claude_wizard(*, home: Path) -> bool:
         _console.print("[yellow]Cancelled — no overrides written.[/yellow]")
         return False
 
-    payload: dict = {}
-    for agent, (model, effort) in selections.items():
-        payload[agent] = {}
-        if model:
-            payload[agent]["model"] = {"claude": model}
-        if effort:
-            payload[agent]["effort"] = {"claude": effort}
+    # Selective write: only fields where the user's choice differs from the
+    # baseline get serialized. Issue #44 mandates a partial override store;
+    # writing every agent's current model would pollute overrides.json with
+    # template defaults whenever the user opens the wizard and confirms
+    # without changing anything.
+    baseline = {
+        agent: {"model": baseline_models[agent], "effort": baseline_efforts[agent]} for agent in claude_wizard_agents()
+    }
+    payload = build_override_payload(baseline, selections)
+    if not payload:
+        # Nothing changed — leave the override store (and Claude's rendered
+        # agents) untouched. Returning True here is correct: the wizard ran
+        # successfully, it just had nothing to write.
+        _console.print("[green]No changes — overrides untouched.[/green]")
+        return True
     write_override_store(home, payload)
 
     # Re-render Claude's installed loop agents. Generic is intentionally

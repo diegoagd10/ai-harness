@@ -147,3 +147,57 @@ def build_confirmation_rows(
             )
         )
     return rows
+
+
+# ---------------------------------------------------------------------------
+# Selective override payload — issue #45 fix-up.
+#
+# The override store contract from issue #44 is "only fields the user
+# changed are stored; everything else falls back to the template". The
+# wizard must not serialize template defaults into the store just because
+# the user opened it and confirmed without changing anything — that would
+# pollute overrides.json with values that already match the baseline and
+# erase the distinction between "explicit choice" and "default".
+# ---------------------------------------------------------------------------
+
+
+def build_override_payload(
+    baseline: dict[str, dict[str, str | None]],
+    selections: dict[str, tuple[str, str | None]],
+) -> dict:
+    """Return the partial override payload containing only fields the user changed.
+
+    *baseline* maps ``agent -> {"model": current_model, "effort": current_effort}``
+    captured BEFORE the wizard started (override wins, else template). It
+    is the source of truth for "what was already in effect".
+
+    *selections* maps ``agent -> (model, effort)`` as the user chose in
+    this wizard session (unchanged agents equal their baseline; edited
+    agents hold the new value).
+
+    The returned payload only contains ``(agent, field)`` pairs whose
+    selection differs from the baseline. An empty payload means the
+    user's confirm was a no-op and the caller should skip writing. The
+    shape matches what :func:`write_override_store` deep-merges::
+
+        {
+            "implementor": {"model": {"claude": "opus"}},
+            "validator": {"effort": {"claude": "high"}},
+        }
+
+    ``None`` effort is a deliberate state — it means "no effort override;
+    fall back to template". When the baseline had a value and the user
+    cleared it, we emit ``{"effort": {"claude": None}}`` so the merge
+    replaces the prior concrete value with the unset state.
+    """
+    payload: dict = {}
+    for agent, (model, effort) in selections.items():
+        base = baseline.get(agent, {})
+        agent_payload: dict = {}
+        if model != base.get("model"):
+            agent_payload["model"] = {"claude": model}
+        if effort != base.get("effort"):
+            agent_payload["effort"] = {"claude": effort}
+        if agent_payload:
+            payload[agent] = agent_payload
+    return payload

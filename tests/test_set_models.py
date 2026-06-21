@@ -35,6 +35,7 @@ from ai_harness.modules.wizard.pure import (
     build_confirmation_rows,
     build_effort_picker_rows,
     build_model_picker_rows,
+    build_override_payload,
     claude_efforts,
     claude_models,
     claude_wizard_agents,
@@ -183,6 +184,182 @@ def test_build_confirmation_rows_includes_model_and_effort() -> None:
     assert "high" in by_value["implementor"]
     # None effort renders as a placeholder
     assert "sonnet" in by_value["validator"]
+
+
+# ---------------------------------------------------------------------------
+# build_override_payload — selective write keeps the override store partial.
+#
+# The override store contract (issue #44) is "only fields I changed are
+# stored; the rest falls back to template defaults". The wizard must NOT
+# serialize template defaults into the store just because the user opened
+# it and confirmed without changing anything. This helper isolates that
+# decision so the TUI does not have to re-derive it.
+# ---------------------------------------------------------------------------
+
+
+def _baseline(**agents: str | None) -> dict[str, dict[str, str | None]]:
+    """Build a baseline map ``agent -> {"model": m, "effort": e}`` from kwargs.
+
+    Convenience for the tests below — keeps each test focused on the agents
+    it cares about instead of repeating the nested dict literal.
+    """
+    return {
+        agent: {"model": kw.get("model"), "effort": kw.get("effort")}  # type: ignore[dict-item]
+        for agent, kw in agents.items()  # type: ignore[arg-type]
+    }
+
+
+def test_build_override_payload_no_changes_returns_empty() -> None:
+    """When every selection matches the baseline, the payload is empty."""
+    baseline = {
+        "explorer": {"model": "sonnet", "effort": None},
+        "implementor": {"model": "sonnet", "effort": None},
+        "validator": {"model": "sonnet", "effort": None},
+    }
+    selections = {
+        "explorer": ("sonnet", None),
+        "implementor": ("sonnet", None),
+        "validator": ("sonnet", None),
+    }
+    assert build_override_payload(baseline, selections) == {}
+
+
+def test_build_override_payload_does_not_pollute_with_template_defaults() -> None:
+    """A fresh install (no override file) keeps the store empty when nothing changes.
+
+    This is the validator's "no default pollution" requirement: opening the
+    wizard and confirming without touching anything must not write
+    ``{"implementor": {"model": {"claude": "sonnet"}}}`` to overrides.json.
+    """
+    baseline = {agent: {"model": "sonnet", "effort": None} for agent in claude_wizard_agents()}
+    selections = {agent: ("sonnet", None) for agent in claude_wizard_agents()}
+    payload = build_override_payload(baseline, selections)
+
+    # No agent appears in the payload at all.
+    assert payload == {}
+    # Defensive: no agent accidentally leaked a default-model entry.
+    for agent in claude_wizard_agents():
+        assert agent not in payload
+
+
+def test_build_override_payload_only_changed_model_is_written() -> None:
+    """Changing one agent's model writes only that (agent, model) entry."""
+    baseline = {
+        "explorer": {"model": "sonnet", "effort": None},
+        "implementor": {"model": "sonnet", "effort": None},
+        "validator": {"model": "sonnet", "effort": None},
+    }
+    selections = {
+        "explorer": ("sonnet", None),
+        "implementor": ("opus", None),
+        "validator": ("sonnet", None),
+    }
+    payload = build_override_payload(baseline, selections)
+
+    assert payload == {"implementor": {"model": {"claude": "opus"}}}
+
+
+def test_build_override_payload_only_changed_effort_is_written() -> None:
+    """Setting an effort where baseline had None writes only that field."""
+    baseline = {
+        "validator": {"model": "sonnet", "effort": None},
+    }
+    selections = {
+        "validator": ("sonnet", "high"),
+    }
+    payload = build_override_payload(baseline, selections)
+
+    assert payload == {"validator": {"effort": {"claude": "high"}}}
+
+
+def test_build_override_payload_both_fields_changed_writes_both() -> None:
+    """Changing both model and effort for the same agent writes both entries."""
+    baseline = {
+        "implementor": {"model": "sonnet", "effort": None},
+    }
+    selections = {
+        "implementor": ("opus", "high"),
+    }
+    payload = build_override_payload(baseline, selections)
+
+    assert payload == {
+        "implementor": {"model": {"claude": "opus"}, "effort": {"claude": "high"}},
+    }
+
+
+def test_build_override_payload_keeps_existing_non_default_override_untouched() -> None:
+    """When the user keeps a non-default existing value, nothing is written for it.
+
+    The existing override entry already in the store survives because we do
+    not re-serialize it — write_override_store deep-merges, so untouched
+    fields are preserved verbatim.
+    """
+    # Existing override: implementor had been previously set to haiku.
+    baseline = {
+        "explorer": {"model": "sonnet", "effort": None},
+        "implementor": {"model": "haiku", "effort": None},
+        "validator": {"model": "sonnet", "effort": None},
+    }
+    # User changes nothing — confirms with current values as-is.
+    selections = {
+        "explorer": ("sonnet", None),
+        "implementor": ("haiku", None),
+        "validator": ("sonnet", None),
+    }
+    payload = build_override_payload(baseline, selections)
+
+    # The non-default baseline for implementor must not be re-serialized —
+    # serializing it would write "haiku" to the store, masking the fact that
+    # the user never touched it. Cleaner: leave the store alone.
+    assert payload == {}
+
+
+def test_build_override_payload_effort_change_from_value_to_other() -> None:
+    """Changing effort from one set value to another writes only the effort."""
+    baseline = {
+        "implementor": {"model": "sonnet", "effort": "low"},
+    }
+    selections = {
+        "implementor": ("sonnet", "high"),
+    }
+    payload = build_override_payload(baseline, selections)
+
+    assert payload == {"implementor": {"effort": {"claude": "high"}}}
+
+
+def test_build_override_payload_unsetting_effort_writes_empty_effort_entry() -> None:
+    """Picking ``None`` effort (clearing it) writes an empty effort entry.
+
+    The override store uses ``None`` to mean "fall back to template"; we
+    preserve that semantic by emitting an explicit ``effort: {}`` slot so
+    the merge replaces the prior value with no value.
+    """
+    baseline = {
+        "validator": {"model": "sonnet", "effort": "high"},
+    }
+    selections = {
+        "validator": ("sonnet", None),
+    }
+    payload = build_override_payload(baseline, selections)
+
+    assert payload == {"validator": {"effort": {"claude": None}}}
+
+
+def test_build_override_payload_ignores_agent_missing_from_baseline() -> None:
+    """An agent with no baseline entry is treated as fresh defaults.
+
+    Defensive: the wizard always seeds baseline from ``_current_claude_*``
+    for every wizard agent, but if a caller forgets one, the helper still
+    produces a sensible payload by comparing against ``None`` (which
+    ``_current_claude_effort`` returns when unset).
+    """
+    baseline: dict[str, dict[str, str | None]] = {}
+    selections = {
+        "explorer": ("opus", "high"),
+    }
+    payload = build_override_payload(baseline, selections)
+
+    assert payload == {"explorer": {"model": {"claude": "opus"}, "effort": {"claude": "high"}}}
 
 
 # ---------------------------------------------------------------------------
@@ -550,6 +727,198 @@ def test_filterable_select_still_enables_search_filter_kwarg() -> None:
     assert captured[0].get("use_search_filter") is True
     assert captured[0].get("use_jk_keys") is False
     assert captured[0].get("use_arrow_keys") is True
+
+
+# ---------------------------------------------------------------------------
+# Wizard — selective override write (issue #45 fix-up)
+#
+# These tests drive ``run_claude_wizard`` end-to-end with monkey-patched
+# pickers. They verify that the override store stays partial — the bug the
+# validator flagged was that the wizard wrote every agent's current model
+# into overrides.json even when the user had not changed anything, polluting
+# the store with template defaults.
+# ---------------------------------------------------------------------------
+
+
+class _ScriptedSelect:
+    """A questionary.select stub that returns a queued value from .ask().
+
+    Each instance consumes one entry from ``responses`` (a list). When the
+    list is exhausted, the spy returns ``"__continue__"`` — the wizard's
+    sentinel for "advance to the next phase without editing" — which lets
+    the test script a full happy-path flow without real terminal input.
+    """
+
+    instances: list[_ScriptedSelect] = []
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        self.args = args
+        self.kwargs = kwargs
+        self._responses: list[object] = []
+        type(self).instances.append(self)
+
+    def queue(self, *values: object) -> _ScriptedSelect:
+        """Schedule *values* to be returned by successive .ask() calls."""
+        self._responses.extend(values)
+        return self
+
+    def ask(self) -> object:
+        if self._responses:
+            return self._responses.pop(0)
+        # Default fall-through: simulate the user pressing Continue.
+        return "__continue__"
+
+
+class _ScriptedConfirm:
+    """A questionary.confirm stub that returns ``True`` (the user pressed enter)."""
+
+    instances: list[_ScriptedConfirm] = []
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        self.args = args
+        self.kwargs = kwargs
+        self._response: bool = True
+        type(self).instances.append(self)
+
+    def queue(self, value: bool) -> _ScriptedConfirm:
+        self._response = value
+        return self
+
+    def ask(self) -> bool:
+        return self._response
+
+
+def _override_file(home: Path) -> Path:
+    return home / ".ai-harness" / "overrides.json"
+
+
+def test_run_claude_wizard_no_changes_does_not_create_override_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Opening the wizard and confirming without edits leaves overrides.json absent.
+
+    Regression for the validator's CRITICAL finding on issue #45: the wizard
+    used to write every agent's current model into the override store,
+    polluting it with template defaults. A fresh HOME plus a confirm without
+    edits must produce no override file at all.
+    """
+    from ai_harness.modules.wizard import tui
+
+    monkeypatch.setattr(tui.questionary, "select", _ScriptedSelect)
+    monkeypatch.setattr(tui.questionary, "confirm", _ScriptedConfirm)
+
+    _ScriptedSelect.instances = []
+    _ScriptedConfirm.instances = []
+
+    wrote = tui.run_claude_wizard(home=tmp_path)
+
+    assert wrote is True, "wizard ran to completion; True is correct even with no writes"
+    assert not _override_file(tmp_path).exists(), (
+        "confirming without edits must NOT create overrides.json — that would "
+        "be the default-pollution bug the validator flagged."
+    )
+
+
+def test_run_claude_wizard_model_change_writes_only_changed_agent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Editing one agent's model writes only that (agent, model) entry."""
+    from ai_harness.modules.wizard import tui
+
+    monkeypatch.setattr(tui.questionary, "select", _ScriptedSelect)
+    monkeypatch.setattr(tui.questionary, "confirm", _ScriptedConfirm)
+
+    _ScriptedSelect.instances = []
+    _ScriptedConfirm.instances = []
+
+    # Phase 1 (model pass): agent-pick returns "implementor", model-pick
+    # returns "opus", then the next agent-pick returns Continue.
+    # Phase 2 (effort pass): agent-pick returns Continue immediately.
+    # Phase 3 (confirm): yes.
+    scripted = _ScriptedSelect()
+    scripted.queue("implementor", "opus", "__continue__", "__continue__")
+
+    monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
+    confirm = _ScriptedConfirm().queue(True)
+    monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
+
+    wrote = tui.run_claude_wizard(home=tmp_path)
+
+    assert wrote is True
+    overrides = json.loads(_override_file(tmp_path).read_text(encoding="utf-8"))
+    assert overrides == {"implementor": {"model": {"claude": "opus"}}}
+
+
+def test_run_claude_wizard_existing_override_kept_when_user_confirms_as_is(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A pre-existing non-default override survives a wizard session that confirms without edits.
+
+    This is the "existing override values that user leaves as current may
+    remain only if already present" half of the validator's spec: the
+    wizard must NOT overwrite the prior file with a default-only payload.
+    """
+    from ai_harness.modules.wizard import tui
+
+    # Seed an existing override that differs from the template default.
+    _override_file(tmp_path).parent.mkdir(parents=True, exist_ok=True)
+    _override_file(tmp_path).write_text(
+        json.dumps({"implementor": {"model": {"claude": "haiku"}}}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(tui.questionary, "select", _ScriptedSelect)
+    monkeypatch.setattr(tui.questionary, "confirm", _ScriptedConfirm)
+    _ScriptedSelect.instances = []
+    _ScriptedConfirm.instances = []
+
+    # User does not pick any agent — both phases go straight to confirm.
+    scripted = _ScriptedSelect()
+    scripted.queue("__continue__", "__continue__")
+    monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
+    confirm = _ScriptedConfirm().queue(True)
+    monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
+
+    wrote = tui.run_claude_wizard(home=tmp_path)
+
+    assert wrote is True
+    overrides = json.loads(_override_file(tmp_path).read_text(encoding="utf-8"))
+    # Existing haiku override must survive untouched.
+    assert overrides["implementor"] == {"model": {"claude": "haiku"}}
+    # No new default entries for other agents.
+    assert set(overrides.keys()) == {"implementor"}
+
+
+def test_run_claude_wizard_effort_change_from_unset_writes_only_effort(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Setting an agent's effort where baseline was None writes only the effort field."""
+    from ai_harness.modules.wizard import tui
+
+    monkeypatch.setattr(tui.questionary, "select", _ScriptedSelect)
+    monkeypatch.setattr(tui.questionary, "confirm", _ScriptedConfirm)
+    _ScriptedSelect.instances = []
+    _ScriptedConfirm.instances = []
+
+    # Phase 1 (model): continue immediately.
+    # Phase 2 (effort): pick validator, set effort to "high", continue.
+    scripted = _ScriptedSelect()
+    scripted.queue("__continue__", "validator", "high", "__continue__")
+    monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
+    confirm = _ScriptedConfirm().queue(True)
+    monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
+
+    wrote = tui.run_claude_wizard(home=tmp_path)
+
+    assert wrote is True
+    overrides = json.loads(_override_file(tmp_path).read_text(encoding="utf-8"))
+    assert overrides == {"validator": {"effort": {"claude": "high"}}}
+    # No model entry leaked in — that would be the default-pollution bug.
+    assert "model" not in overrides["validator"]
 
 
 # ---------------------------------------------------------------------------
