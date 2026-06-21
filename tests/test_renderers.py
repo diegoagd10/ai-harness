@@ -7,6 +7,9 @@ for each agent CLI that supports native agents.
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
+import pytest
 import yaml
 
 from ai_harness.modules.harness.models import AgentCli
@@ -192,3 +195,41 @@ def test_opencode_implementor_has_no_permission_block() -> None:
     assert pair is not None
     fm = _parse_frontmatter(pair[1])
     assert "permission" not in fm, f"implementor should not have permission, got {fm.get('permission')!r}"
+
+
+# ---------------------------------------------------------------------------
+# Invalid metadata → ValueError regression
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "cli, agent_name, bad_meta, error_match",
+    [
+        # OpenCode: missing model.opencode
+        (AgentCli.OPENCODE, "explorer", {}, "missing or invalid model.opencode"),
+        (AgentCli.OPENCODE, "explorer", {"model": {"claude": "sonnet"}}, "missing or invalid model.opencode"),
+        # Claude subagent: missing model.claude
+        (AgentCli.CLAUDE, "explorer", {"mode": "subagent"}, "missing or invalid model.claude"),
+        (
+            AgentCli.CLAUDE,
+            "validator",
+            {"mode": "subagent", "model": {"opencode": "foo"}},
+            "missing or invalid model.claude",
+        ),
+        # Claude skill (primary): missing model.claude
+        (AgentCli.CLAUDE, "loop-orchestrator", {"mode": "primary"}, "missing or invalid model.claude"),
+    ],
+)
+def test_invalid_meta_raises_value_error(
+    cli: AgentCli,
+    agent_name: str,
+    bad_meta: dict,
+    error_match: str,
+) -> None:
+    """Monkeypatching get_agent_meta with missing model key raises ValueError."""
+    with patch(
+        "ai_harness.modules.harness.renderers.get_agent_meta",
+        return_value=bad_meta,
+    ):
+        with pytest.raises(ValueError, match=error_match):
+            render_agents(cli, [agent_name])
