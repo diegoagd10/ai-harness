@@ -9,6 +9,8 @@ non-TTY guards for both the Claude and OpenCode wizards:
 - unknown CLI in ``-o`` → non-zero exit with a clear error
 - Claude wizard under non-TTY → non-zero exit with a TTY message
 - OpenCode wizard under non-TTY → non-zero exit with a TTY message
+- OpenCode wizard when OpenCode is absent on PATH → non-zero exit
+  with install/configure guidance (issue #46 acceptance criterion)
 
 The interactive wizards are intentionally NOT e2e-driven — they
 need a TTY. Behavioural coverage for the wizard lives in
@@ -39,6 +41,7 @@ def run(cli_dir: str) -> None:
         _test_set_models_unknown_cli_errors(path_env)
         _test_set_models_claude_non_tty_errors(path_env)
         _test_set_models_opencode_non_tty_errors(path_env)
+        _test_set_models_opencode_absent_errors(bin_dir)
     finally:
         sandboxed_tool_uninstall()
 
@@ -145,8 +148,12 @@ def _test_set_models_opencode_non_tty_errors(path_env: dict[str, str]) -> None:
     """OpenCode wizard under sandboxed subprocess (no TTY) errors rather than hangs.
 
     Slice 3 implemented the OpenCode wizard, so ``-o opencode`` is no
-    longer rejected at the arg-validation layer. The wizard's TTY
-    guard must fire first and surface a clear "requires TTY" error.
+    longer rejected at the arg-validation layer. The wizard's binary
+    guard fires first (because there is no point asking the user to
+    drive a TTY when their machine is missing the binary the wizard
+    needs); when OpenCode is absent on PATH the install/configure
+    guidance surfaces. The TTY guard only fires when OpenCode IS
+    installed.
     """
     home = sandbox_home()
     result = run_in_sandbox(
@@ -166,6 +173,52 @@ def _test_set_models_opencode_non_tty_errors(path_env: dict[str, str]) -> None:
     combined = f"{result.stdout} {result.stderr}"
     assert "tty" in combined.lower() or "interactive" in combined.lower() or combined.strip() != "", (
         f"expected error to mention TTY / interactive, got: {combined!r}"
+    )
+
+
+def _test_set_models_opencode_absent_errors(bin_dir: str) -> None:
+    """``set-models -o opencode`` errors with install/configure guidance when OpenCode is absent.
+
+    Acceptance criterion: when the ``opencode`` binary is not on PATH,
+    the command must fail non-zero and surface guidance telling the
+    user to install OpenCode and run ``opencode auth login``. This is
+    the e2e counterpart to ``tests/test_set_models.py::test_run_opencode_wizard_opencode_absent_returns_false_with_guidance``;
+    that unit test patches ``_resolve_opencode_binary`` so it never
+    sees the real PATH. Here we strip PATH to ONLY the sandboxed
+    ``ai-harness`` bin dir — no system opencode — so the binary check
+    is forced to fail on any host.
+
+    Reaching this code path requires the OpenCode detection to fire
+    BEFORE the TTY check (a sandboxed subprocess has no TTY). The
+    validator's BLOCKER on issue #46 mandated both this test and the
+    reordering that makes it reachable.
+    """
+    home = sandbox_home()
+    # PATH = only the ai-harness bin dir. The sandboxed CLI is there
+    # so ``ai-harness`` itself is still resolvable, but the system PATH
+    # (and any developer-installed ``opencode``) is gone — this test is
+    # deterministic regardless of what's installed on the host.
+    absent_path_env = {"PATH": bin_dir}
+    result = run_in_sandbox(
+        home,
+        "ai-harness",
+        "set-models",
+        "-o",
+        "opencode",
+        extra_env=absent_path_env,
+        check=False,
+    )
+
+    assert result.returncode != 0, (
+        f"expected non-zero exit for absent opencode, got {result.returncode}\n"
+        f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    )
+    combined = f"{result.stdout} {result.stderr}"
+    # The error must name the missing tool AND tell the user what to do.
+    assert "opencode" in combined.lower(), f"expected error to mention 'opencode', got: {combined!r}"
+    lowered = combined.lower()
+    assert "install" in lowered or "auth" in lowered, (
+        f"expected error to include install/configure guidance ('install' or 'auth'), got: {combined!r}"
     )
 
 

@@ -1273,19 +1273,28 @@ def test_cli_set_models_unknown_cli_errors(isolated_home: Path) -> None:
 
 
 def test_cli_set_models_opencode_non_tty_errors(isolated_home: Path) -> None:
-    """OpenCode is now a valid single-CLI input; under non-TTY it errors like Claude.
+    """OpenCode is now a valid single-CLI input; the command errors clearly without a TTY.
 
     The command's arg-validation no longer rejects ``-o opencode`` —
-    slice 3 implemented the OpenCode wizard. The CliRunner exercises
-    the command without a TTY, so the wizard's TTY guard fires and the
-    user sees a clear "requires a TTY" message.
+    slice 3 implemented the OpenCode wizard. CliRunner runs without a
+    TTY by default and the test environment has no ``opencode`` on
+    PATH, so the wizard's binary guard fires before the TTY guard:
+    the user sees the install/configure guidance, not a "requires
+    TTY" message. Either error message is acceptable as long as the
+    exit is non-zero with a non-empty explanation — the binary guard
+    is what surfaces in practice.
     """
     result = runner.invoke(app, ["set-models", "-o", "opencode"])
 
     assert result.exit_code != 0
     combined = f"{result.stdout} {result.stderr}"
-    # Non-TTY guard must surface a clear error, not hang or pass silently.
-    assert "tty" in combined.lower() or "interactive" in combined.lower() or combined.strip() != ""
+    # The binary guard fires first when OpenCode is absent, so the
+    # message will name the install/auth remediation. Accept the TTY
+    # message too in case a developer machine has opencode on PATH.
+    lowered = combined.lower()
+    assert "opencode" in lowered or "tty" in lowered or "interactive" in lowered, (
+        f"expected install/configure or TTY guidance, got: {combined!r}"
+    )
 
 
 def test_cli_set_models_copilot_not_supported(isolated_home: Path) -> None:
@@ -1314,6 +1323,80 @@ def test_cli_set_models_claude_non_tty_errors(isolated_home: Path) -> None:
     # Either "tty", "stdin", or "interactive" is in the message — or simply
     # the wizard bailed cleanly because no input was available.
     assert combined.strip() != "", "expected some output explaining the bail-out"
+
+
+# ---------------------------------------------------------------------------
+# set_models — OpenCode binary guard (acceptance criterion for issue #46)
+# ---------------------------------------------------------------------------
+
+
+def test_cli_set_models_opencode_absent_errors_with_install_guidance(
+    isolated_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``-o opencode`` with no OpenCode on PATH errors with install/configure guidance.
+
+    Acceptance criterion for issue #46: when ``opencode`` is not on the
+    user's PATH, ``set-models -o opencode`` must fail non-zero and
+    surface install/auth guidance rather than hanging on a TTY prompt
+    or producing a misleading "not implemented" message.
+
+    The flow now runs the OpenCode binary check BEFORE the TTY check in
+    :func:`run_wizard_or_bail` — so this CliRunner (no TTY) reliably
+    reaches the binary-missing path. Patching
+    :func:`_resolve_opencode_binary` to ``None`` makes the test
+    independent of whether the developer happens to have opencode
+    installed locally.
+    """
+    from ai_harness.modules.wizard import tui
+
+    monkeypatch.setattr(tui, "_resolve_opencode_binary", lambda: None)
+
+    result = runner.invoke(app, ["set-models", "-o", "opencode"])
+
+    assert result.exit_code != 0, (
+        f"expected non-zero exit for absent opencode, got {result.exit_code}\n"
+        f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    )
+    combined = f"{result.stdout} {result.stderr}"
+    # The guard must surface install/configure guidance — both the
+    # missing tool name AND a remediation step.
+    assert "opencode" in combined.lower(), f"expected 'opencode' in error, got: {combined!r}"
+    lowered = combined.lower()
+    assert "install" in lowered or "auth" in lowered, (
+        f"expected install/configure guidance ('install' or 'auth') in error, got: {combined!r}"
+    )
+
+
+def test_run_wizard_or_bail_opencode_absent_skips_tty_check(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``run_wizard_or_bail`` for OpenCode checks the binary BEFORE the TTY.
+
+    Direct unit test for the ordering: when OpenCode is absent, the
+    function must return ``False`` with the install/auth message even
+    though the test process has no TTY. If the TTY check fired first,
+    the function would return ``False`` with the wrong message and
+    ``_resolve_opencode_binary`` would never be consulted.
+    """
+    from ai_harness.modules.harness import AgentCli
+    from ai_harness.modules.wizard import tui
+
+    binary_calls: list[str] = []
+    monkeypatch.setattr(
+        tui,
+        "_resolve_opencode_binary",
+        lambda: binary_calls.append("called") or None,
+    )
+
+    # CliRunner runs without a TTY — the test harness is no exception.
+    # If the TTY check fired before the binary check, this would
+    # return False with a TTY message instead of the install guidance.
+    wrote = tui.run_wizard_or_bail(AgentCli.OPENCODE, home=tmp_path)
+
+    assert wrote is False
+    assert binary_calls == ["called"], "binary check must fire before TTY check for OpenCode"
 
 
 # ---------------------------------------------------------------------------

@@ -747,13 +747,35 @@ def run_wizard(cli: AgentCli, *, home: Path) -> bool:
 
 
 def run_wizard_or_bail(cli: AgentCli, *, home: Path) -> bool:
-    """Run the wizard, but bail with a clear error if stdin is not a TTY.
+    """Run the wizard, but bail with a clear error if the prerequisites are missing.
 
-    The TUI needs a TTY to drive questionary's readline-style prompts.
-    A non-TTY (e.g. CI, a piped subprocess, CliRunner) is a clear
-    user-error path that should error rather than hang waiting for
-    stdin that will never come.
+    Two distinct pre-flight checks fire BEFORE the wizard itself:
+
+    1. **OpenCode binary present** (only when ``cli`` is
+       :class:`AgentCli.OPENCODE`). There is no point asking the user
+       to drive a TTY when their machine is missing the binary the
+       wizard needs to call. Surfacing the install/configure guidance
+       here — instead of inside ``run_opencode_wizard`` after the TTY
+       check — means the absent-OpenCode path is reachable from
+       non-TTY environments like e2e sandboxes and CI. The wizard
+       itself repeats the check, which is intentional: calling
+       ``run_opencode_wizard`` directly (unit tests) still gets the
+       same guidance.
+    2. **TTY present**. The TUI needs a TTY to drive questionary's
+       readline-style prompts. A non-TTY (e.g. CI, a piped
+       subprocess, CliRunner) is a clear user-error path that should
+       error rather than hang waiting for stdin that will never come.
     """
+    if cli == AgentCli.OPENCODE:
+        binary = _resolve_opencode_binary()
+        if binary is None:
+            _console.print(
+                "[red]OpenCode is not installed (no `opencode` binary on PATH). "
+                "Install OpenCode and run `opencode auth login` so the wizard "
+                "can list the models your machine is authenticated for.[/red]"
+            )
+            return False
+
     if not sys.stdin.isatty():
         _console.print(
             "[red]set-models requires a TTY (interactive terminal). "
