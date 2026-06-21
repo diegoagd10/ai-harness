@@ -73,13 +73,14 @@ _AGENT_META: dict[str, dict] = {
     },
     "loop-orchestrator": {
         "description": (
-            "Loop orchestrator — drains ready-for-agent GitHub issues onto one per-session "
+            "Loop orchestrator — drains loop-labeled sub-issues onto one per-session "
             "loop branch via explorer → implementor → validator subagents, looping "
             "implementor↔validator on any finding until clean, then opens ONE PR for "
             "the whole session. Never touches local main directly; closes each issue itself "
             "right after its validator pass is clean."
         ),
         "mode": "primary",
+        "color": "error",
         "model": {
             "opencode": "openai/gpt-5.5",
             "claude": "sonnet",
@@ -183,6 +184,11 @@ def _render_opencode_agent(name: str) -> tuple[str, str]:
     # Pass through the permission block if present
     if "permission" in meta:
         opencode_frontmatter["permission"] = meta["permission"]
+
+    # Pass through color if present — OpenCode accepts a hex value or one of
+    # primary, secondary, accent, success, warning, error, info.
+    if "color" in meta:
+        opencode_frontmatter["color"] = meta["color"]
 
     yaml_text = _yaml_dump_frontmatter(opencode_frontmatter)
     rendered = f"---\n{yaml_text}\n---\n{body}"
