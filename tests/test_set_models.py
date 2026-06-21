@@ -921,6 +921,54 @@ def test_run_claude_wizard_effort_change_from_unset_writes_only_effort(
     assert "model" not in overrides["validator"]
 
 
+def test_run_claude_wizard_preserves_existing_install_manifest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The wizard's Claude re-render must NOT drop other CLIs from ``installed.json``.
+
+    Regression for the validator's BLOCKER on issue #45: the set-models
+    re-render path used to call ``install_for_agent_clis([Claude], ...)``,
+    which rewrote the install manifest to only contain Claude and silently
+    dropped generic + copilot entries. With multiple CLIs installed, the
+    manifest must survive the wizard intact.
+    """
+    from ai_harness.modules.harness import install_for_agent_clis
+    from ai_harness.modules.wizard import tui
+
+    # Install generic + claude + copilot first so the manifest has them all.
+    install_for_agent_clis(
+        [AgentCli.GENERIC, AgentCli.CLAUDE, AgentCli.COPILOT],
+        home=tmp_path,
+    )
+    manifest_path = tmp_path / ".ai-harness" / "installed.json"
+    before = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert set(before["agent_clis"]) == {"generic", "claude", "copilot"}
+
+    monkeypatch.setattr(tui.questionary, "select", _ScriptedSelect)
+    monkeypatch.setattr(tui.questionary, "confirm", _ScriptedConfirm)
+    _ScriptedSelect.instances = []
+    _ScriptedConfirm.instances = []
+
+    # Edit implementor's model, then confirm.
+    scripted = _ScriptedSelect()
+    scripted.queue("implementor", "opus", "__continue__", "__continue__")
+    monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
+    confirm = _ScriptedConfirm().queue(True)
+    monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
+
+    wrote = tui.run_claude_wizard(home=tmp_path)
+
+    assert wrote is True
+    after = json.loads(manifest_path.read_text(encoding="utf-8"))
+    # All three CLIs survive — the re-render is scoped to Claude loop agents only.
+    assert set(after["agent_clis"]) == {"generic", "claude", "copilot"}
+    assert set(after["files_by_agent_cli"]) == {"generic", "claude", "copilot"}
+    # Generic and copilot paths are byte-identical to before.
+    for cli in ("generic", "copilot"):
+        assert sorted(after["files_by_agent_cli"][cli]) == sorted(before["files_by_agent_cli"][cli])
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

@@ -935,3 +935,90 @@ def test_install_claude_orchestrator_skill_unaffected_by_overrides(tmp_path: Pat
     assert "model" not in fm
     assert "effort" not in fm
     assert "description" in fm
+
+
+# ---------------------------------------------------------------------------
+# re_render_for_agent_clis — scoped loop-agent re-render that preserves manifest
+# ---------------------------------------------------------------------------
+
+
+def test_re_render_claude_preserves_existing_manifest_for_other_clis(tmp_path: Path) -> None:
+    """Re-rendering Claude's loop agents must NOT clobber generic/copilot entries.
+
+    Regression for the validator's BLOCKER on issue #45: the set-models wizard
+    used to call ``install_for_agent_clis([AgentCli.CLAUDE], ...)`` to re-render
+    Claude's loop agents, which rewrote ``installed.json`` with only Claude and
+    silently dropped the entries for any other installed CLIs. The fix is a
+    render-only path that leaves the manifest untouched.
+    """
+    from ai_harness.modules.harness import re_render_for_agent_clis
+
+    install_for_agent_clis(
+        [AgentCli.GENERIC, AgentCli.CLAUDE, AgentCli.COPILOT],
+        home=tmp_path,
+    )
+
+    before = json.loads((tmp_path / MANIFEST_REL).read_text(encoding="utf-8"))
+    assert set(before["agent_clis"]) == {"generic", "claude", "copilot"}
+    assert set(before["files_by_agent_cli"]) == {"generic", "claude", "copilot"}
+    before_files = {k: sorted(v) for k, v in before["files_by_agent_cli"].items()}
+
+    written = re_render_for_agent_clis([AgentCli.CLAUDE], home=tmp_path)
+
+    # Claude loop agents were rewritten.
+    assert written, "re-render should write Claude loop agents"
+    for name in _CLAUDE_SUBAGENT_NAMES:
+        assert (tmp_path / ".claude" / "agents" / f"{name}.md") in written
+    assert (tmp_path / ".claude" / "skills" / _CLAUDE_SKILL_NAME / "SKILL.md") in written
+
+    # Manifest is preserved verbatim — no other CLI is dropped.
+    after = json.loads((tmp_path / MANIFEST_REL).read_text(encoding="utf-8"))
+    assert set(after["agent_clis"]) == {"generic", "claude", "copilot"}
+    assert set(after["files_by_agent_cli"]) == {"generic", "claude", "copilot"}
+    after_files = {k: sorted(v) for k, v in after["files_by_agent_cli"].items()}
+    assert after_files == before_files, "re-render must not modify the manifest"
+
+
+def test_re_render_claude_with_no_prior_install_creates_files_no_manifest(tmp_path: Path) -> None:
+    """Re-rendering Claude without a prior install writes the loop agents but does NOT mint a manifest.
+
+    The manifest is owned by ``install_for_agent_clis``; the re-render path
+    must not invent one. This keeps the two operations clearly separated:
+    install creates the manifest, re-render just refreshes files.
+    """
+    from ai_harness.modules.harness import re_render_for_agent_clis
+
+    written = re_render_for_agent_clis([AgentCli.CLAUDE], home=tmp_path)
+
+    assert written, "re-render writes Claude loop agents even with no prior install"
+    for name in _CLAUDE_SUBAGENT_NAMES:
+        assert (tmp_path / ".claude" / "agents" / f"{name}.md").is_file()
+    assert (tmp_path / ".claude" / "skills" / _CLAUDE_SKILL_NAME / "SKILL.md").is_file()
+    assert not (tmp_path / MANIFEST_REL).exists(), "re-render must not create the install manifest"
+
+
+def test_re_render_generic_is_a_noop(tmp_path: Path) -> None:
+    """Generic has no native loop agents; re-rendering it writes nothing."""
+    from ai_harness.modules.harness import re_render_for_agent_clis
+
+    install_for_agent_clis([AgentCli.GENERIC], home=tmp_path)
+    before = json.loads((tmp_path / MANIFEST_REL).read_text(encoding="utf-8"))
+
+    written = re_render_for_agent_clis([AgentCli.GENERIC], home=tmp_path)
+
+    assert written == []
+    after = json.loads((tmp_path / MANIFEST_REL).read_text(encoding="utf-8"))
+    assert after == before, "generic re-render must not touch the manifest"
+
+
+def test_re_render_claude_applies_overrides_from_store(tmp_path: Path) -> None:
+    """Re-rendering Claude after editing overrides.json propagates the new model into rendered files."""
+    from ai_harness.modules.harness import re_render_for_agent_clis
+
+    install_for_agent_clis([AgentCli.GENERIC, AgentCli.CLAUDE], home=tmp_path)
+    _write_overrides(tmp_path, {"implementor": {"model": {"claude": "opus"}}})
+
+    re_render_for_agent_clis([AgentCli.CLAUDE], home=tmp_path)
+
+    fm = _read_frontmatter(tmp_path / ".claude" / "agents" / "implementor.md")
+    assert fm["model"] == "opus"

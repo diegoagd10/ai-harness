@@ -16,6 +16,7 @@ function in ``renderers.py``.
 Public surface (re-exported from the package)
 ---------------------------------------------
 install_for_agent_clis     Map bundled resources to agent CLI paths, write, record manifest.
+re_render_for_agent_clis   Re-write rendered loop agents without touching the install manifest.
 uninstall_for_agent_clis   Remove files recorded in the manifest.
 """
 
@@ -188,6 +189,16 @@ _INSTALL_PLAN: dict[AgentCli, list[_InstallWriter]] = {
     ],
 }
 
+# Re-render plan — only writers that re-emit loop agents. Used by
+# ``re_render_for_agent_clis`` for scoped refreshes (e.g. after the
+# set-models wizard edits ``overrides.json``) where touching the install
+# manifest would clobber other CLIs. CLIs with no native loop-agent
+# concept (GENERIC, COPILOT) intentionally get an empty list.
+_RENDER_PLAN: dict[AgentCli, list[_InstallWriter]] = {
+    AgentCli.CLAUDE: [partial(_write_rendered_agents, cli=AgentCli.CLAUDE)],
+    AgentCli.OPENCODE: [partial(_write_rendered_agents, cli=AgentCli.OPENCODE)],
+}
+
 
 # --- public operations ----------------------------------------------------
 
@@ -218,6 +229,39 @@ def install_for_agent_clis(agent_clis: list[AgentCli], *, home: Path | None = No
     manifest = InstallManifest(agent_clis=list(agent_clis), written_paths=written_paths)
     _write_manifest(home, list(agent_clis), files_by_agent_cli)
     return manifest
+
+
+def re_render_for_agent_clis(agent_clis: list[AgentCli], *, home: Path | None = None) -> list[Path]:
+    """Re-write the rendered loop agents for *agent_clis* without touching the install manifest.
+
+    Use this for scoped refreshes — e.g. the ``set-models`` wizard editing
+    ``overrides.json`` and re-emitting Claude's loop agents — where calling
+    ``install_for_agent_clis`` with a single CLI would clobber the entries
+    for other installed CLIs in ``~/.ai-harness/installed.json``.
+
+    Behaviour:
+
+    - Only writers in ``_RENDER_PLAN`` run: the persona+skills writers are
+      install-time artifacts that do not depend on override state and are
+      intentionally left alone. Re-running them would re-copy the static
+      template tree and add nothing.
+    - CLIs without native loop-agent support (GENERIC, COPILOT) are no-ops
+      — they have an empty entry in ``_RENDER_PLAN``.
+    - The install manifest is **never read or written**. The re-render path
+      stays orthogonal to install bookkeeping; if a manifest exists, it is
+      preserved verbatim.
+    - Writes are idempotent: byte-identical content for unchanged overrides.
+
+    Returns the absolute paths written (empty list when nothing changed).
+    """
+    home = home if home is not None else Path.home()
+
+    written_paths: list[Path] = []
+    for agent_cli in agent_clis:
+        for write in _RENDER_PLAN.get(agent_cli, []):
+            written = write(home)
+            written_paths.extend(written)
+    return written_paths
 
 
 def uninstall_for_agent_clis(agent_clis: list[AgentCli] | None, *, home: Path | None = None) -> None:

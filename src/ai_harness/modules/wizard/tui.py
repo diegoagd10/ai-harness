@@ -29,7 +29,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from ai_harness.modules.harness.models import AgentCli
-from ai_harness.modules.harness.operations import install_for_agent_clis
+from ai_harness.modules.harness.operations import re_render_for_agent_clis
 from ai_harness.modules.harness.renderers import (
     get_agent_meta,
     write_override_store,
@@ -349,13 +349,16 @@ def run_claude_wizard(*, home: Path) -> bool:
         return True
     write_override_store(home, payload)
 
-    # Re-render Claude's installed loop agents. Generic is intentionally
-    # NOT reinstalled — set-models is a scoped operation. If generic is
-    # not yet installed, the call is a no-op for generic and only writes
-    # the Claude agents that exist (install_for_agent_clis is idempotent
-    # and only writes what's in the install plan).
+    # Re-render Claude's installed loop agents with the fresh overrides.
+    # ``re_render_for_agent_clis`` writes only the rendered-agent files and
+    # leaves ``~/.ai-harness/installed.json`` untouched — unlike
+    # ``install_for_agent_clis`` with a single CLI, which would rewrite the
+    # manifest to only contain Claude and silently drop entries for any
+    # other installed CLIs (generic, copilot, opencode). Generic is
+    # intentionally a no-op: set-models is a scoped operation that
+    # re-emits only the loop-agent files whose override state just changed.
     try:
-        install_for_agent_clis([AgentCli.CLAUDE], home=home)
+        re_render_for_agent_clis([AgentCli.CLAUDE], home=home)
     except (OSError, ValueError) as exc:
         _console.print(f"[red]Failed to re-render Claude agents: {exc}[/red]")
         return False
