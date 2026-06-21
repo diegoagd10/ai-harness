@@ -131,7 +131,7 @@ def test_claude_implementor_has_no_tools_field() -> None:
 
 
 def test_claude_orchestrator_skill_frontmatter() -> None:
-    """Orchestrator skill has description only — no name, model, mode, or tools."""
+    """Orchestrator skill has description only — no name, model, mode, tools, permission, or agents."""
     pairs = render_agents(AgentCli.CLAUDE)
     pair = _find_pair(pairs, "loop-orchestrator")
     assert pair is not None
@@ -143,6 +143,26 @@ def test_claude_orchestrator_skill_frontmatter() -> None:
     assert "mode" not in fm, f"skill should not have mode, got {fm.get('mode')!r}"
     assert "tools" not in fm, f"skill should not have tools, got {fm.get('tools')!r}"
     assert "permission" not in fm, f"skill should not have permission, got {fm.get('permission')!r}"
+    assert "agents" not in fm, f"skill should not have agents, got {fm.get('agents')!r}"
+
+
+def test_claude_orchestrator_body_has_spawn_allowlist() -> None:
+    """Claude orchestrator skill body contains the spawn allowlist as prose.
+
+    ``permission.task`` is not valid in Claude skill frontmatter, so the
+    renderer injects the allowlist as a prose constraint into the body.
+    """
+    pairs = render_agents(AgentCli.CLAUDE)
+    pair = _find_pair(pairs, "loop-orchestrator")
+    assert pair is not None
+    content = pair[1]
+
+    # Body (after frontmatter) must contain the three allowed subagent names
+    body = content.split("---", 2)[-1]
+    assert "explorer" in body
+    assert "implementor" in body
+    assert "validator" in body
+    assert "spawn allowlist" in body.lower() or "subagent spawn" in body.lower()
 
 
 def test_claude_orchestrator_is_skill_not_subagent() -> None:

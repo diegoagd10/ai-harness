@@ -671,13 +671,16 @@ def test_install_claude_rendered_body_matches_template_verbatim(tmp_path: Path) 
 
         assert rendered_body == template_body, f"{name}: body does not match template verbatim"
 
-    # Orchestrator skill — same check
+    # Orchestrator skill — template body is a prefix; the renderer appends a
+    # Claude-only spawn allowlist prose section (permission.task is not valid
+    # in Claude skill frontmatter).
     template_body = (templates_dir / f"{_CLAUDE_SKILL_NAME}.md").read_text(encoding="utf-8")
 
     rendered = (tmp_path / ".claude" / "skills" / _CLAUDE_SKILL_NAME / "SKILL.md").read_text(encoding="utf-8")
     rendered_body = rendered.split("---", 2)[2].removeprefix("\n")
 
-    assert rendered_body == template_body, f"{_CLAUDE_SKILL_NAME}: body does not match template verbatim"
+    assert rendered_body.startswith(template_body), f"{_CLAUDE_SKILL_NAME}: body does not start with template verbatim"
+    assert "spawn allowlist" in rendered_body.lower()
 
 
 # ---------------------------------------------------------------------------

@@ -67,5 +67,5 @@ Render rules:
 | `permission.edit/write: deny` | `tools` allow-list (deterministic: `Read, Grep, Glob, Bash`) |
 | `permission.bash: allow` | `Bash` included in tools |
 | `permission.bash: deny` | `Bash` removed from tools |
-| `permission.task` allowlist | dropped — no Claude skill equivalent |
+| `permission.task` allowlist | dropped from frontmatter; rendered as prose spawn-allowlist section in the skill body because Claude skills have no ``agents`` frontmatter key |
 | OpenCode-only keys (`mode`, `permission`, `hidden`) | dropped
