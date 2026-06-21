@@ -468,6 +468,7 @@ def _ask_claude_effort(agent: str, home: Path) -> str | None:
     """
     rows = build_effort_picker_rows(agent, _current_claude_effort(agent, home))
     choices = [questionary.Choice(title="← Back", value="__back__")]
+    # ponytail: this label belongs in pure.py as PickerRow.display_label; out of scope for #55 (pure.py is frozen)
     choices.extend(questionary.Choice(title=f"{agent} → {row.value.capitalize()}", value=row.value) for row in rows)
     answer = _filterable_select(
         f"Effort for {agent}:",
@@ -502,6 +503,7 @@ def _ask_continue_or_agent(
     choices: list[questionary.Choice] = []
     if phase != "model":
         choices.append(questionary.Choice(title="← Back", value="__back__"))
+        choices.append(questionary.Separator())
     choices.extend(
         questionary.Choice(
             title=f"{agent} - {selections.get(agent, 'sonnet')}",
@@ -718,6 +720,7 @@ def _ask_opencode_effort(agent: str, home: Path) -> str | None:
     """
     rows = build_opencode_effort_picker_rows(agent, _current_opencode_effort(agent, home))
     choices = [questionary.Choice(title="← Back", value="__back__")]
+    # ponytail: this label belongs in pure.py as PickerRow.display_label; out of scope for #55 (pure.py is frozen)
     choices.extend(questionary.Choice(title=f"{agent} → {row.value.capitalize()}", value=row.value) for row in rows)
     answer = _filterable_select(
         f"Reasoning effort for {agent} (low → high):",
@@ -753,6 +756,7 @@ def _ask_opencode_continue_or_agent(
     choices: list[questionary.Choice] = []
     if phase != "model":
         choices.append(questionary.Choice(title="← Back", value="__back__"))
+        choices.append(questionary.Separator())
     choices.extend(
         questionary.Choice(
             title=f"{agent} - {selections.get(agent, '(unset)')}",

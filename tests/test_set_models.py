@@ -1280,6 +1280,110 @@ def test_ask_opencode_continue_or_agent_has_separator_before_continue(monkeypatc
     assert isinstance(choices[continue_index - 1], questionary.Separator)
 
 
+def test_ask_continue_or_agent_has_separator_after_back_on_effort_phase(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A Separator sits immediately after "← Back" and before the agent rows (Claude, effort phase)."""
+    import questionary
+
+    from ai_harness.modules.wizard import tui
+
+    captured: list[object] = []
+
+    def fake_select(message, *, choices, **kwargs):
+        captured.append(choices)
+
+        class _Q:
+            def ask(self) -> str:
+                return "__continue__"
+
+        return _Q()
+
+    monkeypatch.setattr(tui, "_filterable_select", fake_select)
+    tui._ask_continue_or_agent("effort", {})
+
+    choices = captured[0]
+    back_index = next(i for i, c in enumerate(choices) if isinstance(c, questionary.Choice) and c.value == "__back__")
+    assert isinstance(choices[back_index + 1], questionary.Separator)
+
+
+def test_ask_continue_or_agent_model_phase_has_no_leading_separator(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The model phase has no "← Back" choice, so it gets no leading Separator either (Claude path)."""
+    import questionary
+
+    from ai_harness.modules.wizard import tui
+
+    captured: list[object] = []
+
+    def fake_select(message, *, choices, **kwargs):
+        captured.append(choices)
+
+        class _Q:
+            def ask(self) -> str:
+                return "__continue__"
+
+        return _Q()
+
+    monkeypatch.setattr(tui, "_filterable_select", fake_select)
+    tui._ask_continue_or_agent("model", {})
+
+    choices = captured[0]
+    assert not any(c.value == "__back__" for c in choices if isinstance(c, questionary.Choice))
+    assert isinstance(choices[0], questionary.Choice)
+
+
+def test_ask_opencode_continue_or_agent_has_separator_after_back_on_effort_phase(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Separator sits immediately after "← Back" and before the agent rows (OpenCode, effort phase)."""
+    import questionary
+
+    from ai_harness.modules.wizard import tui
+
+    captured: list[object] = []
+
+    def fake_select(message, *, choices, **kwargs):
+        captured.append(choices)
+
+        class _Q:
+            def ask(self) -> str:
+                return "__continue__"
+
+        return _Q()
+
+    monkeypatch.setattr(tui, "_filterable_select", fake_select)
+    tui._ask_opencode_continue_or_agent("effort", {})
+
+    choices = captured[0]
+    back_index = next(i for i, c in enumerate(choices) if isinstance(c, questionary.Choice) and c.value == "__back__")
+    assert isinstance(choices[back_index + 1], questionary.Separator)
+
+
+def test_ask_opencode_continue_or_agent_model_phase_has_no_leading_separator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The model phase has no "← Back" choice, so it gets no leading Separator either (OpenCode path)."""
+    import questionary
+
+    from ai_harness.modules.wizard import tui
+
+    captured: list[object] = []
+
+    def fake_select(message, *, choices, **kwargs):
+        captured.append(choices)
+
+        class _Q:
+            def ask(self) -> str:
+                return "__continue__"
+
+        return _Q()
+
+    monkeypatch.setattr(tui, "_filterable_select", fake_select)
+    tui._ask_opencode_continue_or_agent("model", {})
+
+    choices = captured[0]
+    assert not any(c.value == "__back__" for c in choices if isinstance(c, questionary.Choice))
+    assert isinstance(choices[0], questionary.Choice)
+
+
 # ---------------------------------------------------------------------------
 # Picker row builders — mark current, leave others unmarked
 # ---------------------------------------------------------------------------
