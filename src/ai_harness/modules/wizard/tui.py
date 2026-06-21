@@ -308,7 +308,15 @@ def _filterable_select(
 
 
 def _print_header(title: str) -> None:
-    """Print a header panel with the prompt title and keybinding legend."""
+    """Clear the terminal, then print a header panel with the prompt title and legend.
+
+    Folding the clear into the header render makes "clear + render header"
+    one atomic unit: every phase render (including back-navigation and
+    repeated agent-edit loop iterations) starts from a clean screen instead
+    of stacking on prior output (#51).
+    """
+    if _console.is_terminal:
+        _console.clear()
     _console.print(
         Panel(
             f"[bold]{title}[/bold]\n[dim]{_KEYBINDING_LEGEND}[/dim]",
@@ -425,8 +433,13 @@ def _ask_continue_or_agent(
     ).ask()
 
 
-def _ask_confirm(selections: dict[str, tuple[str, str | None]]) -> bool:
-    """Ask the user to confirm; True on enter, False on Ctrl+C."""
+def _ask_confirm(title: str, selections: dict[str, tuple[str, str | None]]) -> bool:
+    """Ask the user to confirm; True on enter, False on Ctrl+C.
+
+    Clears and prints *title* as the header first so the confirm screen is
+    also cleared+headed like every other phase render (#51).
+    """
+    _print_header(title)
     rows = build_confirmation_rows(selections)
     body = "\n".join(f"  • {row.label}" for row in rows)
     _console.print(
@@ -450,8 +463,6 @@ def run_claude_wizard(*, home: Path) -> bool:
     loop agents (generic is NOT reinstalled — that would touch files
     outside the wizard's scope).
     """
-    _print_header("set-models · claude")
-
     # Phase 1: model pass — snapshot the baseline so Phase 3 can tell what
     # the user actually changed. Seeding `models` from the baseline also
     # means "continue without picking an agent" leaves that agent at its
@@ -466,6 +477,7 @@ def run_claude_wizard(*, home: Path) -> bool:
     def run_model_phase() -> str:
         """Drive the model phase loop; return '__continue__', '__back__', or '__cancel__'."""
         while True:
+            _print_header("set-models · claude — model")
             pick = _ask_continue_or_agent("model", models)
             if pick is None:  # Ctrl+C
                 return "__cancel__"
@@ -481,6 +493,7 @@ def run_claude_wizard(*, home: Path) -> bool:
     def run_effort_phase() -> str:
         """Drive the effort phase loop; return '__continue__', '__back__', or '__cancel__'."""
         while True:
+            _print_header("set-models · claude — effort")
             # Show current effort alongside (placeholder if unset)
             display = {agent: (efforts[agent] or "(unset)") for agent in efforts}
             pick = _ask_continue_or_agent("effort", display)
@@ -512,7 +525,7 @@ def run_claude_wizard(*, home: Path) -> bool:
 
     # Phase 3: confirm + apply
     selections = {agent: (models[agent], efforts[agent]) for agent in claude_wizard_agents()}
-    if not _ask_confirm(selections):
+    if not _ask_confirm("set-models · claude — confirm", selections):
         _console.print("[yellow]Cancelled — no overrides written.[/yellow]")
         return False
 
@@ -679,8 +692,6 @@ def run_opencode_wizard(*, home: Path) -> bool:
 
     joined = join_opencode_catalog(model_ids, catalog)
 
-    _print_header("set-models · opencode")
-
     # Phase 1: model pass — snapshot the baseline so Phase 3 can tell what
     # the user actually changed. Seeding `models` from the baseline also
     # means "continue without picking an agent" leaves that agent at its
@@ -694,6 +705,7 @@ def run_opencode_wizard(*, home: Path) -> bool:
     def run_model_phase() -> str:
         """Drive the model phase loop; return '__continue__', '__back__', or '__cancel__'."""
         while True:
+            _print_header("set-models · opencode — model")
             pick = _ask_opencode_continue_or_agent("model", models)
             if pick is None:  # Ctrl+C
                 return "__cancel__"
@@ -717,6 +729,7 @@ def run_opencode_wizard(*, home: Path) -> bool:
         testable in isolation.
         """
         while True:
+            _print_header("set-models · opencode — effort")
             # Show the current effort alongside (placeholder if unset)
             display = {agent: (efforts[agent] or "(unset)") for agent in efforts}
             pick = _ask_opencode_continue_or_agent("effort", display)
@@ -756,7 +769,7 @@ def run_opencode_wizard(*, home: Path) -> bool:
 
     # Phase 3: confirm + apply
     selections = {agent: (models[agent], efforts[agent]) for agent in agents}
-    if not _ask_confirm(selections):
+    if not _ask_confirm("set-models · opencode — confirm", selections):
         _console.print("[yellow]Cancelled — no overrides written.[/yellow]")
         return False
 

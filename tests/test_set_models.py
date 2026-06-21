@@ -1738,6 +1738,49 @@ def test_run_wizard_skips_clear_when_not_a_terminal(monkeypatch: pytest.MonkeyPa
 
 
 # ---------------------------------------------------------------------------
+# _print_header — clear on every render (issue #51)
+# ---------------------------------------------------------------------------
+
+
+def test_print_header_clears_terminal_before_rendering(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``_print_header`` must clear the terminal before printing its panel.
+
+    Regression guard for #51: moving between wizard parts (model -> effort
+    -> confirm, including back-navigation and repeated agent-edit loops)
+    left prior output stacked on screen. Folding the clear into
+    ``_print_header`` makes "clear + render header" one atomic unit so
+    every phase render starts from a clean screen.
+    """
+    from unittest.mock import PropertyMock
+
+    from ai_harness.modules.wizard import tui
+
+    calls: list[str] = []
+    monkeypatch.setattr(type(tui._console), "is_terminal", PropertyMock(return_value=True))
+    monkeypatch.setattr(tui._console, "clear", lambda: calls.append("clear"))
+    monkeypatch.setattr(tui._console, "print", lambda *a, **kw: calls.append("print"))
+
+    tui._print_header("set-models · claude — model")
+
+    assert calls == ["clear", "print"], f"expected clear before header print, got {calls}"
+
+
+def test_print_header_skips_clear_when_not_a_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``_print_header`` must not clear when stdout is not a terminal (e.g. CI, pytest capture)."""
+    from unittest.mock import PropertyMock
+
+    from ai_harness.modules.wizard import tui
+
+    calls: list[str] = []
+    monkeypatch.setattr(type(tui._console), "is_terminal", PropertyMock(return_value=False))
+    monkeypatch.setattr(tui._console, "clear", lambda: calls.append("clear"))
+
+    tui._print_header("set-models · claude — model")
+
+    assert calls == [], "clear must not be called when _console.is_terminal is False"
+
+
+# ---------------------------------------------------------------------------
 # Wizard pickers — j/k navigation binding (acceptance criterion: vim-style nav)
 # ---------------------------------------------------------------------------
 # These tests verify that ``_filterable_select`` attaches j/k key bindings to
@@ -2217,6 +2260,84 @@ def test_run_claude_wizard_no_back_choice_in_first_model_phase_agent_chooser(
     assert captured, "the agent chooser did not call _filterable_select"
     values = [choice.value for choice in captured[0]]
     assert "__back__" not in values
+
+
+def test_run_claude_wizard_clears_screen_once_per_phase_render(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each phase render (model, effort, confirm) clears the screen exactly once.
+
+    Regression guard for #51: moving between wizard parts used to stack
+    output instead of starting fresh. A straight-through run (continue,
+    continue, confirm) hits exactly three phase renders, so the terminal
+    must be cleared exactly three times.
+    """
+    from unittest.mock import PropertyMock
+
+    from ai_harness.modules.wizard import tui
+
+    monkeypatch.setattr(tui.questionary, "select", _ScriptedSelect)
+    monkeypatch.setattr(tui.questionary, "confirm", _ScriptedConfirm)
+    _ScriptedSelect.instances = []
+    _ScriptedConfirm.instances = []
+
+    clear_calls: list[str] = []
+    monkeypatch.setattr(type(tui._console), "is_terminal", PropertyMock(return_value=True))
+    monkeypatch.setattr(tui._console, "clear", lambda: clear_calls.append("clear"))
+
+    wrote = tui.run_claude_wizard(home=tmp_path)
+
+    assert wrote is True
+    assert clear_calls == ["clear", "clear", "clear"], (
+        f"expected one clear per phase render (model, effort, confirm), got {clear_calls}"
+    )
+
+
+def test_run_claude_wizard_back_navigation_clears_screen_again(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Backing from the effort phase to the model phase clears the screen again.
+
+    Regression guard for #51: back-navigation must re-clear so the
+    re-rendered model phase doesn't stack on top of the effort phase's
+    prior output.
+    """
+    from unittest.mock import PropertyMock
+
+    from ai_harness.modules.wizard import tui
+
+    monkeypatch.setattr(tui.questionary, "select", _ScriptedSelect)
+    monkeypatch.setattr(tui.questionary, "confirm", _ScriptedConfirm)
+    _ScriptedSelect.instances = []
+    _ScriptedConfirm.instances = []
+
+    # Phase 1 (model): continue immediately.
+    # Phase 2 (effort): back -> re-enters phase 1 (model).
+    # Phase 1 again: continue.
+    # Phase 2 again: continue.
+    # Phase 3: confirm.
+    scripted = _ScriptedSelect()
+    scripted.queue(
+        "__continue__",
+        "__back__",
+        "__continue__",
+        "__continue__",
+    )
+    monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
+    confirm = _ScriptedConfirm().queue(True)
+    monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
+
+    clear_calls: list[str] = []
+    monkeypatch.setattr(type(tui._console), "is_terminal", PropertyMock(return_value=True))
+    monkeypatch.setattr(tui._console, "clear", lambda: clear_calls.append("clear"))
+
+    wrote = tui.run_claude_wizard(home=tmp_path)
+
+    assert wrote is True
+    # model, effort (back), model (again), effort (again), confirm = 5 renders.
+    assert clear_calls == ["clear"] * 5, f"expected 5 phase-render clears (back re-clears), got {clear_calls}"
 
 
 def test_run_claude_wizard_preserves_existing_install_manifest(
