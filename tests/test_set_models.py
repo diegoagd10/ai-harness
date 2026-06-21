@@ -865,6 +865,186 @@ def test_run_opencode_wizard_ctrl_c_at_model_phase_writes_nothing(
     assert not _override_file(tmp_path).exists()
 
 
+def test_run_opencode_wizard_back_from_model_picker_returns_to_agent_choice(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Picking "Back" inside the OpenCode model picker returns to the model phase's agent chooser.
+
+    Issue #50, transition 1 (OpenCode side). Backing out must not record
+    "__back__" as a model value for that agent.
+    """
+    from ai_harness.modules.wizard import tui
+
+    monkeypatch.setattr(tui, "_resolve_opencode_binary", lambda: "/fake/opencode")
+
+    def fake_loader(home: Path, *, runner=None) -> tuple[list[str], dict]:
+        return ["openai/gpt-5.5"], {
+            "alpha": {
+                "models": {
+                    "openai/gpt-5.5": {"reasoning": True, "cost": {"input": 3, "output": 15}},
+                },
+            },
+        }
+
+    monkeypatch.setattr(tui, "_load_opencode_catalog", fake_loader)
+    monkeypatch.setattr(tui.questionary, "select", _ScriptedSelect)
+    monkeypatch.setattr(tui.questionary, "confirm", _ScriptedConfirm)
+    _ScriptedSelect.instances = []
+    _ScriptedConfirm.instances = []
+
+    scripted = _ScriptedSelect()
+    scripted.queue(
+        "implementor",
+        "__back__",
+        "__continue__",
+        "__continue__",
+    )
+    monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
+    confirm = _ScriptedConfirm().queue(True)
+    monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
+
+    wrote = tui.run_opencode_wizard(home=tmp_path)
+
+    assert wrote is True
+    assert not _override_file(tmp_path).exists(), (
+        "backing out of the OpenCode model picker must not write '__back__' "
+        "as the agent's model — no override should exist."
+    )
+
+
+def test_run_opencode_wizard_back_from_effort_picker_returns_to_agent_choice(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Picking "Back" inside the OpenCode effort picker returns to the effort phase's agent chooser.
+
+    Issue #50, transition 2 (OpenCode side).
+    """
+    from ai_harness.modules.wizard import tui
+
+    monkeypatch.setattr(tui, "_resolve_opencode_binary", lambda: "/fake/opencode")
+
+    def fake_loader(home: Path, *, runner=None) -> tuple[list[str], dict]:
+        return ["openai/gpt-5.5"], {
+            "alpha": {
+                "models": {
+                    "openai/gpt-5.5": {"reasoning": True, "cost": {"input": 3, "output": 15}},
+                },
+            },
+        }
+
+    monkeypatch.setattr(tui, "_load_opencode_catalog", fake_loader)
+    monkeypatch.setattr(tui.questionary, "select", _ScriptedSelect)
+    monkeypatch.setattr(tui.questionary, "confirm", _ScriptedConfirm)
+    _ScriptedSelect.instances = []
+    _ScriptedConfirm.instances = []
+
+    # Phase 1: pick implementor -> reasoning model -> continue.
+    # Phase 2: pick implementor -> back out of effort picker -> continue.
+    scripted = _ScriptedSelect()
+    scripted.queue(
+        "implementor",
+        "openai/gpt-5.5",
+        "__continue__",
+        "implementor",
+        "__back__",
+        "__continue__",
+    )
+    monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
+    confirm = _ScriptedConfirm().queue(True)
+    monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
+
+    wrote = tui.run_opencode_wizard(home=tmp_path)
+
+    assert wrote is True
+    overrides = json.loads(_override_file(tmp_path).read_text(encoding="utf-8"))
+    # Only the model change survives; no effort entry was ever recorded.
+    assert overrides == {"implementor": {"model": {"opencode": "openai/gpt-5.5"}}}
+
+
+def test_run_opencode_wizard_back_from_effort_phase_returns_to_model_phase(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Picking "← Back" on the OpenCode effort phase's agent chooser re-enters the model phase.
+
+    Issue #50, transition 3 (OpenCode side). The model edit made before
+    backing out must survive the round trip and must not re-run the
+    catalog loader subprocess (`_load_opencode_catalog`) a second time.
+    """
+    from ai_harness.modules.wizard import tui
+
+    monkeypatch.setattr(tui, "_resolve_opencode_binary", lambda: "/fake/opencode")
+
+    load_calls: list[int] = []
+
+    def fake_loader(home: Path, *, runner=None) -> tuple[list[str], dict]:
+        load_calls.append(1)
+        return ["openai/gpt-5.5"], {
+            "alpha": {
+                "models": {
+                    "openai/gpt-5.5": {"reasoning": True, "cost": {"input": 3, "output": 15}},
+                },
+            },
+        }
+
+    monkeypatch.setattr(tui, "_load_opencode_catalog", fake_loader)
+    monkeypatch.setattr(tui.questionary, "select", _ScriptedSelect)
+    monkeypatch.setattr(tui.questionary, "confirm", _ScriptedConfirm)
+    _ScriptedSelect.instances = []
+    _ScriptedConfirm.instances = []
+
+    # Phase 1: pick implementor -> reasoning model -> continue.
+    # Phase 2: back -> re-enters phase 1 (model).
+    # Phase 1 again: continue (implementor stays on the prior model edit).
+    # Phase 2 again: continue.
+    scripted = _ScriptedSelect()
+    scripted.queue(
+        "implementor",
+        "openai/gpt-5.5",
+        "__continue__",
+        "__back__",
+        "__continue__",
+        "__continue__",
+    )
+    monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
+    confirm = _ScriptedConfirm().queue(True)
+    monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
+
+    wrote = tui.run_opencode_wizard(home=tmp_path)
+
+    assert wrote is True
+    overrides = json.loads(_override_file(tmp_path).read_text(encoding="utf-8"))
+    assert overrides == {"implementor": {"model": {"opencode": "openai/gpt-5.5"}}}
+    assert load_calls == [1], "going back into the model phase must not re-run the catalog loader"
+
+
+def test_run_opencode_wizard_no_back_choice_in_first_model_phase_agent_chooser(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The OpenCode model phase's agent chooser must NOT offer "← Back" — there is no prior phase."""
+    from ai_harness.modules.wizard import tui
+
+    captured: list[object] = []
+
+    def fake_select(message, *, choices, **kwargs):
+        captured.append(choices)
+
+        class _Q:
+            def ask(self) -> str:
+                return "__continue__"
+
+        return _Q()
+
+    monkeypatch.setattr(tui, "_filterable_select", fake_select)
+    tui._ask_opencode_continue_or_agent("model", {})
+
+    assert captured, "the agent chooser did not call _filterable_select"
+    values = [choice.value for choice in captured[0]]
+    assert "__back__" not in values
+
+
 # ---------------------------------------------------------------------------
 # Picker row builders — mark current, leave others unmarked
 # ---------------------------------------------------------------------------
@@ -1891,6 +2071,152 @@ def test_run_claude_wizard_effort_change_from_unset_writes_only_effort(
     assert overrides == {"validator": {"effort": {"claude": "high"}}}
     # No model entry leaked in — that would be the default-pollution bug.
     assert "model" not in overrides["validator"]
+
+
+def test_run_claude_wizard_back_from_model_picker_returns_to_agent_choice(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Picking "Back" inside the model picker returns to the model phase's agent chooser.
+
+    Issue #50, transition 1: there was no way to back out of the per-agent
+    model picker. Backing out must NOT record "__back__" as a model value
+    for that agent — it must re-show the agent chooser so the user can
+    pick the real value (or another agent, or continue) without polluting
+    the override store with the sentinel itself.
+    """
+    from ai_harness.modules.wizard import tui
+
+    monkeypatch.setattr(tui.questionary, "select", _ScriptedSelect)
+    monkeypatch.setattr(tui.questionary, "confirm", _ScriptedConfirm)
+    _ScriptedSelect.instances = []
+    _ScriptedConfirm.instances = []
+
+    # Phase 1 (model): pick implementor -> back out of its model picker ->
+    # continue (no agent edited in this phase).
+    # Phase 2 (effort): continue immediately.
+    scripted = _ScriptedSelect()
+    scripted.queue(
+        "implementor",
+        "__back__",
+        "__continue__",
+        "__continue__",
+    )
+    monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
+    confirm = _ScriptedConfirm().queue(True)
+    monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
+
+    wrote = tui.run_claude_wizard(home=tmp_path)
+
+    assert wrote is True
+    assert not _override_file(tmp_path).exists(), (
+        "backing out of the model picker must not write '__back__' (or any "
+        "other value) as the agent's model — no override should exist."
+    )
+
+
+def test_run_claude_wizard_back_from_effort_picker_returns_to_agent_choice(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Picking "Back" inside the effort picker returns to the effort phase's agent chooser.
+
+    Issue #50, transition 2: mirrors the model-picker back behaviour for
+    effort. Backing out must not record "__back__" as an effort value.
+    """
+    from ai_harness.modules.wizard import tui
+
+    monkeypatch.setattr(tui.questionary, "select", _ScriptedSelect)
+    monkeypatch.setattr(tui.questionary, "confirm", _ScriptedConfirm)
+    _ScriptedSelect.instances = []
+    _ScriptedConfirm.instances = []
+
+    # Phase 1 (model): continue immediately.
+    # Phase 2 (effort): pick validator -> back out of effort picker -> continue.
+    scripted = _ScriptedSelect()
+    scripted.queue(
+        "__continue__",
+        "validator",
+        "__back__",
+        "__continue__",
+    )
+    monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
+    confirm = _ScriptedConfirm().queue(True)
+    monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
+
+    wrote = tui.run_claude_wizard(home=tmp_path)
+
+    assert wrote is True
+    assert not _override_file(tmp_path).exists(), (
+        "backing out of the effort picker must not write '__back__' as the agent's effort — no override should exist."
+    )
+
+
+def test_run_claude_wizard_back_from_effort_phase_returns_to_model_phase(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Picking "← Back" on the effort phase's agent chooser re-enters the model phase.
+
+    Issue #50, transition 3: there was no way to go back from the effort
+    phase to the model phase. State must survive the round trip: the
+    model edit made before backing out must still be in effect when the
+    user continues forward again, and the user can further revise it.
+    """
+    from ai_harness.modules.wizard import tui
+
+    monkeypatch.setattr(tui.questionary, "select", _ScriptedSelect)
+    monkeypatch.setattr(tui.questionary, "confirm", _ScriptedConfirm)
+    _ScriptedSelect.instances = []
+    _ScriptedConfirm.instances = []
+
+    # Phase 1 (model): pick implementor -> opus -> continue.
+    # Phase 2 (effort): back -> re-enters phase 1 (model).
+    # Phase 1 again: continue (implementor stays "opus", the prior edit).
+    # Phase 2 again: continue.
+    scripted = _ScriptedSelect()
+    scripted.queue(
+        "implementor",
+        "opus",
+        "__continue__",
+        "__back__",
+        "__continue__",
+        "__continue__",
+    )
+    monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
+    confirm = _ScriptedConfirm().queue(True)
+    monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
+
+    wrote = tui.run_claude_wizard(home=tmp_path)
+
+    assert wrote is True
+    overrides = json.loads(_override_file(tmp_path).read_text(encoding="utf-8"))
+    assert overrides == {"implementor": {"model": {"claude": "opus"}}}
+
+
+def test_run_claude_wizard_no_back_choice_in_first_model_phase_agent_chooser(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The model phase's agent chooser must NOT offer "← Back" — there is no prior phase."""
+    from ai_harness.modules.wizard import tui
+
+    captured: list[object] = []
+
+    def fake_select(message, *, choices, **kwargs):
+        captured.append(choices)
+
+        class _Q:
+            def ask(self) -> str:
+                return "__continue__"
+
+        return _Q()
+
+    monkeypatch.setattr(tui, "_filterable_select", fake_select)
+    tui._ask_continue_or_agent("model", {})
+
+    assert captured, "the agent chooser did not call _filterable_select"
+    values = [choice.value for choice in captured[0]]
+    assert "__back__" not in values
 
 
 def test_run_claude_wizard_preserves_existing_install_manifest(

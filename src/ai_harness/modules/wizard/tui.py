@@ -354,9 +354,14 @@ def _current_opencode_effort(agent: str, home: Path) -> str | None:
 
 
 def _ask_claude_model(agent: str, home: Path) -> str | None:
-    """Ask the user to pick a model for *agent*; return None on Ctrl+C."""
+    """Ask the user to pick a model for *agent*; return None on Ctrl+C.
+
+    A leading "← Back" choice returns the ``"__back__"`` sentinel so the
+    caller can re-show the agent chooser without recording a model change.
+    """
     rows = build_model_picker_rows(agent, _current_claude_model(agent, home))
-    choices = [questionary.Choice(title=row.label, value=row.value) for row in rows]
+    choices = [questionary.Choice(title="← Back", value="__back__")]
+    choices.extend(questionary.Choice(title=row.label, value=row.value) for row in rows)
     return _filterable_select(
         f"Model for {agent}:",
         choices=choices,
@@ -364,9 +369,14 @@ def _ask_claude_model(agent: str, home: Path) -> str | None:
 
 
 def _ask_claude_effort(agent: str, home: Path) -> str | None:
-    """Ask the user to pick an effort for *agent*; return None on Ctrl+C."""
+    """Ask the user to pick an effort for *agent*; return None on Ctrl+C.
+
+    A leading "← Back" choice returns the ``"__back__"`` sentinel so the
+    caller can re-show the agent chooser without recording an effort change.
+    """
     rows = build_effort_picker_rows(agent, _current_claude_effort(agent, home))
-    choices = [questionary.Choice(title=row.label, value=row.value) for row in rows]
+    choices = [questionary.Choice(title="← Back", value="__back__")]
+    choices.extend(questionary.Choice(title=row.label, value=row.value) for row in rows)
     return _filterable_select(
         f"Effort for {agent}:",
         choices=choices,
@@ -380,7 +390,9 @@ def _ask_continue_or_agent(
     """Ask the user to either pick an agent to edit or continue to the next phase.
 
     A trailing "Continue → {next phase}" choice advances the wizard; selecting
-    an agent opens the model/effort picker. ``None`` on Ctrl+C.
+    an agent opens the model/effort picker. ``None`` on Ctrl+C. Phases after
+    the first ("model" has no predecessor) get a leading "← Back" choice
+    returning ``"__back__"`` so the user can return to the previous phase.
     """
     next_phase = {
         "model": "effort",
@@ -390,13 +402,16 @@ def _ask_continue_or_agent(
         next_phase = "confirm"
 
     agent_list = list(claude_wizard_agents())
-    choices: list[questionary.Choice] = [
+    choices: list[questionary.Choice] = []
+    if phase != "model":
+        choices.append(questionary.Choice(title="← Back", value="__back__"))
+    choices.extend(
         questionary.Choice(
             title=f"{agent} (current: {selections.get(agent, 'sonnet')})",
             value=agent,
         )
         for agent in agent_list
-    ]
+    )
     choices.append(
         questionary.Choice(
             title=f"Continue → {next_phase}",
@@ -446,35 +461,54 @@ def run_claude_wizard(*, home: Path) -> bool:
         agent: _current_claude_effort(agent, home) for agent in claude_wizard_agents()
     }
     models: dict[str, str] = dict(baseline_models)
-    while True:
-        pick = _ask_continue_or_agent("model", models)
-        if pick is None:  # Ctrl+C
-            _console.print("[yellow]Cancelled — no overrides written.[/yellow]")
-            return False
-        if pick == "__continue__":
-            break
-        new_model = _ask_claude_model(pick, home)
-        if new_model is None:
-            _console.print("[yellow]Cancelled — no overrides written.[/yellow]")
-            return False
-        models[pick] = new_model
-
-    # Phase 2: effort pass
     efforts: dict[str, str | None] = dict(baseline_efforts)
-    while True:
-        # Show current effort alongside (placeholder if unset)
-        display = {agent: (efforts[agent] or "(unset)") for agent in efforts}
-        pick = _ask_continue_or_agent("effort", display)
-        if pick is None:
+
+    def run_model_phase() -> str:
+        """Drive the model phase loop; return '__continue__', '__back__', or '__cancel__'."""
+        while True:
+            pick = _ask_continue_or_agent("model", models)
+            if pick is None:  # Ctrl+C
+                return "__cancel__"
+            if pick in ("__continue__", "__back__"):
+                return pick
+            new_model = _ask_claude_model(pick, home)
+            if new_model is None:
+                return "__cancel__"
+            if new_model == "__back__":
+                continue
+            models[pick] = new_model
+
+    def run_effort_phase() -> str:
+        """Drive the effort phase loop; return '__continue__', '__back__', or '__cancel__'."""
+        while True:
+            # Show current effort alongside (placeholder if unset)
+            display = {agent: (efforts[agent] or "(unset)") for agent in efforts}
+            pick = _ask_continue_or_agent("effort", display)
+            if pick is None:
+                return "__cancel__"
+            if pick in ("__continue__", "__back__"):
+                return pick
+            new_effort = _ask_claude_effort(pick, home)
+            if new_effort is None:
+                return "__cancel__"
+            if new_effort == "__back__":
+                continue
+            efforts[pick] = new_effort
+
+    # Phases 1-2 are driven by an index so the effort phase's "← Back" can
+    # decrement back into the model phase without losing state — `models`
+    # and `efforts` are closures shared across re-entries.
+    phases = [run_model_phase, run_effort_phase]
+    index = 0
+    while index < len(phases):
+        outcome = phases[index]()
+        if outcome == "__cancel__":
             _console.print("[yellow]Cancelled — no overrides written.[/yellow]")
             return False
-        if pick == "__continue__":
-            break
-        new_effort = _ask_claude_effort(pick, home)
-        if new_effort is None:
-            _console.print("[yellow]Cancelled — no overrides written.[/yellow]")
-            return False
-        efforts[pick] = new_effort
+        if outcome == "__back__":
+            index -= 1
+            continue
+        index += 1
 
     # Phase 3: confirm + apply
     selections = {agent: (models[agent], efforts[agent]) for agent in claude_wizard_agents()}
@@ -533,10 +567,13 @@ def _ask_opencode_model(agent: str, joined, home: Path) -> str | None:
     *joined* is a list of :class:`OpencodeModelEntry` produced by
     :func:`join_opencode_catalog` — the TUI never re-derives cost or
     reasoning from the catalog, it just renders the labels the pure
-    layer produced.
+    layer produced. A leading "← Back" choice returns the ``"__back__"``
+    sentinel so the caller can re-show the agent chooser without
+    recording a model change.
     """
     rows = build_opencode_model_picker_rows(joined, _current_opencode_model(agent, home) or "")
-    choices = [questionary.Choice(title=row.label, value=row.value) for row in rows]
+    choices = [questionary.Choice(title="← Back", value="__back__")]
+    choices.extend(questionary.Choice(title=row.label, value=row.value) for row in rows)
     return _filterable_select(
         f"Model for {agent}:",
         choices=choices,
@@ -548,10 +585,13 @@ def _ask_opencode_effort(agent: str, home: Path) -> str | None:
 
     The TUI is responsible for NOT calling this for non-reasoning models
     — :func:`run_opencode_wizard` checks the model's catalog entry
-    before prompting.
+    before prompting. A leading "← Back" choice returns the ``"__back__"``
+    sentinel so the caller can re-show the agent chooser without recording
+    an effort change.
     """
     rows = build_opencode_effort_picker_rows(agent, _current_opencode_effort(agent, home))
-    choices = [questionary.Choice(title=row.label, value=row.value) for row in rows]
+    choices = [questionary.Choice(title="← Back", value="__back__")]
+    choices.extend(questionary.Choice(title=row.label, value=row.value) for row in rows)
     return _filterable_select(
         f"Reasoning effort for {agent} (low → high):",
         choices=choices,
@@ -566,6 +606,9 @@ def _ask_opencode_continue_or_agent(
 
     The agent list shows the current selection per agent (after the model
     pass) so the user can confirm what they just chose before moving on.
+    Phases after the first ("model" has no predecessor) get a leading
+    "← Back" choice returning ``"__back__"`` so the user can return to the
+    previous phase.
     """
     next_phase = {
         "model": "effort",
@@ -575,13 +618,16 @@ def _ask_opencode_continue_or_agent(
         next_phase = "confirm"
 
     agent_list = list(opencode_wizard_agents())
-    choices: list[questionary.Choice] = [
+    choices: list[questionary.Choice] = []
+    if phase != "model":
+        choices.append(questionary.Choice(title="← Back", value="__back__"))
+    choices.extend(
         questionary.Choice(
             title=f"{agent} (current: {selections.get(agent, '(unset)')})",
             value=agent,
         )
         for agent in agent_list
-    ]
+    )
     choices.append(
         questionary.Choice(
             title=f"Continue → {next_phase}",
@@ -643,47 +689,70 @@ def run_opencode_wizard(*, home: Path) -> bool:
     baseline_models: dict[str, str] = {agent: (_current_opencode_model(agent, home) or "") for agent in agents}
     baseline_efforts: dict[str, str | None] = {agent: _current_opencode_effort(agent, home) for agent in agents}
     models: dict[str, str] = dict(baseline_models)
-    while True:
-        pick = _ask_opencode_continue_or_agent("model", models)
-        if pick is None:  # Ctrl+C
-            _console.print("[yellow]Cancelled — no overrides written.[/yellow]")
-            return False
-        if pick == "__continue__":
-            break
-        new_model = _ask_opencode_model(pick, joined, home)
-        if new_model is None:
-            _console.print("[yellow]Cancelled — no overrides written.[/yellow]")
-            return False
-        models[pick] = new_model
-
-    # Phase 2: effort pass — for non-reasoning models the wizard skips
-    # the effort prompt and clears the selection to None. For reasoning
-    # models the user picks a value from the fixed (low, medium, high)
-    # set. The TUI does not consult the model's catalog entry directly
-    # (that decision lives in the pure layer via opencode_model_is_reasoning)
-    # so the gate is testable in isolation.
     efforts: dict[str, str | None] = dict(baseline_efforts)
-    while True:
-        # Show the current effort alongside (placeholder if unset)
-        display = {agent: (efforts[agent] or "(unset)") for agent in efforts}
-        pick = _ask_opencode_continue_or_agent("effort", display)
-        if pick is None:
+
+    def run_model_phase() -> str:
+        """Drive the model phase loop; return '__continue__', '__back__', or '__cancel__'."""
+        while True:
+            pick = _ask_opencode_continue_or_agent("model", models)
+            if pick is None:  # Ctrl+C
+                return "__cancel__"
+            if pick in ("__continue__", "__back__"):
+                return pick
+            new_model = _ask_opencode_model(pick, joined, home)
+            if new_model is None:
+                return "__cancel__"
+            if new_model == "__back__":
+                continue
+            models[pick] = new_model
+
+    def run_effort_phase() -> str:
+        """Drive the effort phase loop; return '__continue__', '__back__', or '__cancel__'.
+
+        For non-reasoning models the wizard skips the effort prompt and
+        clears the selection to None. For reasoning models the user picks
+        a value from the fixed (low, medium, high) set. The TUI does not
+        consult the model's catalog entry directly (that decision lives in
+        the pure layer via opencode_model_is_reasoning) so the gate is
+        testable in isolation.
+        """
+        while True:
+            # Show the current effort alongside (placeholder if unset)
+            display = {agent: (efforts[agent] or "(unset)") for agent in efforts}
+            pick = _ask_opencode_continue_or_agent("effort", display)
+            if pick is None:
+                return "__cancel__"
+            if pick in ("__continue__", "__back__"):
+                return pick
+            chosen_model = models[pick]
+            if not opencode_model_is_reasoning(chosen_model, catalog):
+                # Non-reasoning model: clear effort, render the skip explicitly,
+                # do NOT prompt. The user can still continue or pick another agent.
+                efforts[pick] = None
+                _console.print(f"[dim]Skipping effort for {pick}: {chosen_model} is not a reasoning model.[/dim]")
+                continue
+            new_effort = _ask_opencode_effort(pick, home)
+            if new_effort is None:
+                return "__cancel__"
+            if new_effort == "__back__":
+                continue
+            efforts[pick] = new_effort
+
+    # Phases 1-2 are driven by an index so the effort phase's "← Back" can
+    # decrement back into the model phase without losing state or re-running
+    # the catalog loader subprocess above — `models`/`efforts` are closures
+    # shared across re-entries.
+    phases = [run_model_phase, run_effort_phase]
+    index = 0
+    while index < len(phases):
+        outcome = phases[index]()
+        if outcome == "__cancel__":
             _console.print("[yellow]Cancelled — no overrides written.[/yellow]")
             return False
-        if pick == "__continue__":
-            break
-        chosen_model = models[pick]
-        if not opencode_model_is_reasoning(chosen_model, catalog):
-            # Non-reasoning model: clear effort, render the skip explicitly,
-            # do NOT prompt. The user can still continue or pick another agent.
-            efforts[pick] = None
-            _console.print(f"[dim]Skipping effort for {pick}: {chosen_model} is not a reasoning model.[/dim]")
+        if outcome == "__back__":
+            index -= 1
             continue
-        new_effort = _ask_opencode_effort(pick, home)
-        if new_effort is None:
-            _console.print("[yellow]Cancelled — no overrides written.[/yellow]")
-            return False
-        efforts[pick] = new_effort
+        index += 1
 
     # Phase 3: confirm + apply
     selections = {agent: (models[agent], efforts[agent]) for agent in agents}
