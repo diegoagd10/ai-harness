@@ -67,3 +67,22 @@ deep-merged over the defaults at *render* time so it survives reinstall. Set
 through the `set-models` wizard, never by hand-editing rendered agent files
 (those are byte-identically overwritten on the next install).
 _Avoid_: customization, setting, config
+
+## Init
+
+The repo-local scaffolding step, run once inside a consuming repository. Distinct
+from *install*, which distributes the harness globally into each *Agent CLI*'s
+`$HOME` config: `init` writes only the per-project artifacts the loop and skill
+flow assume at a repo root — a `CODING_STANDARDS.md` skeleton, a label-policy
+block in the repo's agent doc, and the loop's GitHub labels. It is idempotent by
+per-artifact detection and never clobbers human-edited content.
+_Avoid_: setup, bootstrap, scaffold (as a noun)
+
+## Prerequisite
+
+An external, globally-installed tool that the harness *requires* but deliberately
+does not own — currently *Engram* (persistent memory) and the matt-pocock
+engineering skills. The harness documents how to install them but never provisions
+them at *install* time nor removes them at uninstall, because they are user-scoped
+and shared across every repository on the machine.
+_Avoid_: dependency, plugin (when you mean the documented external requirement)
