@@ -50,3 +50,20 @@ frontmatter schema (e.g. OpenCode's `mode`/`permission` vs Claude Code's
 `tools`), selecting that CLI's model, and writing to that CLI's agent directory.
 A render may be *lossy* or *skipped* when a concept has no equivalent in the
 target CLI.
+
+## Effort
+
+The reasoning-intensity setting on a loop agent, expressed CLI-neutrally and
+mapped at *render* time onto each Agent CLI's native field: Claude Code's
+`effort` (`low|medium|high|xhigh|max`) and OpenCode's `reasoningEffort` (offered
+only for models that advertise reasoning). Distinct from *model* — it tunes how
+hard the chosen model thinks, not which model runs.
+
+## Override
+
+A user-set per-CLI *model* or *effort* value that takes precedence over the
+*Agent template* defaults, persisted to `~/.ai-harness/overrides.json` and
+deep-merged over the defaults at *render* time so it survives reinstall. Set
+through the `set-models` wizard, never by hand-editing rendered agent files
+(those are byte-identically overwritten on the next install).
+_Avoid_: customization, setting, config
