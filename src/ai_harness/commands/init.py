@@ -12,7 +12,7 @@ from ai_harness.modules.harness import init_repo
 
 
 def init() -> None:
-    """Scaffold CODING_STANDARDS.md and CLAUDE.md labels policy at the repo root.
+    """Scaffold CODING_STANDARDS.md, CLAUDE.md labels policy, and GitHub labels at the repo root.
 
     Idempotent — if an artifact already exists it is left unchanged.
     """
@@ -29,3 +29,9 @@ def init() -> None:
         typer.echo("No CLAUDE.md found — skipping labels-policy block.")
     else:
         typer.echo("CLAUDE.md labels-policy block already present — unchanged.")
+
+    if result.created_labels:
+        typer.echo(f"Created GitHub labels: {', '.join(result.created_labels)}.")
+    if result.label_warnings:
+        for warning in result.label_warnings:
+            typer.echo(f"Warning: {warning}", err=True)

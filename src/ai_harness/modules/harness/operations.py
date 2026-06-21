@@ -30,6 +30,7 @@ from functools import partial
 from importlib.resources import files
 from pathlib import Path
 
+from ai_harness.modules.harness.labels import ensure_labels
 from ai_harness.modules.harness.models import AgentCli, InitResult, InstallManifest
 from ai_harness.modules.harness.renderers import render_agents
 
@@ -332,16 +333,20 @@ _AI_HARNESS_START = "<!-- ai-harness:start -->"
 _AI_HARNESS_END = "<!-- ai-harness:end -->"
 
 
-def init_repo(repo_root: Path | None = None) -> InitResult:
+def init_repo(
+    repo_root: Path | None = None,
+) -> InitResult:
     """Scaffold repo-local artifacts at *repo_root*.
 
     Writes a titles-only ``CODING_STANDARDS.md`` if it does not exist, and
     appends a labels-policy block to ``CLAUDE.md`` if the file exists and the
     ``<!-- ai-harness:start -->`` / ``<!-- ai-harness:end -->`` markers are not
-    already present.
+    already present. Creates the ``ready-for-agent`` and ``loop`` GitHub labels
+    via ``gh label create`` (skips those that already exist).
 
     Idempotent by per-artifact detection — no sentinel file. Returns an
-    ``InitResult`` describing which artifacts were written.
+    ``InitResult`` describing which artifacts were written and which labels were
+    created.
 
     *repo_root* defaults to the current working directory so tests can drive
     the operation against a temporary directory.
@@ -350,11 +355,14 @@ def init_repo(repo_root: Path | None = None) -> InitResult:
 
     wrote_standards = _write_coding_standards(root)
     wrote_labels_policy, claude_md_missing = _write_labels_policy(root)
+    label_result = ensure_labels(root)
 
     return InitResult(
         wrote_standards=wrote_standards,
         wrote_labels_policy=wrote_labels_policy,
         claude_md_missing=claude_md_missing,
+        created_labels=label_result.created,
+        label_warnings=label_result.warnings,
     )
 
 

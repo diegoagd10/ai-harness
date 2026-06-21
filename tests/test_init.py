@@ -14,6 +14,7 @@ import pytest
 from typer.testing import CliRunner
 
 from ai_harness.main import app
+from ai_harness.modules.harness.labels import LabelResult
 
 runner = CliRunner()
 
@@ -276,3 +277,89 @@ def test_cli_init_reports_labels_policy_skipped_when_no_claude_md(
     assert result.exit_code == 0, result.stderr
     assert "No CLAUDE.md found" in result.stdout
     assert not (tmp_path / CLAUDE_MD).exists()
+
+
+# ---------------------------------------------------------------------------
+# init_repo — label creation integration
+# ---------------------------------------------------------------------------
+
+_FAKE_LABEL_RESULT_OK = LabelResult(created=["ready-for-agent", "loop"], warnings=[])
+
+
+def test_init_repo_includes_label_result(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """init_repo populates created_labels and label_warnings from ensure_labels."""
+    from ai_harness.modules.harness import init_repo, operations
+
+    monkeypatch.setattr(operations, "ensure_labels", lambda _root: _FAKE_LABEL_RESULT_OK)
+
+    result = init_repo(tmp_path)
+
+    assert result.created_labels == ["ready-for-agent", "loop"]
+    assert result.label_warnings == []
+
+
+def test_init_repo_label_skips_dont_block_scaffolding(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """When labels are skipped (already exist), scaffolding still completes."""
+    from ai_harness.modules.harness import init_repo, operations
+
+    monkeypatch.setattr(operations, "ensure_labels", lambda _root: LabelResult(created=[], warnings=[]))
+
+    result = init_repo(tmp_path)
+
+    assert result.created_labels == []
+    assert result.label_warnings == []
+    assert result.wrote_standards is True  # Scaffolding proceeds normally
+
+
+def test_init_repo_label_warnings_dont_block_scaffolding(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """When label creation warns (gh unavailable), scaffolding still completes."""
+    from ai_harness.modules.harness import init_repo, operations
+
+    warnings = [
+        "Could not create GitHub label 'ready-for-agent' (gh CLI not found). "
+        "Run manually:\n  gh label create ready-for-agent --color 7057ff --description "
+        '"Fully specified, ready for an AFK agent"',
+    ]
+    monkeypatch.setattr(operations, "ensure_labels", lambda _root: LabelResult(created=[], warnings=warnings))
+
+    result = init_repo(tmp_path)
+
+    assert result.created_labels == []
+    assert len(result.label_warnings) == 1
+    assert "gh CLI not found" in result.label_warnings[0]
+    assert result.wrote_standards is True  # Scaffolding proceeds normally
+
+
+# ---------------------------------------------------------------------------
+# CLI adapter — label output
+# ---------------------------------------------------------------------------
+
+
+def test_cli_init_reports_created_labels(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``ai-harness init`` reports created GitHub labels."""
+    from ai_harness.modules.harness import operations
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(operations, "ensure_labels", lambda _root: _FAKE_LABEL_RESULT_OK)
+
+    result = runner.invoke(app, ["init"])
+
+    assert result.exit_code == 0, result.stderr
+    assert "Created GitHub labels" in result.stdout
+    assert "ready-for-agent" in result.stdout
+    assert "loop" in result.stdout
+
+
+def test_cli_init_reports_label_warnings_to_stderr(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``ai-harness init`` routes label warnings to stderr."""
+    from ai_harness.modules.harness import operations
+
+    monkeypatch.chdir(tmp_path)
+    warnings = ["gh CLI not found — run manually"]
+    monkeypatch.setattr(operations, "ensure_labels", lambda _root: LabelResult(created=[], warnings=warnings))
+
+    result = runner.invoke(app, ["init"])
+
+    assert result.exit_code == 0, result.stderr
+    assert "Warning:" in result.stderr
+    assert "gh CLI not found" in result.stderr
