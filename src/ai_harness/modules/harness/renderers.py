@@ -17,8 +17,10 @@ destination layout) are private and owned by ``render_agents``.
 from __future__ import annotations
 
 import copy
+import json
 from importlib.resources import files
 from importlib.resources.abc import Traversable
+from pathlib import Path
 
 import yaml
 
@@ -106,6 +108,27 @@ def _loop_agent_dir() -> Traversable:
     return files(_LOOP_AGENT_PACKAGE) / _LOOP_AGENT_DIR
 
 
+# ---------------------------------------------------------------------------
+# Override store — ``<home>/.ai-harness/overrides.json``
+# ---------------------------------------------------------------------------
+
+_OVERRIDES_REL = ".ai-harness/overrides.json"
+
+
+def _load_override_store(home: Path) -> dict:
+    """Return the per-agent override store at ``home/.ai-harness/overrides.json``.
+
+    Returns ``{}`` when the file is missing (no-op override). Malformed JSON
+    is raised as-is so the user can fix it instead of silently rendering
+    template defaults. Owned here — next to the merge logic that consumes
+    it — so the operations layer doesn't need to know about the store path.
+    """
+    path = home / _OVERRIDES_REL
+    if not path.is_file():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def _discover_loop_agents() -> list[str]:
     """Return sorted list of loop agent template names (without .md extension)."""
     root = _loop_agent_dir()
@@ -122,11 +145,16 @@ def _read_template_source(name: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def get_agent_meta(name: str, overrides: dict | None = None) -> dict:
+def get_agent_meta(name: str, overrides: dict | None = None, *, home: Path | None = None) -> dict:
     """Return the metadata dict for a named agent (from ``_AGENT_META``).
 
     *overrides* is an optional per-agent partial overlay (see project docs).
-    When present, the override entry for *name* is deep-merged over the
+    When ``None`` (the default), the override store is loaded from
+    ``home/.ai-harness/overrides.json`` (``Path.home()`` when *home* is
+    ``None``); an absent file is a no-op, a malformed file raises
+    ``json.JSONDecodeError``. When provided, the dict is used verbatim —
+    callers can pass ``{}`` for an explicit empty store, sidestepping the
+    disk lookup. The override entry for *name* is deep-merged over the
     template defaults; absent or unknown agents keep their template values.
     The returned dict is always a fresh copy so callers cannot mutate the
     shared template state.
@@ -136,7 +164,9 @@ def get_agent_meta(name: str, overrides: dict | None = None) -> dict:
     meta = _AGENT_META.get(name)
     if meta is None:
         raise ValueError(f"Unknown agent template: {name!r}")
-    override_entry = (overrides or {}).get(name, {})
+    if overrides is None:
+        overrides = _load_override_store(home if home is not None else Path.home())
+    override_entry = overrides.get(name, {})
     return _deep_merge(meta, override_entry)
 
 
@@ -361,6 +391,8 @@ def render_agents(
     cli: AgentCli,
     names: list[str] | None = None,
     overrides: dict | None = None,
+    *,
+    home: Path | None = None,
 ) -> list[tuple[str, str]]:
     """Render the loop agents for *cli* as home-relative (path, content) pairs.
 
@@ -371,11 +403,16 @@ def render_agents(
 
     *names* defaults to the discovered loop agents; pass an explicit list to
     render a subset. *overrides* is an optional per-agent partial overlay
-    deep-merged over the template defaults; ``None`` or ``{}`` is a no-op.
-    CLIs without native agent support return an empty list.
+    deep-merged over the template defaults; ``None`` loads the override
+    store from ``home/.ai-harness/overrides.json`` (default
+    ``Path.home()``), ``{}`` is an explicit no-op. CLIs without native
+    agent support return an empty list.
     """
     if names is None:
         names = _discover_loop_agents()
+
+    if overrides is None:
+        overrides = _load_override_store(home if home is not None else Path.home())
 
     if cli == AgentCli.CLAUDE:
         return [_render_claude(name, overrides=overrides) for name in names]

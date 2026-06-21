@@ -311,11 +311,17 @@ def _read_frontmatter(path: Path) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _build_expected_opencode() -> dict[str, dict]:
-    """Build OpenCode expected frontmatter from agent metadata."""
+def _build_expected_opencode(overrides: dict | None = None) -> dict[str, dict]:
+    """Build OpenCode expected frontmatter from agent metadata.
+
+    *overrides* is threaded through ``get_agent_meta`` so the expected values
+    stay in sync with the same source the renderer uses. Pass ``{}`` (the
+    default at module import) to capture the template-default baseline —
+    this avoids reading the real ``~/.ai-harness/overrides.json`` at import.
+    """
     result: dict[str, dict] = {}
     for name in _LOOP_AGENT_NAMES:
-        meta = get_agent_meta(name)
+        meta = get_agent_meta(name, overrides=overrides)
         entry: dict[str, object] = {
             "description": meta["description"],
             "mode": meta["mode"],
@@ -327,7 +333,7 @@ def _build_expected_opencode() -> dict[str, dict]:
     return result
 
 
-def _build_expected_claude() -> dict[str, dict]:
+def _build_expected_claude(overrides: dict | None = None) -> dict[str, dict]:
     """Build Claude expected frontmatter from agent metadata.
 
     Claude frontmatter includes ``name`` (agent key) and ``model`` for
@@ -335,12 +341,15 @@ def _build_expected_claude() -> dict[str, dict]:
     ``mode`` is absent — Claude has no mode concept.
     Read-only agents carry a ``tools`` allow-list translated from the
     OpenCode ``permission`` block.
+
+    *overrides* is threaded through ``get_agent_meta``; pass ``{}`` to
+    capture the template-default baseline without reading disk.
     """
     from copy import deepcopy
 
     result: dict[str, dict] = {}
     for name in _LOOP_AGENT_NAMES:
-        meta = get_agent_meta(name)
+        meta = get_agent_meta(name, overrides=overrides)
         entry: dict[str, object] = {
             "description": meta["description"],
         }
@@ -361,8 +370,10 @@ def _build_expected_claude() -> dict[str, dict]:
     return result
 
 
-_EXPECTED_OPENCODE_FRONTMATTER = _build_expected_opencode()
-_EXPECTED_CLAUDE_FRONTMATTER = _build_expected_claude()
+# Module-level baseline captures the template-default frontmatter — we pass
+# overrides={} explicitly so the import never reads the real ~/.ai-harness/overrides.json.
+_EXPECTED_OPENCODE_FRONTMATTER = _build_expected_opencode(overrides={})
+_EXPECTED_CLAUDE_FRONTMATTER = _build_expected_claude(overrides={})
 
 
 def _assert_frontmatter_matches(path: Path, expected: dict) -> None:

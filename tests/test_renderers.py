@@ -7,6 +7,8 @@ for each agent CLI that supports native agents.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -336,9 +338,11 @@ def test_invalid_meta_raises_value_error(
 # ---------------------------------------------------------------------------
 
 
-def test_get_agent_meta_without_overrides_is_unchanged() -> None:
-    """Calling get_agent_meta without overrides returns the template default."""
-    meta = get_agent_meta("implementor")
+def test_get_agent_meta_without_overrides_is_unchanged(tmp_path: Path) -> None:
+    """Calling get_agent_meta without explicit overrides auto-loads from home;
+    an absent overrides.json at home is a no-op (template defaults).
+    """
+    meta = get_agent_meta("implementor", home=tmp_path)
 
     assert meta["model"]["opencode"] == "opencode-go/deepseek-v4-pro"
     assert meta["model"]["claude"] == "sonnet"
@@ -558,14 +562,14 @@ def test_orchestrator_skill_unchanged_when_only_other_agents_overridden() -> Non
     assert "effort" not in fm
 
 
-def test_template_meta_not_mutated_by_overrides_across_calls() -> None:
+def test_template_meta_not_mutated_by_overrides_across_calls(tmp_path: Path) -> None:
     """Repeated calls with different overrides must not bleed state into each other."""
     overrides_a = {"implementor": {"model": {"opencode": "openai/gpt-5.4"}}}
     overrides_b = {"implementor": {"model": {"opencode": "openai/gpt-5.5"}}}
 
     first = get_agent_meta("implementor", overrides=overrides_a)
     second = get_agent_meta("implementor", overrides=overrides_b)
-    third = get_agent_meta("implementor")  # no overrides → template default
+    third = get_agent_meta("implementor", home=tmp_path)  # absent store → template default
 
     assert first["model"]["opencode"] == "openai/gpt-5.4"
     assert second["model"]["opencode"] == "openai/gpt-5.5"
@@ -574,3 +578,94 @@ def test_template_meta_not_mutated_by_overrides_across_calls() -> None:
     # No leftover mutation from any of the override calls
     assert first["model"]["claude"] == "sonnet"
     assert second["model"]["claude"] == "sonnet"
+
+
+# ---------------------------------------------------------------------------
+# Override store auto-load from home/.ai-harness/overrides.json
+# ---------------------------------------------------------------------------
+
+
+def _write_overrides_store(home: Path, payload: dict) -> Path:
+    """Write *payload* to ``home/.ai-harness/overrides.json`` and return its path."""
+    path = home / ".ai-harness" / "overrides.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
+def test_get_agent_meta_auto_loads_override_store_from_home(tmp_path: Path) -> None:
+    """get_agent_meta(name) with no overrides arg reads from home/.ai-harness/overrides.json."""
+    _write_overrides_store(tmp_path, {"implementor": {"model": {"opencode": "openai/gpt-5.4"}}})
+
+    meta = get_agent_meta("implementor", home=tmp_path)
+
+    assert meta["model"]["opencode"] == "openai/gpt-5.4"
+    # Unset CLI falls back to template default
+    assert meta["model"]["claude"] == "sonnet"
+
+
+def test_get_agent_meta_auto_load_missing_store_is_noop(tmp_path: Path) -> None:
+    """No overrides.json at home → get_agent_meta returns template defaults."""
+    # No file written at tmp_path/.ai-harness/overrides.json
+    meta = get_agent_meta("implementor", home=tmp_path)
+
+    assert meta["model"]["opencode"] == "opencode-go/deepseek-v4-pro"
+    assert meta["model"]["claude"] == "sonnet"
+    assert meta["description"].startswith("Implements one GitHub issue")
+
+
+def test_get_agent_meta_auto_load_partial_override_preserves_others(tmp_path: Path) -> None:
+    """Partial override leaves untouched fields and untouched agents at template defaults."""
+    _write_overrides_store(
+        tmp_path,
+        {"implementor": {"model": {"opencode": "openai/gpt-5.4"}, "effort": {"opencode": "high"}}},
+    )
+
+    implementor = get_agent_meta("implementor", home=tmp_path)
+    explorer = get_agent_meta("explorer", home=tmp_path)
+
+    assert implementor["model"]["opencode"] == "openai/gpt-5.4"
+    assert implementor["effort"] == {"opencode": "high"}
+    assert implementor["model"]["claude"] == "sonnet"  # not overridden → default
+    assert implementor["mode"] == "subagent"  # not in override → default
+    # Explorer untouched
+    assert explorer["model"]["opencode"] == "opencode-go/kimi-k2.7-code"
+    assert "effort" not in explorer
+
+
+def test_get_agent_meta_auto_load_unknown_override_agent_ignored(tmp_path: Path) -> None:
+    """Overrides keyed by an unknown agent are silently ignored on auto-load."""
+    _write_overrides_store(tmp_path, {"unknown-agent": {"model": {"opencode": "openai/gpt-5.4"}}})
+
+    meta = get_agent_meta("implementor", home=tmp_path)
+
+    assert meta["model"]["opencode"] == "opencode-go/deepseek-v4-pro"
+
+
+def test_get_agent_meta_auto_load_malformed_store_raises(tmp_path: Path) -> None:
+    """Malformed JSON in overrides.json raises JSONDecodeError (no silent fallback)."""
+    bad_path = tmp_path / ".ai-harness" / "overrides.json"
+    bad_path.parent.mkdir(parents=True, exist_ok=True)
+    bad_path.write_text("{not valid json", encoding="utf-8")
+
+    with pytest.raises(json.JSONDecodeError):
+        get_agent_meta("implementor", home=tmp_path)
+
+
+def test_get_agent_meta_explicit_overrides_wins_over_store(tmp_path: Path) -> None:
+    """An explicit overrides=... arg skips the store lookup entirely."""
+    _write_overrides_store(tmp_path, {"implementor": {"model": {"opencode": "openai/gpt-5.4"}}})
+
+    meta = get_agent_meta("implementor", overrides={"implementor": {"model": {"opencode": "override"}}}, home=tmp_path)
+
+    assert meta["model"]["opencode"] == "override"
+
+
+def test_render_agents_auto_loads_override_store_from_home(tmp_path: Path) -> None:
+    """render_agents(cli, home=home) reads the store once and threads it through."""
+    _write_overrides_store(tmp_path, {"implementor": {"model": {"opencode": "openai/gpt-5.4"}}})
+
+    pairs = render_agents(AgentCli.OPENCODE, ["implementor"], home=tmp_path)
+
+    fm = _parse_frontmatter(pairs[0][1])
+    assert fm["model"] == "openai/gpt-5.4"
