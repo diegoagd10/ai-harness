@@ -203,6 +203,28 @@ _KEYBINDING_LEGEND = "↑/↓ + j/k: navigate · type to filter · enter: select
 _ESC_BACK = "__esc_back__"
 
 
+def _attach_esc_back(application: object, result: object) -> None:
+    """Bind Esc to exit *application* with *result*, whatever its key_bindings type.
+
+    ``questionary.select``'s ``Application.key_bindings`` is a plain
+    ``KeyBindings`` (supports ``.add``), but ``questionary.confirm``'s is a
+    prompt_toolkit ``_MergedKeyBindings`` (because ``PromptSession`` merges
+    its own bindings internally) — that one has no ``.add`` and raises
+    ``AttributeError`` (#56). Reassigning ``application.key_bindings`` to a
+    fresh merge of the existing bindings plus a new ``KeyBindings`` works for
+    both cases, so this helper is safe to use on any questionary prompt.
+    """
+    from prompt_toolkit.key_binding import KeyBindings, merge_key_bindings
+
+    kb = KeyBindings()
+
+    @kb.add("escape", eager=True)
+    def _(event: object) -> None:
+        application.exit(result=result)
+
+    application.key_bindings = merge_key_bindings([application.key_bindings, kb])
+
+
 # ---------------------------------------------------------------------------
 # Helper — find the InquirerControl inside a questionary.select layout tree
 # ---------------------------------------------------------------------------
@@ -335,12 +357,9 @@ def _filterable_select(
         while not inquirer_control.is_selection_valid():
             inquirer_control.select_previous()
 
-    def _esc_back(event: object) -> None:
-        application.exit(result=_ESC_BACK)
-
     application.key_bindings.add("j", eager=True)(_move_down)
     application.key_bindings.add("k", eager=True)(_move_up)
-    application.key_bindings.add("escape", eager=True)(_esc_back)
+    _attach_esc_back(application, _ESC_BACK)
 
     _insert_always_visible_filter_row(application, inquirer_control)
 
@@ -552,11 +571,7 @@ def _ask_confirm(title: str, selections: dict[str, tuple[str, str | None]]) -> s
     )
     application = getattr(question, "application", None)
     if application is not None:
-
-        def _esc_back(event: object) -> None:
-            application.exit(result=_ESC_BACK)
-
-        application.key_bindings.add("escape", eager=True)(_esc_back)
+        _attach_esc_back(application, _ESC_BACK)
 
     answer = question.ask()
     if answer == _ESC_BACK:

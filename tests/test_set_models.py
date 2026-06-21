@@ -2346,6 +2346,89 @@ def test_filterable_select_jk_moves_inquirer_pointer() -> None:
     assert inquirer_control.pointed_at == 1
 
 
+# ---------------------------------------------------------------------------
+# Confirm screen — Esc-binding regression (issue #56)
+# ---------------------------------------------------------------------------
+# Every other test in this module that exercises ``_ask_confirm`` stubs
+# ``questionary.confirm`` with ``_ScriptedConfirm``, which has no
+# ``.application`` attribute — so ``_ask_confirm``'s ``getattr(question,
+# "application", None)`` short-circuits and the Esc-binding code never runs.
+# That's how issue #56's crash slipped past every #55 test: a REAL
+# ``questionary.confirm(...).application.key_bindings`` is a prompt_toolkit
+# ``_MergedKeyBindings`` (because ``PromptSession`` merges internally), which
+# has no ``.add`` method — unlike ``questionary.select``'s plain
+# ``KeyBindings``. These tests build a real prompt_toolkit ``Application``
+# (via ``create_pipe_input`` / ``DummyOutput``) so the merge bug is actually
+# exercised.
+
+
+def test_ask_confirm_esc_binding_real_application_does_not_raise() -> None:
+    """Attaching the Esc binding to a REAL confirm Application must not raise.
+
+    Regression for #56: ``application.key_bindings.add(...)`` blew up with
+    ``AttributeError: '_MergedKeyBindings' object has no attribute 'add'``
+    because a real ``questionary.confirm`` Application's key_bindings are
+    merged, not a plain ``KeyBindings`` registry.
+    """
+    import questionary
+    from prompt_toolkit.input import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+
+    from ai_harness.modules.wizard import tui
+
+    with create_pipe_input() as inp:
+        question = questionary.confirm("Confirm?", default=True, input=inp, output=DummyOutput())
+        # Exercise the exact helper _ask_confirm relies on to attach Esc.
+        tui._attach_esc_back(question.application, tui._ESC_BACK)
+
+
+def test_ask_confirm_esc_binding_real_application_exits_with_esc_back() -> None:
+    """Pressing Esc on a real confirm Application exits with the _ESC_BACK sentinel."""
+    import questionary
+    from prompt_toolkit.input import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+
+    from ai_harness.modules.wizard import tui
+
+    with create_pipe_input() as inp:
+        question = questionary.confirm("Confirm?", default=True, input=inp, output=DummyOutput())
+        tui._attach_esc_back(question.application, tui._ESC_BACK)
+
+        inp.send_text("\x1b")
+        answer = question.ask()
+
+    assert answer == tui._ESC_BACK
+
+
+def test_filterable_select_esc_binding_uses_shared_helper_real_application() -> None:
+    """``_filterable_select``'s Esc binding also works through the shared helper.
+
+    Confirms the merge-based helper is safe for the select path too (plain
+    ``KeyBindings``, not merged) — same helper, same behaviour, no regression
+    to the #55 j/k bindings.
+    """
+    import prompt_toolkit.key_binding.key_processor as kp
+    import questionary
+    from prompt_toolkit.key_binding import KeyPress
+    from prompt_toolkit.keys import Keys
+
+    from ai_harness.modules.wizard import tui
+
+    kp.KeyProcessor._start_timeout = lambda self: None
+
+    choices = [questionary.Choice(title="alpha", value="a"), questionary.Choice(title="beta", value="b")]
+    question = tui._filterable_select("Test:", choices=choices)
+
+    exit_results: list[object] = []
+    question.application.exit = lambda result=None, **kw: exit_results.append(result)
+
+    processor = question.application.key_processor
+    processor.feed(KeyPress(Keys.Escape, "\x1b"))
+    processor.process_keys()
+
+    assert exit_results == [tui._ESC_BACK]
+
+
 def test_filterable_select_jk_skips_disabled_choices() -> None:
     """j/k navigation must skip disabled choices, matching the arrow-key behaviour."""
     import prompt_toolkit.key_binding.key_processor as kp
