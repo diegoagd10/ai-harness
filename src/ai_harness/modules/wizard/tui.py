@@ -52,7 +52,7 @@ _console = Console()
 # ---------------------------------------------------------------------------
 
 
-_KEYBINDING_LEGEND = "↑/↓ or j/k: navigate · type to filter · enter: select · Ctrl+C: cancel"
+_KEYBINDING_LEGEND = "↑/↓: navigate · type to filter · enter: select · Ctrl+C: cancel"
 
 
 def _print_header(title: str) -> None:
@@ -97,8 +97,8 @@ def _ask_claude_model(agent: str, home: Path) -> str | None:
     return questionary.select(
         f"Model for {agent}:",
         choices=choices,
-        use_jk_keys=True,
         use_arrow_keys=True,
+        use_search_filter=True,
     ).ask()
 
 
@@ -109,8 +109,8 @@ def _ask_claude_effort(agent: str, home: Path) -> str | None:
     return questionary.select(
         f"Effort for {agent}:",
         choices=choices,
-        use_jk_keys=True,
         use_arrow_keys=True,
+        use_search_filter=True,
     ).ask()
 
 
@@ -148,8 +148,8 @@ def _ask_continue_or_agent(
     return questionary.select(
         f"Choose an agent to edit its {phase}, or continue:",
         choices=choices,
-        use_jk_keys=True,
         use_arrow_keys=True,
+        use_search_filter=True,
     ).ask()
 
 

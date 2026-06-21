@@ -326,6 +326,85 @@ def test_cli_set_models_claude_non_tty_errors(isolated_home: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Wizard pickers — type-to-filter wiring (acceptance criterion: search filter)
+# ---------------------------------------------------------------------------
+# These tests do NOT drive the full TUI. They spy on questionary.select to
+# confirm the picker functions wire the ``use_search_filter=True`` kwarg that
+# enables type-to-filter navigation. Driving the actual prompt would test
+# the questionary library, not us.
+
+
+class _SelectSpy:
+    """Captures kwargs from each questionary.select call and returns None from .ask().
+
+    The ``None`` return simulates a Ctrl+C cancel so the wizard bails out
+    cleanly without needing a real terminal.
+    """
+
+    instances: list[_SelectSpy] = []
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        self.args = args
+        self.kwargs = kwargs
+        _SelectSpy.instances.append(self)
+
+    def ask(self) -> None:
+        return None
+
+
+def test_model_picker_enables_search_filter(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The Claude model picker must enable type-to-filter (acceptance criterion)."""
+    from ai_harness.modules.wizard import tui
+
+    _SelectSpy.instances = []
+    monkeypatch.setattr(tui.questionary, "select", _SelectSpy)
+
+    tui._ask_claude_model("implementor", tmp_path)  # type: ignore[attr-defined]
+
+    assert _SelectSpy.instances, "questionary.select was not called"
+    assert _SelectSpy.instances[0].kwargs.get("use_search_filter") is True
+
+
+def test_effort_picker_enables_search_filter(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The Claude effort picker must enable type-to-filter (acceptance criterion)."""
+    from ai_harness.modules.wizard import tui
+
+    _SelectSpy.instances = []
+    monkeypatch.setattr(tui.questionary, "select", _SelectSpy)
+
+    tui._ask_claude_effort("validator", tmp_path)  # type: ignore[attr-defined]
+
+    assert _SelectSpy.instances, "questionary.select was not called"
+    assert _SelectSpy.instances[0].kwargs.get("use_search_filter") is True
+
+
+def test_agent_continue_picker_enables_search_filter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The agent-picker (with the Continue sentinel) must also enable search filtering."""
+    from ai_harness.modules.wizard import tui
+
+    _SelectSpy.instances = []
+    monkeypatch.setattr(tui.questionary, "select", _SelectSpy)
+
+    tui._ask_continue_or_agent("model", {"implementor": "opus"})  # type: ignore[attr-defined]
+
+    assert _SelectSpy.instances, "questionary.select was not called"
+    assert _SelectSpy.instances[0].kwargs.get("use_search_filter") is True
+
+
+def test_keybinding_legend_advertises_filter_not_jk() -> None:
+    """The header/footer legend must reflect the new keybindings (arrows + filter, no j/k)."""
+    from ai_harness.modules.wizard import tui
+
+    legend = tui._KEYBINDING_LEGEND
+    assert "type to filter" in legend
+    assert "↑/↓" in legend
+    # j/k is no longer a navigation hint because use_search_filter makes it filter input.
+    assert "j/k" not in legend
+
+
+# ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
