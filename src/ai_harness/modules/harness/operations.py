@@ -18,7 +18,7 @@ Public surface (re-exported from the package)
 install_for_agent_clis     Map bundled resources to agent CLI paths, write, record manifest.
 re_render_for_agent_clis   Re-write rendered loop agents without touching the install manifest.
 uninstall_for_agent_clis   Remove files recorded in the manifest.
-init_repo                  Scaffold a titles-only CODING_STANDARDS.md at the repo root.
+init_repo                  Scaffold CODING_STANDARDS.md skeleton and CLAUDE.md labels-policy block.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ from functools import partial
 from importlib.resources import files
 from pathlib import Path
 
-from ai_harness.modules.harness.models import AgentCli, InstallManifest
+from ai_harness.modules.harness.models import AgentCli, InitResult, InstallManifest
 from ai_harness.modules.harness.renderers import render_agents
 
 # --- the secret knowledge this module hides -------------------------------
@@ -317,20 +317,74 @@ _CODING_STANDARDS_SKELETON = """\
 ## Quality gates
 """
 
+_LABELS_POLICY_BLOCK = """\
+<!-- ai-harness:start -->
 
-def init_repo(repo_root: Path | None = None) -> bool:
-    """Scaffold a titles-only ``CODING_STANDARDS.md`` at *repo_root*.
+## Loop label policy
 
-    If the file already exists, it is left untouched and ``False`` is returned
-    (idempotent by per-artifact detection — no sentinel file). Otherwise the
-    skeleton is written and ``True`` is returned.
+- A **prd-issue** carries `ready-for-agent` only — never `loop`.
+- A **sub-issue** carries `ready-for-agent` + `loop`.
+
+<!-- ai-harness:end -->
+"""
+
+_AI_HARNESS_START = "<!-- ai-harness:start -->"
+_AI_HARNESS_END = "<!-- ai-harness:end -->"
+
+
+def init_repo(repo_root: Path | None = None) -> InitResult:
+    """Scaffold repo-local artifacts at *repo_root*.
+
+    Writes a titles-only ``CODING_STANDARDS.md`` if it does not exist, and
+    appends a labels-policy block to ``CLAUDE.md`` if the file exists and the
+    ``<!-- ai-harness:start -->`` / ``<!-- ai-harness:end -->`` markers are not
+    already present.
+
+    Idempotent by per-artifact detection — no sentinel file. Returns an
+    ``InitResult`` describing which artifacts were written.
 
     *repo_root* defaults to the current working directory so tests can drive
     the operation against a temporary directory.
     """
     root = repo_root if repo_root is not None else Path.cwd()
+
+    wrote_standards = _write_coding_standards(root)
+    wrote_labels_policy, claude_md_missing = _write_labels_policy(root)
+
+    return InitResult(
+        wrote_standards=wrote_standards,
+        wrote_labels_policy=wrote_labels_policy,
+        claude_md_missing=claude_md_missing,
+    )
+
+
+def _write_coding_standards(root: Path) -> bool:
+    """Write ``CODING_STANDARDS.md`` skeleton if absent; return whether written."""
     path = root / "CODING_STANDARDS.md"
     if path.exists():
         return False
     path.write_text(_CODING_STANDARDS_SKELETON, encoding="utf-8")
     return True
+
+
+def _write_labels_policy(root: Path) -> tuple[bool, bool]:
+    """Append labels-policy block to ``CLAUDE.md``.
+
+    Returns ``(wrote, claude_md_missing)``:
+    - ``(True, False)`` when the block was appended.
+    - ``(False, False)`` when markers are already present (idempotent skip).
+    - ``(False, True)`` when ``CLAUDE.md`` does not exist (silently skipped).
+    """
+    path = root / "CLAUDE.md"
+    if not path.exists():
+        return False, True
+
+    content = path.read_text(encoding="utf-8")
+    if _AI_HARNESS_START in content or _AI_HARNESS_END in content:
+        return False, False
+
+    if not content.endswith("\n"):
+        content += "\n"
+    content += "\n" + _LABELS_POLICY_BLOCK + "\n"
+    path.write_text(content, encoding="utf-8")
+    return True, False
