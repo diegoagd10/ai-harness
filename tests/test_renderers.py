@@ -13,7 +13,7 @@ import pytest
 import yaml
 
 from ai_harness.modules.harness.models import AgentCli
-from ai_harness.modules.harness.renderers import render_agents
+from ai_harness.modules.harness.renderers import get_agent_meta, render_agents
 
 
 def _parse_frontmatter(content: str) -> dict:
@@ -144,6 +144,7 @@ def test_claude_orchestrator_skill_frontmatter() -> None:
     assert "tools" not in fm, f"skill should not have tools, got {fm.get('tools')!r}"
     assert "permission" not in fm, f"skill should not have permission, got {fm.get('permission')!r}"
     assert "agents" not in fm, f"skill should not have agents, got {fm.get('agents')!r}"
+    assert "color" not in fm, f"skill should not have color, got {fm.get('color')!r}"
 
 
 def test_claude_orchestrator_body_has_spawn_allowlist() -> None:
@@ -165,6 +166,40 @@ def test_claude_orchestrator_body_has_spawn_allowlist() -> None:
     assert "spawn allowlist" in body.lower() or "subagent spawn" in body.lower()
 
 
+def test_claude_orchestrator_body_has_session_end_pr_contract() -> None:
+    """Session-end prose covers push, create-or-update PR lookup, and the no-second-PR guard."""
+    pairs = render_agents(AgentCli.CLAUDE)
+    pair = _find_pair(pairs, "loop-orchestrator")
+    assert pair is not None
+    body = pair[1].split("---", 2)[-1]
+
+    assert "gh pr list --head" in body
+    assert "gh pr edit" in body
+    assert "gh pr create" in body
+
+
+def test_claude_orchestrator_body_has_prd_linking_keywords() -> None:
+    """Session-end prose distinguishes ``Closes #<prd>`` from ``Part of #<prd>`` by drain state."""
+    pairs = render_agents(AgentCli.CLAUDE)
+    pair = _find_pair(pairs, "loop-orchestrator")
+    assert pair is not None
+    body = pair[1].split("---", 2)[-1]
+
+    assert "Closes #" in body
+    assert "Part of #" in body
+
+
+def test_claude_orchestrator_body_has_label_independent_drain_check() -> None:
+    """Session-end prose states drain detection ignores labels — any open issue referencing the prd-issue blocks it."""
+    pairs = render_agents(AgentCli.CLAUDE)
+    pair = _find_pair(pairs, "loop-orchestrator")
+    assert pair is not None
+    body = pair[1].split("---", 2)[-1]
+
+    assert "label-independent" in body.lower() or "label independent" in body.lower()
+    assert "drained" in body.lower()
+
+
 def test_claude_orchestrator_is_skill_not_subagent() -> None:
     """Orchestrator renders as skill at the expected path, never as a subagent."""
     pairs = render_agents(AgentCli.CLAUDE)
@@ -172,6 +207,27 @@ def test_claude_orchestrator_is_skill_not_subagent() -> None:
     paths = [path for path, _ in pairs]
     assert ".claude/skills/loop-orchestrator/SKILL.md" in paths
     assert ".claude/agents/loop-orchestrator.md" not in paths
+
+
+def test_claude_subagents_have_no_color() -> None:
+    """No Claude subagent frontmatter carries a ``color`` key — Claude has no color concept."""
+    pairs = render_agents(AgentCli.CLAUDE)
+
+    for name in ("explorer", "implementor", "validator"):
+        pair = _find_pair(pairs, name)
+        assert pair is not None, f"{name} not found in Claude output"
+        fm = _parse_frontmatter(pair[1])
+        assert "color" not in fm, f"{name}: should not have color, got {fm.get('color')!r}"
+
+
+def test_loop_orchestrator_description_mentions_loop_labeled_sub_issues() -> None:
+    """Orchestrator description drops 'ready-for-agent' and names loop-labeled sub-issues."""
+    meta = get_agent_meta("loop-orchestrator")
+    description = meta["description"]
+
+    assert "ready-for-agent" not in description
+    assert "loop" in description
+    assert "sub-issue" in description
 
 
 # ---------------------------------------------------------------------------
@@ -215,6 +271,26 @@ def test_opencode_implementor_has_no_permission_block() -> None:
     assert pair is not None
     fm = _parse_frontmatter(pair[1])
     assert "permission" not in fm, f"implementor should not have permission, got {fm.get('permission')!r}"
+
+
+def test_opencode_orchestrator_has_error_color() -> None:
+    """OpenCode loop-orchestrator frontmatter carries ``color: error``."""
+    pairs = render_agents(AgentCli.OPENCODE)
+    pair = _find_pair(pairs, "loop-orchestrator")
+    assert pair is not None
+    fm = _parse_frontmatter(pair[1])
+    assert fm.get("color") == "error", f"expected color=error, got {fm.get('color')!r}"
+
+
+def test_opencode_subagents_have_no_color() -> None:
+    """OpenCode explorer/implementor/validator carry no ``color`` key."""
+    pairs = render_agents(AgentCli.OPENCODE)
+
+    for name in ("explorer", "implementor", "validator"):
+        pair = _find_pair(pairs, name)
+        assert pair is not None, f"{name} not found in OpenCode output"
+        fm = _parse_frontmatter(pair[1])
+        assert "color" not in fm, f"{name}: should not have color, got {fm.get('color')!r}"
 
 
 # ---------------------------------------------------------------------------

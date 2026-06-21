@@ -96,22 +96,31 @@ Always save AFTER a step completes, not during. Status reflects the LAST complet
 
 ## Session end
 
-Runs when the issue queue is drained (step 1 found nothing left) or `LOOP_MAX_ITERATIONS` was hit.
+Runs when the issue queue is drained (step 1 found nothing left) or `LOOP_MAX_ITERATIONS` was hit. A session PR's existence is never gated on completeness — validated work is always pushed and reviewable, even with issues still open or blocked.
 
-1. If `<loop_run_branch>` has no commits ahead of `main` (nothing landed this session), report that and stop — no PR needed.
+1. If `<loop_run_branch>` has no commits ahead of `main` (nothing landed this session), report that and stop — no PR needed, nothing to push.
 2. `git push -u origin <loop_run_branch>`.
-3. `gh pr create --base main --head <loop_run_branch> --title "Loop session: <N> issues" --body "<summary>"`. Body lists each closed issue (number, title, one-line validator summary) for human-readable traceability. This PR is not what closes the issues — they're already closed — it's only what lands the code on `main`.
-4. Tell the user the PR URL and which issues are in it.
-5. Mark `loop/run/active` in Engram as closed (PR opened, URL noted), so the next boot starts a fresh `loop-run/<ts>` instead of resuming this one.
-6. Print `LOOP DONE`.
+3. **Ensure exactly one PR exists (create-or-update), never a second.**
+   - `gh pr list --head <loop_run_branch> --json number` to look up an existing PR for this branch.
+   - If found: `gh pr edit <N>` to refresh title/body with the latest summary. Do not create a new one.
+   - If not found: `gh pr create --base main --head <loop_run_branch> --title "Loop session: <N> issues" --body "<body>"`.
+   - Defensive note: if `gh pr list --head` ever returns more than one PR for this branch, that is a bug in an earlier session — do not create a third; fix the body of the most recent one and tell the user.
+4. **Build the PR body following the `branch-pr` skill's agnostic format**: Summary, a Changes table (here: one row per closed sub-issue — number, title, one-line validator summary), a Test Plan section listing the `CODING_STANDARDS.md` quality gates marked passed (each merged sub-issue already earned a clean validator pass on those gates), the Contributor Checklist, plus a status list of this session's sub-issues split into closed / blocked / still-open.
+5. **Link every distinct prd-issue referenced by this session's closed sub-issues.** Extract each sub-issue's PRD reference (see step 2 of the per-iteration loop). Dedup by prd-issue number — multiple sub-issues pointing at the same prd-issue produce one line, not several.
+   - File-path PRD references (e.g. `docs/prd/checkout.md`) are mentioned as plain text — never as a closing keyword, since `gh` cannot close a file path.
+   - For each `#<prd>` numeric reference, run the **label-independent drain check**: `gh issue list --state open --json number,body --limit 500`, then scan each `body` client-side for the literal `#<prd>` token (word-boundary checked, so `#41` never matches `#410`). Do not use `gh issue list --search "#<prd> in:body"` — GitHub's search qualifier tokenizes `#<number>` as a cross-reference rather than literal text and can both over- and under-match (see ADR 0003). `LOOP_LABEL` only selects which sub-issues the loop itself works — it has no bearing on whether a prd-issue is drained, so this scan never filters by label. Zero matching open issues → the prd-issue is fully drained → emit `Closes #<prd>` in the PR body. One or more matches → emit `Part of #<prd>`.
+   - The Loop never closes a prd-issue itself, under any circumstance — only `Closes #<prd>` in a merged PR description triggers GitHub's auto-close, and only a human merging the PR makes that happen. Orphan sub-issues (no PRD reference at all) still get PR'd; they just contribute no `Closes`/`Part of` line.
+6. Tell the user the PR URL, which sub-issues are in it, and the linked prd-issues with their Closes/Part of state.
+7. **Retire `loop/run/active` in Engram only when every prd-issue touched this session is fully drained.** If even one touched prd-issue still has open issues referencing it, leave `loop/run/active` alive (still pointing at `<loop_run_branch>`) so the next session resumes the same branch and updates the same PR instead of opening a new one.
+8. Print `LOOP DONE`.
 
 ## Hard rules
 
 - ONE issue in flight per iteration. Never batch implementor/validator work across issues.
 - NEVER push a per-issue sub-branch. Only the session's `<loop_run_branch>` gets pushed, and only once, at session end.
-- NEVER open more than one PR per session — one PR covers everything closed that session.
+- NEVER open a second PR for the same `<loop_run_branch>` — look it up with `gh pr list --head` first and `gh pr edit` it if it already exists; `gh pr create` only when none exists.
 - NEVER merge anything into local `main` yourself, ever. `main` only moves when a human merges the session PR on GitHub.
-- You close each issue yourself, immediately after a clean validator pass and a successful merge into `<loop_run_branch>` — do not wait for the session PR to merge. The implementor never closes an issue.
+- You close each sub-issue yourself, immediately after a clean validator pass and a successful merge into `<loop_run_branch>` — do not wait for the session PR to merge. The implementor never closes a sub-issue. **You never close a prd-issue either, regardless of drain state** — `Closes #<prd>` in the PR body is the only mechanism, and it only fires when a human merges the PR.
 - NEVER amend a commit already on a sub-branch or on `<loop_run_branch>`.
 - The implementor MUST stay on its assigned sub-branch — no further sub-branches, no rebases, no force-push.
 - You NEVER write code yourself. You only orchestrate, and the only git writes you perform are creating/checking out branches and the sub-branch → loop-run-branch `merge --ff-only`.

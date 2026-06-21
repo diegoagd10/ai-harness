@@ -26,7 +26,7 @@ Use this skill when:
 ```
 1. Create branch: type/description (see Branch Naming below)
 2. Implement changes with conventional commits
-3. Run shellcheck on modified scripts
+3. Run the project's quality gates (see `CODING_STANDARDS.md` if present, otherwise run the project's standard checks)
 4. Open PR using the template
 5. Wait for automated checks to pass
 ```
@@ -53,7 +53,7 @@ Branch names MUST match this regex:
 | Refactor | `refactor/<description>` | `refactor/extract-shared-logic` |
 | Performance | `perf/<description>` | `perf/reduce-startup-time` |
 | Test | `test/<description>` | `test/add-setup-coverage` |
-| Build | `build/<description>` | `build/update-shellcheck` |
+| Build | `build/<description>` | `build/update-dependencies` |
 | CI | `ci/<description>` | `ci/add-branch-validation` |
 | Revert | `revert/<description>` | `revert/broken-setup-change` |
 
@@ -78,16 +78,14 @@ If a PR template exists at `.github/PULL_REQUEST_TEMPLATE.md`, use it. Only if i
 ### 3. Test Plan
 
 ```markdown
-- [x] Scripts run without errors: `shellcheck scripts/*.sh`
+- [x] All quality gates from `CODING_STANDARDS.md` pass (or the project's standard checks, if no such file exists)
 - [x] Manually tested the affected functionality
-- [x] Skills load correctly in target agent
 ```
 
 ### 4. Contributor Checklist
 
 All boxes must be checked:
-- Ran shellcheck on modified scripts
-- Skills tested in at least one agent
+- Ran the project's quality gates (see `CODING_STANDARDS.md` if present)
 - Docs updated if behavior changed
 - Conventional commit format
 - No `Co-Authored-By` trailers
@@ -96,9 +94,7 @@ All boxes must be checked:
 
 ## Automated Checks (all must pass)
 
-| Check | Job name | What it verifies |
-|-------|----------|-----------------|
-| CI | `Shellcheck` | Shell scripts pass `shellcheck` |
+All CI checks configured for this repository must pass before merge.
 
 ---
 
@@ -123,7 +119,7 @@ feat(scripts): add Codex support to setup.sh
 fix(skills): correct topic key format in sdd-apply
 docs(readme): update multi-model configuration guide
 refactor(skills): extract shared persistence logic
-chore(ci): add shellcheck to PR validation workflow
+chore(ci): add linting to PR validation workflow
 perf(scripts): reduce setup.sh execution time
 style(skills): fix markdown formatting
 test(scripts): add setup.sh integration tests
@@ -140,8 +136,7 @@ feat!: redesign skill loading system
 # Create branch
 git checkout -b feature/my-feature main
 
-# Run shellcheck before pushing
-shellcheck scripts/*.sh
+# Run the project's quality gates before pushing (see CODING_STANDARDS.md if present)
 
 # Push and create PR
 git push -u origin feature/my-feature
