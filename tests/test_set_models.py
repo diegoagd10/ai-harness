@@ -564,6 +564,32 @@ def test_load_opencode_catalog_strips_blank_lines_and_whitespace(tmp_path: Path)
     assert ids == ["openai/gpt-5.5", "openai/gpt-5.5-mini"]
 
 
+def test_default_subprocess_runner_accepts_positional_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The real runner accepts ``timeout`` positionally, matching every call site and fake.
+
+    Regression test for #52: the runner's own signature made ``timeout``
+    keyword-only while ``_load_opencode_catalog`` (and all test fakes) call
+    it positionally, raising ``TypeError`` at runtime.
+    """
+    import subprocess
+
+    from ai_harness.modules.wizard import tui
+
+    captured: dict[str, object] = {}
+
+    def fake_run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        captured["args"] = args
+        captured["timeout"] = kwargs.get("timeout")
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="ok\n", stderr="")
+
+    monkeypatch.setattr(tui.subprocess, "run", fake_run)
+
+    result = tui._default_subprocess_runner(["echo", "x"], 5.0)
+
+    assert result == "ok\n"
+    assert captured["timeout"] == 5.0
+
+
 def test_resolve_opencode_binary_returns_none_when_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -77,7 +77,7 @@ class OpencodeUnavailable(Exception):
         self.message = message
 
 
-def _default_subprocess_runner(args: list[str], *, timeout: float) -> str:
+def _default_subprocess_runner(args: list[str], timeout: float) -> str:
     """Default runner: invoke the program via :mod:`subprocess` and return stdout."""
     completed = subprocess.run(  # noqa: S603 — args come from the wizard, not user input
         args,
