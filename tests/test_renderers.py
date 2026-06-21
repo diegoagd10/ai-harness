@@ -166,6 +166,40 @@ def test_claude_orchestrator_body_has_spawn_allowlist() -> None:
     assert "spawn allowlist" in body.lower() or "subagent spawn" in body.lower()
 
 
+def test_claude_orchestrator_body_has_session_end_pr_contract() -> None:
+    """Session-end prose covers push, create-or-update PR lookup, and the no-second-PR guard."""
+    pairs = render_agents(AgentCli.CLAUDE)
+    pair = _find_pair(pairs, "loop-orchestrator")
+    assert pair is not None
+    body = pair[1].split("---", 2)[-1]
+
+    assert "gh pr list --head" in body
+    assert "gh pr edit" in body
+    assert "gh pr create" in body
+
+
+def test_claude_orchestrator_body_has_prd_linking_keywords() -> None:
+    """Session-end prose distinguishes ``Closes #<prd>`` from ``Part of #<prd>`` by drain state."""
+    pairs = render_agents(AgentCli.CLAUDE)
+    pair = _find_pair(pairs, "loop-orchestrator")
+    assert pair is not None
+    body = pair[1].split("---", 2)[-1]
+
+    assert "Closes #" in body
+    assert "Part of #" in body
+
+
+def test_claude_orchestrator_body_has_label_independent_drain_check() -> None:
+    """Session-end prose states drain detection ignores labels — any open issue referencing the prd-issue blocks it."""
+    pairs = render_agents(AgentCli.CLAUDE)
+    pair = _find_pair(pairs, "loop-orchestrator")
+    assert pair is not None
+    body = pair[1].split("---", 2)[-1]
+
+    assert "label-independent" in body.lower() or "label independent" in body.lower()
+    assert "drained" in body.lower()
+
+
 def test_claude_orchestrator_is_skill_not_subagent() -> None:
     """Orchestrator renders as skill at the expected path, never as a subagent."""
     pairs = render_agents(AgentCli.CLAUDE)
