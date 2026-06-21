@@ -457,6 +457,46 @@ def test_cli_set_models_multiple_clis_errors(isolated_home: Path) -> None:
     assert "exactly one" in combined.lower() or "single" in combined.lower() or "one" in combined.lower()
 
 
+def test_cli_set_models_repeated_o_flags_error(isolated_home: Path) -> None:
+    """Repeated ``-o`` flags must trigger the same exactly-one validation as comma input.
+
+    Regression for the validator's BLOCKER on issue #45: typer's default
+    behaviour for a single-value ``str`` option silently keeps only the
+    LAST occurrence of a repeated flag. So ``set-models -o claude -o
+    opencode`` used to pass through with ``to="opencode"`` and produce
+    the misleading "not yet implemented" error instead of a clear
+    "exactly one Agent CLI" validation error that surfaces BOTH values.
+    """
+    result = runner.invoke(app, ["set-models", "-o", "claude", "-o", "opencode"])
+
+    assert result.exit_code != 0
+    combined = f"{result.stdout} {result.stderr}"
+    # The validation message must mention BOTH clis — proof that the
+    # repeated -o was collected, not silently dropped.
+    assert "claude" in combined.lower(), f"expected 'claude' in error, got: {combined!r}"
+    assert "opencode" in combined.lower(), f"expected 'opencode' in error, got: {combined!r}"
+    assert "exactly one" in combined.lower() or "got 2" in combined.lower(), (
+        f"expected exactly-one validation message, got: {combined!r}"
+    )
+
+
+def test_cli_set_models_repeated_o_same_value_still_errors(isolated_home: Path) -> None:
+    """Two identical ``-o`` flags (``-o claude -o claude``) must still fail the exactly-one check.
+
+    Even when the user repeats the same value, the validation must reject
+    the input — silently collapsing duplicates would mask shell quoting
+    bugs and aliases that expand to the same flag. The command must
+    require exactly one occurrence of ``-o``, not exactly one distinct CLI.
+    """
+    result = runner.invoke(app, ["set-models", "-o", "claude", "-o", "claude"])
+
+    assert result.exit_code != 0
+    combined = f"{result.stdout} {result.stderr}"
+    assert "exactly one" in combined.lower() or "got 2" in combined.lower(), (
+        f"expected exactly-one validation message for repeated identical -o, got: {combined!r}"
+    )
+
+
 def test_cli_set_models_unknown_cli_errors(isolated_home: Path) -> None:
     """An unknown CLI in -o errors with a clear, non-zero exit."""
     result = runner.invoke(app, ["set-models", "-o", "bogus"])

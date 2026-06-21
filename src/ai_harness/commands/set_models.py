@@ -13,14 +13,14 @@ from typing import Annotated
 
 import typer
 
-from ai_harness.commands import parse_single_agent_cli
+from ai_harness.commands import parse_agent_clis
 from ai_harness.modules.harness import AgentCli
 from ai_harness.modules.wizard.tui import run_wizard_or_bail
 
 
 def set_models(
     to: Annotated[
-        str,
+        list[str],
         typer.Option(
             "-o",
             "--only",
@@ -30,11 +30,24 @@ def set_models(
 ) -> None:
     """Run the set-models wizard for the given Agent CLI.
 
-    ``-o`` is mandatory and accepts exactly one value. Re-run the wizard
-    to overwrite a previous selection. Press Ctrl+C at any prompt to
-    cancel without writing.
+    ``-o`` is mandatory and must appear exactly once. Repeated ``-o``
+    flags are rejected — typer would otherwise keep only the last
+    occurrence and silently mask the user's mistake. A single ``-o``
+    may carry a comma-separated list, which is also rejected by the
+    same exactly-one check. Re-run the wizard to overwrite a previous
+    selection. Press Ctrl+C at any prompt to cancel without writing.
     """
-    parsed = parse_single_agent_cli(to)
+    if len(to) > 1:
+        valid = ", ".join(a.value for a in AgentCli)
+        raise typer.BadParameter(
+            f"set-models accepts -o exactly once, got {len(to)} occurrences: {', '.join(to)}. Valid: {valid}."
+        )
+
+    # Flatten: a single -o may itself carry a comma-separated list.
+    parsed: list[AgentCli] = []
+    for raw in to:
+        parsed.extend(parse_agent_clis(raw))
+
     if len(parsed) == 0:
         valid = ", ".join(a.value for a in AgentCli)
         raise typer.BadParameter(f"set-models requires exactly one Agent CLI in -o. Got nothing. Valid: {valid}.")
