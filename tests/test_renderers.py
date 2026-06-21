@@ -469,7 +469,7 @@ def test_claude_emits_effort_when_set() -> None:
 
 def test_opencode_omits_effort_when_unset() -> None:
     """No effort override → no ``reasoningEffort`` key in OpenCode frontmatter."""
-    pairs = render_agents(AgentCli.OPENCODE, ["implementor"])
+    pairs = render_agents(AgentCli.OPENCODE, ["implementor"], overrides={})
 
     fm = _parse_frontmatter(pairs[0][1])
     assert "reasoningEffort" not in fm
@@ -477,7 +477,7 @@ def test_opencode_omits_effort_when_unset() -> None:
 
 def test_claude_omits_effort_when_unset() -> None:
     """No effort override → no ``effort`` key in Claude frontmatter."""
-    pairs = render_agents(AgentCli.CLAUDE, ["implementor"])
+    pairs = render_agents(AgentCli.CLAUDE, ["implementor"], overrides={})
 
     fm = _parse_frontmatter(pairs[0][1])
     assert "effort" not in fm
