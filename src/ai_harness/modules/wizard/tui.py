@@ -725,6 +725,8 @@ def run_wizard(cli: AgentCli, *, home: Path) -> bool:
     Supports Claude and OpenCode. Generic and Copilot are not wizard
     targets at all (the wizard command rejects them up front).
     """
+    if _console.is_terminal:
+        _console.clear()
     if cli == AgentCli.CLAUDE:
         return run_claude_wizard(home=home)
     if cli == AgentCli.OPENCODE:

@@ -1508,6 +1508,56 @@ def test_header_phase_renders_legend_exactly_once(
 
 
 # ---------------------------------------------------------------------------
+# run_wizard — clear console on entry (issue #49)
+# ---------------------------------------------------------------------------
+
+
+def test_run_wizard_clears_console_before_header(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """``run_wizard`` must clear the terminal once, before any output, on every path.
+
+    Regression guard for #49: prior wizard runs left earlier command output
+    on screen when the wizard's first screen rendered. The clear must happen
+    exactly once and strictly before the first ``_console.print`` call.
+    """
+    from unittest.mock import PropertyMock
+
+    from ai_harness.modules.harness import AgentCli
+    from ai_harness.modules.wizard import tui
+
+    calls: list[str] = []
+    monkeypatch.setattr(type(tui._console), "is_terminal", PropertyMock(return_value=True))
+    monkeypatch.setattr(tui._console, "clear", lambda: calls.append("clear"))
+    monkeypatch.setattr(tui, "run_claude_wizard", lambda **kwargs: calls.append("claude") or True)
+    monkeypatch.setattr(tui, "run_opencode_wizard", lambda **kwargs: calls.append("opencode") or True)
+
+    tui.run_wizard(AgentCli.CLAUDE, home=tmp_path)
+
+    assert calls == ["clear", "claude"], f"expected clear before claude wizard dispatch, got {calls}"
+
+    calls.clear()
+    tui.run_wizard(AgentCli.OPENCODE, home=tmp_path)
+
+    assert calls == ["clear", "opencode"], f"expected clear before opencode wizard dispatch, got {calls}"
+
+
+def test_run_wizard_skips_clear_when_not_a_terminal(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """``run_wizard`` must not clear when stdout is not a terminal (e.g. CI, pytest capture)."""
+    from unittest.mock import PropertyMock
+
+    from ai_harness.modules.harness import AgentCli
+    from ai_harness.modules.wizard import tui
+
+    calls: list[str] = []
+    monkeypatch.setattr(type(tui._console), "is_terminal", PropertyMock(return_value=False))
+    monkeypatch.setattr(tui._console, "clear", lambda: calls.append("clear"))
+    monkeypatch.setattr(tui, "run_claude_wizard", lambda **kwargs: True)
+
+    tui.run_wizard(AgentCli.CLAUDE, home=tmp_path)
+
+    assert calls == [], "clear must not be called when _console.is_terminal is False"
+
+
+# ---------------------------------------------------------------------------
 # Wizard pickers — j/k navigation binding (acceptance criterion: vim-style nav)
 # ---------------------------------------------------------------------------
 # These tests verify that ``_filterable_select`` attaches j/k key bindings to
