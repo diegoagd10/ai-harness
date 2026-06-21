@@ -1482,6 +1482,31 @@ def test_keybinding_legend_advertises_jk_and_filter() -> None:
     assert "j/k" in legend
 
 
+def test_header_phase_renders_legend_exactly_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The navigation header must not be duplicated on screen.
+
+    Regression test for #48: ``_print_header`` rendered the keybinding
+    legend inside its panel, and a separate ``_print_footer`` call printed
+    the same legend again right below it, reading as a duplicated header.
+    A wizard phase must call into ``_console.print`` only once to render
+    the header+legend, with no second call carrying the same legend text.
+    """
+    from ai_harness.modules.wizard import tui
+
+    printed: list[object] = []
+    monkeypatch.setattr(tui._console, "print", lambda *args, **kwargs: printed.append(args))
+
+    tui._print_header("set-models · claude")
+
+    assert len(printed) == 1, f"expected exactly one _console.print call for the header phase, got {len(printed)}"
+    panel_text = str(printed[0][0].renderable)
+    legend_occurrences = panel_text.count(tui._KEYBINDING_LEGEND)
+    assert legend_occurrences == 1, f"expected legend rendered exactly once, got {legend_occurrences}"
+    assert not hasattr(tui, "_print_footer"), "_print_footer must be removed, not just left unused"
+
+
 # ---------------------------------------------------------------------------
 # Wizard pickers — j/k navigation binding (acceptance criterion: vim-style nav)
 # ---------------------------------------------------------------------------

@@ -317,11 +317,6 @@ def _print_header(title: str) -> None:
     )
 
 
-def _print_footer() -> None:
-    """Print a footer rule with the keybinding legend."""
-    _console.print(f"[dim]{_KEYBINDING_LEGEND}[/dim]\n")
-
-
 # ---------------------------------------------------------------------------
 # Helper — resolve the current value (override → template default)
 # ---------------------------------------------------------------------------
@@ -441,7 +436,6 @@ def run_claude_wizard(*, home: Path) -> bool:
     outside the wizard's scope).
     """
     _print_header("set-models · claude")
-    _print_footer()
 
     # Phase 1: model pass — snapshot the baseline so Phase 3 can tell what
     # the user actually changed. Seeding `models` from the baseline also
@@ -640,7 +634,6 @@ def run_opencode_wizard(*, home: Path) -> bool:
     joined = join_opencode_catalog(model_ids, catalog)
 
     _print_header("set-models · opencode")
-    _print_footer()
 
     # Phase 1: model pass — snapshot the baseline so Phase 3 can tell what
     # the user actually changed. Seeding `models` from the baseline also
