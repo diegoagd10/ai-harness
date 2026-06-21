@@ -18,6 +18,7 @@ Public surface (re-exported from the package)
 install_for_agent_clis     Map bundled resources to agent CLI paths, write, record manifest.
 re_render_for_agent_clis   Re-write rendered loop agents without touching the install manifest.
 uninstall_for_agent_clis   Remove files recorded in the manifest.
+init_repo                  Scaffold a titles-only CODING_STANDARDS.md at the repo root.
 """
 
 from __future__ import annotations
@@ -298,3 +299,38 @@ def uninstall_for_agent_clis(agent_clis: list[AgentCli] | None, *, home: Path | 
     else:
         remaining_files = {a.value: files_by_agent_cli[a.value] for a in remaining if a.value in files_by_agent_cli}
         _write_manifest(home, remaining, remaining_files)
+
+
+# --- repo-local scaffolding (init) ---------------------------------------
+
+_CODING_STANDARDS_SKELETON = """\
+# Coding Standards
+
+## Style
+
+## Testing
+
+## Architecture
+
+## Commits
+
+## Quality gates
+"""
+
+
+def init_repo(repo_root: Path | None = None) -> bool:
+    """Scaffold a titles-only ``CODING_STANDARDS.md`` at *repo_root*.
+
+    If the file already exists, it is left untouched and ``False`` is returned
+    (idempotent by per-artifact detection — no sentinel file). Otherwise the
+    skeleton is written and ``True`` is returned.
+
+    *repo_root* defaults to the current working directory so tests can drive
+    the operation against a temporary directory.
+    """
+    root = repo_root if repo_root is not None else Path.cwd()
+    path = root / "CODING_STANDARDS.md"
+    if path.exists():
+        return False
+    path.write_text(_CODING_STANDARDS_SKELETON, encoding="utf-8")
+    return True

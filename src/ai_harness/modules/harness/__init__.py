@@ -6,6 +6,7 @@ Re-exports the public surface so callers import from the package root:
 
 from ai_harness.modules.harness.models import AgentCli, InstallManifest
 from ai_harness.modules.harness.operations import (
+    init_repo,
     install_for_agent_clis,
     re_render_for_agent_clis,
     uninstall_for_agent_clis,
@@ -14,6 +15,7 @@ from ai_harness.modules.harness.operations import (
 __all__ = [
     "AgentCli",
     "InstallManifest",
+    "init_repo",
     "install_for_agent_clis",
     "re_render_for_agent_clis",
     "uninstall_for_agent_clis",
