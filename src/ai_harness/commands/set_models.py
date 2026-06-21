@@ -17,6 +17,8 @@ from ai_harness.commands import parse_agent_clis
 from ai_harness.modules.harness import AgentCli
 from ai_harness.modules.wizard.tui import run_wizard_or_bail
 
+_SUPPORTED = (AgentCli.CLAUDE, AgentCli.OPENCODE)
+
 
 def set_models(
     to: Annotated[
@@ -38,7 +40,7 @@ def set_models(
     selection. Press Ctrl+C at any prompt to cancel without writing.
     """
     if len(to) > 1:
-        valid = ", ".join(a.value for a in AgentCli)
+        valid = ", ".join(a.value for a in _SUPPORTED)
         raise typer.BadParameter(
             f"set-models accepts -o exactly once, got {len(to)} occurrences: {', '.join(to)}. Valid: {valid}."
         )
@@ -49,10 +51,10 @@ def set_models(
         parsed.extend(parse_agent_clis(raw))
 
     if len(parsed) == 0:
-        valid = ", ".join(a.value for a in AgentCli)
+        valid = ", ".join(a.value for a in _SUPPORTED)
         raise typer.BadParameter(f"set-models requires exactly one Agent CLI in -o. Got nothing. Valid: {valid}.")
     if len(parsed) > 1:
-        valid = ", ".join(a.value for a in AgentCli)
+        valid = ", ".join(a.value for a in _SUPPORTED)
         raise typer.BadParameter(
             f"set-models requires exactly one Agent CLI in -o, got {len(parsed)}: "
             f"{', '.join(a.value for a in parsed)}. Valid: {valid}."

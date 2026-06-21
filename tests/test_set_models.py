@@ -1512,6 +1512,48 @@ def test_cli_set_models_copilot_not_supported(isolated_home: Path) -> None:
     assert "copilot" in combined.lower()
 
 
+def test_cli_set_models_generic_not_supported(isolated_home: Path) -> None:
+    """Generic is not in the wizard's vocabulary at all."""
+    result = runner.invoke(app, ["set-models", "-o", "generic"])
+
+    assert result.exit_code != 0
+    combined = f"{result.stdout} {result.stderr}"
+    assert "generic" in combined.lower()
+
+
+def test_cli_set_models_no_cli_invalid_choice_message_scoped(isolated_home: Path) -> None:
+    """Empty -o ('') yields a 'Valid:' suffix scoped to claude/opencode only."""
+    result = runner.invoke(app, ["set-models", "-o", ""])
+
+    assert result.exit_code != 0
+    combined = f"{result.stdout} {result.stderr}".lower()
+    assert "claude" in combined
+    assert "opencode" in combined
+    assert "generic" not in combined
+    assert "copilot" not in combined
+
+
+def test_cli_set_models_repeated_flag_invalid_choice_message_scoped(isolated_home: Path) -> None:
+    """Repeated -o flags yield a 'Valid:' suffix scoped to claude/opencode only."""
+    result = runner.invoke(app, ["set-models", "-o", "claude", "-o", "opencode"])
+
+    assert result.exit_code != 0
+    combined = f"{result.stdout} {result.stderr}".lower()
+    assert "valid: claude, opencode" in combined
+
+
+def test_cli_set_models_help_mentions_only_claude_opencode() -> None:
+    """``--help`` must mention only claude and opencode, not generic or copilot."""
+    result = runner.invoke(app, ["set-models", "--help"])
+
+    assert result.exit_code == 0
+    lowered = result.stdout.lower()
+    assert "claude" in lowered
+    assert "opencode" in lowered
+    assert "generic" not in lowered
+    assert "copilot" not in lowered
+
+
 # ---------------------------------------------------------------------------
 # set_models CLI — non-TTY guard for claude (must not hang waiting for stdin)
 # ---------------------------------------------------------------------------
