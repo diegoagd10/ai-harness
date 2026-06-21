@@ -393,15 +393,163 @@ def test_agent_continue_picker_enables_search_filter(
     assert _SelectSpy.instances[0].kwargs.get("use_search_filter") is True
 
 
-def test_keybinding_legend_advertises_filter_not_jk() -> None:
-    """The header/footer legend must reflect the new keybindings (arrows + filter, no j/k)."""
+def test_keybinding_legend_advertises_jk_and_filter() -> None:
+    """The header/footer legend must advertise j/k navigation AND type-to-filter.
+
+    Acceptance requires BOTH vim-style j/k navigation and type-to-filter. The
+    questionary pickers delegate to a custom wrapper that wires j/k to
+    navigation (not filter input) and keeps the search filter active.
+    """
     from ai_harness.modules.wizard import tui
 
     legend = tui._KEYBINDING_LEGEND
     assert "type to filter" in legend
     assert "↑/↓" in legend
-    # j/k is no longer a navigation hint because use_search_filter makes it filter input.
-    assert "j/k" not in legend
+    assert "j/k" in legend
+
+
+# ---------------------------------------------------------------------------
+# Wizard pickers — j/k navigation binding (acceptance criterion: vim-style nav)
+# ---------------------------------------------------------------------------
+# These tests verify that ``_filterable_select`` attaches j/k key bindings to
+# the prompt_toolkit Application that drive the underlying InquirerControl's
+# ``select_next`` / ``select_previous``. We do NOT drive the full prompt —
+# just confirm the bindings exist and call the right methods.
+
+
+def test_filterable_select_attaches_jk_bindings() -> None:
+    """The custom select wrapper must add j/k bindings to the prompt's key registry."""
+    import questionary
+
+    from ai_harness.modules.wizard import tui
+
+    choices = [questionary.Choice(title="alpha", value="a"), questionary.Choice(title="beta", value="b")]
+    question = tui._filterable_select("Test:", choices=choices)
+
+    keys = {b.keys[0] for b in question.application.key_bindings.bindings}
+    assert "j" in keys
+    assert "k" in keys
+
+
+def test_filterable_select_jk_moves_inquirer_pointer() -> None:
+    """Pressing j / k on the picker actually moves the InquirerControl's pointer."""
+    import prompt_toolkit.key_binding.key_processor as kp
+    import questionary
+    from prompt_toolkit.key_binding import KeyPress
+
+    from ai_harness.modules.wizard import tui
+
+    # Avoid prompt_toolkit trying to start an event-loop timeout in tests.
+    kp.KeyProcessor._start_timeout = lambda self: None
+
+    choices = [
+        questionary.Choice(title="alpha", value="a"),
+        questionary.Choice(title="beta", value="b"),
+        questionary.Choice(title="gamma", value="c"),
+    ]
+    question = tui._filterable_select("Test:", choices=choices)
+    inquirer_control = tui._find_inquirer_control(question.application.layout.container)
+    assert inquirer_control is not None
+    assert inquirer_control.pointed_at == 0
+
+    processor = question.application.key_processor
+    # j → next
+    processor.feed(KeyPress("j", "j"))
+    processor.process_keys()
+    assert inquirer_control.pointed_at == 1
+
+    # j → next
+    processor.feed(KeyPress("j", "j"))
+    processor.process_keys()
+    assert inquirer_control.pointed_at == 2
+
+    # k → previous
+    processor.feed(KeyPress("k", "k"))
+    processor.process_keys()
+    assert inquirer_control.pointed_at == 1
+
+
+def test_filterable_select_jk_skips_disabled_choices() -> None:
+    """j/k navigation must skip disabled choices, matching the arrow-key behaviour."""
+    import prompt_toolkit.key_binding.key_processor as kp
+    import questionary
+    from prompt_toolkit.key_binding import KeyPress
+
+    from ai_harness.modules.wizard import tui
+
+    kp.KeyProcessor._start_timeout = lambda self: None
+
+    choices = [
+        questionary.Choice(title="alpha", value="a"),
+        questionary.Choice(title="blocked", value="b", disabled="not available"),
+        questionary.Choice(title="gamma", value="c"),
+    ]
+    question = tui._filterable_select("Test:", choices=choices)
+    inquirer_control = tui._find_inquirer_control(question.application.layout.container)
+    assert inquirer_control is not None
+
+    processor = question.application.key_processor
+    processor.feed(KeyPress("j", "j"))
+    processor.process_keys()
+    # j from index 0 should skip the disabled "blocked" and land on "gamma" (index 2).
+    assert inquirer_control.get_pointed_at().value == "c"
+
+
+def test_filterable_select_keeps_type_to_filter_for_other_chars() -> None:
+    """Non-navigation letters must still feed the InquirerControl's search filter."""
+    import prompt_toolkit.key_binding.key_processor as kp
+    import questionary
+    from prompt_toolkit.key_binding import KeyPress
+
+    from ai_harness.modules.wizard import tui
+
+    kp.KeyProcessor._start_timeout = lambda self: None
+
+    choices = [
+        questionary.Choice(title="alpha", value="a"),
+        questionary.Choice(title="beta", value="b"),
+    ]
+    question = tui._filterable_select("Test:", choices=choices)
+    inquirer_control = tui._find_inquirer_control(question.application.layout.container)
+    assert inquirer_control is not None
+    assert inquirer_control.search_filter is None
+
+    processor = question.application.key_processor
+    # Press 'a' — not bound to our j/k handler, so it must hit the search filter.
+    processor.feed(KeyPress("a", "a"))
+    processor.process_keys()
+    assert inquirer_control.search_filter == "a"
+
+
+def test_filterable_select_still_enables_search_filter_kwarg() -> None:
+    """The wrapper passes ``use_search_filter=True`` to questionary.select."""
+    import ai_harness.modules.wizard.tui as tui_mod
+
+    captured: list[dict[str, object]] = []
+
+    def fake_select(message: object, *args: object, **kwargs: object) -> object:
+        captured.append(kwargs)
+
+        class _Q:
+            # No ``application`` attribute — the wrapper must handle this gracefully
+            # and still pass the right kwargs (mirrors the existing _SelectSpy tests).
+
+            def ask(self) -> None:
+                return None
+
+        return _Q()
+
+    original = tui_mod.questionary.select
+    tui_mod.questionary.select = fake_select  # type: ignore[assignment]
+    try:
+        tui_mod._filterable_select("Test:", choices=[])
+    finally:
+        tui_mod.questionary.select = original  # type: ignore[assignment]
+
+    assert captured, "questionary.select was not called"
+    assert captured[0].get("use_search_filter") is True
+    assert captured[0].get("use_jk_keys") is False
+    assert captured[0].get("use_arrow_keys") is True
 
 
 # ---------------------------------------------------------------------------

@@ -52,7 +52,118 @@ _console = Console()
 # ---------------------------------------------------------------------------
 
 
-_KEYBINDING_LEGEND = "↑/↓: navigate · type to filter · enter: select · Ctrl+C: cancel"
+_KEYBINDING_LEGEND = "↑/↓ + j/k: navigate · type to filter · enter: select · Ctrl+C: cancel"
+
+
+# ---------------------------------------------------------------------------
+# Helper — find the InquirerControl inside a questionary.select layout tree
+# ---------------------------------------------------------------------------
+
+
+def _find_inquirer_control(node: object) -> object | None:
+    """Walk a prompt_toolkit layout tree and return questionary's ``InquirerControl``.
+
+    ``questionary.select`` builds the InquirerControl locally and does not expose
+    it. We recover it by walking ``Application.layout.container`` (an
+    ``HSplit``) and looking at each ``Window``'s ``content``. The walk is
+    defensive — any node that does not expose ``content`` / ``children`` is
+    skipped. Returns ``None`` if no InquirerControl is found, which should
+    not happen for a question built by ``questionary.select``.
+    """
+    from questionary.prompts.common import InquirerControl
+
+    if node is None:
+        return None
+
+    # Window-like: content IS the InquirerControl.
+    content = getattr(node, "content", None)
+    if isinstance(content, InquirerControl):
+        return content
+
+    # Wrap-like containers (ConditionalContainer, Window): recurse into content.
+    if content is not None and content is not node:
+        found = _find_inquirer_control(content)
+        if found is not None:
+            return found
+
+    # Split-like containers (HSplit, VSplit): recurse into each child.
+    children = getattr(node, "children", None)
+    if children:
+        for child in children:
+            if child is None or isinstance(child, str):
+                continue
+            found = _find_inquirer_control(child)
+            if found is not None:
+                return found
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Helper — questionary.select with j/k navigation + type-to-filter
+# ---------------------------------------------------------------------------
+
+
+def _filterable_select(
+    message: str,
+    *,
+    choices: list[questionary.Choice],
+) -> questionary.Question:
+    """Build a questionary.select question that supports j/k AND type-to-filter.
+
+    ``questionary.select`` raises ``ValueError`` if you combine
+    ``use_jk_keys=True`` with ``use_search_filter=True`` — the library is
+    right that 'j' and 'k' can be part of a search prefix, but the issue's
+    acceptance criteria require BOTH vim-style navigation and type-to-filter
+    simultaneously. This wrapper builds the question with the search filter
+    enabled and ``use_jk_keys=False``, then attaches its own j/k bindings to
+    the resulting prompt_toolkit ``Application`` that call
+    ``select_next`` / ``select_previous`` on the underlying InquirerControl.
+
+    prompt_toolkit's ``KeyProcessor._process`` calls ``matches[-1]`` — the
+    LAST matching binding — for a given key. Our j/k bindings are appended
+    to the registry AFTER questionary's eager search-filter bindings, so
+    ours win for 'j' and 'k'. Other printable characters still hit
+    questionary's search filter and feed ``InquirerControl.search_filter``
+    as expected. Arrow keys and Ctrl+C/Ctrl+Q are untouched (they were
+    added by questionary and remain functional).
+    """
+    question = questionary.select(
+        message,
+        choices=choices,
+        use_arrow_keys=True,
+        use_search_filter=True,
+        use_jk_keys=False,
+    )
+
+    # ``question.application`` is a real prompt_toolkit Application in production
+    # but a test-time fake (e.g. the ``_SelectSpy`` in tests/test_set_models.py)
+    # may omit it. In that case we cannot attach j/k bindings — tests asserting
+    # the kwargs reach questionary still pass, and the spy already short-circuits
+    # ``.ask()`` so the user never sees a real prompt.
+    application = getattr(question, "application", None)
+    if application is None:
+        return question
+
+    inquirer_control = _find_inquirer_control(application.layout.container)
+    if inquirer_control is None:
+        # Defensive only — every questionary.select has exactly one InquirerControl.
+        return question
+
+    def _move_down(event: object) -> None:
+        inquirer_control.select_next()
+        while not inquirer_control.is_selection_valid():
+            inquirer_control.select_next()
+
+    def _move_up(event: object) -> None:
+        inquirer_control.select_previous()
+        while not inquirer_control.is_selection_valid():
+            inquirer_control.select_previous()
+
+    application.key_bindings.add("j", eager=True)(_move_down)
+    application.key_bindings.add("k", eager=True)(_move_up)
+
+    return question
 
 
 def _print_header(title: str) -> None:
@@ -94,11 +205,9 @@ def _ask_claude_model(agent: str, home: Path) -> str | None:
     """Ask the user to pick a model for *agent*; return None on Ctrl+C."""
     rows = build_model_picker_rows(agent, _current_claude_model(agent, home))
     choices = [questionary.Choice(title=row.label, value=row.value) for row in rows]
-    return questionary.select(
+    return _filterable_select(
         f"Model for {agent}:",
         choices=choices,
-        use_arrow_keys=True,
-        use_search_filter=True,
     ).ask()
 
 
@@ -106,11 +215,9 @@ def _ask_claude_effort(agent: str, home: Path) -> str | None:
     """Ask the user to pick an effort for *agent*; return None on Ctrl+C."""
     rows = build_effort_picker_rows(agent, _current_claude_effort(agent, home))
     choices = [questionary.Choice(title=row.label, value=row.value) for row in rows]
-    return questionary.select(
+    return _filterable_select(
         f"Effort for {agent}:",
         choices=choices,
-        use_arrow_keys=True,
-        use_search_filter=True,
     ).ask()
 
 
@@ -145,11 +252,9 @@ def _ask_continue_or_agent(
         )
     )
 
-    return questionary.select(
+    return _filterable_select(
         f"Choose an agent to edit its {phase}, or continue:",
         choices=choices,
-        use_arrow_keys=True,
-        use_search_filter=True,
     ).ask()
 
 
