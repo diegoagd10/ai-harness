@@ -772,3 +772,155 @@ def test_cli_uninstall_claude_removes_agents_and_skill(isolated_home: Path) -> N
     assert not (isolated_home / ".claude" / "skills" / _CLAUDE_SKILL_NAME / "SKILL.md").exists(), (
         "CLI uninstall: claude skill remaining"
     )
+
+
+# ---------------------------------------------------------------------------
+# Override store — `~/.ai-harness/overrides.json` is loaded at install time
+# ---------------------------------------------------------------------------
+
+_OVERRIDES_REL = ".ai-harness/overrides.json"
+
+
+def _write_overrides(home: Path, payload: dict) -> Path:
+    """Write *payload* to ``~/.ai-harness/overrides.json`` and return the path."""
+    path = home / _OVERRIDES_REL
+    path.parent.mkdir(parents=True, exist_ok=True)
+    import json as _json
+
+    path.write_text(_json.dumps(payload), encoding="utf-8")
+    return path
+
+
+def test_install_opencode_with_overrides_applies_model_and_effort(tmp_path: Path) -> None:
+    """An overrides.json with model + effort propagates into the rendered OpenCode frontmatter."""
+    _write_overrides(
+        tmp_path,
+        {"implementor": {"model": {"opencode": "openai/gpt-5.4"}, "effort": {"opencode": "high"}}},
+    )
+
+    install_for_agent_clis([AgentCli.GENERIC, AgentCli.OPENCODE], home=tmp_path)
+
+    path = tmp_path / ".config" / "opencode" / "agent" / "implementor.md"
+    fm = _read_frontmatter(path)
+    assert fm["model"] == "openai/gpt-5.4"
+    assert fm["reasoningEffort"] == "high"
+
+
+def test_install_claude_with_overrides_applies_model_and_effort(tmp_path: Path) -> None:
+    """An overrides.json with model + effort propagates into the rendered Claude frontmatter."""
+    _write_overrides(
+        tmp_path,
+        {"implementor": {"model": {"claude": "opus"}, "effort": {"claude": "high"}}},
+    )
+
+    install_for_agent_clis([AgentCli.GENERIC, AgentCli.CLAUDE], home=tmp_path)
+
+    path = tmp_path / ".claude" / "agents" / "implementor.md"
+    fm = _read_frontmatter(path)
+    assert fm["model"] == "opus"
+    assert fm["effort"] == "high"
+
+
+def test_install_without_overrides_is_byte_identical(tmp_path: Path) -> None:
+    """No overrides.json → rendered output is byte-identical to the no-override baseline."""
+    install_for_agent_clis([AgentCli.GENERIC, AgentCli.OPENCODE], home=tmp_path)
+    first_bytes: dict[str, bytes] = {}
+    for name in _LOOP_AGENT_NAMES:
+        first_bytes[name] = (tmp_path / ".config" / "opencode" / "agent" / f"{name}.md").read_bytes()
+
+    # Reinstall with an empty (absent) overrides file
+    install_for_agent_clis([AgentCli.GENERIC, AgentCli.OPENCODE], home=tmp_path)
+    for name in _LOOP_AGENT_NAMES:
+        second = (tmp_path / ".config" / "opencode" / "agent" / f"{name}.md").read_bytes()
+        assert second == first_bytes[name], f"{name}: byte-identical reinstall failed (no overrides present)"
+
+
+def test_install_with_overrides_survives_reinstall(tmp_path: Path) -> None:
+    """Override survives reinstall (the second install reads the same overrides.json)."""
+    _write_overrides(
+        tmp_path,
+        {"implementor": {"model": {"opencode": "openai/gpt-5.4"}}},
+    )
+
+    install_for_agent_clis([AgentCli.GENERIC, AgentCli.OPENCODE], home=tmp_path)
+    first = (tmp_path / ".config" / "opencode" / "agent" / "implementor.md").read_text(encoding="utf-8")
+
+    install_for_agent_clis([AgentCli.GENERIC, AgentCli.OPENCODE], home=tmp_path)
+    second = (tmp_path / ".config" / "opencode" / "agent" / "implementor.md").read_text(encoding="utf-8")
+    assert first == second
+    assert "openai/gpt-5.4" in second
+
+
+def test_install_with_partial_overrides_preserves_others(tmp_path: Path) -> None:
+    """Overriding implementor must leave explorer/validator/loop-orchestrator unchanged."""
+    _write_overrides(
+        tmp_path,
+        {"implementor": {"model": {"opencode": "openai/gpt-5.4"}}},
+    )
+
+    install_for_agent_clis([AgentCli.GENERIC, AgentCli.OPENCODE], home=tmp_path)
+
+    explorer_fm = _read_frontmatter(tmp_path / ".config" / "opencode" / "agent" / "explorer.md")
+    validator_fm = _read_frontmatter(tmp_path / ".config" / "opencode" / "agent" / "validator.md")
+    orchestrator_fm = _read_frontmatter(tmp_path / ".config" / "opencode" / "agent" / "loop-orchestrator.md")
+    assert explorer_fm["model"] == "opencode-go/kimi-k2.7-code"
+    assert validator_fm["model"] == "openai/gpt-4.1-mini"
+    assert orchestrator_fm["model"] == "openai/gpt-5.5"
+
+
+def test_install_with_overrides_does_not_remove_overrides_on_uninstall(tmp_path: Path) -> None:
+    """Uninstall must not delete the overrides file — it's user-authored config."""
+    _write_overrides(
+        tmp_path,
+        {"implementor": {"model": {"opencode": "openai/gpt-5.4"}}},
+    )
+
+    install_for_agent_clis([AgentCli.GENERIC, AgentCli.OPENCODE], home=tmp_path)
+    assert (tmp_path / _OVERRIDES_REL).is_file(), "overrides.json should exist after install"
+
+    uninstall_for_agent_clis(None, home=tmp_path)
+    assert (tmp_path / _OVERRIDES_REL).is_file(), "overrides.json must survive uninstall (user config)"
+
+
+def test_install_with_unknown_override_agent_ignores_it(tmp_path: Path) -> None:
+    """An overrides entry for a non-existent agent is silently ignored."""
+    _write_overrides(
+        tmp_path,
+        {"unknown-agent": {"model": {"opencode": "openai/gpt-5.4"}}},
+    )
+
+    install_for_agent_clis([AgentCli.GENERIC, AgentCli.OPENCODE], home=tmp_path)
+
+    fm = _read_frontmatter(tmp_path / ".config" / "opencode" / "agent" / "implementor.md")
+    assert fm["model"] == "opencode-go/deepseek-v4-pro"
+
+
+def test_install_with_malformed_overrides_raises(tmp_path: Path) -> None:
+    """Malformed JSON in overrides.json fails loudly (no silent fallback)."""
+    bad_path = tmp_path / _OVERRIDES_REL
+    bad_path.parent.mkdir(parents=True, exist_ok=True)
+    bad_path.write_text("{not valid json", encoding="utf-8")
+
+    with pytest.raises(json.JSONDecodeError):
+        install_for_agent_clis([AgentCli.GENERIC, AgentCli.OPENCODE], home=tmp_path)
+
+
+def test_install_claude_orchestrator_skill_unaffected_by_overrides(tmp_path: Path) -> None:
+    """Claude orchestrator skill frontmatter stays description-only even with overrides."""
+    _write_overrides(
+        tmp_path,
+        {
+            "loop-orchestrator": {
+                "model": {"claude": "opus"},
+                "effort": {"claude": "high"},
+            },
+        },
+    )
+
+    install_for_agent_clis([AgentCli.GENERIC, AgentCli.CLAUDE], home=tmp_path)
+
+    skill_path = tmp_path / ".claude" / "skills" / _CLAUDE_SKILL_NAME / "SKILL.md"
+    fm = _read_frontmatter(skill_path)
+    assert "model" not in fm
+    assert "effort" not in fm
+    assert "description" in fm

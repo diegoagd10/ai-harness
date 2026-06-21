@@ -42,6 +42,7 @@ from ai_harness.modules.harness.renderers import render_agents
 _MANIFEST_DIR = ".ai-harness"
 _MANIFEST_FILENAME = "installed.json"
 _MANIFEST_VERSION = 1
+_OVERRIDES_FILENAME = "overrides.json"
 
 _RESOURCE_PACKAGE = "ai_harness"
 _RESOURCE_ROOT = "resources"
@@ -80,6 +81,24 @@ def _read_manifest(home: Path) -> dict | None:
     path = _manifest_path(home)
     if not path.is_file():
         return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _overrides_path(home: Path) -> Path:
+    """Return the path to ``~/.ai-harness/overrides.json`` for *home*."""
+    return home / _MANIFEST_DIR / _OVERRIDES_FILENAME
+
+
+def _read_overrides(home: Path) -> dict:
+    """Return the per-agent override store for *home*.
+
+    Returns ``{}`` when the file is missing (no-op override). Malformed JSON
+    is raised as-is so the user can fix it instead of silently rendering
+    template defaults.
+    """
+    path = _overrides_path(home)
+    if not path.is_file():
+        return {}
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -146,9 +165,15 @@ def _write_persona_and_skills(home: Path, *, config_dest_rel: str, tree_dest_rel
 
 
 def _write_rendered_agents(home: Path, *, cli: AgentCli) -> list[Path]:
-    """Render the loop agents for *cli* into *home*; return absolute paths written."""
+    """Render the loop agents for *cli* into *home*; return absolute paths written.
+
+    Reads the override store from ``~/.ai-harness/overrides.json`` once and
+    threads it through ``render_agents``. A missing file is a no-op; a
+    malformed file fails loudly.
+    """
+    overrides = _read_overrides(home)
     written: list[Path] = []
-    for rel, content in render_agents(cli):
+    for rel, content in render_agents(cli, overrides=overrides):
         dest = home / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(content, encoding="utf-8")

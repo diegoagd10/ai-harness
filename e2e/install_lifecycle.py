@@ -11,6 +11,7 @@ additional agent CLIs on top of generic.
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -109,6 +110,8 @@ def run(cli_dir: str) -> None:
         _test_install_claude_and_copilot(path_env)
         _test_install_only_opencode(path_env)
         _test_install_claude_and_opencode(path_env)
+        _test_install_with_overrides_opencode(path_env)
+        _test_install_with_overrides_claude(path_env)
     finally:
         sandboxed_tool_uninstall()
 
@@ -186,3 +189,87 @@ def _test_install_claude_and_opencode(path_env: dict[str, str]) -> None:
     _assert_opencode_exists(h)
     _assert_copilot_missing(h)
     _assert_manifest_exists(h)
+
+
+# ---------------------------------------------------------------------------
+# Override store — sandbox HOME is seeded with overrides.json before install;
+# the installed agent frontmatter must reflect the overridden model + effort.
+# ---------------------------------------------------------------------------
+
+
+def _seed_overrides(home: Path, payload: dict) -> None:
+    """Write *payload* to ``~/.ai-harness/overrides.json`` inside *home*."""
+    target = Path(home) / ".ai-harness" / "overrides.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _read_frontmatter_yaml(path: Path) -> dict:
+    """Parse YAML frontmatter between --- delimiters and return the dict."""
+    import yaml  # local import keeps e2e suite portable
+
+    text = path.read_text(encoding="utf-8")
+    parts = text.split("---")
+    assert len(parts) >= 3, f"no frontmatter in {path}"
+    return yaml.safe_load(parts[1])
+
+
+def _test_install_with_overrides_opencode(path_env: dict[str, str]) -> None:
+    """Seeded overrides.json drives the rendered OpenCode frontmatter."""
+    home = sandbox_home()
+    _seed_overrides(
+        Path(home),
+        {
+            "implementor": {
+                "model": {"opencode": "openai/gpt-5.4"},
+                "effort": {"opencode": "high"},
+            },
+        },
+    )
+
+    run_in_sandbox(home, "ai-harness", "install", "-o", "opencode", extra_env=path_env)
+    h = Path(home)
+
+    agent_path = h / ".config" / "opencode" / "agent" / "implementor.md"
+    assert_file_exists(agent_path, "opencode agent implementor")
+    fm = _read_frontmatter_yaml(agent_path)
+    assert fm.get("model") == "openai/gpt-5.4", f"expected overridden model, got {fm.get('model')!r}"
+    assert fm.get("reasoningEffort") == "high", (
+        f"expected overridden reasoningEffort, got {fm.get('reasoningEffort')!r}"
+    )
+
+    # Other agents keep their template defaults (partial merge).
+    explorer_fm = _read_frontmatter_yaml(h / ".config" / "opencode" / "agent" / "explorer.md")
+    assert explorer_fm.get("model") == "opencode-go/kimi-k2.7-code"
+    assert "reasoningEffort" not in explorer_fm
+
+
+def _test_install_with_overrides_claude(path_env: dict[str, str]) -> None:
+    """Seeded overrides.json drives the rendered Claude frontmatter; the orchestrator skill stays clean."""
+    home = sandbox_home()
+    _seed_overrides(
+        Path(home),
+        {
+            "implementor": {
+                "model": {"claude": "opus"},
+                "effort": {"claude": "high"},
+            },
+        },
+    )
+
+    run_in_sandbox(home, "ai-harness", "install", "-o", "claude", extra_env=path_env)
+    h = Path(home)
+
+    agent_path = h / ".claude" / "agents" / "implementor.md"
+    assert_file_exists(agent_path, "claude agent implementor")
+    fm = _read_frontmatter_yaml(agent_path)
+    assert fm.get("model") == "opus", f"expected overridden model, got {fm.get('model')!r}"
+    assert fm.get("effort") == "high", f"expected overridden effort, got {fm.get('effort')!r}"
+
+    # Orchestrator skill remains description-only.
+    skill_path = h / ".claude" / "skills" / "loop-orchestrator" / "SKILL.md"
+    assert_file_exists(skill_path, "claude orchestrator skill")
+    skill_fm = _read_frontmatter_yaml(skill_path)
+    assert "model" not in skill_fm
+    assert "effort" not in skill_fm
+    assert "description" in skill_fm

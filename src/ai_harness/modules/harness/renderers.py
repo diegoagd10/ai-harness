@@ -16,6 +16,7 @@ destination layout) are private and owned by ``render_agents``.
 
 from __future__ import annotations
 
+import copy
 from importlib.resources import files
 from importlib.resources.abc import Traversable
 
@@ -121,15 +122,39 @@ def _read_template_source(name: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def get_agent_meta(name: str) -> dict:
+def get_agent_meta(name: str, overrides: dict | None = None) -> dict:
     """Return the metadata dict for a named agent (from ``_AGENT_META``).
+
+    *overrides* is an optional per-agent partial overlay (see project docs).
+    When present, the override entry for *name* is deep-merged over the
+    template defaults; absent or unknown agents keep their template values.
+    The returned dict is always a fresh copy so callers cannot mutate the
+    shared template state.
 
     Public so tests can derive expected frontmatter from the same source.
     """
     meta = _AGENT_META.get(name)
     if meta is None:
         raise ValueError(f"Unknown agent template: {name!r}")
-    return meta
+    override_entry = (overrides or {}).get(name, {})
+    return _deep_merge(meta, override_entry)
+
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    """Return a fresh dict with *override* recursively merged over *base*.
+
+    Dicts merge key-by-key (recursively); scalars and lists in *override*
+    replace those in *base*. The original *base* is never mutated; the
+    returned dict (and any nested dicts inside it) are fresh copies.
+    """
+    result = copy.deepcopy(base)
+    for key, value in override.items():
+        base_value = result.get(key)
+        if isinstance(base_value, dict) and isinstance(value, dict):
+            result[key] = _deep_merge(base_value, value)
+        else:
+            result[key] = copy.deepcopy(value)
+    return result
 
 
 def _get_agent_mode(name: str) -> str:
@@ -160,7 +185,7 @@ def _yaml_dump_frontmatter(data: dict[str, object]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _render_opencode_agent(name: str) -> tuple[str, str]:
+def _render_opencode_agent(name: str, overrides: dict | None = None) -> tuple[str, str]:
     """Render a loop agent template into an OpenCode agent file.
 
     Returns (filename, content) where filename is ``<name>.md`` and content is
@@ -168,7 +193,7 @@ def _render_opencode_agent(name: str) -> tuple[str, str]:
 
     Raises ValueError if the agent's metadata lacks ``model.opencode``.
     """
-    meta = get_agent_meta(name)
+    meta = get_agent_meta(name, overrides=overrides)
     body = _read_template_body(name)
 
     model_map = meta.get("model")
@@ -180,6 +205,11 @@ def _render_opencode_agent(name: str) -> tuple[str, str]:
         "mode": meta.get("mode", "subagent"),
         "model": model_map["opencode"],
     }
+
+    # Emit effort as OpenCode's ``reasoningEffort`` only when configured for this CLI
+    effort_map = meta.get("effort")
+    if isinstance(effort_map, dict) and "opencode" in effort_map:
+        opencode_frontmatter["reasoningEffort"] = effort_map["opencode"]
 
     # Pass through the permission block if present
     if "permission" in meta:
@@ -195,7 +225,7 @@ def _render_opencode_agent(name: str) -> tuple[str, str]:
     return f"{name}.md", rendered
 
 
-def _render_claude_agent(name: str) -> tuple[str, str]:
+def _render_claude_agent(name: str, overrides: dict | None = None) -> tuple[str, str]:
     """Render a loop agent template into a Claude Code agent file.
 
     Returns (filename, content) where filename is ``<name>.md`` and content is
@@ -203,7 +233,7 @@ def _render_claude_agent(name: str) -> tuple[str, str]:
 
     Raises ValueError if the agent lacks ``model.claude`` or has ``mode: primary``.
     """
-    meta = get_agent_meta(name)
+    meta = get_agent_meta(name, overrides=overrides)
     body = _read_template_body(name)
 
     model_map = meta.get("model")
@@ -220,6 +250,11 @@ def _render_claude_agent(name: str) -> tuple[str, str]:
         "model": model_map["claude"],
     }
 
+    # Emit effort as Claude's ``effort`` only when configured for this CLI
+    effort_map = meta.get("effort")
+    if isinstance(effort_map, dict) and "claude" in effort_map:
+        claude_frontmatter["effort"] = effort_map["claude"]
+
     # Translate OpenCode permission block to Claude-native tools allow-list
     permission = meta.get("permission")
     if isinstance(permission, dict) and permission.get("edit") == "deny" and permission.get("write") == "deny":
@@ -233,15 +268,19 @@ def _render_claude_agent(name: str) -> tuple[str, str]:
     return f"{name}.md", rendered
 
 
-def _render_claude_skill(name: str) -> tuple[str, str]:
+def _render_claude_skill(name: str, overrides: dict | None = None) -> tuple[str, str]:
     """Render the primary loop agent template into a Claude Code skill file.
 
     Returns (filename, content) where filename is ``SKILL.md`` and content is
     the full rendered frontmatter + body.
 
+    The skill carries only ``description`` in frontmatter — no model, effort,
+    or tools. Overrides are intentionally ignored: skills run on the session
+    model and inherit the user's effort setting.
+
     Raises ValueError if the agent lacks ``model.claude`` or has mode other than ``primary``.
     """
-    meta = get_agent_meta(name)
+    meta = get_agent_meta(name, overrides=overrides)
     body = _read_template_body(name)
 
     model_map = meta.get("model")
@@ -257,6 +296,7 @@ def _render_claude_skill(name: str) -> tuple[str, str]:
     }
     # No name field — skills aren't spawned by name.
     # No model field — skills run on the session model.
+    # No effort field — skills inherit the user's session effort setting.
     # No tools field — unrestricted.
     # No mode field — Claude has no mode concept; skill-vs-agent is determined
     # by destination directory, not frontmatter.
@@ -299,25 +339,29 @@ _CLAUDE_SKILL_DIR = ".claude/skills/loop-orchestrator"
 _OPENCODE_AGENT_DIR = ".config/opencode/agent"
 
 
-def _render_claude(name: str) -> tuple[str, str]:
+def _render_claude(name: str, overrides: dict | None = None) -> tuple[str, str]:
     """Render one Claude loop agent as a home-relative (path, content) pair.
 
     Primary agents become the orchestrator skill; all others become subagents.
     """
     if _get_agent_mode(name) == "primary":
-        filename, content = _render_claude_skill(name)
+        filename, content = _render_claude_skill(name, overrides=overrides)
         return f"{_CLAUDE_SKILL_DIR}/{filename}", content
-    filename, content = _render_claude_agent(name)
+    filename, content = _render_claude_agent(name, overrides=overrides)
     return f"{_CLAUDE_AGENTS_DIR}/{filename}", content
 
 
-def _render_opencode(name: str) -> tuple[str, str]:
+def _render_opencode(name: str, overrides: dict | None = None) -> tuple[str, str]:
     """Render one OpenCode loop agent as a home-relative (path, content) pair."""
-    filename, content = _render_opencode_agent(name)
+    filename, content = _render_opencode_agent(name, overrides=overrides)
     return f"{_OPENCODE_AGENT_DIR}/{filename}", content
 
 
-def render_agents(cli: AgentCli, names: list[str] | None = None) -> list[tuple[str, str]]:
+def render_agents(
+    cli: AgentCli,
+    names: list[str] | None = None,
+    overrides: dict | None = None,
+) -> list[tuple[str, str]]:
     """Render the loop agents for *cli* as home-relative (path, content) pairs.
 
     The sole public agent-render entry. Owns skill-vs-agent mode dispatch,
@@ -326,13 +370,15 @@ def render_agents(cli: AgentCli, names: list[str] | None = None) -> list[tuple[s
     inline emission.
 
     *names* defaults to the discovered loop agents; pass an explicit list to
-    render a subset. CLIs without native agent support return an empty list.
+    render a subset. *overrides* is an optional per-agent partial overlay
+    deep-merged over the template defaults; ``None`` or ``{}`` is a no-op.
+    CLIs without native agent support return an empty list.
     """
     if names is None:
         names = _discover_loop_agents()
 
     if cli == AgentCli.CLAUDE:
-        return [_render_claude(name) for name in names]
+        return [_render_claude(name, overrides=overrides) for name in names]
     if cli == AgentCli.OPENCODE:
-        return [_render_opencode(name) for name in names]
+        return [_render_opencode(name, overrides=overrides) for name in names]
     return []
