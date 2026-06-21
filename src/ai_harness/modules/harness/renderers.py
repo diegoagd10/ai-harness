@@ -187,9 +187,20 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return result
 
 
-def _get_agent_mode(name: str) -> str:
-    """Return the mode (subagent|primary) for a named agent."""
-    return get_agent_meta(name).get("mode", "subagent")
+def _get_agent_mode(
+    name: str,
+    overrides: dict | None = None,
+    *,
+    home: Path | None = None,
+) -> str:
+    """Return the mode (subagent|primary) for a named agent.
+
+    Threads *overrides* and *home* through to :func:`get_agent_meta` so the
+    mode lookup shares the same resolution path as the frontmatter pass — an
+    explicit ``overrides=`` arg (including ``{}``) must NOT fall through to a
+    ``~/.ai-harness/overrides.json`` read at the ambient ``$HOME``.
+    """
+    return get_agent_meta(name, overrides=overrides, home=home).get("mode", "subagent")
 
 
 def _read_template_body(name: str) -> str:
@@ -369,12 +380,17 @@ _CLAUDE_SKILL_DIR = ".claude/skills/loop-orchestrator"
 _OPENCODE_AGENT_DIR = ".config/opencode/agent"
 
 
-def _render_claude(name: str, overrides: dict | None = None) -> tuple[str, str]:
+def _render_claude(
+    name: str,
+    overrides: dict | None = None,
+    *,
+    home: Path | None = None,
+) -> tuple[str, str]:
     """Render one Claude loop agent as a home-relative (path, content) pair.
 
     Primary agents become the orchestrator skill; all others become subagents.
     """
-    if _get_agent_mode(name) == "primary":
+    if _get_agent_mode(name, overrides=overrides, home=home) == "primary":
         filename, content = _render_claude_skill(name, overrides=overrides)
         return f"{_CLAUDE_SKILL_DIR}/{filename}", content
     filename, content = _render_claude_agent(name, overrides=overrides)

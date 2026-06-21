@@ -669,3 +669,84 @@ def test_render_agents_auto_loads_override_store_from_home(tmp_path: Path) -> No
 
     fm = _parse_frontmatter(pairs[0][1])
     assert fm["model"] == "openai/gpt-5.4"
+
+
+# ---------------------------------------------------------------------------
+# render_agents with explicit overrides must be isolated from ambient HOME state
+# ---------------------------------------------------------------------------
+
+
+def test_render_agents_explicit_overrides_skips_malformed_home_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """render_agents with explicit overrides= must not read ~/.ai-harness/overrides.json
+    at the ambient HOME — even if that file is malformed. Confirms the mode lookup
+    inside the Claude dispatch path also flows through the in-memory overrides.
+    """
+    # Malformed overrides.json at HOME — any reader would crash on json.loads.
+    bad_path = tmp_path / ".ai-harness" / "overrides.json"
+    bad_path.parent.mkdir(parents=True, exist_ok=True)
+    bad_path.write_text("{not valid json", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    # Explicit empty overrides — must NOT read HOME. Pass home=tmp_path so the
+    # frontmatter pass still uses tmp_path (no home store either, but explicit
+    # overrides sidestep ambient state regardless of the home arg).
+    pairs = render_agents(
+        AgentCli.CLAUDE,
+        ["implementor"],
+        overrides={},
+        home=tmp_path,
+    )
+
+    fm = _parse_frontmatter(pairs[0][1])
+    assert fm["model"] == "sonnet"  # template default — proves HOME was not read
+
+
+def test_render_agents_explicit_overrides_sidestep_home_store_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A well-formed but conflicting HOME store must NOT bleed into render_agents
+    when the caller passed explicit overrides — including for the mode lookup
+    (a HOME-only override for ``mode`` must not redirect dispatch).
+    """
+    _write_overrides_store(
+        tmp_path,
+        {"implementor": {"model": {"claude": "home-value"}, "mode": "primary"}},
+    )
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    pairs = render_agents(
+        AgentCli.CLAUDE,
+        ["implementor"],
+        overrides={"implementor": {"model": {"claude": "explicit-value"}}},
+    )
+
+    # Explicit overrides win on model...
+    fm = _parse_frontmatter(pairs[0][1])
+    assert fm["model"] == "explicit-value"
+    # ...and the explicit empty mode keeps dispatch in the subagent branch
+    # (not the skill branch), proving the mode lookup also saw the in-memory
+    # overrides, not HOME.
+    pair = _find_pair(pairs, "implementor")
+    assert pair is not None
+    assert pair[0] == ".claude/agents/implementor.md"
+
+
+def test_render_agents_mode_override_routes_through_dispatch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """When an explicit override flips an agent's mode to primary, render_agents
+    must route it to the Claude skill directory (not the agents directory).
+    Confirms overrides thread all the way through mode lookup, not just frontmatter.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path))  # no overrides.json on disk
+
+    pairs = render_agents(
+        AgentCli.CLAUDE,
+        ["implementor"],
+        overrides={"implementor": {"mode": "primary"}},
+    )
+
+    # Primary → skill directory, with SKILL.md as the leaf filename.
+    skill_paths = [path for path, _ in pairs if path.endswith("/SKILL.md")]
+    assert skill_paths, f"expected a SKILL.md dispatch, got {[p for p, _ in pairs]}"
+    assert skill_paths[0].endswith("/loop-orchestrator/SKILL.md")
