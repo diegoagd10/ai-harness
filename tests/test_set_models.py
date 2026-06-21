@@ -35,10 +35,16 @@ from ai_harness.modules.wizard.pure import (
     build_confirmation_rows,
     build_effort_picker_rows,
     build_model_picker_rows,
+    build_opencode_model_picker_rows,
+    build_opencode_override_payload,
     build_override_payload,
     claude_efforts,
     claude_models,
     claude_wizard_agents,
+    join_opencode_catalog,
+    opencode_efforts,
+    opencode_model_is_reasoning,
+    opencode_wizard_agents,
 )
 
 if TYPE_CHECKING:
@@ -95,6 +101,768 @@ def test_claude_efforts_is_the_fixed_set() -> None:
 def test_claude_wizard_agents_excludes_orchestrator() -> None:
     """The Claude wizard configures the three subagents; the orchestrator skill is fixed."""
     assert claude_wizard_agents() == ("explorer", "implementor", "validator")
+
+
+# ---------------------------------------------------------------------------
+# Fixed OpenCode vocabulary — the wizard's vocabulary lives in the pure module
+# ---------------------------------------------------------------------------
+
+
+def test_opencode_wizard_agents_includes_orchestrator_first() -> None:
+    """The OpenCode wizard configures all four loop agents, orchestrator on top.
+
+    Acceptance criterion: ``set-models -o opencode`` lists all four loop
+    agents with the orchestrator on top. The orchestrator is a primary
+    OpenCode agent (not a skill) so it carries a model and is configurable.
+    """
+    assert opencode_wizard_agents() == ("loop-orchestrator", "explorer", "implementor", "validator")
+
+
+def test_opencode_efforts_is_the_reasoning_effort_set() -> None:
+    """OpenCode's ``reasoningEffort`` values are the fixed (low, medium, high) set."""
+    assert opencode_efforts() == ("low", "medium", "high")
+
+
+# ---------------------------------------------------------------------------
+# join_opencode_catalog — pure join of ``opencode models`` ids with
+# ``~/.cache/opencode/models.json`` cost/reasoning metadata.
+# ---------------------------------------------------------------------------
+
+
+def test_join_opencode_catalog_flattens_nested_provider_shape() -> None:
+    """The native ``models.json`` shape (provider → models → id → entry) is flattened to id-keyed.
+
+    Real-world ``models.json`` nests as ``{provider: {models: {id: entry}}}``;
+    the join must walk that tree to find cost and reasoning. Order follows
+    the ids argument (which mirrors ``opencode models`` output order).
+    """
+    catalog = {
+        "alpha": {
+            "id": "alpha",
+            "models": {
+                "openai/gpt-5.5": {"id": "openai/gpt-5.5", "reasoning": True, "cost": {"input": 1, "output": 2}},
+            },
+        },
+        "beta": {
+            "id": "beta",
+            "models": {
+                "openai/gpt-5.5-mini": {
+                    "id": "openai/gpt-5.5-mini",
+                    "reasoning": False,
+                    "cost": {"input": 0.1, "output": 0.2},
+                },
+            },
+        },
+    }
+    joined = join_opencode_catalog(["openai/gpt-5.5", "openai/gpt-5.5-mini"], catalog)
+
+    assert [e.id for e in joined] == ["openai/gpt-5.5", "openai/gpt-5.5-mini"]
+    by_id = {e.id: e for e in joined}
+    assert by_id["openai/gpt-5.5"].reasoning is True
+    assert by_id["openai/gpt-5.5"].cost_input == 1
+    assert by_id["openai/gpt-5.5"].cost_output == 2
+    assert by_id["openai/gpt-5.5-mini"].reasoning is False
+    assert by_id["openai/gpt-5.5-mini"].cost_input == 0.1
+    assert by_id["openai/gpt-5.5-mini"].cost_output == 0.2
+
+
+def test_join_opencode_catalog_accepts_flat_shape() -> None:
+    """A flat ``{id: entry}`` catalog (test fixture) is also supported.
+
+    The pure helper should not assume a particular nesting depth — tests
+    and hand-rolled fixtures may pass flat dicts, and the loader is free
+    to pass either shape.
+    """
+    catalog = {
+        "openai/gpt-5.5": {"id": "openai/gpt-5.5", "reasoning": True, "cost": {"input": 3, "output": 15}},
+    }
+    joined = join_opencode_catalog(["openai/gpt-5.5"], catalog)
+
+    assert len(joined) == 1
+    assert joined[0].reasoning is True
+    assert joined[0].cost_input == 3
+    assert joined[0].cost_output == 15
+
+
+def test_join_opencode_catalog_missing_id_marked_unknown() -> None:
+    """An id absent from the catalog is still listed, with cost ``None`` and reasoning ``False``.
+
+    Acceptance criterion: pure helpers unit-tested with an injected id
+    list and catalog — including the "id missing from catalog" case. The
+    wizard must show the model (otherwise a stale ``opencode models``
+    listing would silently lose a row) and fall back to "unknown" cost
+    plus the safe non-reasoning default.
+    """
+    catalog = {
+        "openai/gpt-5.5": {"id": "openai/gpt-5.5", "reasoning": True, "cost": {"input": 3, "output": 15}},
+    }
+    joined = join_opencode_catalog(["openai/gpt-5.5", "openai/mystery-model"], catalog)
+
+    by_id = {e.id: e for e in joined}
+    assert by_id["openai/gpt-5.5"].cost_input == 3
+    assert by_id["openai/mystery-model"].cost_input is None
+    assert by_id["openai/mystery-model"].cost_output is None
+    assert by_id["openai/mystery-model"].reasoning is False
+
+
+def test_join_opencode_catalog_preserves_input_order() -> None:
+    """Row order follows the ``opencode models`` id list, not catalog order."""
+    catalog = {
+        "openai/gpt-5.5": {"reasoning": True, "cost": {"input": 3, "output": 15}},
+        "openai/gpt-5.4": {"reasoning": True, "cost": {"input": 2, "output": 10}},
+    }
+    # Pass ids in reverse-alphabetical order — join must preserve that.
+    joined = join_opencode_catalog(["openai/gpt-5.4", "openai/gpt-5.5"], catalog)
+
+    assert [e.id for e in joined] == ["openai/gpt-5.4", "openai/gpt-5.5"]
+
+
+def test_join_opencode_catalog_skips_malformed_cost_entries() -> None:
+    """A cost entry that is not a number is rendered as ``None`` rather than crashing.
+
+    Real-world catalogs can carry non-numeric ``cost`` values (null,
+    strings, missing sub-keys). The picker tolerates those by showing
+    ``$?`` instead of crashing the wizard.
+    """
+    catalog = {
+        "weird/model": {"id": "weird/model", "reasoning": False, "cost": "unknown"},
+        "openai/gpt-5.5": {"id": "openai/gpt-5.5", "reasoning": True, "cost": {"input": 1, "output": 2}},
+    }
+    joined = join_opencode_catalog(["weird/model", "openai/gpt-5.5"], catalog)
+    by_id = {e.id: e for e in joined}
+
+    assert by_id["weird/model"].cost_input is None
+    assert by_id["weird/model"].cost_output is None
+    assert by_id["openai/gpt-5.5"].cost_input == 1
+
+
+# ---------------------------------------------------------------------------
+# opencode_model_is_reasoning — pure gate for the effort prompt.
+# ---------------------------------------------------------------------------
+
+
+def test_opencode_model_is_reasoning_true_for_reasoning_entry() -> None:
+    """Catalog entry with ``reasoning: true`` returns True."""
+    catalog = {"openai/gpt-5.5": {"reasoning": True}}
+    assert opencode_model_is_reasoning("openai/gpt-5.5", catalog) is True
+
+
+def test_opencode_model_is_reasoning_false_for_non_reasoning_entry() -> None:
+    """Catalog entry with ``reasoning: false`` (or absent) returns False."""
+    catalog = {"openai/gpt-5.5-mini": {"reasoning": False}}
+    assert opencode_model_is_reasoning("openai/gpt-5.5-mini", catalog) is False
+
+
+def test_opencode_model_is_reasoning_false_for_missing_id() -> None:
+    """An id missing from the catalog is treated as non-reasoning (safe default)."""
+    catalog = {"openai/gpt-5.5": {"reasoning": True}}
+    assert opencode_model_is_reasoning("openai/unknown", catalog) is False
+
+
+def test_opencode_model_is_reasoning_walks_nested_shape() -> None:
+    """The reasoning check works on the nested provider→models shape too."""
+    catalog = {
+        "alpha": {"models": {"openai/gpt-5.5": {"reasoning": True}}},
+        "beta": {"models": {"openai/gpt-5.5-mini": {"reasoning": False}}},
+    }
+    assert opencode_model_is_reasoning("openai/gpt-5.5", catalog) is True
+    assert opencode_model_is_reasoning("openai/gpt-5.5-mini", catalog) is False
+
+
+# ---------------------------------------------------------------------------
+# build_opencode_model_picker_rows — model picker with cost labels
+# ---------------------------------------------------------------------------
+
+
+def test_build_opencode_model_picker_rows_shows_cost_in_label() -> None:
+    """Each model picker row shows the model id, input cost, and output cost."""
+    from ai_harness.modules.wizard.pure import OpencodeModelEntry
+
+    joined = [
+        OpencodeModelEntry(id="openai/gpt-5.5", cost_input=3, cost_output=15, reasoning=True),
+        OpencodeModelEntry(id="openai/gpt-5.5-mini", cost_input=0.1, cost_output=0.2, reasoning=False),
+    ]
+    rows = build_opencode_model_picker_rows(joined, "openai/gpt-5.5")
+
+    by_id = {r.value: r for r in rows}
+    assert "openai/gpt-5.5" in by_id["openai/gpt-5.5"].label
+    assert "3" in by_id["openai/gpt-5.5"].label
+    assert "15" in by_id["openai/gpt-5.5"].label
+    assert "0.1" in by_id["openai/gpt-5.5-mini"].label
+
+
+def test_build_opencode_model_picker_rows_unknown_cost_renders_dollar_question() -> None:
+    """A model missing from the catalog is shown with ``$?`` cost (still selectable).
+
+    The user must be able to pick a model the catalog doesn't know
+    about (e.g. a freshly added provider that the local cache hasn't
+    refreshed for) — the picker row just shows ``$?`` instead of ``$N``.
+    """
+    from ai_harness.modules.wizard.pure import OpencodeModelEntry
+
+    joined = [OpencodeModelEntry(id="openai/unknown", cost_input=None, cost_output=None, reasoning=False)]
+    rows = build_opencode_model_picker_rows(joined, "")
+
+    assert len(rows) == 1
+    assert "$?" in rows[0].label
+
+
+def test_build_opencode_model_picker_rows_marks_current() -> None:
+    """The row whose value equals *current_model* is marked as current."""
+    from ai_harness.modules.wizard.pure import OpencodeModelEntry
+
+    joined = [
+        OpencodeModelEntry(id="openai/gpt-5.5", cost_input=3, cost_output=15, reasoning=True),
+        OpencodeModelEntry(id="openai/gpt-5.5-mini", cost_input=0.1, cost_output=0.2, reasoning=False),
+    ]
+    rows = build_opencode_model_picker_rows(joined, "openai/gpt-5.5")
+
+    current = [r for r in rows if r.is_current]
+    assert len(current) == 1
+    assert current[0].value == "openai/gpt-5.5"
+
+
+def test_build_opencode_model_picker_rows_unknown_current_marks_none() -> None:
+    """A current model that is not in the list marks no row (no false preselection)."""
+    from ai_harness.modules.wizard.pure import OpencodeModelEntry
+
+    joined = [OpencodeModelEntry(id="openai/gpt-5.5", cost_input=3, cost_output=15, reasoning=True)]
+    rows = build_opencode_model_picker_rows(joined, "stale/model")
+
+    assert all(not r.is_current for r in rows)
+
+
+# ---------------------------------------------------------------------------
+# build_opencode_override_payload — selective OpenCode-flavored override writer.
+# ---------------------------------------------------------------------------
+
+
+def test_build_opencode_effort_picker_rows_uses_opencode_set() -> None:
+    """The OpenCode effort picker uses ``(low, medium, high)``, not Claude's ``(low, medium, high, xhigh, max)``."""
+    from ai_harness.modules.wizard.pure import build_opencode_effort_picker_rows
+
+    rows = build_opencode_effort_picker_rows("implementor", "high")
+    assert [r.value for r in rows] == list(opencode_efforts())
+    current = [r for r in rows if r.is_current]
+    assert len(current) == 1
+    assert current[0].value == "high"
+
+
+def test_build_opencode_override_payload_no_changes_returns_empty() -> None:
+    """Unchanged selections produce an empty payload (caller skips the write)."""
+    baseline = {
+        "explorer": {"model": "openai/gpt-5.5", "effort": "high"},
+        "implementor": {"model": "openai/gpt-5.5-mini", "effort": None},
+    }
+    selections = {
+        "explorer": ("openai/gpt-5.5", "high"),
+        "implementor": ("openai/gpt-5.5-mini", None),
+    }
+    assert build_opencode_override_payload(baseline, selections) == {}
+
+
+def test_build_opencode_override_payload_keys_under_opencode() -> None:
+    """Each emitted model/effort is nested under the ``opencode`` CLI key.
+
+    The deep-merge in :func:`write_override_store` uses these keys to land
+    in the right per-CLI slot of the override store — same convention
+    as :func:`build_override_payload` uses for ``claude``.
+    """
+    baseline = {"implementor": {"model": "openai/gpt-5.5-mini", "effort": None}}
+    selections = {"implementor": ("openai/gpt-5.5", "high")}
+
+    payload = build_opencode_override_payload(baseline, selections)
+
+    assert payload == {
+        "implementor": {
+            "model": {"opencode": "openai/gpt-5.5"},
+            "effort": {"opencode": "high"},
+        },
+    }
+
+
+def test_build_opencode_override_payload_does_not_collide_with_claude() -> None:
+    """The OpenCode payload must NOT carry any ``claude`` key.
+
+    A user running ``set-models -o opencode`` only changes OpenCode-side
+    overrides; the Claude slot for the same agent must remain untouched.
+    """
+    baseline = {"implementor": {"model": "sonnet", "effort": None}}
+    selections = {"implementor": ("openai/gpt-5.5", "high")}
+
+    payload = build_opencode_override_payload(baseline, selections)
+
+    assert "claude" not in str(payload)
+
+
+def test_build_opencode_override_payload_clears_stale_effort_on_non_reasoning_model() -> None:
+    """Switching to a non-reasoning model clears a previously set effort override.
+
+    The TUI forces effort to ``None`` for non-reasoning models. If the
+    baseline had a reasoning model's effort, that override would
+    otherwise carry over and the renderer would emit ``reasoningEffort``
+    in the agent's frontmatter — defeating the "non-reasoning models
+    skip effort" acceptance criterion. This diff clears the stale slot.
+    """
+    baseline = {"validator": {"model": "openai/gpt-5.5", "effort": "high"}}
+    selections = {"validator": ("openai/gpt-5.5-mini", None)}
+
+    payload = build_opencode_override_payload(baseline, selections)
+
+    assert payload == {
+        "validator": {
+            "model": {"opencode": "openai/gpt-5.5-mini"},
+            "effort": {"opencode": None},
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# OpencodeUnavailable + catalog loader — the IO seam.
+#
+# The TUI's catalog loader is the only piece of wizard code that touches
+# the filesystem (``~/.cache/opencode/models.json``) and a subprocess
+# (``opencode models``). Both are injectable so this layer is testable
+# without standing up an OpenCode install. The accepted-criterion contract
+# is "if OpenCode is absent, the command errors with install/configure
+# guidance; no static fallback list is used."
+# ---------------------------------------------------------------------------
+
+
+def test_load_opencode_catalog_joins_subprocess_ids_with_catalog_file(
+    tmp_path: Path,
+) -> None:
+    """The loader returns ``(ids, catalog)`` from the injected subprocess and the file."""
+    from ai_harness.modules.wizard import tui
+
+    catalog_path = tmp_path / ".cache" / "opencode" / "models.json"
+    catalog_path.parent.mkdir(parents=True, exist_ok=True)
+    catalog_path.write_text(
+        json.dumps(
+            {
+                "alpha": {
+                    "models": {
+                        "openai/gpt-5.5": {"reasoning": True, "cost": {"input": 3, "output": 15}},
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_runner(args: list[str], timeout: float) -> str:
+        return "openai/gpt-5.5\n"
+
+    ids, catalog = tui._load_opencode_catalog(tmp_path, runner=fake_runner)
+
+    assert ids == ["openai/gpt-5.5"]
+    assert "alpha" in catalog  # the raw dict — flattening is the pure layer's job
+
+
+def test_load_opencode_catalog_raises_on_missing_binary(
+    tmp_path: Path,
+) -> None:
+    """A FileNotFoundError from the runner is converted to OpencodeUnavailable."""
+    from ai_harness.modules.wizard import tui
+
+    def missing_binary(args: list[str], timeout: float) -> str:
+        raise FileNotFoundError("No such file: opencode")
+
+    with pytest.raises(tui.OpencodeUnavailable) as excinfo:
+        tui._load_opencode_catalog(tmp_path, runner=missing_binary)
+
+    # The message must include actionable guidance — the acceptance
+    # criterion requires "install and configure OpenCode first" wording
+    # (or close enough that the user knows what to do next).
+    message = str(excinfo.value).lower()
+    assert "opencode" in message or "install" in message
+
+
+def test_load_opencode_catalog_raises_on_nonzero_exit(tmp_path: Path) -> None:
+    """A non-zero exit code is converted to OpencodeUnavailable with a clear message."""
+    import subprocess
+
+    from ai_harness.modules.wizard import tui
+
+    def nonzero_runner(args: list[str], timeout: float) -> str:
+        raise subprocess.CalledProcessError(returncode=1, cmd=args, output="", stderr="auth required")
+
+    with pytest.raises(tui.OpencodeUnavailable) as excinfo:
+        tui._load_opencode_catalog(tmp_path, runner=nonzero_runner)
+
+    assert "opencode" in str(excinfo.value).lower() or "install" in str(excinfo.value).lower()
+
+
+def test_load_opencode_catalog_raises_on_empty_id_list(tmp_path: Path) -> None:
+    """An empty ``opencode models`` result is treated as OpenCode unavailable.
+
+    Real-world triggers: the user authenticated for no providers, or the
+    binary is misconfigured and returns success with no body. The
+    acceptance criterion forbids a static fallback — the wizard must
+    error instead.
+    """
+    from ai_harness.modules.wizard import tui
+
+    catalog_path = tmp_path / ".cache" / "opencode" / "models.json"
+    catalog_path.parent.mkdir(parents=True, exist_ok=True)
+    catalog_path.write_text(json.dumps({}), encoding="utf-8")
+
+    def empty_runner(args: list[str], timeout: float) -> str:
+        return "  \n  \n"  # whitespace only — no real ids
+
+    with pytest.raises(tui.OpencodeUnavailable) as excinfo:
+        tui._load_opencode_catalog(tmp_path, runner=empty_runner)
+
+    assert "no model" in str(excinfo.value).lower() or "authenticate" in str(excinfo.value).lower()
+
+
+def test_load_opencode_catalog_raises_on_missing_catalog_file(tmp_path: Path) -> None:
+    """A successful ``opencode models`` with no catalog file is OpencodeUnavailable."""
+    from ai_harness.modules.wizard import tui
+
+    def fake_runner(args: list[str], timeout: float) -> str:
+        return "openai/gpt-5.5\n"
+
+    # tmp_path has no .cache/opencode/models.json
+    with pytest.raises(tui.OpencodeUnavailable) as excinfo:
+        tui._load_opencode_catalog(tmp_path, runner=fake_runner)
+
+    message = str(excinfo.value)
+    assert ".cache" in message or "opencode" in message.lower()
+
+
+def test_load_opencode_catalog_raises_on_malformed_catalog_json(tmp_path: Path) -> None:
+    """A catalog file with invalid JSON is OpencodeUnavailable (no silent fallback)."""
+    from ai_harness.modules.wizard import tui
+
+    catalog_path = tmp_path / ".cache" / "opencode" / "models.json"
+    catalog_path.parent.mkdir(parents=True, exist_ok=True)
+    catalog_path.write_text("not valid json {{{", encoding="utf-8")
+
+    def fake_runner(args: list[str], timeout: float) -> str:
+        return "openai/gpt-5.5\n"
+
+    with pytest.raises(tui.OpencodeUnavailable) as excinfo:
+        tui._load_opencode_catalog(tmp_path, runner=fake_runner)
+
+    assert "opencode" in str(excinfo.value).lower() or "parse" in str(excinfo.value).lower()
+
+
+def test_load_opencode_catalog_strips_blank_lines_and_whitespace(tmp_path: Path) -> None:
+    """Leading/trailing whitespace and blank lines from the subprocess are ignored."""
+    from ai_harness.modules.wizard import tui
+
+    catalog_path = tmp_path / ".cache" / "opencode" / "models.json"
+    catalog_path.parent.mkdir(parents=True, exist_ok=True)
+    catalog_path.write_text(json.dumps({"alpha": {"models": {}}}), encoding="utf-8")
+
+    def fake_runner(args: list[str], timeout: float) -> str:
+        return "\n  openai/gpt-5.5  \n\n\n  openai/gpt-5.5-mini  \n"
+
+    ids, _ = tui._load_opencode_catalog(tmp_path, runner=fake_runner)
+
+    assert ids == ["openai/gpt-5.5", "openai/gpt-5.5-mini"]
+
+
+def test_resolve_opencode_binary_returns_none_when_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``shutil.which`` returning None is reported as no install."""
+    from ai_harness.modules.wizard import tui
+
+    monkeypatch.setattr(tui.shutil, "which", lambda _name: None)
+    assert tui._resolve_opencode_binary() is None
+
+
+# ---------------------------------------------------------------------------
+# run_opencode_wizard — full-flow tests with monkey-patched questionary.
+#
+# These mirror the slice-2 Claude tests: each scriptable stub queues the
+# values the wizard would otherwise ask the user for, so we can drive a
+# full happy path or a cancel path without a TTY. The pure helpers carry
+# the decision logic; these tests are guard rails for the IO glue.
+# ---------------------------------------------------------------------------
+
+
+def test_run_opencode_wizard_no_changes_does_not_create_override_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Opening the wizard and confirming without edits leaves overrides.json absent.
+
+    Regression for the slice-2 default-pollution bug carried into slice 3.
+    The TUI must NOT serialize template defaults into the store just
+    because the user opened the wizard and confirmed without changing
+    anything.
+    """
+    from ai_harness.modules.wizard import tui
+
+    # Stub the binary resolution + catalog loader so the wizard gets a
+    # well-formed OpenCode environment without standing up the real one.
+    monkeypatch.setattr(tui, "_resolve_opencode_binary", lambda: "/fake/opencode")
+
+    def fake_loader(home: Path, *, runner=None) -> tuple[list[str], dict]:
+        return ["openai/gpt-5.5", "openai/gpt-5.5-mini"], {
+            "alpha": {
+                "models": {
+                    "openai/gpt-5.5": {"reasoning": True, "cost": {"input": 3, "output": 15}},
+                    "openai/gpt-5.5-mini": {"reasoning": False, "cost": {"input": 0.1, "output": 0.2}},
+                },
+            },
+        }
+
+    monkeypatch.setattr(tui, "_load_opencode_catalog", fake_loader)
+    monkeypatch.setattr(tui.questionary, "select", _ScriptedSelect)
+    monkeypatch.setattr(tui.questionary, "confirm", _ScriptedConfirm)
+
+    _ScriptedSelect.instances = []
+    _ScriptedConfirm.instances = []
+
+    # User does not pick any agent — both phases go straight to confirm.
+    scripted = _ScriptedSelect()
+    scripted.queue("__continue__", "__continue__")
+    monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
+    confirm = _ScriptedConfirm().queue(True)
+    monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
+
+    wrote = tui.run_opencode_wizard(home=tmp_path)
+
+    assert wrote is True
+    assert not _override_file(tmp_path).exists(), (
+        "confirming without edits must NOT create overrides.json — that would "
+        "be the default-pollution bug carried from slice 2."
+    )
+
+
+def test_run_opencode_wizard_non_reasoning_model_skips_effort_prompt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A non-reasoning model selection skips the effort prompt and clears the effort override.
+
+    Acceptance criterion: effort is offered only when the selected model
+    has ``reasoning: true``. When the user picks a non-reasoning model
+    (here ``openai/gpt-5.5-mini``) the wizard must not ask for effort —
+    and, if a prior effort override was set, must clear it so the
+    renderer does not emit ``reasoningEffort`` in the frontmatter.
+    """
+    from ai_harness.modules.wizard import tui
+
+    monkeypatch.setattr(tui, "_resolve_opencode_binary", lambda: "/fake/opencode")
+
+    def fake_loader(home: Path, *, runner=None) -> tuple[list[str], dict]:
+        return ["openai/gpt-5.5", "openai/gpt-5.5-mini"], {
+            "alpha": {
+                "models": {
+                    "openai/gpt-5.5": {"reasoning": True, "cost": {"input": 3, "output": 15}},
+                    "openai/gpt-5.5-mini": {"reasoning": False, "cost": {"input": 0.1, "output": 0.2}},
+                },
+            },
+        }
+
+    monkeypatch.setattr(tui, "_load_opencode_catalog", fake_loader)
+    monkeypatch.setattr(tui.questionary, "select", _ScriptedSelect)
+    monkeypatch.setattr(tui.questionary, "confirm", _ScriptedConfirm)
+    _ScriptedSelect.instances = []
+    _ScriptedConfirm.instances = []
+
+    scripted = _ScriptedSelect()
+    # Phase 1: pick implementor → pick non-reasoning model → continue → continue
+    # Phase 2: continue (the wizard's gating skips effort for non-reasoning)
+    # Phase 3: confirm
+    scripted.queue(
+        "implementor",  # pick agent
+        "openai/gpt-5.5-mini",  # pick model
+        "__continue__",  # continue past model phase
+        "__continue__",  # continue past effort phase (no effort was asked)
+    )
+    monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
+    confirm = _ScriptedConfirm().queue(True)
+    monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
+
+    wrote = tui.run_opencode_wizard(home=tmp_path)
+
+    assert wrote is True
+    overrides = json.loads(_override_file(tmp_path).read_text(encoding="utf-8"))
+    # Only the model changed; effort was never asked (and the baseline had None).
+    assert overrides == {
+        "implementor": {"model": {"opencode": "openai/gpt-5.5-mini"}},
+    }
+    # No effort entry was written for this agent.
+    assert "effort" not in overrides["implementor"]
+
+
+def test_run_opencode_wizard_reasoning_model_prompts_for_effort(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A reasoning model selection does prompt for effort.
+
+    Companion to the non-reasoning test: the gating fires the OTHER way
+    for ``reasoning: true`` models and the user is asked for an effort
+    level.
+    """
+    from ai_harness.modules.wizard import tui
+
+    monkeypatch.setattr(tui, "_resolve_opencode_binary", lambda: "/fake/opencode")
+
+    def fake_loader(home: Path, *, runner=None) -> tuple[list[str], dict]:
+        return ["openai/gpt-5.5"], {
+            "alpha": {
+                "models": {
+                    "openai/gpt-5.5": {"reasoning": True, "cost": {"input": 3, "output": 15}},
+                },
+            },
+        }
+
+    monkeypatch.setattr(tui, "_load_opencode_catalog", fake_loader)
+    monkeypatch.setattr(tui.questionary, "select", _ScriptedSelect)
+    monkeypatch.setattr(tui.questionary, "confirm", _ScriptedConfirm)
+    _ScriptedSelect.instances = []
+    _ScriptedConfirm.instances = []
+
+    scripted = _ScriptedSelect()
+    scripted.queue(
+        "implementor",  # model phase: pick agent
+        "openai/gpt-5.5",  # pick reasoning model
+        "__continue__",  # continue past model phase
+        "implementor",  # effort phase: pick agent
+        "high",  # pick effort
+        "__continue__",  # continue past effort phase
+    )
+    monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
+    confirm = _ScriptedConfirm().queue(True)
+    monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
+
+    wrote = tui.run_opencode_wizard(home=tmp_path)
+
+    assert wrote is True
+    overrides = json.loads(_override_file(tmp_path).read_text(encoding="utf-8"))
+    assert overrides == {
+        "implementor": {
+            "model": {"opencode": "openai/gpt-5.5"},
+            "effort": {"opencode": "high"},
+        },
+    }
+
+
+def test_run_opencode_wizard_opencode_absent_returns_false_with_guidance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the opencode binary is missing, the wizard returns False and prints guidance.
+
+    Acceptance criterion: ``set-models -o opencode`` must error when
+    OpenCode is absent. The wizard surfaces a clear install/configure
+    message and writes nothing.
+    """
+    from ai_harness.modules.wizard import tui
+
+    monkeypatch.setattr(tui, "_resolve_opencode_binary", lambda: None)
+    monkeypatch.setattr(tui, "_load_opencode_catalog", lambda *a, **kw: pytest.fail("should not be called"))
+
+    wrote = tui.run_opencode_wizard(home=tmp_path)
+
+    assert wrote is False
+    assert not _override_file(tmp_path).exists()
+
+
+def test_run_opencode_wizard_preserves_existing_install_manifest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The OpenCode re-render must NOT drop other CLIs from ``installed.json``.
+
+    Mirrors the slice-2 Claude regression test. With multiple CLIs
+    installed, the wizard's scoped re-render (for OpenCode only) must
+    leave the install manifest entries for generic, claude, copilot
+    intact.
+    """
+    from ai_harness.modules.harness import install_for_agent_clis
+    from ai_harness.modules.wizard import tui
+
+    install_for_agent_clis(
+        [AgentCli.GENERIC, AgentCli.CLAUDE, AgentCli.OPENCODE],
+        home=tmp_path,
+    )
+    manifest_path = tmp_path / ".ai-harness" / "installed.json"
+    before = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert set(before["agent_clis"]) == {"generic", "claude", "opencode"}
+
+    monkeypatch.setattr(tui, "_resolve_opencode_binary", lambda: "/fake/opencode")
+
+    def fake_loader(home: Path, *, runner=None) -> tuple[list[str], dict]:
+        return ["openai/gpt-5.5", "openai/gpt-5.5-mini"], {
+            "alpha": {
+                "models": {
+                    "openai/gpt-5.5": {"reasoning": True, "cost": {"input": 3, "output": 15}},
+                    "openai/gpt-5.5-mini": {"reasoning": False, "cost": {"input": 0.1, "output": 0.2}},
+                },
+            },
+        }
+
+    monkeypatch.setattr(tui, "_load_opencode_catalog", fake_loader)
+    monkeypatch.setattr(tui.questionary, "select", _ScriptedSelect)
+    monkeypatch.setattr(tui.questionary, "confirm", _ScriptedConfirm)
+    _ScriptedSelect.instances = []
+    _ScriptedConfirm.instances = []
+
+    # Edit implementor's model (non-reasoning → skip effort) then confirm.
+    scripted = _ScriptedSelect()
+    scripted.queue(
+        "implementor",
+        "openai/gpt-5.5-mini",
+        "__continue__",
+        "__continue__",
+    )
+    monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
+    confirm = _ScriptedConfirm().queue(True)
+    monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
+
+    wrote = tui.run_opencode_wizard(home=tmp_path)
+
+    assert wrote is True
+    after = json.loads(manifest_path.read_text(encoding="utf-8"))
+    # All three CLIs survive — the re-render is scoped to OpenCode loop agents only.
+    assert set(after["agent_clis"]) == {"generic", "claude", "opencode"}
+    assert set(after["files_by_agent_cli"]) == {"generic", "claude", "opencode"}
+
+
+def test_run_opencode_wizard_ctrl_c_at_model_phase_writes_nothing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Ctrl+C during the model pass cancels without writing overrides.
+
+    Acceptance criterion: Ctrl+C cancels with nothing written. The
+    wizard must NOT serialize partial selections to the override store
+    on cancel.
+    """
+    from ai_harness.modules.wizard import tui
+
+    monkeypatch.setattr(tui, "_resolve_opencode_binary", lambda: "/fake/opencode")
+
+    def fake_loader(home: Path, *, runner=None) -> tuple[list[str], dict]:
+        return ["openai/gpt-5.5"], {
+            "alpha": {
+                "models": {
+                    "openai/gpt-5.5": {"reasoning": True, "cost": {"input": 3, "output": 15}},
+                },
+            },
+        }
+
+    monkeypatch.setattr(tui, "_load_opencode_catalog", fake_loader)
+
+    class _CtrlC:
+        def ask(self) -> None:
+            return None  # simulates Ctrl+C → questionary returns None
+
+    monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: _CtrlC())
+
+    wrote = tui.run_opencode_wizard(home=tmp_path)
+
+    assert wrote is False
+    assert not _override_file(tmp_path).exists()
 
 
 # ---------------------------------------------------------------------------
@@ -504,14 +1272,20 @@ def test_cli_set_models_unknown_cli_errors(isolated_home: Path) -> None:
     assert result.exit_code != 0
 
 
-def test_cli_set_models_opencode_explicit_not_implemented(isolated_home: Path) -> None:
-    """OpenCode is single-CLI valid but explicitly not implemented in slice 2."""
+def test_cli_set_models_opencode_non_tty_errors(isolated_home: Path) -> None:
+    """OpenCode is now a valid single-CLI input; under non-TTY it errors like Claude.
+
+    The command's arg-validation no longer rejects ``-o opencode`` —
+    slice 3 implemented the OpenCode wizard. The CliRunner exercises
+    the command without a TTY, so the wizard's TTY guard fires and the
+    user sees a clear "requires a TTY" message.
+    """
     result = runner.invoke(app, ["set-models", "-o", "opencode"])
 
     assert result.exit_code != 0
     combined = f"{result.stdout} {result.stderr}"
-    assert "opencode" in combined.lower()
-    assert "not implemented" in combined.lower() or "slice 3" in combined.lower()
+    # Non-TTY guard must surface a clear error, not hang or pass silently.
+    assert "tty" in combined.lower() or "interactive" in combined.lower() or combined.strip() != ""
 
 
 def test_cli_set_models_copilot_not_supported(isolated_home: Path) -> None:

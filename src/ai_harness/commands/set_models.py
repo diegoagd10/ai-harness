@@ -2,8 +2,8 @@
 
 Mandatory ``-o/--only`` accepting exactly one Agent CLI. Zero or multiple
 CLIs error with a clear message. Slice 2 implements the Claude wizard
-end-to-end; OpenCode is deferred to slice 3 with an explicit not-yet
-error; generic/copilot are not wizard targets at all.
+end-to-end; slice 3 implements the OpenCode wizard end-to-end; generic
+and copilot are not wizard targets at all.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ def set_models(
         typer.Option(
             "-o",
             "--only",
-            help="Exactly one Agent CLI to configure (claude for now; opencode comes in slice 3).",
+            help="Exactly one Agent CLI to configure (claude or opencode).",
         ),
     ],
 ) -> None:
@@ -65,10 +65,10 @@ def set_models(
         raise typer.BadParameter(
             "set-models does not support 'copilot' — Copilot has no per-agent model configuration."
         )
-    if cli == AgentCli.OPENCODE:
-        raise typer.BadParameter("set-models for 'opencode' is not yet implemented (slice 3). Use 'claude' for now.")
 
-    # cli is Claude here — the only supported wizard in this slice.
+    # Both Claude and OpenCode now have a full wizard. The wizard itself
+    # surfaces OpenCode-absent or non-TTY errors with clear messages; the
+    # command layer just dispatches.
     wrote = run_wizard_or_bail(cli, home=Path.home())
     if not wrote:
         raise typer.Exit(code=1)

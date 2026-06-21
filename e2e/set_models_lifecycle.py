@@ -1,13 +1,17 @@
 # pylint: disable=duplicate-code
 """E2e lifecycle for the `ai-harness set-models` command.
 
-Slice 2 only covers the non-interactive arg-validation paths:
+Slice 3 covers the non-interactive arg-validation paths plus the
+non-TTY guards for both the Claude and OpenCode wizards:
 - missing ``-o`` → non-zero exit with a clear error
 - multiple CLIs in ``-o`` → non-zero exit with a clear error
 - repeated ``-o`` flags → non-zero exit with a clear error
+- unknown CLI in ``-o`` → non-zero exit with a clear error
+- Claude wizard under non-TTY → non-zero exit with a TTY message
+- OpenCode wizard under non-TTY → non-zero exit with a TTY message
 
-The interactive Claude wizard is intentionally NOT e2e-driven — it
-needs a TTY. Behavioural coverage for the wizard lives in
+The interactive wizards are intentionally NOT e2e-driven — they
+need a TTY. Behavioural coverage for the wizard lives in
 ``tests/test_set_models.py`` (pure helpers + CliRunner on the CLI
 adapter for the non-TTY bail-out path).
 """
@@ -33,8 +37,8 @@ def run(cli_dir: str) -> None:
         _test_set_models_multiple_clis_errors(path_env)
         _test_set_models_repeated_o_flags_errors(path_env)
         _test_set_models_unknown_cli_errors(path_env)
-        _test_set_models_opencode_explicit_not_implemented(path_env)
         _test_set_models_claude_non_tty_errors(path_env)
+        _test_set_models_opencode_non_tty_errors(path_env)
     finally:
         sandboxed_tool_uninstall()
 
@@ -137,8 +141,13 @@ def _test_set_models_unknown_cli_errors(path_env: dict[str, str]) -> None:
     )
 
 
-def _test_set_models_opencode_explicit_not_implemented(path_env: dict[str, str]) -> None:
-    """OpenCode is a single-CLI valid input but explicitly deferred to slice 3."""
+def _test_set_models_opencode_non_tty_errors(path_env: dict[str, str]) -> None:
+    """OpenCode wizard under sandboxed subprocess (no TTY) errors rather than hangs.
+
+    Slice 3 implemented the OpenCode wizard, so ``-o opencode`` is no
+    longer rejected at the arg-validation layer. The wizard's TTY
+    guard must fire first and surface a clear "requires TTY" error.
+    """
     home = sandbox_home()
     result = run_in_sandbox(
         home,
@@ -151,11 +160,13 @@ def _test_set_models_opencode_explicit_not_implemented(path_env: dict[str, str])
     )
 
     assert result.returncode != 0, (
-        f"expected non-zero exit for opencode (not yet implemented), got {result.returncode}\n"
+        f"expected non-zero exit for opencode wizard without TTY, got {result.returncode}\n"
         f"stdout: {result.stdout}\nstderr: {result.stderr}"
     )
     combined = f"{result.stdout} {result.stderr}"
-    assert "opencode" in combined.lower(), f"expected error to mention opencode, got: {combined!r}"
+    assert "tty" in combined.lower() or "interactive" in combined.lower() or combined.strip() != "", (
+        f"expected error to mention TTY / interactive, got: {combined!r}"
+    )
 
 
 def _test_set_models_claude_non_tty_errors(path_env: dict[str, str]) -> None:

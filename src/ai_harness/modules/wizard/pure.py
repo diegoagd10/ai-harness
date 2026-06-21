@@ -56,6 +56,38 @@ def claude_wizard_agents() -> tuple[str, ...]:
 
 
 # ---------------------------------------------------------------------------
+# Fixed OpenCode vocabulary — the wizard's single source of truth.
+# ---------------------------------------------------------------------------
+
+#: Agents configurable through the OpenCode wizard. The orchestrator is
+#: included (and listed first) because on OpenCode it is a primary agent
+#: carrying a model and effort, not a skill. The remaining three are the
+#: explorer/implementor/validator subagents.
+OPENCODE_WIZARD_AGENTS: tuple[str, ...] = (
+    "loop-orchestrator",
+    "explorer",
+    "implementor",
+    "validator",
+)
+
+#: OpenCode ``reasoningEffort`` values the wizard offers. The set is fixed
+#: per the issue: effort is gated on the model's ``reasoning`` boolean, and
+#: the same value set applies to every reasoning model. Order is intentional:
+#: low → high.
+OPENCODE_REASONING_EFFORTS: tuple[str, ...] = ("low", "medium", "high")
+
+
+def opencode_wizard_agents() -> tuple[str, ...]:
+    """Return the agents configurable through the OpenCode wizard (orchestrator on top)."""
+    return OPENCODE_WIZARD_AGENTS
+
+
+def opencode_efforts() -> tuple[str, ...]:
+    """Return the fixed OpenCode ``reasoningEffort`` values the wizard offers."""
+    return OPENCODE_REASONING_EFFORTS
+
+
+# ---------------------------------------------------------------------------
 # Picker rows — the TUI's only formatting surface.
 # ---------------------------------------------------------------------------
 
@@ -96,7 +128,10 @@ def build_effort_picker_rows(agent_name: str, current_effort: str | None) -> lis
     """Build the effort picker rows for *agent_name*, marking *current_effort*.
 
     A ``None`` *current_effort* (no override set yet) marks no row — the
-    user must pick one to advance.
+    user must pick one to advance. The effort set is the Claude wizard's
+    fixed ``(low, medium, high, xhigh, max)`` set; the OpenCode wizard
+    uses :func:`build_opencode_effort_picker_rows` instead so the two
+    CLIs do not share a vocabulary.
     """
     return [
         PickerRow(
@@ -105,6 +140,23 @@ def build_effort_picker_rows(agent_name: str, current_effort: str | None) -> lis
             is_current=(effort == current_effort),
         )
         for effort in CLAUDE_EFFORTS
+    ]
+
+
+def build_opencode_effort_picker_rows(agent_name: str, current_effort: str | None) -> list[PickerRow]:
+    """Build the OpenCode effort picker rows for *agent_name*, marking *current_effort*.
+
+    Same shape as :func:`build_effort_picker_rows` but uses the OpenCode
+    ``reasoningEffort`` set ``(low, medium, high)``. A ``None``
+    *current_effort* marks no row.
+    """
+    return [
+        PickerRow(
+            value=effort,
+            label=f"{agent_name} → {effort}",
+            is_current=(effort == current_effort),
+        )
+        for effort in OPENCODE_REASONING_EFFORTS
     ]
 
 
@@ -125,6 +177,139 @@ def build_agent_list_rows(
         )
         for agent in agents
     ]
+
+
+# ---------------------------------------------------------------------------
+# OpenCode catalog join — pure data-prep for the model picker.
+#
+# ``opencode models`` prints model ids, one per line. Cost
+# (``cost.input``/``cost.output``) and the ``reasoning`` boolean are joined
+# in from ``~/.cache/opencode/models.json`` by id. The catalog is a nested
+# dict of ``{provider: {models: {id: entry}}}`` (OpenCode's native shape) or
+# any mapping of id → entry. The join is pure so the TUI can drive it with
+# injected boundaries and the helper stays unit-testable.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class OpencodeModelEntry:
+    """One model id joined with its catalog metadata.
+
+    ``cost_input`` and ``cost_output`` are USD per 1M tokens, or ``None``
+    when the catalog has no entry for this id (the picker still shows the
+    id, with cost rendered as "?"). ``reasoning`` is the boolean from the
+    catalog; ``False`` when the id is missing (the wizard treats unknown
+    models as non-reasoning — safe default for the effort gate).
+    """
+
+    id: str
+    cost_input: float | None
+    cost_output: float | None
+    reasoning: bool
+
+
+def _flatten_opencode_catalog(catalog: dict) -> dict[str, dict]:
+    """Reduce any OpenCode catalog shape to a flat ``{id: entry}`` mapping.
+
+    OpenCode's ``models.json`` nests as ``{provider: {models: {id: entry}}}``
+    (or, for hand-rolled test fixtures, a flat ``{id: entry}`` already).
+    This helper handles both so the pure layer doesn't need to know which
+    shape the loader produced. Defensive: missing ``models`` keys, empty
+    providers, and non-dict entries are skipped without raising — the
+    caller treats any id not present here as "unknown" (cost=``None``,
+    reasoning=``False``).
+    """
+    flat: dict[str, dict] = {}
+    if not isinstance(catalog, dict):
+        return flat
+    for key, value in catalog.items():
+        if not isinstance(value, dict):
+            continue
+        # Provider-shaped: the value nests its models under "models".
+        if "models" in value and isinstance(value.get("models"), dict):
+            for model_id, entry in value["models"].items():
+                if isinstance(entry, dict):
+                    flat[model_id] = entry
+            continue
+        # Flat-shaped: the key IS the model id and the value IS the entry.
+        # Heuristic: a model entry has at least one of id/cost/reasoning/name.
+        if any(k in value for k in ("id", "cost", "reasoning", "name")):
+            flat[key] = value
+    return flat
+
+
+def join_opencode_catalog(model_ids: list[str], catalog: dict) -> list[OpencodeModelEntry]:
+    """Join the ``opencode models`` id list with the catalog's cost/reasoning metadata.
+
+    Returns one :class:`OpencodeModelEntry` per id, preserving *model_ids*
+    order (the order ``opencode models`` printed them). Ids missing from
+    the catalog still appear — the picker still lists them, with
+    ``cost_input=None``/``cost_output=None`` and ``reasoning=False`` so
+    the wizard can fall back to "unknown" rendering and skip effort
+    prompting. The function is pure: no IO, no globals, fully driven by
+    the arguments so tests can inject any catalog shape.
+    """
+    flat = _flatten_opencode_catalog(catalog)
+    joined: list[OpencodeModelEntry] = []
+    for model_id in model_ids:
+        entry = flat.get(model_id)
+        if entry is None:
+            joined.append(OpencodeModelEntry(id=model_id, cost_input=None, cost_output=None, reasoning=False))
+            continue
+        cost = entry.get("cost") if isinstance(entry.get("cost"), dict) else {}
+        cost_input = cost.get("input") if isinstance(cost, dict) else None
+        cost_output = cost.get("output") if isinstance(cost, dict) else None
+        reasoning = bool(entry.get("reasoning", False))
+        joined.append(
+            OpencodeModelEntry(
+                id=model_id,
+                cost_input=cost_input if isinstance(cost_input, (int, float)) else None,
+                cost_output=cost_output if isinstance(cost_output, (int, float)) else None,
+                reasoning=reasoning,
+            )
+        )
+    return joined
+
+
+def opencode_model_is_reasoning(model_id: str, catalog: dict) -> bool:
+    """Return True iff *model_id*'s catalog entry has ``reasoning: true``.
+
+    Used by the TUI to decide whether to ask the user for an effort level
+    for the agent. Missing or non-reasoning entries return ``False`` — the
+    safe default, which makes the wizard skip the effort prompt. Pure: no
+    IO, driven entirely by *catalog* so tests can inject any shape.
+    """
+    flat = _flatten_opencode_catalog(catalog)
+    entry = flat.get(model_id)
+    if not isinstance(entry, dict):
+        return False
+    return bool(entry.get("reasoning", False))
+
+
+def build_opencode_model_picker_rows(
+    joined: list[OpencodeModelEntry],
+    current_model: str,
+) -> list[PickerRow]:
+    """Build the OpenCode model picker rows, marking *current_model*.
+
+    Each row's label carries the model id, its input cost, and its output
+    cost (in USD per 1M tokens, or ``?`` when the catalog has no entry).
+    Order matches the *joined* list — the order ``opencode models`` printed
+    them. If *current_model* is not in the list (stale override), no row
+    is marked; the wizard does not pretend a non-option is selected.
+    """
+    rows: list[PickerRow] = []
+    for entry in joined:
+        in_cost = f"${entry.cost_input}" if entry.cost_input is not None else "$?"
+        out_cost = f"${entry.cost_output}" if entry.cost_output is not None else "$?"
+        rows.append(
+            PickerRow(
+                value=entry.id,
+                label=f"{entry.id} (in: {in_cost} / out: {out_cost})",
+                is_current=(entry.id == current_model),
+            )
+        )
+    return rows
 
 
 def build_confirmation_rows(
@@ -198,6 +383,33 @@ def build_override_payload(
             agent_payload["model"] = {"claude": model}
         if effort != base.get("effort"):
             agent_payload["effort"] = {"claude": effort}
+        if agent_payload:
+            payload[agent] = agent_payload
+    return payload
+
+
+def build_opencode_override_payload(
+    baseline: dict[str, dict[str, str | None]],
+    selections: dict[str, tuple[str, str | None]],
+) -> dict:
+    """Return the partial OpenCode override payload containing only fields the user changed.
+
+    Same contract as :func:`build_override_payload` but keyed under
+    ``model.opencode`` / ``effort.opencode`` so the deep-merge lands in the
+    right per-CLI slot of the override store. The TUI feeds each agent's
+    effort selection as ``None`` whenever the chosen model is non-reasoning
+    so that, if a prior session had set effort for a reasoning model, the
+    new non-reasoning selection clears the stale effort override
+    (``{"effort": {"opencode": None}}``).
+    """
+    payload: dict = {}
+    for agent, (model, effort) in selections.items():
+        base = baseline.get(agent, {})
+        agent_payload: dict = {}
+        if model != base.get("model"):
+            agent_payload["model"] = {"opencode": model}
+        if effort != base.get("effort"):
+            agent_payload["effort"] = {"opencode": effort}
         if agent_payload:
             payload[agent] = agent_payload
     return payload
