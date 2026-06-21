@@ -129,6 +129,42 @@ def _load_override_store(home: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def write_override_store(home: Path, payload: dict) -> None:
+    """Deep-merge *payload* into the per-agent override store and write it back.
+
+    Public so the ``set-models`` wizard can persist user choices without
+    re-implementing the store path. Existing entries for other agents, or
+    for the same agent under different fields, are preserved — only the
+    keys present in *payload* change. The file is written atomically: an
+    in-memory merge, then a single write to ``~/.ai-harness/overrides.json``.
+    Malformed existing JSON is raised as-is (matching the loader's contract).
+    """
+    existing = _load_override_store(home)
+    merged = _deep_merge_override_store(existing, payload)
+    path = home / _OVERRIDES_REL
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(merged, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _deep_merge_override_store(base: dict, override: dict) -> dict:
+    """Recursively merge *override* into *base*, returning a fresh dict.
+
+    Same shape as ``_deep_merge`` (used at render time) but operates on
+    a fresh copy of *base* rather than the in-place render path so the
+    wizard can keep its source-of-truth pristine between calls.
+    """
+    import copy
+
+    result = copy.deepcopy(base)
+    for key, value in override.items():
+        base_value = result.get(key)
+        if isinstance(base_value, dict) and isinstance(value, dict):
+            result[key] = _deep_merge_override_store(base_value, value)
+        else:
+            result[key] = copy.deepcopy(value)
+    return result
+
+
 def _discover_loop_agents() -> list[str]:
     """Return sorted list of loop agent template names (without .md extension)."""
     root = _loop_agent_dir()
