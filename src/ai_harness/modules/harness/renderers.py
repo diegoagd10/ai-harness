@@ -283,10 +283,15 @@ def _render_opencode_agent(name: str, overrides: dict | None = None) -> tuple[st
         "model": model_map["opencode"],
     }
 
-    # Emit effort as OpenCode's ``reasoningEffort`` only when configured for this CLI
+    # Emit effort as OpenCode's ``reasoningEffort`` only when configured for this CLI.
+    # ``None`` means the wizard deliberately cleared a stale override (e.g. when
+    # switching to a non-reasoning model); rendering that as ``null`` would
+    # leave stale frontmatter on disk, so we treat ``None`` the same as unset.
     effort_map = meta.get("effort")
-    if isinstance(effort_map, dict) and "opencode" in effort_map:
-        opencode_frontmatter["reasoningEffort"] = effort_map["opencode"]
+    if isinstance(effort_map, dict):
+        opencode_effort = effort_map.get("opencode")
+        if opencode_effort is not None:
+            opencode_frontmatter["reasoningEffort"] = opencode_effort
 
     # Pass through the permission block if present
     if "permission" in meta:
@@ -327,10 +332,15 @@ def _render_claude_agent(name: str, overrides: dict | None = None) -> tuple[str,
         "model": model_map["claude"],
     }
 
-    # Emit effort as Claude's ``effort`` only when configured for this CLI
+    # Emit effort as Claude's ``effort`` only when configured for this CLI.
+    # ``None`` means the wizard deliberately cleared a stale override; rendering
+    # that as ``null`` would leave stale frontmatter on disk, so we treat
+    # ``None`` the same as unset.
     effort_map = meta.get("effort")
-    if isinstance(effort_map, dict) and "claude" in effort_map:
-        claude_frontmatter["effort"] = effort_map["claude"]
+    if isinstance(effort_map, dict):
+        claude_effort = effort_map.get("claude")
+        if claude_effort is not None:
+            claude_frontmatter["effort"] = claude_effort
 
     # Translate OpenCode permission block to Claude-native tools allow-list
     permission = meta.get("permission")

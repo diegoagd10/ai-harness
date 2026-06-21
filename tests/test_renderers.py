@@ -530,6 +530,116 @@ def test_override_with_both_model_and_effort() -> None:
     assert claude_fm["effort"] == "high"
 
 
+# ---------------------------------------------------------------------------
+# Cleared effort — ``None`` means "drop the field"; non-reasoning models
+# must not emit ``reasoningEffort: null`` (issue #46 fix-up).
+# ---------------------------------------------------------------------------
+
+
+def test_opencode_omits_reasoning_effort_when_override_value_is_none() -> None:
+    """An override clearing effort (``{"effort": {"opencode": None}}``) must not
+    leave ``reasoningEffort: null`` in the rendered OpenCode frontmatter.
+
+    The wizard writes ``None`` for non-reasoning models so a prior reasoning-
+    model override does not leak forward. The renderer must honour that
+    "drop the field" semantics — emitting ``null`` violates "non-reasoning
+    models skip effort" and pollutes the agent file with stale frontmatter.
+    """
+    overrides = {"validator": {"effort": {"opencode": None}}}
+
+    pairs = render_agents(AgentCli.OPENCODE, ["validator"], overrides=overrides)
+
+    content = pairs[0][1]
+    fm = _parse_frontmatter(content)
+    assert "reasoningEffort" not in fm, (
+        f"reasoningEffort must be omitted when override value is None; got {fm.get('reasoningEffort')!r}"
+    )
+    # Belt-and-braces: the YAML literal must not appear either.
+    assert "reasoningEffort: null" not in content, f"raw frontmatter still contains reasoningEffort: null:\n{content}"
+
+
+def test_claude_omits_effort_when_override_value_is_none() -> None:
+    """Same contract for Claude: ``{"effort": {"claude": None}}`` must drop ``effort``."""
+    overrides = {"validator": {"effort": {"claude": None}}}
+
+    pairs = render_agents(AgentCli.CLAUDE, ["validator"], overrides=overrides)
+
+    content = pairs[0][1]
+    fm = _parse_frontmatter(content)
+    assert "effort" not in fm, f"effort must be omitted when override value is None; got {fm.get('effort')!r}"
+    assert "effort: null" not in content, f"raw frontmatter still contains effort: null:\n{content}"
+
+
+def test_opencode_non_reasoning_selection_omits_reasoning_effort() -> None:
+    """Full non-reasoning selection: model override + cleared effort → no reasoningEffort.
+
+    This mirrors what the wizard writes when the user picks a non-reasoning
+    model after having set effort for a previous reasoning one — the diff
+    must end up with neither ``reasoningEffort`` nor ``reasoningEffort: null``
+    in the rendered agent file.
+    """
+    overrides = {
+        "validator": {
+            "model": {"opencode": "openai/gpt-5.5-mini"},
+            "effort": {"opencode": None},
+        }
+    }
+
+    pairs = render_agents(AgentCli.OPENCODE, ["validator"], overrides=overrides)
+
+    content = pairs[0][1]
+    fm = _parse_frontmatter(content)
+    assert fm["model"] == "openai/gpt-5.5-mini"
+    assert "reasoningEffort" not in fm
+    assert "reasoningEffort: null" not in content
+
+
+def test_claude_non_reasoning_selection_omits_effort() -> None:
+    """Claude counterpart: model override + cleared effort → no ``effort`` field."""
+    overrides = {
+        "validator": {
+            "model": {"claude": "haiku"},
+            "effort": {"claude": None},
+        }
+    }
+
+    pairs = render_agents(AgentCli.CLAUDE, ["validator"], overrides=overrides)
+
+    content = pairs[0][1]
+    fm = _parse_frontmatter(content)
+    assert fm["model"] == "haiku"
+    assert "effort" not in fm
+    assert "effort: null" not in content
+
+
+def test_opencode_partial_effort_clear_keeps_other_cli_unset() -> None:
+    """Clearing only OpenCode effort does not leak into Claude effort emission."""
+    overrides = {"validator": {"effort": {"opencode": None}}}
+
+    opencode_pairs = render_agents(AgentCli.OPENCODE, ["validator"], overrides=overrides)
+    claude_pairs = render_agents(AgentCli.CLAUDE, ["validator"], overrides=overrides)
+
+    assert "reasoningEffort" not in _parse_frontmatter(opencode_pairs[0][1])
+    assert "effort" not in _parse_frontmatter(claude_pairs[0][1])
+
+
+def test_effort_value_none_does_not_override_concrete_value_for_other_cli() -> None:
+    """``None`` for one CLI must not suppress a concrete value on the other CLI."""
+    overrides = {
+        "validator": {
+            "effort": {"opencode": None, "claude": "high"},
+        }
+    }
+
+    opencode_pairs = render_agents(AgentCli.OPENCODE, ["validator"], overrides=overrides)
+    claude_pairs = render_agents(AgentCli.CLAUDE, ["validator"], overrides=overrides)
+
+    opencode_fm = _parse_frontmatter(opencode_pairs[0][1])
+    claude_fm = _parse_frontmatter(claude_pairs[0][1])
+    assert "reasoningEffort" not in opencode_fm
+    assert claude_fm["effort"] == "high"
+
+
 def test_orchestrator_skill_unaffected_by_overrides() -> None:
     """Claude orchestrator skill — rendered via _render_claude_skill — carries no model/effort
     regardless of overrides.
