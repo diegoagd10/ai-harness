@@ -54,3 +54,18 @@ Render rules:
   `resources/loop-agent/`.
 - Reintroduces an `opencode` target that ADR-0001 removed, but scoped to the
   agents artifact only (no AGENTS.md/skills for OpenCode yet).
+
+## OpenCode → Claude field mapping
+
+| OpenCode (`_AGENT_META`) | Claude frontmatter |
+|---|---|
+| agent key | `name` |
+| `description` | `description` |
+| `mode: subagent` | (omitted — implicit) |
+| `mode: primary` | rendered as a skill (no `name`/`model`) |
+| `model.claude` | `model` |
+| `permission.edit/write: deny` | `tools` allow-list (deterministic: `Read, Grep, Glob, Bash`) |
+| `permission.bash: allow` | `Bash` included in tools |
+| `permission.bash: deny` | `Bash` removed from tools |
+| `permission.task` allowlist | dropped from frontmatter; rendered as prose spawn-allowlist section in the skill body because Claude skills have no ``agents`` frontmatter key |
+| OpenCode-only keys (`mode`, `permission`, `hidden`) | dropped
