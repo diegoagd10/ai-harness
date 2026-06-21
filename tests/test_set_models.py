@@ -1071,6 +1071,215 @@ def test_run_opencode_wizard_no_back_choice_in_first_model_phase_agent_chooser(
     assert "__back__" not in values
 
 
+def test_run_opencode_wizard_esc_on_effort_phase_agent_chooser_returns_to_model_phase(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Esc on the OpenCode effort phase's agent chooser goes back to the model phase."""
+    from ai_harness.modules.wizard import tui
+
+    monkeypatch.setattr(tui, "_resolve_opencode_binary", lambda: "/fake/opencode")
+
+    def fake_loader(home: Path, *, runner=None) -> tuple[list[str], dict]:
+        return ["openai/gpt-5.5"], {
+            "alpha": {
+                "models": {
+                    "openai/gpt-5.5": {"reasoning": True, "cost": {"input": 3, "output": 15}},
+                },
+            },
+        }
+
+    monkeypatch.setattr(tui, "_load_opencode_catalog", fake_loader)
+    monkeypatch.setattr(tui.questionary, "select", _ScriptedSelect)
+    monkeypatch.setattr(tui.questionary, "confirm", _ScriptedConfirm)
+    _ScriptedSelect.instances = []
+    _ScriptedConfirm.instances = []
+
+    scripted = _ScriptedSelect()
+    scripted.queue(
+        "implementor",
+        "openai/gpt-5.5",
+        "__continue__",
+        tui._ESC_BACK,
+        "__continue__",
+        "__continue__",
+    )
+    monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
+    confirm = _ScriptedConfirm().queue(True)
+    monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
+
+    wrote = tui.run_opencode_wizard(home=tmp_path)
+
+    assert wrote is True
+    overrides = json.loads(_override_file(tmp_path).read_text(encoding="utf-8"))
+    assert overrides == {"implementor": {"model": {"opencode": "openai/gpt-5.5"}}}
+
+
+def test_run_opencode_wizard_esc_at_model_phase_agent_chooser_is_ignored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Esc at the OpenCode model phase's agent chooser is a no-op (no predecessor)."""
+    from ai_harness.modules.wizard import tui
+
+    monkeypatch.setattr(tui, "_resolve_opencode_binary", lambda: "/fake/opencode")
+
+    def fake_loader(home: Path, *, runner=None) -> tuple[list[str], dict]:
+        return ["openai/gpt-5.5"], {}
+
+    monkeypatch.setattr(tui, "_load_opencode_catalog", fake_loader)
+    monkeypatch.setattr(tui.questionary, "select", _ScriptedSelect)
+    monkeypatch.setattr(tui.questionary, "confirm", _ScriptedConfirm)
+    _ScriptedSelect.instances = []
+    _ScriptedConfirm.instances = []
+
+    scripted = _ScriptedSelect()
+    scripted.queue(
+        tui._ESC_BACK,
+        "__continue__",
+        "__continue__",
+    )
+    monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
+    confirm = _ScriptedConfirm().queue(True)
+    monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
+
+    wrote = tui.run_opencode_wizard(home=tmp_path)
+
+    assert wrote is True
+    assert not _override_file(tmp_path).exists()
+
+
+# ---------------------------------------------------------------------------
+# Agent chooser — label format, Continue label, Separator (issue #55)
+# ---------------------------------------------------------------------------
+
+
+def test_ask_continue_or_agent_uses_dash_label_format(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Claude agent chooser renders ``{agent} - {value}``, not ``(current: ...)``."""
+    import questionary
+
+    from ai_harness.modules.wizard import tui
+
+    captured: list[object] = []
+
+    def fake_select(message, *, choices, **kwargs):
+        captured.append(choices)
+
+        class _Q:
+            def ask(self) -> str:
+                return "__continue__"
+
+        return _Q()
+
+    monkeypatch.setattr(tui, "_filterable_select", fake_select)
+    tui._ask_continue_or_agent("model", {"implementor": "opus"})
+
+    titles = [choice.title for choice in captured[0] if isinstance(choice, questionary.Choice)]
+    assert "implementor - opus" in titles
+    assert not any("(current:" in title for title in titles)
+
+
+def test_ask_opencode_continue_or_agent_uses_dash_label_format(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The OpenCode agent chooser renders ``{agent} - {value}``, not ``(current: ...)``."""
+    import questionary
+
+    from ai_harness.modules.wizard import tui
+
+    captured: list[object] = []
+
+    def fake_select(message, *, choices, **kwargs):
+        captured.append(choices)
+
+        class _Q:
+            def ask(self) -> str:
+                return "__continue__"
+
+        return _Q()
+
+    monkeypatch.setattr(tui, "_filterable_select", fake_select)
+    tui._ask_opencode_continue_or_agent("model", {"implementor": "openai/gpt-5.5"})
+
+    titles = [choice.title for choice in captured[0] if isinstance(choice, questionary.Choice)]
+    assert "implementor - openai/gpt-5.5" in titles
+    assert not any("(current:" in title for title in titles)
+
+
+def test_ask_continue_or_agent_continue_label_has_no_arrow(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Continue choice's label is plain "Continue" — no "-> {next_phase}" suffix."""
+    import questionary
+
+    from ai_harness.modules.wizard import tui
+
+    captured: list[object] = []
+
+    def fake_select(message, *, choices, **kwargs):
+        captured.append(choices)
+
+        class _Q:
+            def ask(self) -> str:
+                return "__continue__"
+
+        return _Q()
+
+    monkeypatch.setattr(tui, "_filterable_select", fake_select)
+    tui._ask_continue_or_agent("model", {})
+
+    continue_choice = next(c for c in captured[0] if isinstance(c, questionary.Choice) and c.value == "__continue__")
+    assert continue_choice.title == "Continue"
+
+
+def test_ask_continue_or_agent_has_separator_before_continue(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A Separator sits immediately before the Continue choice (Claude path)."""
+    import questionary
+
+    from ai_harness.modules.wizard import tui
+
+    captured: list[object] = []
+
+    def fake_select(message, *, choices, **kwargs):
+        captured.append(choices)
+
+        class _Q:
+            def ask(self) -> str:
+                return "__continue__"
+
+        return _Q()
+
+    monkeypatch.setattr(tui, "_filterable_select", fake_select)
+    tui._ask_continue_or_agent("model", {})
+
+    choices = captured[0]
+    continue_index = next(
+        i for i, c in enumerate(choices) if isinstance(c, questionary.Choice) and c.value == "__continue__"
+    )
+    assert isinstance(choices[continue_index - 1], questionary.Separator)
+
+
+def test_ask_opencode_continue_or_agent_has_separator_before_continue(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A Separator sits immediately before the Continue choice (OpenCode path)."""
+    import questionary
+
+    from ai_harness.modules.wizard import tui
+
+    captured: list[object] = []
+
+    def fake_select(message, *, choices, **kwargs):
+        captured.append(choices)
+
+        class _Q:
+            def ask(self) -> str:
+                return "__continue__"
+
+        return _Q()
+
+    monkeypatch.setattr(tui, "_filterable_select", fake_select)
+    tui._ask_opencode_continue_or_agent("model", {})
+
+    choices = captured[0]
+    continue_index = next(
+        i for i, c in enumerate(choices) if isinstance(c, questionary.Choice) and c.value == "__continue__"
+    )
+    assert isinstance(choices[continue_index - 1], questionary.Separator)
+
+
 # ---------------------------------------------------------------------------
 # Picker row builders — mark current, leave others unmarked
 # ---------------------------------------------------------------------------
@@ -1700,6 +1909,50 @@ def test_effort_picker_enables_search_filter(monkeypatch: pytest.MonkeyPatch, tm
     assert _SelectSpy.instances[0].kwargs.get("use_search_filter") is True
 
 
+def test_claude_effort_picker_capitalizes_display_label_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The effort picker shows "High" etc. but the underlying value stays lowercase "high"."""
+    from ai_harness.modules.wizard import tui
+
+    _SelectSpy.instances = []
+    monkeypatch.setattr(tui.questionary, "select", _SelectSpy)
+
+    tui._ask_claude_effort("validator", tmp_path)  # type: ignore[attr-defined]
+
+    choices = _SelectSpy.instances[0].kwargs["choices"]
+    high_choice = next(c for c in choices if c.value == "high")
+    assert high_choice.title == "validator → High"
+    assert high_choice.value == "high"
+
+
+def test_claude_model_picker_does_not_capitalize_label(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The model picker's labels must never be capitalized — model ids stay lowercase."""
+    from ai_harness.modules.wizard import tui
+
+    _SelectSpy.instances = []
+    monkeypatch.setattr(tui.questionary, "select", _SelectSpy)
+
+    tui._ask_claude_model("implementor", tmp_path)  # type: ignore[attr-defined]
+
+    choices = _SelectSpy.instances[0].kwargs["choices"]
+    sonnet_choice = next(c for c in choices if c.value == "sonnet")
+    assert sonnet_choice.title == "implementor → sonnet"
+
+
+def test_opencode_effort_picker_capitalizes_display_label_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The OpenCode effort picker capitalizes the display only; value stays lowercase."""
+    from ai_harness.modules.wizard import tui
+
+    _SelectSpy.instances = []
+    monkeypatch.setattr(tui.questionary, "select", _SelectSpy)
+
+    tui._ask_opencode_effort("validator", tmp_path)  # type: ignore[attr-defined]
+
+    choices = _SelectSpy.instances[0].kwargs["choices"]
+    high_choice = next(c for c in choices if c.value == "high")
+    assert high_choice.title == "validator → High"
+    assert high_choice.value == "high"
+
+
 def test_agent_continue_picker_enables_search_filter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1849,6 +2102,48 @@ def test_print_header_skips_clear_when_not_a_terminal(monkeypatch: pytest.Monkey
 
 
 # ---------------------------------------------------------------------------
+# Phase spacing — blank line between header and title (issue #55)
+# ---------------------------------------------------------------------------
+
+
+def test_claude_model_phase_prints_blank_line_after_header(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Claude model phase prints a blank line right after the header panel."""
+    from ai_harness.modules.wizard import tui
+
+    printed: list[tuple[object, ...]] = []
+    monkeypatch.setattr(tui._console, "print", lambda *a, **kw: printed.append(a))
+    monkeypatch.setattr(tui.questionary, "select", _ScriptedSelect)
+    monkeypatch.setattr(tui.questionary, "confirm", _ScriptedConfirm)
+    _ScriptedSelect.instances = []
+    _ScriptedConfirm.instances = []
+    scripted = _ScriptedSelect()
+    scripted.queue("__continue__", "__continue__")
+    monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
+    confirm = _ScriptedConfirm().queue(True)
+    monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
+
+    tui.run_claude_wizard(home=tmp_path)
+
+    # First print is the header Panel; the next must be a bare blank-line print.
+    assert printed[0][0].__class__.__name__ == "Panel"
+    assert printed[1] == ("",)
+
+
+def test_ask_confirm_prints_blank_line_after_header(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The confirm screen prints a blank line right after the header panel."""
+    from ai_harness.modules.wizard import tui
+
+    printed: list[tuple[object, ...]] = []
+    monkeypatch.setattr(tui._console, "print", lambda *a, **kw: printed.append(a))
+    monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: _ScriptedConfirm().queue(True))
+
+    tui._ask_confirm("set-models · claude — confirm", {"implementor": ("opus", "high")})
+
+    assert printed[0][0].__class__.__name__ == "Panel"
+    assert printed[1] == ("",)
+
+
+# ---------------------------------------------------------------------------
 # Wizard pickers — j/k navigation binding (acceptance criterion: vim-style nav)
 # ---------------------------------------------------------------------------
 # These tests verify that ``_filterable_select`` attaches j/k key bindings to
@@ -1869,6 +2164,44 @@ def test_filterable_select_attaches_jk_bindings() -> None:
     keys = {b.keys[0] for b in question.application.key_bindings.bindings}
     assert "j" in keys
     assert "k" in keys
+
+
+def test_filterable_select_attaches_escape_binding() -> None:
+    """The custom select wrapper must add an Esc binding to the prompt's key registry."""
+    import questionary
+    from prompt_toolkit.keys import Keys
+
+    from ai_harness.modules.wizard import tui
+
+    choices = [questionary.Choice(title="alpha", value="a"), questionary.Choice(title="beta", value="b")]
+    question = tui._filterable_select("Test:", choices=choices)
+
+    keys = {b.keys[0] for b in question.application.key_bindings.bindings}
+    assert Keys.Escape in keys
+
+
+def test_filterable_select_escape_exits_with_esc_back_sentinel() -> None:
+    """Pressing Esc on a filterable select exits the Application with the _ESC_BACK sentinel."""
+    import prompt_toolkit.key_binding.key_processor as kp
+    import questionary
+    from prompt_toolkit.key_binding import KeyPress
+    from prompt_toolkit.keys import Keys
+
+    from ai_harness.modules.wizard import tui
+
+    kp.KeyProcessor._start_timeout = lambda self: None
+
+    choices = [questionary.Choice(title="alpha", value="a"), questionary.Choice(title="beta", value="b")]
+    question = tui._filterable_select("Test:", choices=choices)
+
+    exit_results: list[object] = []
+    question.application.exit = lambda result=None, **kw: exit_results.append(result)
+
+    processor = question.application.key_processor
+    processor.feed(KeyPress(Keys.Escape, "\x1b"))
+    processor.process_keys()
+
+    assert exit_results == [tui._ESC_BACK]
 
 
 def test_filterable_select_jk_moves_inquirer_pointer() -> None:
@@ -1956,6 +2289,129 @@ def test_filterable_select_keeps_type_to_filter_for_other_chars() -> None:
 
     processor = question.application.key_processor
     # Press 'a' — not bound to our j/k handler, so it must hit the search filter.
+    processor.feed(KeyPress("a", "a"))
+    processor.process_keys()
+    assert inquirer_control.search_filter == "a"
+
+
+# ---------------------------------------------------------------------------
+# Always-visible filter box, positioned ABOVE the list (issue #55)
+# ---------------------------------------------------------------------------
+
+
+def test_filterable_select_filter_row_sits_immediately_above_the_list() -> None:
+    """The filter row is inserted directly above the rendered choice list, not below."""
+    import questionary
+
+    from ai_harness.modules.wizard import tui
+
+    choices = [questionary.Choice(title="alpha", value="a"), questionary.Choice(title="beta", value="b")]
+    question = tui._filterable_select("Test:", choices=choices)
+
+    slot = tui._find_inquirer_window_slot(question.application.layout.container)
+    assert slot is not None
+    children, list_index = slot
+
+    assert list_index > 0, "the list window must have a sibling above it (the filter row)"
+    filter_row = children[list_index - 1]
+    # The filter row's inner control renders "Filter: " — distinguishing it
+    # from any other sibling that might be inserted above the list.
+    window = getattr(filter_row, "content", None)
+    control = getattr(window, "content", None)
+    tokens = control.text()
+    assert any("Filter: " in text for _, text in tokens)
+
+
+def test_filterable_select_has_spacer_between_title_and_filter_row() -> None:
+    """A blank spacer row sits between the prompt title and the filter row."""
+    import questionary
+
+    from ai_harness.modules.wizard import tui
+
+    choices = [questionary.Choice(title="alpha", value="a")]
+    question = tui._filterable_select("Test:", choices=choices)
+
+    slot = tui._find_inquirer_window_slot(question.application.layout.container)
+    children, list_index = slot
+    # children: [title, spacer, filter, list, ...]
+    filter_index = list_index - 1
+    spacer_index = filter_index - 1
+    assert spacer_index >= 0
+    spacer_tokens = children[spacer_index].content.content.text()
+    filter_tokens = children[filter_index].content.content.text()
+    assert all(text == "" for _, text in spacer_tokens)
+    assert any("Filter: " in text for _, text in filter_tokens)
+
+
+def test_filterable_select_filter_row_visible_before_any_keystroke() -> None:
+    """The filter row renders "Filter: " even with no search filter typed yet.
+
+    Unlike questionary's own hidden-until-first-keystroke search box, the
+    wizard's filter row must be visible from the start (always-visible
+    requirement).
+    """
+    import questionary
+
+    from ai_harness.modules.wizard import tui
+
+    choices = [questionary.Choice(title="alpha", value="a")]
+    question = tui._filterable_select("Test:", choices=choices)
+
+    slot = tui._find_inquirer_window_slot(question.application.layout.container)
+    children, list_index = slot
+    filter_row = children[list_index - 1]
+    tokens = filter_row.content.content.text()
+    assert tokens == [("class:text", "Filter: ")]
+
+
+def test_filterable_select_filter_row_updates_live_with_keystrokes() -> None:
+    """Typing updates the always-visible filter row's rendered text live."""
+    import prompt_toolkit.key_binding.key_processor as kp
+    import questionary
+    from prompt_toolkit.key_binding import KeyPress
+
+    from ai_harness.modules.wizard import tui
+
+    kp.KeyProcessor._start_timeout = lambda self: None
+
+    choices = [questionary.Choice(title="alpha", value="a"), questionary.Choice(title="beta", value="b")]
+    question = tui._filterable_select("Test:", choices=choices)
+
+    processor = question.application.key_processor
+    processor.feed(KeyPress("a", "a"))
+    processor.process_keys()
+
+    slot = tui._find_inquirer_window_slot(question.application.layout.container)
+    children, list_index = slot
+    filter_row = children[list_index - 1]
+    tokens = filter_row.content.content.text()
+    assert tokens == [("class:text", "Filter: a")]
+
+
+def test_filterable_select_filter_row_still_preserves_jk_and_search() -> None:
+    """Inserting the filter row must not break existing j/k nav or type-to-filter."""
+    import prompt_toolkit.key_binding.key_processor as kp
+    import questionary
+    from prompt_toolkit.key_binding import KeyPress
+
+    from ai_harness.modules.wizard import tui
+
+    kp.KeyProcessor._start_timeout = lambda self: None
+
+    choices = [
+        questionary.Choice(title="alpha", value="a"),
+        questionary.Choice(title="beta", value="b"),
+        questionary.Choice(title="gamma", value="c"),
+    ]
+    question = tui._filterable_select("Test:", choices=choices)
+    inquirer_control = tui._find_inquirer_control(question.application.layout.container)
+    assert inquirer_control.pointed_at == 0
+
+    processor = question.application.key_processor
+    processor.feed(KeyPress("j", "j"))
+    processor.process_keys()
+    assert inquirer_control.pointed_at == 1
+
     processor.feed(KeyPress("a", "a"))
     processor.process_keys()
     assert inquirer_control.search_filter == "a"
@@ -2328,6 +2784,205 @@ def test_run_claude_wizard_no_back_choice_in_first_model_phase_agent_chooser(
     assert captured, "the agent chooser did not call _filterable_select"
     values = [choice.value for choice in captured[0]]
     assert "__back__" not in values
+
+
+# ---------------------------------------------------------------------------
+# Esc = back, Ctrl+C = quit (issue #55)
+# ---------------------------------------------------------------------------
+
+
+def test_ask_continue_or_agent_esc_is_ignored_on_first_model_phase(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Esc on the model phase's agent chooser (no predecessor) is a no-op, not '__back__'."""
+    from ai_harness.modules.wizard import tui
+
+    monkeypatch.setattr(
+        tui, "_filterable_select", lambda *a, **kw: type("_Q", (), {"ask": lambda self: tui._ESC_BACK})()
+    )
+
+    result = tui._ask_continue_or_agent("model", {})
+
+    assert result == tui._ESC_BACK, "the first phase has no back target — Esc must surface the raw sentinel"
+
+
+def test_ask_continue_or_agent_esc_maps_to_back_on_effort_phase(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Esc on the effort phase's agent chooser maps to '__back__' (return to model phase)."""
+    from ai_harness.modules.wizard import tui
+
+    monkeypatch.setattr(
+        tui, "_filterable_select", lambda *a, **kw: type("_Q", (), {"ask": lambda self: tui._ESC_BACK})()
+    )
+
+    result = tui._ask_continue_or_agent("effort", {})
+
+    assert result == "__back__"
+
+
+def test_ask_opencode_continue_or_agent_esc_ignored_on_first_phase(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Esc on the OpenCode model phase's agent chooser is a no-op."""
+    from ai_harness.modules.wizard import tui
+
+    monkeypatch.setattr(
+        tui, "_filterable_select", lambda *a, **kw: type("_Q", (), {"ask": lambda self: tui._ESC_BACK})()
+    )
+
+    result = tui._ask_opencode_continue_or_agent("model", {})
+
+    assert result == tui._ESC_BACK
+
+
+def test_run_claude_wizard_esc_at_model_phase_agent_chooser_redraws_same_screen(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Esc at the model phase's agent chooser is ignored — the wizard re-shows the same screen."""
+    from ai_harness.modules.wizard import tui
+
+    monkeypatch.setattr(tui.questionary, "select", _ScriptedSelect)
+    monkeypatch.setattr(tui.questionary, "confirm", _ScriptedConfirm)
+    _ScriptedSelect.instances = []
+    _ScriptedConfirm.instances = []
+
+    # Phase 1 (model): Esc (no-op, redraw) -> continue.
+    # Phase 2 (effort): continue.
+    scripted = _ScriptedSelect()
+    scripted.queue(
+        tui._ESC_BACK,
+        "__continue__",
+        "__continue__",
+    )
+    monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
+    confirm = _ScriptedConfirm().queue(True)
+    monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
+
+    wrote = tui.run_claude_wizard(home=tmp_path)
+
+    assert wrote is True
+    assert not _override_file(tmp_path).exists()
+
+
+def test_run_claude_wizard_esc_in_model_picker_returns_to_agent_choice(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Esc inside the per-agent model picker behaves exactly like '← Back'."""
+    from ai_harness.modules.wizard import tui
+
+    monkeypatch.setattr(tui.questionary, "select", _ScriptedSelect)
+    monkeypatch.setattr(tui.questionary, "confirm", _ScriptedConfirm)
+    _ScriptedSelect.instances = []
+    _ScriptedConfirm.instances = []
+
+    scripted = _ScriptedSelect()
+    scripted.queue(
+        "implementor",
+        tui._ESC_BACK,
+        "__continue__",
+        "__continue__",
+    )
+    monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
+    confirm = _ScriptedConfirm().queue(True)
+    monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
+
+    wrote = tui.run_claude_wizard(home=tmp_path)
+
+    assert wrote is True
+    assert not _override_file(tmp_path).exists(), (
+        "Esc inside the model picker must not write any override for the agent it abandoned editing."
+    )
+
+
+def test_run_claude_wizard_esc_on_effort_phase_agent_chooser_returns_to_model_phase(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Esc on the effort phase's agent chooser goes back to the model phase, like '← Back'."""
+    from ai_harness.modules.wizard import tui
+
+    monkeypatch.setattr(tui.questionary, "select", _ScriptedSelect)
+    monkeypatch.setattr(tui.questionary, "confirm", _ScriptedConfirm)
+    _ScriptedSelect.instances = []
+    _ScriptedConfirm.instances = []
+
+    # Phase 1 (model): pick implementor -> opus -> continue.
+    # Phase 2 (effort): Esc -> re-enters phase 1 (model).
+    # Phase 1 again: continue.
+    # Phase 2 again: continue.
+    scripted = _ScriptedSelect()
+    scripted.queue(
+        "implementor",
+        "opus",
+        "__continue__",
+        tui._ESC_BACK,
+        "__continue__",
+        "__continue__",
+    )
+    monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
+    confirm = _ScriptedConfirm().queue(True)
+    monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
+
+    wrote = tui.run_claude_wizard(home=tmp_path)
+
+    assert wrote is True
+    overrides = json.loads(_override_file(tmp_path).read_text(encoding="utf-8"))
+    assert overrides == {"implementor": {"model": {"claude": "opus"}}}
+
+
+def test_run_claude_wizard_esc_on_confirm_screen_returns_to_effort_phase(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Esc on the confirm screen returns to the effort phase without writing anything yet."""
+    from ai_harness.modules.wizard import tui
+
+    monkeypatch.setattr(tui.questionary, "select", _ScriptedSelect)
+    _ScriptedSelect.instances = []
+
+    # Phase 1 (model): continue.
+    # Phase 2 (effort): continue.
+    # Confirm: Esc -> back to effort phase.
+    # Phase 2 again: continue.
+    # Confirm again: confirm (True).
+    scripted = _ScriptedSelect()
+    scripted.queue(
+        "__continue__",
+        "__continue__",
+        "__continue__",
+    )
+    monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
+
+    confirm_responses = [tui._ESC_BACK, True]
+
+    class _ConfirmSeq:
+        def ask(self) -> object:
+            return confirm_responses.pop(0)
+
+    monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: _ConfirmSeq())
+
+    wrote = tui.run_claude_wizard(home=tmp_path)
+
+    assert wrote is True
+    assert not confirm_responses, "confirm must have been asked twice (Esc back, then confirm)"
+
+
+def test_run_claude_wizard_ctrl_c_at_confirm_screen_still_cancels(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ctrl+C on the confirm screen still fully cancels the wizard (semantics unchanged by #55)."""
+    from ai_harness.modules.wizard import tui
+
+    monkeypatch.setattr(tui.questionary, "select", _ScriptedSelect)
+    _ScriptedSelect.instances = []
+
+    scripted = _ScriptedSelect()
+    scripted.queue("__continue__", "__continue__")
+    monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
+
+    class _CtrlCConfirm:
+        def ask(self) -> None:
+            return None  # questionary.confirm returns None on Ctrl+C in this codebase's usage
+
+    monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: _CtrlCConfirm())
+
+    wrote = tui.run_claude_wizard(home=tmp_path)
+
+    assert wrote is False
+    assert not _override_file(tmp_path).exists()
 
 
 def test_run_claude_wizard_clears_screen_once_per_phase_render(

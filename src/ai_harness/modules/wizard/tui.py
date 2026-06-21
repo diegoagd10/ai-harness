@@ -193,7 +193,14 @@ _console = Console()
 # ---------------------------------------------------------------------------
 
 
-_KEYBINDING_LEGEND = "↑/↓ + j/k: navigate · type to filter · enter: select · Ctrl+C: cancel"
+_KEYBINDING_LEGEND = "↑/↓ + j/k: navigate · type to filter · enter: select · Esc: back · Ctrl+C: quit"
+
+
+#: Sentinel returned by ``.ask()`` when the user presses Esc inside a
+#: ``_filterable_select`` prompt or the confirm screen. Distinct from the
+#: ``None`` questionary returns for Ctrl+C — Ctrl+C always means "quit the
+#: whole wizard" while Esc means "go back one step" (#55).
+_ESC_BACK = "__esc_back__"
 
 
 # ---------------------------------------------------------------------------
@@ -237,6 +244,33 @@ def _find_inquirer_control(node: object) -> object | None:
             if found is not None:
                 return found
 
+    return None
+
+
+def _find_inquirer_window_slot(node: object) -> tuple[list, int] | None:
+    """Locate the ``HSplit`` children list and index holding the list's ``Window(ic)``.
+
+    Returns ``(children, index)`` so the caller can ``children.insert(index, ...)``
+    to place a new row immediately ABOVE the rendered choice list — the
+    ``ConditionalContainer(Window(ic), filter=~IsDone())`` node that
+    :func:`questionary.prompts.common.create_inquirer_layout` builds.
+    Returns ``None`` if the structure isn't found (defensive only — every
+    questionary.select layout has this node).
+    """
+    from questionary.prompts.common import InquirerControl
+
+    children = getattr(node, "children", None)
+    if children:
+        for index, child in enumerate(children):
+            if child is None or isinstance(child, str):
+                continue
+            content = getattr(child, "content", None)
+            inner = getattr(content, "content", None) if content is not None else None
+            if isinstance(inner, InquirerControl):
+                return children, index
+            found = _find_inquirer_window_slot(child)
+            if found is not None:
+                return found
     return None
 
 
@@ -301,10 +335,57 @@ def _filterable_select(
         while not inquirer_control.is_selection_valid():
             inquirer_control.select_previous()
 
+    def _esc_back(event: object) -> None:
+        application.exit(result=_ESC_BACK)
+
     application.key_bindings.add("j", eager=True)(_move_down)
     application.key_bindings.add("k", eager=True)(_move_up)
+    application.key_bindings.add("escape", eager=True)(_esc_back)
+
+    _insert_always_visible_filter_row(application, inquirer_control)
 
     return question
+
+
+def _insert_always_visible_filter_row(application: object, inquirer_control: object) -> None:
+    """Insert an always-visible "Filter: ..." row immediately above the choice list.
+
+    ``questionary``'s own search filter (``use_search_filter=True``) only
+    renders the typed text BELOW the list, and only after the first
+    keystroke. The wizard's spec calls for a filter box that's visible from
+    the start and sits ABOVE the list, between the prompt title and the
+    choices. The filtering logic itself (``InquirerControl.search_filter``
+    / ``add_search_character``) is untouched — questionary's own eager
+    key bindings still feed it on every keystroke; this only adds a new
+    always-rendered ``Window`` reflecting that same state, so the live
+    filtering behaviour (and the existing j/k bindings) keep working
+    exactly as before (#55).
+    """
+    from prompt_toolkit.filters import IsDone
+    from prompt_toolkit.layout.containers import ConditionalContainer, Window
+    from prompt_toolkit.layout.controls import FormattedTextControl
+
+    slot = _find_inquirer_window_slot(application.layout.container)
+    if slot is None:
+        # Defensive only — every questionary.select layout has this node.
+        return
+    children, index = slot
+
+    def _filter_row_tokens() -> list[tuple[str, str]]:
+        return [("class:text", f"Filter: {inquirer_control.search_filter or ''}")]
+
+    filter_row = ConditionalContainer(
+        Window(FormattedTextControl(_filter_row_tokens), height=1),
+        filter=~IsDone(),
+    )
+    # A blank spacer row between the prompt title and the filter box so the
+    # two don't read as glued together (issue #55 spacing requirement).
+    spacer_row = ConditionalContainer(
+        Window(FormattedTextControl(lambda: [("", "")]), height=1),
+        filter=~IsDone(),
+    )
+    children.insert(index, filter_row)
+    children.insert(index, spacer_row)
 
 
 def _print_header(title: str) -> None:
@@ -364,31 +445,35 @@ def _current_opencode_effort(agent: str, home: Path) -> str | None:
 def _ask_claude_model(agent: str, home: Path) -> str | None:
     """Ask the user to pick a model for *agent*; return None on Ctrl+C.
 
-    A leading "← Back" choice returns the ``"__back__"`` sentinel so the
-    caller can re-show the agent chooser without recording a model change.
+    A leading "← Back" choice, or pressing Esc, returns the ``"__back__"``
+    sentinel so the caller can re-show the agent chooser without recording
+    a model change.
     """
     rows = build_model_picker_rows(agent, _current_claude_model(agent, home))
     choices = [questionary.Choice(title="← Back", value="__back__")]
     choices.extend(questionary.Choice(title=row.label, value=row.value) for row in rows)
-    return _filterable_select(
+    answer = _filterable_select(
         f"Model for {agent}:",
         choices=choices,
     ).ask()
+    return "__back__" if answer == _ESC_BACK else answer
 
 
 def _ask_claude_effort(agent: str, home: Path) -> str | None:
     """Ask the user to pick an effort for *agent*; return None on Ctrl+C.
 
-    A leading "← Back" choice returns the ``"__back__"`` sentinel so the
-    caller can re-show the agent chooser without recording an effort change.
+    A leading "← Back" choice, or pressing Esc, returns the ``"__back__"``
+    sentinel so the caller can re-show the agent chooser without recording
+    an effort change.
     """
     rows = build_effort_picker_rows(agent, _current_claude_effort(agent, home))
     choices = [questionary.Choice(title="← Back", value="__back__")]
-    choices.extend(questionary.Choice(title=row.label, value=row.value) for row in rows)
-    return _filterable_select(
+    choices.extend(questionary.Choice(title=f"{agent} → {row.value.capitalize()}", value=row.value) for row in rows)
+    answer = _filterable_select(
         f"Effort for {agent}:",
         choices=choices,
     ).ask()
+    return "__back__" if answer == _ESC_BACK else answer
 
 
 def _ask_continue_or_agent(
@@ -397,10 +482,14 @@ def _ask_continue_or_agent(
 ) -> str | None:
     """Ask the user to either pick an agent to edit or continue to the next phase.
 
-    A trailing "Continue → {next phase}" choice advances the wizard; selecting
-    an agent opens the model/effort picker. ``None`` on Ctrl+C. Phases after
-    the first ("model" has no predecessor) get a leading "← Back" choice
+    A trailing "Continue" choice advances the wizard; selecting an agent
+    opens the model/effort picker. ``None`` on Ctrl+C. Phases after the
+    first ("model" has no predecessor) get a leading "← Back" choice
     returning ``"__back__"`` so the user can return to the previous phase.
+
+    Pressing Esc behaves like "← Back" on every phase except the first
+    ("model"), which has no predecessor to return to — there Esc is a
+    no-op and re-shows the same screen (#55).
     """
     next_phase = {
         "model": "effort",
@@ -415,31 +504,38 @@ def _ask_continue_or_agent(
         choices.append(questionary.Choice(title="← Back", value="__back__"))
     choices.extend(
         questionary.Choice(
-            title=f"{agent} (current: {selections.get(agent, 'sonnet')})",
+            title=f"{agent} - {selections.get(agent, 'sonnet')}",
             value=agent,
         )
         for agent in agent_list
     )
+    choices.append(questionary.Separator())
     choices.append(
         questionary.Choice(
-            title=f"Continue → {next_phase}",
+            title="Continue",
             value="__continue__",
         )
     )
 
-    return _filterable_select(
+    answer = _filterable_select(
         f"Choose an agent to edit its {phase}, or continue:",
         choices=choices,
     ).ask()
+    if answer == _ESC_BACK:
+        return "__back__" if phase != "model" else _ESC_BACK
+    return answer
 
 
-def _ask_confirm(title: str, selections: dict[str, tuple[str, str | None]]) -> bool:
-    """Ask the user to confirm; True on enter, False on Ctrl+C.
+def _ask_confirm(title: str, selections: dict[str, tuple[str, str | None]]) -> str:
+    """Ask the user to confirm; returns ``"__confirm__"``, ``"__back__"``, or ``"__cancel__"``.
 
     Clears and prints *title* as the header first so the confirm screen is
-    also cleared+headed like every other phase render (#51).
+    also cleared+headed like every other phase render (#51). Ctrl+C
+    cancels the whole wizard (``"__cancel__"``); Esc goes back one step
+    to the effort phase (``"__back__"``) without writing anything (#55).
     """
     _print_header(title)
+    _console.print("")
     rows = build_confirmation_rows(selections)
     body = "\n".join(f"  • {row.label}" for row in rows)
     _console.print(
@@ -448,12 +544,22 @@ def _ask_confirm(title: str, selections: dict[str, tuple[str, str | None]]) -> b
             border_style="green",
         )
     )
-    return bool(
-        questionary.confirm(
-            "Press enter to write overrides and re-render Claude agents, Ctrl+C to cancel:",
-            default=True,
-        ).ask()
+    question = questionary.confirm(
+        "Press enter to write overrides and re-render Claude agents, Esc to go back, Ctrl+C to cancel:",
+        default=True,
     )
+    application = getattr(question, "application", None)
+    if application is not None:
+
+        def _esc_back(event: object) -> None:
+            application.exit(result=_ESC_BACK)
+
+        application.key_bindings.add("escape", eager=True)(_esc_back)
+
+    answer = question.ask()
+    if answer == _ESC_BACK:
+        return "__back__"
+    return "__confirm__" if answer else "__cancel__"
 
 
 def run_claude_wizard(*, home: Path) -> bool:
@@ -478,9 +584,12 @@ def run_claude_wizard(*, home: Path) -> bool:
         """Drive the model phase loop; return '__continue__', '__back__', or '__cancel__'."""
         while True:
             _print_header("set-models · claude — model")
+            _console.print("")
             pick = _ask_continue_or_agent("model", models)
             if pick is None:  # Ctrl+C
                 return "__cancel__"
+            if pick == _ESC_BACK:  # Esc on the first phase: no-op, re-show this screen.
+                continue
             if pick in ("__continue__", "__back__"):
                 return pick
             new_model = _ask_claude_model(pick, home)
@@ -494,6 +603,7 @@ def run_claude_wizard(*, home: Path) -> bool:
         """Drive the effort phase loop; return '__continue__', '__back__', or '__cancel__'."""
         while True:
             _print_header("set-models · claude — effort")
+            _console.print("")
             # Show current effort alongside (placeholder if unset)
             display = {agent: (efforts[agent] or "(unset)") for agent in efforts}
             pick = _ask_continue_or_agent("effort", display)
@@ -508,10 +618,18 @@ def run_claude_wizard(*, home: Path) -> bool:
                 continue
             efforts[pick] = new_effort
 
-    # Phases 1-2 are driven by an index so the effort phase's "← Back" can
-    # decrement back into the model phase without losing state — `models`
-    # and `efforts` are closures shared across re-entries.
-    phases = [run_model_phase, run_effort_phase]
+    def run_confirm_phase() -> str:
+        """Drive the confirm screen; return '__continue__', '__back__', or '__cancel__'."""
+        selections = {agent: (models[agent], efforts[agent]) for agent in claude_wizard_agents()}
+        outcome = _ask_confirm("set-models · claude — confirm", selections)
+        if outcome == "__confirm__":
+            return "__continue__"
+        return outcome
+
+    # Phases 0-2 are driven by an index so "← Back" / Esc can decrement back
+    # into the previous phase without losing state — `models` and `efforts`
+    # are closures shared across re-entries.
+    phases = [run_model_phase, run_effort_phase, run_confirm_phase]
     index = 0
     while index < len(phases):
         outcome = phases[index]()
@@ -523,17 +641,12 @@ def run_claude_wizard(*, home: Path) -> bool:
             continue
         index += 1
 
-    # Phase 3: confirm + apply
-    selections = {agent: (models[agent], efforts[agent]) for agent in claude_wizard_agents()}
-    if not _ask_confirm("set-models · claude — confirm", selections):
-        _console.print("[yellow]Cancelled — no overrides written.[/yellow]")
-        return False
-
     # Selective write: only fields where the user's choice differs from the
     # baseline get serialized. Issue #44 mandates a partial override store;
     # writing every agent's current model would pollute overrides.json with
     # template defaults whenever the user opens the wizard and confirms
     # without changing anything.
+    selections = {agent: (models[agent], efforts[agent]) for agent in claude_wizard_agents()}
     baseline = {
         agent: {"model": baseline_models[agent], "effort": baseline_efforts[agent]} for agent in claude_wizard_agents()
     }
@@ -580,17 +693,18 @@ def _ask_opencode_model(agent: str, joined, home: Path) -> str | None:
     *joined* is a list of :class:`OpencodeModelEntry` produced by
     :func:`join_opencode_catalog` — the TUI never re-derives cost or
     reasoning from the catalog, it just renders the labels the pure
-    layer produced. A leading "← Back" choice returns the ``"__back__"``
-    sentinel so the caller can re-show the agent chooser without
-    recording a model change.
+    layer produced. A leading "← Back" choice, or pressing Esc, returns
+    the ``"__back__"`` sentinel so the caller can re-show the agent
+    chooser without recording a model change.
     """
     rows = build_opencode_model_picker_rows(joined, _current_opencode_model(agent, home) or "")
     choices = [questionary.Choice(title="← Back", value="__back__")]
     choices.extend(questionary.Choice(title=row.label, value=row.value) for row in rows)
-    return _filterable_select(
+    answer = _filterable_select(
         f"Model for {agent}:",
         choices=choices,
     ).ask()
+    return "__back__" if answer == _ESC_BACK else answer
 
 
 def _ask_opencode_effort(agent: str, home: Path) -> str | None:
@@ -598,17 +712,18 @@ def _ask_opencode_effort(agent: str, home: Path) -> str | None:
 
     The TUI is responsible for NOT calling this for non-reasoning models
     — :func:`run_opencode_wizard` checks the model's catalog entry
-    before prompting. A leading "← Back" choice returns the ``"__back__"``
-    sentinel so the caller can re-show the agent chooser without recording
-    an effort change.
+    before prompting. A leading "← Back" choice, or pressing Esc, returns
+    the ``"__back__"`` sentinel so the caller can re-show the agent
+    chooser without recording an effort change.
     """
     rows = build_opencode_effort_picker_rows(agent, _current_opencode_effort(agent, home))
     choices = [questionary.Choice(title="← Back", value="__back__")]
-    choices.extend(questionary.Choice(title=row.label, value=row.value) for row in rows)
-    return _filterable_select(
+    choices.extend(questionary.Choice(title=f"{agent} → {row.value.capitalize()}", value=row.value) for row in rows)
+    answer = _filterable_select(
         f"Reasoning effort for {agent} (low → high):",
         choices=choices,
     ).ask()
+    return "__back__" if answer == _ESC_BACK else answer
 
 
 def _ask_opencode_continue_or_agent(
@@ -622,6 +737,10 @@ def _ask_opencode_continue_or_agent(
     Phases after the first ("model" has no predecessor) get a leading
     "← Back" choice returning ``"__back__"`` so the user can return to the
     previous phase.
+
+    Pressing Esc behaves like "← Back" on every phase except the first
+    ("model"), which has no predecessor to return to — there Esc is a
+    no-op and re-shows the same screen (#55).
     """
     next_phase = {
         "model": "effort",
@@ -636,22 +755,26 @@ def _ask_opencode_continue_or_agent(
         choices.append(questionary.Choice(title="← Back", value="__back__"))
     choices.extend(
         questionary.Choice(
-            title=f"{agent} (current: {selections.get(agent, '(unset)')})",
+            title=f"{agent} - {selections.get(agent, '(unset)')}",
             value=agent,
         )
         for agent in agent_list
     )
+    choices.append(questionary.Separator())
     choices.append(
         questionary.Choice(
-            title=f"Continue → {next_phase}",
+            title="Continue",
             value="__continue__",
         )
     )
 
-    return _filterable_select(
+    answer = _filterable_select(
         f"Choose an agent to edit its {phase}, or continue:",
         choices=choices,
     ).ask()
+    if answer == _ESC_BACK:
+        return "__back__" if phase != "model" else _ESC_BACK
+    return answer
 
 
 def run_opencode_wizard(*, home: Path) -> bool:
@@ -706,9 +829,12 @@ def run_opencode_wizard(*, home: Path) -> bool:
         """Drive the model phase loop; return '__continue__', '__back__', or '__cancel__'."""
         while True:
             _print_header("set-models · opencode — model")
+            _console.print("")
             pick = _ask_opencode_continue_or_agent("model", models)
             if pick is None:  # Ctrl+C
                 return "__cancel__"
+            if pick == _ESC_BACK:  # Esc on the first phase: no-op, re-show this screen.
+                continue
             if pick in ("__continue__", "__back__"):
                 return pick
             new_model = _ask_opencode_model(pick, joined, home)
@@ -730,6 +856,7 @@ def run_opencode_wizard(*, home: Path) -> bool:
         """
         while True:
             _print_header("set-models · opencode — effort")
+            _console.print("")
             # Show the current effort alongside (placeholder if unset)
             display = {agent: (efforts[agent] or "(unset)") for agent in efforts}
             pick = _ask_opencode_continue_or_agent("effort", display)
@@ -751,11 +878,19 @@ def run_opencode_wizard(*, home: Path) -> bool:
                 continue
             efforts[pick] = new_effort
 
-    # Phases 1-2 are driven by an index so the effort phase's "← Back" can
-    # decrement back into the model phase without losing state or re-running
-    # the catalog loader subprocess above — `models`/`efforts` are closures
-    # shared across re-entries.
-    phases = [run_model_phase, run_effort_phase]
+    def run_confirm_phase() -> str:
+        """Drive the confirm screen; return '__continue__', '__back__', or '__cancel__'."""
+        selections = {agent: (models[agent], efforts[agent]) for agent in agents}
+        outcome = _ask_confirm("set-models · opencode — confirm", selections)
+        if outcome == "__confirm__":
+            return "__continue__"
+        return outcome
+
+    # Phases 0-2 are driven by an index so "← Back" / Esc can decrement back
+    # into the previous phase without losing state or re-running the catalog
+    # loader subprocess above — `models`/`efforts` are closures shared
+    # across re-entries.
+    phases = [run_model_phase, run_effort_phase, run_confirm_phase]
     index = 0
     while index < len(phases):
         outcome = phases[index]()
@@ -767,16 +902,11 @@ def run_opencode_wizard(*, home: Path) -> bool:
             continue
         index += 1
 
-    # Phase 3: confirm + apply
-    selections = {agent: (models[agent], efforts[agent]) for agent in agents}
-    if not _ask_confirm("set-models · opencode — confirm", selections):
-        _console.print("[yellow]Cancelled — no overrides written.[/yellow]")
-        return False
-
     # Selective write under model.opencode / effort.opencode keys — same
     # contract as the Claude path. Cleared efforts (None) for non-reasoning
     # models emit {"effort": {"opencode": None}} so a prior reasoning-model
     # effort override is removed from the store.
+    selections = {agent: (models[agent], efforts[agent]) for agent in agents}
     baseline = {agent: {"model": baseline_models[agent], "effort": baseline_efforts[agent]} for agent in agents}
     payload = build_opencode_override_payload(baseline, selections)
     if not payload:
