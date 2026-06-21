@@ -17,6 +17,23 @@ looping implementor↔validator until clean. The four agents are one unit, not
 loose parts — they are authored together as the *loop agents* under
 `resources/loop-agent/` and installed as a set.
 
+## prd-issue
+
+A GitHub issue holding the full context for a unit of product work. It is split
+into *sub-issues* that the loop implements one at a time. A prd-issue is closed
+by a human merging the session PR (via a `Closes` keyword the orchestrator adds
+once every sub-issue is done) — never by the loop itself.
+_Avoid_: PRD doc, spec, epic (when you mean the GitHub issue)
+
+## sub-issue
+
+A vertical slice of a *prd-issue*, authored as its own GitHub issue that
+references its parent prd-issue in the body. The loop works and closes
+sub-issues itself; `LOOP_LABEL` marks which ones are ready to work. Whether a
+prd-issue is fully drained is judged by open sub-issues referencing it, not by
+any label.
+_Avoid_: task, subtask, child ticket
+
 ## Agent template
 
 A CLI-neutral definition of one loop agent (e.g. `validator`,
