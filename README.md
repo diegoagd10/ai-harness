@@ -61,10 +61,12 @@ home, so one install covers both.
 
 ## What this tool does
 
-**ai-harness** is a persona + skills installer for AI coding Agent CLIs. It
-copies a bundled `AGENTS.md` (the persona) and a `skills/` directory into each
-supported Agent CLI's native config directory. You manage one set of files; the
-tool distributes them everywhere they need to go.
+**ai-harness** is a persona, skills, and loop-agent installer for AI coding
+Agent CLIs. It copies a bundled `AGENTS.md` (the persona) and a `skills/`
+directory into each supported Agent CLI's native config directory, and renders
+the loop agents (`loop-agent/`) for CLIs with native agent support (Claude Code
+and OpenCode). You manage one set of files; the tool distributes them everywhere
+they need to go.
 
 Four commands:
 
@@ -76,10 +78,11 @@ Four commands:
   globally into each Agent CLI's `$HOME` config.
 
 - `ai-harness install` — **global** distribution. Copies `AGENTS.md` + skills
-  into each Agent CLI's config dir. Generic (`~/.agents/`) is always installed.
-  The `-o` flag adds specific Agent CLIs on top. Reinstalling is byte-identical —
-  running `install` again produces exactly the same files, so downstream tools
-  don't churn on unchanged content.
+  into each Agent CLI's config dir, and renders the loop agents into the native
+  agent directories of Claude Code and OpenCode. Generic (`~/.agents/`) is always
+  installed. The `-o` flag adds specific Agent CLIs on top. Reinstalling is
+  byte-identical — running `install` again produces exactly the same files, so
+  downstream tools don't churn on unchanged content.
 
 - `ai-harness uninstall` — removes exactly what `install` wrote, using a
   persisted manifest. Works even when the source repo is gone. No-args removes
