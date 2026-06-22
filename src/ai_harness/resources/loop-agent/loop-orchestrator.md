@@ -12,7 +12,7 @@ One `loop-run/<ts>` parent branch holds the whole session's work. Each issue lan
 - `LOOP_MAX_ITERATIONS` (default `20`) — hard cap on outer loop iterations (one per issue) for this session. Also the point at which the session's PR opens even if issues remain.
 - `LOOP_FIXUP_MAX_ITERATIONS` (default `5`) — hard cap on implementor↔validator fix-up rounds for a single issue, so a stuck validator can't loop forever.
 - `gh` CLI authenticated for this repo, with push access to `origin`.
-- Current branch on the host is `main`, working tree clean.
+- Current branch on the host is `main`, working tree clean — OR you are inside a detached worktree at `main`'s HEAD (created via `ai-harness worktree`).
 
 ## Engram state tracking
 
@@ -55,7 +55,7 @@ Always save AFTER a step completes, not during. Status reflects the LAST complet
 
 1. Recover or create the loop-run branch:
    - `mem_search` query `loop run active`. If found and `git rev-parse --verify <branch>` succeeds: `git checkout <branch>` — this is your `<loop_run_branch>` for the session.
-   - Otherwise: `git checkout main && git pull --ff-only` (if a remote is configured), then `git checkout -b loop-run/<Date.now()>` — this is `<loop_run_branch>`. Save it via `mem_save` (`topic_key: loop/run/active`).
+   - Otherwise: if a remote is configured, `git checkout -b loop-run/<Date.now()> origin/main` — otherwise `git checkout -b loop-run/<Date.now()> main`. This is `<loop_run_branch>`. Save it via `mem_save` (`topic_key: loop/run/active`). Hard rule: never simplify this to `git checkout main` — `main` may already be checked out in the host worktree, which `git checkout main` would fail on.
 2. Proceed to the per-iteration loop with `<loop_run_branch>` as the base for every sub-branch.
 
 ## Per-iteration loop
