@@ -185,6 +185,7 @@ _INSTALL_PLAN: dict[AgentCli, list[_InstallWriter]] = {
             config_dest_rel=".github/copilot-instructions.md",
             tree_dest_rel=".copilot/skills",
         ),
+        partial(_write_rendered_agents, cli=AgentCli.COPILOT),
     ],
     AgentCli.OPENCODE: [
         partial(_write_rendered_agents, cli=AgentCli.OPENCODE),
@@ -195,9 +196,10 @@ _INSTALL_PLAN: dict[AgentCli, list[_InstallWriter]] = {
 # ``re_render_for_agent_clis`` for scoped refreshes (e.g. after the
 # set-models wizard edits ``overrides.json``) where touching the install
 # manifest would clobber other CLIs. CLIs with no native loop-agent
-# concept (GENERIC, COPILOT) intentionally get an empty list.
+# concept (GENERIC) intentionally get an empty list.
 _RENDER_PLAN: dict[AgentCli, list[_InstallWriter]] = {
     AgentCli.CLAUDE: [partial(_write_rendered_agents, cli=AgentCli.CLAUDE)],
+    AgentCli.COPILOT: [partial(_write_rendered_agents, cli=AgentCli.COPILOT)],
     AgentCli.OPENCODE: [partial(_write_rendered_agents, cli=AgentCli.OPENCODE)],
 }
 
@@ -247,7 +249,7 @@ def re_render_for_agent_clis(agent_clis: list[AgentCli], *, home: Path | None = 
       install-time artifacts that do not depend on override state and are
       intentionally left alone. Re-running them would re-copy the static
       template tree and add nothing.
-    - CLIs without native loop-agent support (GENERIC, COPILOT) are no-ops
+    - CLIs without native loop-agent support (GENERIC) are no-ops
       — they have an empty entry in ``_RENDER_PLAN``.
     - The install manifest is **never read or written**. The re-render path
       stays orthogonal to install bookkeeping; if a manifest exists, it is

@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """Unit tests for the agent-render seam — ``render_agents``.
 
 These exercise the single public agent-render entry directly (not through
@@ -26,9 +27,11 @@ def _parse_frontmatter(content: str) -> dict:
 
 
 def _find_pair(pairs: list[tuple[str, str]], name: str) -> tuple[str, str] | None:
-    """Find a (path, content) pair whose path ends with ``<name>.md`` or ``SKILL.md``."""
+    """Find a (path, content) pair whose path ends with ``<name>.md``, ``<name>.agent.md``, or ``SKILL.md``."""
     for pair in pairs:
         if pair[0].endswith(f"/{name}.md") or pair[0].endswith(f"/{name}/SKILL.md"):
+            return pair
+        if pair[0].endswith(f"/{name}.agent.md"):
             return pair
     return None
 
@@ -860,3 +863,132 @@ def test_render_agents_mode_override_routes_through_dispatch(tmp_path: Path, mon
     skill_paths = [path for path, _ in pairs if path.endswith("/SKILL.md")]
     assert skill_paths, f"expected a SKILL.md dispatch, got {[p for p, _ in pairs]}"
     assert skill_paths[0].endswith("/loop-orchestrator/SKILL.md")
+
+
+# ---------------------------------------------------------------------------
+# Copilot renderer — name+description only, .agent.md filenames,
+# no model required, no skill/primary distinction
+# ---------------------------------------------------------------------------
+
+
+def test_render_agents_copilot_returns_four_agent_files() -> None:
+    """Copilot emits all four loop agents under .copilot/agents/ with .agent.md extension."""
+    pairs = render_agents(AgentCli.COPILOT)
+
+    paths = [path for path, _ in pairs]
+    assert paths == [
+        ".copilot/agents/explorer.agent.md",
+        ".copilot/agents/implementor.agent.md",
+        ".copilot/agents/loop-orchestrator.agent.md",
+        ".copilot/agents/validator.agent.md",
+    ]
+    for _, content in pairs:
+        assert content.startswith("---\n")
+
+
+def test_copilot_frontmatter_has_name_and_description_only() -> None:
+    """Every Copilot agent frontmatter contains exactly ``name`` and ``description``."""
+    pairs = render_agents(AgentCli.COPILOT)
+
+    for name in ("explorer", "implementor", "validator", "loop-orchestrator"):
+        pair = _find_pair(pairs, name)
+        assert pair is not None, f"{name} not found in Copilot output"
+        fm = _parse_frontmatter(pair[1])
+        assert fm.get("name") == name, f"{name}: expected name={name!r}, got {fm.get('name')!r}"
+        assert fm.get("description", "").startswith(get_agent_meta(name)["description"]), (
+            f"{name}: description mismatch"
+        )
+        # MUST NOT contain model, tools, user-invocable, disable-model-invocation, mode, permission, color
+        for forbidden in (
+            "model",
+            "tools",
+            "user-invocable",
+            "disable-model-invocation",
+            "mode",
+            "permission",
+            "color",
+        ):
+            assert forbidden not in fm, f"{name}: forbidden key {forbidden!r} present, got {fm.get(forbidden)!r}"
+
+
+def test_copilot_loop_orchestrator_is_agent_not_skill() -> None:
+    """Copilot has no skill/primary distinction — all agents render in same shape."""
+    pairs = render_agents(AgentCli.COPILOT)
+
+    pair = _find_pair(pairs, "loop-orchestrator")
+    assert pair is not None
+    assert pair[0] == ".copilot/agents/loop-orchestrator.agent.md"
+    fm = _parse_frontmatter(pair[1])
+    assert "name" in fm
+    assert "description" in fm
+    assert "model" not in fm
+
+
+def test_copilot_rendered_body_matches_template_verbatim() -> None:
+    """Copilot agent body equals the shared template body unchanged."""
+    from importlib.resources import files
+
+    pairs = render_agents(AgentCli.COPILOT)
+    templates_dir = files("ai_harness.resources") / "loop-agent"
+
+    for name in ("explorer", "implementor", "validator", "loop-orchestrator"):
+        pair = _find_pair(pairs, name)
+        assert pair is not None, f"{name} not found"
+
+        template_body = (templates_dir / f"{name}.md").read_text(encoding="utf-8")
+        rendered_body = pair[1].split("---", 2)[2].removeprefix("\n")
+
+        assert rendered_body == template_body, f"{name}: body does not match template verbatim"
+
+
+def test_render_agents_copilot_unknown_cli_returns_empty() -> None:
+    """GENERIC is still treated as no native agent support — no copilot leak."""
+    assert render_agents(AgentCli.GENERIC) == []
+
+
+def test_render_agents_copilot_byte_identical_when_no_overrides() -> None:
+    """render_agents for Copilot with overrides=None produces identical output to default."""
+    baseline = render_agents(AgentCli.COPILOT)
+    no_arg = render_agents(AgentCli.COPILOT, overrides=None)
+
+    assert baseline == no_arg
+
+
+def test_render_agents_copilot_honours_explicit_names() -> None:
+    """An explicit names list renders just that subset for Copilot."""
+    pairs = render_agents(AgentCli.COPILOT, ["validator", "explorer"])
+
+    assert [path for path, _ in pairs] == [
+        ".copilot/agents/validator.agent.md",
+        ".copilot/agents/explorer.agent.md",
+    ]
+
+
+def test_copilot_no_model_validation_required() -> None:
+    """Copilot renderer does NOT require a copilot model entry — missing model does not raise."""
+    bad_meta = {"description": "test", "mode": "subagent"}  # no model at all
+    with patch(
+        "ai_harness.modules.harness.renderers.get_agent_meta",
+        return_value=bad_meta,
+    ):
+        pairs = render_agents(AgentCli.COPILOT, ["explorer"])
+        assert len(pairs) == 1
+        assert pairs[0][1].startswith("---\n")
+
+
+def test_render_agents_copilot_with_overrides_preserves_name_and_description() -> None:
+    """Overrides on other fields must not leak into Copilot frontmatter."""
+    overrides = {
+        "implementor": {
+            "model": {"opencode": "openai/gpt-5.4"},
+            "effort": {"opencode": "high"},
+        }
+    }
+    pairs = render_agents(AgentCli.COPILOT, ["implementor"], overrides=overrides)
+
+    assert len(pairs) == 1
+    fm = _parse_frontmatter(pairs[0][1])
+    assert fm.get("name") == "implementor"
+    assert "description" in fm
+    for forbidden in ("model", "effort", "reasoningEffort", "tools", "mode", "permission"):
+        assert forbidden not in fm, f"forbidden key {forbidden!r} leaked into Copilot frontmatter"

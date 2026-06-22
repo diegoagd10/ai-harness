@@ -1817,12 +1817,23 @@ def test_cli_set_models_opencode_non_tty_errors(isolated_home: Path) -> None:
 
 
 def test_cli_set_models_copilot_not_supported(isolated_home: Path) -> None:
-    """Copilot and generic are not in the wizard's vocabulary at all."""
+    """Copilot is rejected with a message that names the Copilot-native model mechanism.
+
+    Acceptance criterion: ``set-models -o copilot`` must still reject, but the
+    rejection message must point the user at the Copilot-native way to set a
+    model (``/model`` or ``~/.copilot/settings.json``) — no wizard, catalog,
+    or per-agent override-store support is added for copilot.
+    """
     result = runner.invoke(app, ["set-models", "-o", "copilot"])
 
     assert result.exit_code != 0
     combined = f"{result.stdout} {result.stderr}"
-    assert "copilot" in combined.lower()
+    lowered = combined.lower()
+    assert "copilot" in lowered
+    # The message must reference the Copilot-native mechanism.
+    assert "/model" in lowered or "settings.json" in lowered, (
+        f"expected /model or settings.json in copilot rejection, got: {combined!r}"
+    )
 
 
 def test_cli_set_models_generic_not_supported(isolated_home: Path) -> None:
