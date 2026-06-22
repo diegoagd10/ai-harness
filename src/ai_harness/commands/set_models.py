@@ -65,7 +65,8 @@ def set_models(
         raise typer.BadParameter("set-models does not support 'generic' — the generic agent has no model to configure.")
     if cli == AgentCli.COPILOT:
         raise typer.BadParameter(
-            "set-models does not support 'copilot' — Copilot has no per-agent model configuration."
+            "set-models does not support 'copilot' — use /model in the Copilot CLI "
+            "or edit ~/.copilot/settings.json to set the model."
         )
 
     # Both Claude and OpenCode now have a full wizard. The wizard itself

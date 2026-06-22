@@ -216,6 +216,54 @@ configuration directories of every supported Agent CLI:
 Generic is always installed. It provides the persona for any Agent CLI
 that reads from the standard `~/.agents/` directory.
 
+## Copilot loop agents
+
+`ai-harness install` also renders the four loop agents into
+`~/.copilot/agents/` as Copilot custom agent files
+(`loop-orchestrator.agent.md`, `explorer.agent.md`,
+`implementor.agent.md`, `validator.agent.md`). Each file carries a YAML
+frontmatter with `name` and `description` — the fields Copilot CLI
+honors for custom agents.
+
+### Driving the Loop
+
+Start the Loop from within Copilot CLI:
+
+```
+/agent loop-orchestrator
+```
+
+The orchestrator picks up ready sub-issues from the project tracker and
+coordinates the three subagents — explorer (investigate), implementor
+(apply), validator (review) — until the change is clean and committed.
+
+### Subagent visibility
+
+All three subagents are visible and directly invocable:
+
+| Agent | Purpose | Invocation |
+|-------|---------|------------|
+| **explorer** | Read-only codebase investigation plan | `/agent explorer` |
+| **implementor** | Applies the implementor workflow to one change | `/agent implementor` |
+| **validator** | Read-only diff audit after implementation | `/agent validator` |
+
+The subagents are intentionally visible so you can invoke one directly
+when you need a targeted investigation or review without running the
+full Loop.
+
+### Model selection
+
+Copilot CLI's model is a single global setting — not per-agent. Use the
+Copilot-native mechanism:
+
+- **Interactive**: `/model` in the Copilot CLI session
+- **Persistent**: edit `model` in `~/.copilot/settings.json`
+
+`ai-harness set-models` does **not** support `-o copilot`. The agent
+files carry no `model` field (Copilot CLI ignores it — see
+[ADR 0008](docs/adr/0008-copilot-loop-agents-native-model.md)), so the
+right place to set the model is the Copilot CLI itself.
+
 ## What's in here
 
 The project is a uv-managed Python package. The main regions of the tree:
