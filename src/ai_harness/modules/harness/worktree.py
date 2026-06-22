@@ -3,6 +3,11 @@
 Creates a detached worktree at ``.ai-harness/worktrees/<Date.now()>``
 from ``main``'s HEAD and lazily writes a nested ``.ai-harness/.gitignore``
 so throwaway worktrees are never committed.
+
+Public surface
+--------------
+WorktreeResult  Outcome dataclass with *path*, *gitignore_written*, and *warning*.
+create_worktree Create a detached git worktree at ``.ai-harness/worktrees/<Date.now()>``.
 """
 
 from __future__ import annotations
@@ -11,6 +16,8 @@ import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
+
+__all__ = ["WorktreeResult", "create_worktree"]
 
 
 @dataclass(frozen=True, slots=True)
