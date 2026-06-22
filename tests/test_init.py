@@ -294,8 +294,8 @@ def test_init_repo_includes_label_result(tmp_path: Path, monkeypatch: pytest.Mon
 
     result = init_repo(tmp_path)
 
-    assert result.created_labels == ["ready-for-agent", "loop"]
-    assert result.label_warnings == []
+    assert result.created_labels == ("ready-for-agent", "loop")
+    assert result.label_warnings == ()
 
 
 def test_init_repo_label_skips_dont_block_scaffolding(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -306,8 +306,8 @@ def test_init_repo_label_skips_dont_block_scaffolding(tmp_path: Path, monkeypatc
 
     result = init_repo(tmp_path)
 
-    assert result.created_labels == []
-    assert result.label_warnings == []
+    assert result.created_labels == ()
+    assert result.label_warnings == ()
     assert result.wrote_standards is True  # Scaffolding proceeds normally
 
 
@@ -324,7 +324,7 @@ def test_init_repo_label_warnings_dont_block_scaffolding(tmp_path: Path, monkeyp
 
     result = init_repo(tmp_path)
 
-    assert result.created_labels == []
+    assert result.created_labels == ()
     assert len(result.label_warnings) == 1
     assert "gh CLI not found" in result.label_warnings[0]
     assert result.wrote_standards is True  # Scaffolding proceeds normally

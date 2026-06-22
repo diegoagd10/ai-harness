@@ -7,7 +7,7 @@ permissions) lives in ``_AGENT_META`` below.
 
 Public surface
 --------------
-render_agents           Render loop agents for a CLI as home-relative (path, content) pairs.
+render_agents           Render loop agents for a CLI as home-relative ``RenderedFile`` records (filename + content).
 get_agent_meta          Return the metadata dict for a named agent.
 
 All other render mechanics (per-CLI render functions, discovery, mode dispatch,
@@ -18,9 +18,11 @@ from __future__ import annotations
 
 import copy
 import json
+from dataclasses import dataclass
 from importlib.resources import files
 from importlib.resources.abc import Traversable
 from pathlib import Path
+from typing import NamedTuple
 
 import yaml
 
@@ -29,11 +31,75 @@ from ai_harness.modules.harness.models import AgentCli
 _LOOP_AGENT_PACKAGE = "ai_harness.resources"
 _LOOP_AGENT_DIR = "loop-agent"
 
+
+class RenderedFile(NamedTuple):
+    """One rendered agent file: a home-relative path and the file's full content.
+
+    Every renderer in this module returns a ``RenderedFile`` so callers can
+    read ``.filename`` and ``.content`` without remembering positional order.
+    The single public entry :func:`render_agents` yields a list of these.
+    """
+
+    filename: str
+    content: str
+
+
 # ---------------------------------------------------------------------------
 # Agent metadata — single source of truth for description, mode, per-CLI
 # models, and permission blocks. Resource templates carry only the prompt
 # body; this constant is what the render functions read.
 # ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class AgentCaps:
+    """What an agent may do, in CLI-neutral terms. Reading files is always
+    allowed; these gate the rest. Each renderer translates *from* this — no
+    single CLI's permission schema is the canonical form.
+
+    ``write`` collapses OpenCode's edit+write into one knob: in practice an
+    agent is either allowed to touch the filesystem or not. Split into two
+    fields only if an agent ever needs to edit existing files but not create
+    new ones.
+    """
+
+    write: bool = True  # may modify the filesystem (edit + create)
+    bash: bool = True  # may run shell commands
+    spawn: tuple[str, ...] | None = None  # None = cannot spawn; tuple = subagent allowlist
+
+
+def _opencode_permission(caps: AgentCaps) -> dict:
+    """Translate caps into OpenCode's ``permission`` block.
+
+    Only deviations from OpenCode's allow-by-default are emitted, so a
+    full-capability agent yields ``{}`` (no permission block).
+    """
+    perm: dict = {}
+    if not caps.write:
+        perm["edit"] = "deny"
+        perm["write"] = "deny"
+    if not caps.bash:
+        perm["bash"] = "deny"
+    if caps.spawn is not None:
+        perm["task"] = {"*": "deny", **{name: "allow" for name in caps.spawn}}
+    return perm
+
+
+# ponytail: Claude's ``tools`` is a closed allow-list — set it and the agent
+# gets ONLY these, nothing else. So this translation is necessarily coarse:
+# it expresses "restricted minimal set" vs "everything" (omit tools), not
+# fine-grained subtractions from Claude's full toolset. ``spawn`` is not
+# reflected here — every spawn-capable agent is mode=primary and renders via
+# _render_claude_skill, never the agent renderer.
+def _claude_tools(caps: AgentCaps) -> list[str]:
+    """Translate caps into a Claude ``tools`` allow-list."""
+    tools = ["Read", "Grep", "Glob"]
+    if caps.write:
+        tools += ["Edit", "Write"]
+    if caps.bash:
+        tools.append("Bash")
+    return tools
+
 
 _AGENT_META: dict[str, dict] = {
     "explorer": {
@@ -46,7 +112,7 @@ _AGENT_META: dict[str, dict] = {
             "opencode": "opencode-go/kimi-k2.7-code",
             "claude": "sonnet",
         },
-        "permission": {"edit": "deny", "write": "deny"},
+        "caps": AgentCaps(write=False),
     },
     "implementor": {
         "description": (
@@ -73,7 +139,7 @@ _AGENT_META: dict[str, dict] = {
             "opencode": "openai/gpt-5.4-mini",
             "claude": "sonnet",
         },
-        "permission": {"edit": "deny", "write": "deny"},
+        "caps": AgentCaps(write=False),
     },
     "loop-orchestrator": {
         "description": (
@@ -89,17 +155,7 @@ _AGENT_META: dict[str, dict] = {
             "opencode": "openai/gpt-5.5",
             "claude": "sonnet",
         },
-        "permission": {
-            "task": {
-                "*": "deny",
-                "explorer": "allow",
-                "implementor": "allow",
-                "validator": "allow",
-            },
-            "edit": "deny",
-            "write": "deny",
-            "bash": "allow",
-        },
+        "caps": AgentCaps(write=False, spawn=("explorer", "implementor", "validator")),
     },
 }
 
@@ -141,29 +197,10 @@ def write_override_store(home: Path, payload: dict) -> None:
     Malformed existing JSON is raised as-is (matching the loader's contract).
     """
     existing = _load_override_store(home)
-    merged = _deep_merge_override_store(existing, payload)
+    merged = _deep_merge(existing, payload)
     path = home / _OVERRIDES_REL
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(merged, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-
-def _deep_merge_override_store(base: dict, override: dict) -> dict:
-    """Recursively merge *override* into *base*, returning a fresh dict.
-
-    Same shape as ``_deep_merge`` (used at render time) but operates on
-    a fresh copy of *base* rather than the in-place render path so the
-    wizard can keep its source-of-truth pristine between calls.
-    """
-    import copy
-
-    result = copy.deepcopy(base)
-    for key, value in override.items():
-        base_value = result.get(key)
-        if isinstance(base_value, dict) and isinstance(value, dict):
-            result[key] = _deep_merge_override_store(base_value, value)
-        else:
-            result[key] = copy.deepcopy(value)
-    return result
 
 
 def _discover_loop_agents() -> list[str]:
@@ -263,11 +300,11 @@ def _yaml_dump_frontmatter(data: dict[str, object]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _render_opencode_agent(name: str, overrides: dict | None = None) -> tuple[str, str]:
+def _render_opencode_agent(name: str, overrides: dict | None = None) -> RenderedFile:
     """Render a loop agent template into an OpenCode agent file.
 
-    Returns (filename, content) where filename is ``<name>.md`` and content is
-    the full rendered frontmatter + body.
+    Returns a :class:`RenderedFile` whose ``filename`` is ``<name>.md`` and
+    whose ``content`` is the full rendered frontmatter + body.
 
     Raises ValueError if the agent's metadata lacks ``model.opencode``.
     """
@@ -294,9 +331,12 @@ def _render_opencode_agent(name: str, overrides: dict | None = None) -> tuple[st
         if opencode_effort is not None:
             opencode_frontmatter["reasoningEffort"] = opencode_effort
 
-    # Pass through the permission block if present
-    if "permission" in meta:
-        opencode_frontmatter["permission"] = meta["permission"]
+    # Translate caps into OpenCode's permission block (omitted when empty).
+    caps = meta.get("caps")
+    if isinstance(caps, AgentCaps):
+        permission = _opencode_permission(caps)
+        if permission:
+            opencode_frontmatter["permission"] = permission
 
     # Pass through color if present — OpenCode accepts a hex value or one of
     # primary, secondary, accent, success, warning, error, info.
@@ -305,14 +345,14 @@ def _render_opencode_agent(name: str, overrides: dict | None = None) -> tuple[st
 
     yaml_text = _yaml_dump_frontmatter(opencode_frontmatter)
     rendered = f"---\n{yaml_text}\n---\n{body}"
-    return f"{name}.md", rendered
+    return RenderedFile(f"{name}.md", rendered)
 
 
-def _render_claude_agent(name: str, overrides: dict | None = None) -> tuple[str, str]:
+def _render_claude_agent(name: str, overrides: dict | None = None) -> RenderedFile:
     """Render a loop agent template into a Claude Code agent file.
 
-    Returns (filename, content) where filename is ``<name>.md`` and content is
-    the full rendered frontmatter + body.
+    Returns a :class:`RenderedFile` whose ``filename`` is ``<name>.md`` and
+    whose ``content`` is the full rendered frontmatter + body.
 
     Raises ValueError if the agent lacks ``model.claude`` or has ``mode: primary``.
     """
@@ -343,24 +383,22 @@ def _render_claude_agent(name: str, overrides: dict | None = None) -> tuple[str,
         if claude_effort is not None:
             claude_frontmatter["effort"] = claude_effort
 
-    # Translate OpenCode permission block to Claude-native tools allow-list
-    permission = meta.get("permission")
-    if isinstance(permission, dict) and permission.get("edit") == "deny" and permission.get("write") == "deny":
-        tools = ["Read", "Grep", "Glob", "Bash"]
-        if permission.get("bash") == "deny":
-            tools.remove("Bash")
-        claude_frontmatter["tools"] = ", ".join(tools)
+    # Emit a Claude tools allow-list only when caps restrict the agent; a
+    # full-capability agent omits `tools` entirely (which means "all tools").
+    caps = meta.get("caps")
+    if isinstance(caps, AgentCaps) and caps != AgentCaps():
+        claude_frontmatter["tools"] = ", ".join(_claude_tools(caps))
 
     yaml_text = _yaml_dump_frontmatter(claude_frontmatter)
     rendered = f"---\n{yaml_text}\n---\n{body}"
-    return f"{name}.md", rendered
+    return RenderedFile(f"{name}.md", rendered)
 
 
-def _render_claude_skill(name: str, overrides: dict | None = None) -> tuple[str, str]:
+def _render_claude_skill(name: str, overrides: dict | None = None) -> RenderedFile:
     """Render the primary loop agent template into a Claude Code skill file.
 
-    Returns (filename, content) where filename is ``SKILL.md`` and content is
-    the full rendered frontmatter + body.
+    Returns a :class:`RenderedFile` whose ``filename`` is ``SKILL.md`` and
+    whose ``content`` is the full rendered frontmatter + body.
 
     The skill carries only ``description`` in frontmatter — no model, effort,
     or tools. Overrides are intentionally ignored: skills run on the session
@@ -397,23 +435,20 @@ def _render_claude_skill(name: str, overrides: dict | None = None) -> tuple[str,
     # frontmatter field to restrict subagent spawning, so we convert
     # permission.task into a conversational constraint.
     spawn_note = ""
-    permission = meta.get("permission")
-    if isinstance(permission, dict) and "task" in permission:
-        task_perms = permission["task"]
-        allowed = [agent for agent, access in task_perms.items() if access == "allow" and agent != "*"]
-        if allowed:
-            names = ", ".join(f"`{a}`" for a in allowed)
-            spawn_note = (
-                "\n\n## Subagent spawn allowlist\n\n"
-                "Claude skills cannot enforce spawn restrictions in frontmatter. "
-                "The following prose constraint replaces the OpenCode "
-                f"``permission.task`` allowlist:\n\n"
-                f"Only spawn these subagents: {names}.\n"
-            )
+    caps = meta.get("caps")
+    if isinstance(caps, AgentCaps) and caps.spawn:
+        names = ", ".join(f"`{a}`" for a in caps.spawn)
+        spawn_note = (
+            "\n\n## Subagent spawn allowlist\n\n"
+            "Claude skills cannot enforce spawn restrictions in frontmatter. "
+            "The following prose constraint replaces the OpenCode "
+            f"``permission.task`` allowlist:\n\n"
+            f"Only spawn these subagents: {names}.\n"
+        )
 
     yaml_text = _yaml_dump_frontmatter(claude_frontmatter)
     rendered = f"---\n{yaml_text}\n---\n{body}{spawn_note}"
-    return "SKILL.md", rendered
+    return RenderedFile("SKILL.md", rendered)
 
 
 # ---------------------------------------------------------------------------
@@ -433,29 +468,29 @@ def _render_claude(
     overrides: dict | None = None,
     *,
     home: Path | None = None,
-) -> tuple[str, str]:
-    """Render one Claude loop agent as a home-relative (path, content) pair.
+) -> RenderedFile:
+    """Render one Claude loop agent as a home-relative ``RenderedFile`` record.
 
     Primary agents become the orchestrator skill; all others become subagents.
     """
     if _get_agent_mode(name, overrides=overrides, home=home) == "primary":
-        filename, content = _render_claude_skill(name, overrides=overrides)
-        return f"{_CLAUDE_SKILL_DIR}/{filename}", content
-    filename, content = _render_claude_agent(name, overrides=overrides)
-    return f"{_CLAUDE_AGENTS_DIR}/{filename}", content
+        rendered = _render_claude_skill(name, overrides=overrides)
+        return RenderedFile(f"{_CLAUDE_SKILL_DIR}/{rendered.filename}", rendered.content)
+    rendered = _render_claude_agent(name, overrides=overrides)
+    return RenderedFile(f"{_CLAUDE_AGENTS_DIR}/{rendered.filename}", rendered.content)
 
 
-def _render_opencode(name: str, overrides: dict | None = None) -> tuple[str, str]:
-    """Render one OpenCode loop agent as a home-relative (path, content) pair."""
-    filename, content = _render_opencode_agent(name, overrides=overrides)
-    return f"{_OPENCODE_AGENT_DIR}/{filename}", content
+def _render_opencode(name: str, overrides: dict | None = None) -> RenderedFile:
+    """Render one OpenCode loop agent as a home-relative ``RenderedFile`` record."""
+    rendered = _render_opencode_agent(name, overrides=overrides)
+    return RenderedFile(f"{_OPENCODE_AGENT_DIR}/{rendered.filename}", rendered.content)
 
 
-def _render_copilot_agent(name: str, overrides: dict | None = None) -> tuple[str, str]:
+def _render_copilot_agent(name: str, overrides: dict | None = None) -> RenderedFile:
     """Render a loop agent template into a Copilot agent file.
 
-    Returns (filename, content) where filename is ``<name>.agent.md`` and content
-    is the full rendered frontmatter + body.
+    Returns a :class:`RenderedFile` whose ``filename`` is ``<name>.agent.md``
+    and whose ``content`` is the full rendered frontmatter + body.
 
     Frontmatter carries only ``name`` and ``description`` — no ``model``, ``tools``,
     ``user-invocable``, or ``disable-model-invocation``. The Copilot CLI ignores
@@ -474,7 +509,7 @@ def _render_copilot_agent(name: str, overrides: dict | None = None) -> tuple[str
 
     yaml_text = _yaml_dump_frontmatter(copilot_frontmatter)
     rendered = f"---\n{yaml_text}\n---\n{body}"
-    return f"{name}.agent.md", rendered
+    return RenderedFile(f"{name}.agent.md", rendered)
 
 
 def _render_copilot(
@@ -482,10 +517,10 @@ def _render_copilot(
     overrides: dict | None = None,
     *,
     home: Path | None = None,
-) -> tuple[str, str]:
-    """Render one Copilot loop agent as a home-relative (path, content) pair."""
-    filename, content = _render_copilot_agent(name, overrides=overrides)
-    return f"{_COPILOT_AGENT_DIR}/{filename}", content
+) -> RenderedFile:
+    """Render one Copilot loop agent as a home-relative ``RenderedFile`` record."""
+    rendered = _render_copilot_agent(name, overrides=overrides)
+    return RenderedFile(f"{_COPILOT_AGENT_DIR}/{rendered.filename}", rendered.content)
 
 
 def render_agents(
@@ -494,8 +529,8 @@ def render_agents(
     overrides: dict | None = None,
     *,
     home: Path | None = None,
-) -> list[tuple[str, str]]:
-    """Render the loop agents for *cli* as home-relative (path, content) pairs.
+) -> list[RenderedFile]:
+    """Render the loop agents for *cli* as home-relative ``RenderedFile`` records.
 
     The sole public agent-render entry. Owns skill-vs-agent mode dispatch,
     destination directory layout, and filename. Returns POSIX home-relative

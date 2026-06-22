@@ -29,10 +29,26 @@ from collections.abc import Callable
 from functools import partial
 from importlib.resources import files
 from pathlib import Path
+from typing import NamedTuple
 
 from ai_harness.modules.harness.labels import ensure_labels
 from ai_harness.modules.harness.models import AgentCli, InitResult, InstallManifest
 from ai_harness.modules.harness.renderers import render_agents
+
+
+class WriteLabelsResult(NamedTuple):
+    """Outcome of ``_write_labels_policy``: whether the block was appended and whether CLAUDE.md existed.
+
+    ``wrote`` is ``True`` only when the labels-policy block was appended;
+    ``claude_md_missing`` distinguishes the two skip cases (``False`` →
+    markers already present, ``True`` → ``CLAUDE.md`` absent). Naming the
+    pair avoids the positional ``(wrote, claude_md_missing)`` tuple where
+    callers could swap the booleans.
+    """
+
+    wrote: bool
+    claude_md_missing: bool
+
 
 # --- the secret knowledge this module hides -------------------------------
 #
@@ -156,10 +172,10 @@ def _write_rendered_agents(home: Path, *, cli: AgentCli) -> list[Path]:
     and a malformed file fails loudly — no pre-loading duplication here.
     """
     written: list[Path] = []
-    for rel, content in render_agents(cli, home=home):
-        dest = home / rel
+    for rendered in render_agents(cli, home=home):
+        dest = home / rendered.filename
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(content, encoding="utf-8")
+        dest.write_text(rendered.content, encoding="utf-8")
         written.append(dest)
     return written
 
@@ -356,15 +372,17 @@ def init_repo(
     root = repo_root if repo_root is not None else Path.cwd()
 
     wrote_standards = _write_coding_standards(root)
-    wrote_labels_policy, claude_md_missing = _write_labels_policy(root)
+    labels_result = _write_labels_policy(root)
+    wrote_labels_policy = labels_result.wrote
+    claude_md_missing = labels_result.claude_md_missing
     label_result = ensure_labels(root)
 
     return InitResult(
         wrote_standards=wrote_standards,
         wrote_labels_policy=wrote_labels_policy,
         claude_md_missing=claude_md_missing,
-        created_labels=label_result.created,
-        label_warnings=label_result.warnings,
+        created_labels=tuple(label_result.created),
+        label_warnings=tuple(label_result.warnings),
     )
 
 
@@ -377,24 +395,24 @@ def _write_coding_standards(root: Path) -> bool:
     return True
 
 
-def _write_labels_policy(root: Path) -> tuple[bool, bool]:
+def _write_labels_policy(root: Path) -> WriteLabelsResult:
     """Append labels-policy block to ``CLAUDE.md``.
 
-    Returns ``(wrote, claude_md_missing)``:
-    - ``(True, False)`` when the block was appended.
-    - ``(False, False)`` when markers are already present (idempotent skip).
-    - ``(False, True)`` when ``CLAUDE.md`` does not exist (silently skipped).
+    Returns a :class:`WriteLabelsResult`:
+    - ``WriteLabelsResult(True, False)`` when the block was appended.
+    - ``WriteLabelsResult(False, False)`` when markers are already present (idempotent skip).
+    - ``WriteLabelsResult(False, True)`` when ``CLAUDE.md`` does not exist (silently skipped).
     """
     path = root / "CLAUDE.md"
     if not path.exists():
-        return False, True
+        return WriteLabelsResult(False, True)
 
     content = path.read_text(encoding="utf-8")
     if _AI_HARNESS_START in content or _AI_HARNESS_END in content:
-        return False, False
+        return WriteLabelsResult(False, False)
 
     if not content.endswith("\n"):
         content += "\n"
     content += "\n" + _LABELS_POLICY_BLOCK + "\n"
     path.write_text(content, encoding="utf-8")
-    return True, False
+    return WriteLabelsResult(True, False)

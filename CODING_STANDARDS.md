@@ -15,6 +15,12 @@ This file is project-specific by design. To reuse the `.opencode/agent/` loop in
   - Function docstrings REQUIRED on every public function. Imperative-tense one-liner; expand only when behaviour is non-obvious.
 - **Naming**: `snake_case` for functions/variables, `PascalCase` for classes, `SCREAMING_SNAKE_CASE` for module-level constants. Private helpers prefixed with `_`.
 - **Strings**: double quotes. f-strings for interpolation. Prefer `".".join(...)` over `+` concatenation.
+- **Method ordering inside a class**:
+  1. `__init__` first (PEP 8).
+  2. All other dunder methods next (`__repr__`, `__eq__`, etc.).
+  3. Public methods (no leading underscore), grouped by responsibility.
+  4. Private methods (`_`-prefixed) last.
+  - A private helper that is *only* called by the immediately preceding public method belongs next to that method, not at the bottom. Rule of thumb: if `bar` is called exclusively by `foo`, keep `bar` directly after `foo`.
 
 ## Testing
 
@@ -31,6 +37,18 @@ This file is project-specific by design. To reuse the `.opencode/agent/` loop in
 - **Single responsibility per module.** Prefer composition over inheritance.
 - **Idempotent install / uninstall.** Re-running `install` is a no-op (or only updates drifted files); `uninstall` removes exactly what `install` created.
 - **No new top-level packages** without an ADR in `docs/adr/`. Read `docs/adr/` before changing module boundaries.
+- **Tuples → named types when they escape a function**. A tuple literal or `tuple[...]` annotation is acceptable when:
+  - The shape is homogeneous (`tuple[str, ...]`, `tuple[int, int]` coords used arithmetically), OR
+  - It is consumed by immediate unpacking within the same function and never crosses a function boundary.
+  Replace with a `NamedTuple` (preferred for pure value records) or `frozen dataclass` (when methods/defaults are needed) when **any** of the following holds:
+  - The tuple is returned (RETURN) or accepted as a parameter (PARAM) across module boundaries.
+  - The shape has ≥ 2 heterogeneous fields (different types or different semantic roles).
+  - The same shape repeats in ≥ 3 sites — DRY the record into one named type.
+  Do NOT replace:
+  - `dict.items()` unpacking (`for k, v in d.items()`) — that is iteration, not a record.
+  - Tuple unpacking in `for` loops / multiple assignment.
+  - Fixed-vocabulary module-level constants of homogeneous tuples (`CLAUDE_MODELS = ("haiku", ...)`).
+  - One-off 2-tuples whose meaning is documented in the function's docstring and used in a single site (e.g. `(children, index)`).
 
 ## Commits
 

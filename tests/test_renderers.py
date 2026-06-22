@@ -16,7 +16,13 @@ import pytest
 import yaml
 
 from ai_harness.modules.harness.models import AgentCli
-from ai_harness.modules.harness.renderers import get_agent_meta, render_agents
+from ai_harness.modules.harness.renderers import (
+    AgentCaps,
+    _claude_tools,
+    _opencode_permission,
+    get_agent_meta,
+    render_agents,
+)
 
 
 def _parse_frontmatter(content: str) -> dict:
@@ -992,3 +998,29 @@ def test_render_agents_copilot_with_overrides_preserves_name_and_description() -
     assert "description" in fm
     for forbidden in ("model", "effort", "reasoningEffort", "tools", "mode", "permission"):
         assert forbidden not in fm, f"forbidden key {forbidden!r} leaked into Copilot frontmatter"
+
+
+def test_caps_translation_is_per_capability() -> None:
+    """Caps translate independently per capability on both CLIs.
+
+    Guards the old bug: a restriction that fired only when edit AND write were
+    both denied, silently leaving other shapes unrestricted on Claude.
+    """
+    # Full capability → no OpenCode permission block, no Claude tools list.
+    assert _opencode_permission(AgentCaps()) == {}
+    assert AgentCaps() == AgentCaps()  # the "omit tools" sentinel in the renderer
+
+    # write=False alone restricts on BOTH CLIs (the bug was: not on Claude).
+    assert _opencode_permission(AgentCaps(write=False)) == {"edit": "deny", "write": "deny"}
+    assert _claude_tools(AgentCaps(write=False)) == ["Read", "Grep", "Glob", "Bash"]
+
+    # bash=False removes Bash on Claude and denies it on OpenCode, independently.
+    assert _claude_tools(AgentCaps(bash=False)) == ["Read", "Grep", "Glob", "Edit", "Write"]
+    assert _opencode_permission(AgentCaps(bash=False)) == {"bash": "deny"}
+
+    # spawn → OpenCode task allowlist; absent on a non-spawning agent.
+    assert _opencode_permission(AgentCaps(write=False, spawn=("explorer",))) == {
+        "edit": "deny",
+        "write": "deny",
+        "task": {"*": "deny", "explorer": "allow"},
+    }
