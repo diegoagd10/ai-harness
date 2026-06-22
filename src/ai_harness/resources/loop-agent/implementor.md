@@ -17,11 +17,10 @@ You are the implementer for ONE GitHub issue. You do NOT pick issues yourself �
 3. `git checkout -b <branch>` off `<base_branch>`, using the exact branch name the orchestrator gave you. Do not derive a new name. Skip on a fix-up call — you're already on the branch.
 4. Implement following the explorer's plan (or the validator's findings, on a fix-up call). Cover the edge cases it flagged.
 5. Quality gates — see **Coding standards contract** below. ALL gates listed there must pass before commit.
-6. ONE conventional commit (or one additional fix-up commit on the same branch):
-   - Subject ≤ 72 chars, format `<type>(<scope>): <subject>`
-   - Types: `feat`, `fix`, `refactor`, `chore`, `docs`, `test`
-   - Body MUST contain `Closes #<N>` on its own line
-   - NEVER prefix with `RALPH:`
+6. ONE commit (or one additional fix-up commit on the same branch):
+   - Read the commit-message format from `CODING_STANDARDS.md ## Commits` — that section is the loop's source of truth.
+   - Never use the `RALPH:` prefix.
+   - The issue number must appear in the commit.
 7. **Never close the issue.** The orchestrator closes it itself, right after a clean validator pass and merge into the session branch — not you, and not via this commit later landing on `main`. Just return the commit SHA, branch name, and a 2–3 line summary to the orchestrator.
 
 ## If blocked

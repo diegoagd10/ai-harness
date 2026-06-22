@@ -51,9 +51,10 @@ _AGENT_META: dict[str, dict] = {
     "implementor": {
         "description": (
             "Implements one GitHub issue on an assigned branch. TDD, quality gates, "
-            "ONE conventional commit with `Closes #N` in the body. Never closes the "
-            "issue itself — the orchestrator closes it right after a clean validator "
-            "pass. Reports BLOCKED if the issue cannot be resolved."
+            "ONE commit whose format follows CODING_STANDARDS.md ## Commits; the "
+            "issue number must appear in the commit. Never closes the issue itself "
+            "— the orchestrator closes it right after a clean validator pass. "
+            "Reports BLOCKED if the issue cannot be resolved."
         ),
         "mode": "subagent",
         "model": {

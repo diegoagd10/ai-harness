@@ -12,7 +12,7 @@ One `loop-run/<ts>` parent branch holds the whole session's work. Each issue lan
 - `LOOP_MAX_ITERATIONS` (default `20`) — hard cap on outer loop iterations (one per issue) for this session. Also the point at which the session's PR opens even if issues remain.
 - `LOOP_FIXUP_MAX_ITERATIONS` (default `5`) — hard cap on implementor↔validator fix-up rounds for a single issue, so a stuck validator can't loop forever.
 - `gh` CLI authenticated for this repo, with push access to `origin`.
-- Current branch on the host is `main`, working tree clean.
+- Current branch on the host is `main`, working tree clean — OR you are inside a detached worktree at `main`'s HEAD (created via `ai-harness worktree`).
 
 ## Engram state tracking
 
@@ -55,7 +55,7 @@ Always save AFTER a step completes, not during. Status reflects the LAST complet
 
 1. Recover or create the loop-run branch:
    - `mem_search` query `loop run active`. If found and `git rev-parse --verify <branch>` succeeds: `git checkout <branch>` — this is your `<loop_run_branch>` for the session.
-   - Otherwise: `git checkout main && git pull --ff-only` (if a remote is configured), then `git checkout -b loop-run/<Date.now()>` — this is `<loop_run_branch>`. Save it via `mem_save` (`topic_key: loop/run/active`).
+   - Otherwise: if a remote is configured, `git checkout -b loop-run/<Date.now()> origin/main` — otherwise `git checkout -b loop-run/<Date.now()> main`. This is `<loop_run_branch>`. Save it via `mem_save` (`topic_key: loop/run/active`). Hard rule: never simplify this to `git checkout main` — `main` may already be checked out in the host worktree, which `git checkout main` would fail on.
 2. Proceed to the per-iteration loop with `<loop_run_branch>` as the base for every sub-branch.
 
 ## Per-iteration loop
@@ -72,7 +72,7 @@ Always save AFTER a step completes, not during. Status reflects the LAST complet
 
 5. **Delegate to `explorer`.** Pass: issue number, title, body. Explorer returns a focused plan (affected files, plan, edge cases, test surface, risks). Do NOT skip.
 
-6. **Delegate to `implementor`.** Pass: issue number, title, body, the exact sub-branch string from step 3 (`loop/<issue-number>-<Date.now()>`), `base_branch=<loop_run_branch>`, explorer's report. Implementor checks out `<loop_run_branch>`, branches off it using that exact sub-branch string, follows TDD, makes ONE conventional commit with `Closes #<N>` in the body. **The implementor never closes the issue and never touches `main`.**
+6. **Delegate to `implementor`.** Pass: issue number, title, body, the exact sub-branch string from step 3 (`loop/<issue-number>-<Date.now()>`), `base_branch=<loop_run_branch>`, explorer's report. Implementor checks out `<loop_run_branch>`, branches off it using that exact sub-branch string, follows TDD, makes ONE commit whose format follows `CODING_STANDARDS.md ## Commits`; the issue number must appear in the commit. **The implementor never closes the issue and never touches `main`.**
    - If implementor reports `BLOCKED:`: `gh issue comment <N> --body "BLOCKED: <reason>"`, save Engram status `blocked`, jump back to step 1.
 
 7. **Save Engram status `reviewing` for the issue.**
@@ -124,7 +124,7 @@ Runs when the issue queue is drained (step 1 found nothing left) or `LOOP_MAX_IT
 - NEVER amend a commit already on a sub-branch or on `<loop_run_branch>`.
 - The implementor MUST stay on its assigned sub-branch — no further sub-branches, no rebases, no force-push.
 - You NEVER write code yourself. You only orchestrate, and the only git writes you perform are creating/checking out branches and the sub-branch → loop-run-branch `merge --ff-only`.
-- Conventional commits only. Never `RALPH:` prefix.
+- Commit format is owned by `CODING_STANDARDS.md ## Commits` — never assert a specific format in this prompt. Never `RALPH:` prefix.
 - A clean validator pass means EXACTLY `No findings.` — WARNING- or SUGGESTION-only output is NOT clean and still triggers a fix-up round.
 - If `gh issue list` errors or returns malformed JSON, stop and tell the user.
 - Sub-branch naming convention is `loop/<issue-number>-<Date.now()>`, branched off `<loop_run_branch>` — the orchestrator generates it once per issue and every subagent uses the same string verbatim.
