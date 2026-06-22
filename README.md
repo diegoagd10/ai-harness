@@ -110,6 +110,7 @@ Requires Python >= 3.12.
 git clone https://github.com/diegoagd10/ai-harness.git
 cd ai-harness
 uv tool install .              # puts ai-harness on PATH (~/.local/bin/ai-harness)
+# After upgrading an existing install: uv tool install --force .
 ai-harness install             # copies AGENTS.md + skills into ~/.agents/
 ```
 

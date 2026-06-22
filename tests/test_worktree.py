@@ -804,3 +804,84 @@ def test_cli_delete_keyboard_interrupt_on_select(
     assert result.exit_code == 0
     assert not called
     assert "Cancelled" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# Regression: ``worktree delete`` must NEVER invoke ``create_worktree``
+# ---------------------------------------------------------------------------
+
+
+def test_cli_delete_does_not_create_worktree_no_entries(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``ai-harness worktree delete`` with no worktrees exits 0 and
+    does NOT call ``create_worktree``."""
+    from ai_harness.commands import worktree as cmd
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cmd, "_require_tty", lambda: None)
+    monkeypatch.setattr(cmd, "list_worktrees", lambda repo_root=None, **kw: [])
+
+    create_calls: list[object] = []
+    monkeypatch.setattr(cmd, "create_worktree", lambda *a, **kw: create_calls.append(1) or _dummy_worktree_result())
+
+    result = runner.invoke(app, ["worktree", "delete"])
+
+    assert result.exit_code == 0
+    assert len(create_calls) == 0, f"create_worktree was called {len(create_calls)} times during delete"
+    assert "No ai-harness worktrees found" in result.stdout
+
+
+def test_cli_delete_does_not_create_worktree_when_empty_and_non_tty(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Non-TTY ``ai-harness worktree delete`` exits non-zero and
+    does NOT call ``create_worktree``."""
+    from ai_harness.commands import worktree as cmd
+
+    monkeypatch.chdir(tmp_path)
+
+    create_calls: list[object] = []
+    monkeypatch.setattr(cmd, "create_worktree", lambda *a, **kw: create_calls.append(1) or _dummy_worktree_result())
+
+    result = runner.invoke(app, ["worktree", "delete"])
+
+    assert result.exit_code != 0
+    assert len(create_calls) == 0, f"create_worktree was called {len(create_calls)} times during delete"
+
+
+def test_cli_delete_does_not_create_worktree_when_picker_cancelled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Picker returning None (Esc) during ``worktree delete`` cancels,
+    does NOT call ``create_worktree``."""
+    from ai_harness.commands import worktree as cmd
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cmd, "_require_tty", lambda: None)
+    wt_path = tmp_path / ".ai-harness" / "worktrees" / "12345"
+    entry = _make_fake_entry(wt_path, "main", "12345 · main")
+    monkeypatch.setattr(cmd, "list_worktrees", lambda repo_root=None, **kw: [entry])
+
+    create_calls: list[object] = []
+    monkeypatch.setattr(cmd, "create_worktree", lambda *a, **kw: create_calls.append(1) or _dummy_worktree_result())
+
+    monkeypatch.setattr("questionary.select", lambda *a, **kw: _FakeQuestionary(None))
+
+    result = runner.invoke(app, ["worktree", "delete"])
+
+    assert result.exit_code == 0
+    assert len(create_calls) == 0, f"create_worktree was called {len(create_calls)} times during delete"
+    assert "nothing removed" in result.stdout.lower()
+
+
+def _dummy_worktree_result() -> WorktreeResult:
+    """Return a synthetic WorktreeResult for sentinel stubs."""
+    return WorktreeResult(
+        path=Path("/dev/null"),
+        gitignore_written=False,
+        warning=None,
+    )

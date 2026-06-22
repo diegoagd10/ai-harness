@@ -28,6 +28,11 @@ from ai_harness.modules.harness.worktree import (
     remove_worktree,
 )
 
+# IMPORTANT: do NOT set invoke_without_command=True or decorate a group
+# callback with @app.callback() that calls create_worktree().  Typer
+# invokes the group callback even when a subcommand is given, which
+# means ``ai-harness worktree delete`` would create a worktree before
+# opening the delete picker.  Each verb is an explicit @app.command().
 app = typer.Typer()
 
 _console = Console()
