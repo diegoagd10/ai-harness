@@ -256,6 +256,22 @@ uv run inv uninstall
 e2e/docker-test.sh
 ```
 
+## Commit convention
+
+The commit-message format is owned by
+[`CODING_STANDARDS.md ## Commits`](CODING_STANDARDS.md#commits) — the loop's agents defer
+to that section instead of hardcoding a convention. The default is Conventional Commits.
+
+Override it by editing the section. For example, to switch to a work-policy format:
+
+```markdown
+## Commits
+
+- `[{issue_number}] <description>` — subject describes the change, issue number leads.
+- One logical change per commit.
+- **NEVER use the `RALPH:` prefix.**
+```
+
 ## Contributing
 
 - Run `uv run inv test` before opening a pull request.

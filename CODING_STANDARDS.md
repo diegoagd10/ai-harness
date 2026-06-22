@@ -34,9 +34,13 @@ This file is project-specific by design. To reuse the `.opencode/agent/` loop in
 
 ## Commits
 
-- **Conventional Commits only**: `<type>(<scope>): <subject>`. Allowed types: `feat`, `fix`, `refactor`, `chore`, `docs`, `test`.
+This section is the loop's source of truth for commit-message format — the implementor and
+orchestrator defer to it rather than hardcoding a convention. Edit this section to change
+how the loop writes commits (e.g. `[{issue_number}] <description>`).
+
+- **Conventional Commits**: `<type>(<scope>): <subject>`. Allowed types: `feat`, `fix`, `refactor`, `chore`, `docs`, `test`.
 - Subject ≤ 72 chars, imperative mood ("add", not "added"), no trailing period.
-- Body references the issue: `Closes #<NUMBER>` on the last line.
+- `Closes #<NUMBER>` on the last line is *optional* — nothing in loop automation depends on it (the orchestrator closes issues via `gh issue close`, and PRD drain scans issue bodies, not commit messages). Teams may omit or replace it.
 - **NEVER use the `RALPH:` prefix** — it is not a convention in this repo.
 - One logical change per commit. Do not mix refactors with feature changes.
 

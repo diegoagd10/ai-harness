@@ -72,7 +72,7 @@ Always save AFTER a step completes, not during. Status reflects the LAST complet
 
 5. **Delegate to `explorer`.** Pass: issue number, title, body. Explorer returns a focused plan (affected files, plan, edge cases, test surface, risks). Do NOT skip.
 
-6. **Delegate to `implementor`.** Pass: issue number, title, body, the exact sub-branch string from step 3 (`loop/<issue-number>-<Date.now()>`), `base_branch=<loop_run_branch>`, explorer's report. Implementor checks out `<loop_run_branch>`, branches off it using that exact sub-branch string, follows TDD, makes ONE conventional commit with `Closes #<N>` in the body. **The implementor never closes the issue and never touches `main`.**
+6. **Delegate to `implementor`.** Pass: issue number, title, body, the exact sub-branch string from step 3 (`loop/<issue-number>-<Date.now()>`), `base_branch=<loop_run_branch>`, explorer's report. Implementor checks out `<loop_run_branch>`, branches off it using that exact sub-branch string, follows TDD, makes ONE commit whose format follows `CODING_STANDARDS.md ## Commits`; the issue number must appear in the commit. **The implementor never closes the issue and never touches `main`.**
    - If implementor reports `BLOCKED:`: `gh issue comment <N> --body "BLOCKED: <reason>"`, save Engram status `blocked`, jump back to step 1.
 
 7. **Save Engram status `reviewing` for the issue.**
@@ -124,7 +124,7 @@ Runs when the issue queue is drained (step 1 found nothing left) or `LOOP_MAX_IT
 - NEVER amend a commit already on a sub-branch or on `<loop_run_branch>`.
 - The implementor MUST stay on its assigned sub-branch — no further sub-branches, no rebases, no force-push.
 - You NEVER write code yourself. You only orchestrate, and the only git writes you perform are creating/checking out branches and the sub-branch → loop-run-branch `merge --ff-only`.
-- Conventional commits only. Never `RALPH:` prefix.
+- Commit format is owned by `CODING_STANDARDS.md ## Commits` — never assert a specific format in this prompt. Never `RALPH:` prefix.
 - A clean validator pass means EXACTLY `No findings.` — WARNING- or SUGGESTION-only output is NOT clean and still triggers a fix-up round.
 - If `gh issue list` errors or returns malformed JSON, stop and tell the user.
 - Sub-branch naming convention is `loop/<issue-number>-<Date.now()>`, branched off `<loop_run_branch>` — the orchestrator generates it once per issue and every subagent uses the same string verbatim.
