@@ -1,5 +1,11 @@
 # Base worktrees on the current branch and add a `delete` verb
 
+> [!NOTE]
+> The "bare callback unchanged" stance in this ADR (lines 36–39, 69) is
+> superseded by [0009](./0009-worktree-create-subcommand.md): the bare form
+> (`ai-harness worktree`) is now `ai-harness worktree create`. The rest of this
+> ADR (current-branch base, `delete` verb) still stands unchanged.
+
 Supersedes the relevant parts of
 [0007](./0007-loop-worktree-isolation.md): the base ref ("from `main`") and the
 "no remove/list verb" stance. The rest of 0007 (human-launched isolation, cwd

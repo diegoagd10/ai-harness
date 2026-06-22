@@ -93,7 +93,7 @@ Five commands:
   survive reinstall. Requires exactly one Agent CLI via `-o` (supports `claude`
   and `opencode`).
 
-- `ai-harness worktree` — creates an isolated git worktree at
+- `ai-harness worktree create` — creates an isolated git worktree at
   `.ai-harness/worktrees/<Date.now()>`, detached at the current branch's HEAD.
   Lazily writes a nested `.gitignore` so throwaway worktrees are never committed.
   Launch your Agent CLI inside this directory to run the loop without disturbing
@@ -110,6 +110,7 @@ Requires Python >= 3.12.
 git clone https://github.com/diegoagd10/ai-harness.git
 cd ai-harness
 uv tool install .              # puts ai-harness on PATH (~/.local/bin/ai-harness)
+# After upgrading an existing install: uv tool install --force .
 ai-harness install             # copies AGENTS.md + skills into ~/.agents/
 ```
 
@@ -175,7 +176,7 @@ commands). To keep your host repository undisturbed — so you can grill, model,
 run a second loop in parallel — create an isolated worktree:
 
 ```bash
-ai-harness worktree
+ai-harness worktree create
 # Created worktree: .ai-harness/worktrees/1782139126824
 # Created .ai-harness/.gitignore.
 
