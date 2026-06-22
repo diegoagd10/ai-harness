@@ -42,5 +42,5 @@ class InitResult:
     wrote_standards: bool
     wrote_labels_policy: bool
     claude_md_missing: bool = False
-    created_labels: list[str] = ()
-    label_warnings: list[str] = ()
+    created_labels: tuple[str, ...] = ()
+    label_warnings: tuple[str, ...] = ()

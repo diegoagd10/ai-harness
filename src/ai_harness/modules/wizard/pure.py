@@ -17,10 +17,24 @@ can use to mark the current selection in the prompt.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 if TYPE_CHECKING:
     pass
+
+
+class ModelSelection(NamedTuple):
+    """One agent's chosen model + effort in a wizard session.
+
+    Used as the value type of the per-agent selections dict shared by the
+    pure helpers (:func:`build_confirmation_rows`, :func:`build_override_payload`,
+    :func:`build_opencode_override_payload`) and the TUI's
+    :func:`_ask_confirm`. ``effort`` is ``None`` when the user never picked
+    one (Claude) or when the chosen model is non-reasoning (OpenCode).
+    """
+
+    model: str
+    effort: str | None
 
 
 # ---------------------------------------------------------------------------
@@ -313,21 +327,21 @@ def build_opencode_model_picker_rows(
 
 
 def build_confirmation_rows(
-    selections: dict[str, tuple[str, str | None]],
+    selections: dict[str, ModelSelection],
 ) -> list[PickerRow]:
     """Build the confirmation rows: one per agent with model and effort.
 
-    *selections* maps ``agent -> (model, effort)``. ``None`` effort (the
-    user never picked one) renders as ``"(unset)"`` so the user notices
-    the gap on the confirmation screen before pressing enter.
+    *selections* maps ``agent -> ModelSelection(model, effort)``. ``None``
+    effort (the user never picked one) renders as ``"(unset)"`` so the user
+    notices the gap on the confirmation screen before pressing enter.
     """
     rows: list[PickerRow] = []
-    for agent, (model, effort) in selections.items():
-        effort_str = effort if effort is not None else "(unset)"
+    for agent, selection in selections.items():
+        effort_str = selection.effort if selection.effort is not None else "(unset)"
         rows.append(
             PickerRow(
                 value=agent,
-                label=f"{agent}: {model} / {effort_str}",
+                label=f"{agent}: {selection.model} / {effort_str}",
                 is_current=False,
             )
         )
@@ -348,7 +362,7 @@ def build_confirmation_rows(
 
 def build_override_payload(
     baseline: dict[str, dict[str, str | None]],
-    selections: dict[str, tuple[str, str | None]],
+    selections: dict[str, ModelSelection],
 ) -> dict:
     """Return the partial override payload containing only fields the user changed.
 
@@ -356,9 +370,9 @@ def build_override_payload(
     captured BEFORE the wizard started (override wins, else template). It
     is the source of truth for "what was already in effect".
 
-    *selections* maps ``agent -> (model, effort)`` as the user chose in
-    this wizard session (unchanged agents equal their baseline; edited
-    agents hold the new value).
+    *selections* maps ``agent -> ModelSelection(model, effort)`` as the
+    user chose in this wizard session (unchanged agents equal their
+    baseline; edited agents hold the new value).
 
     The returned payload only contains ``(agent, field)`` pairs whose
     selection differs from the baseline. An empty payload means the
@@ -376,13 +390,13 @@ def build_override_payload(
     replaces the prior concrete value with the unset state.
     """
     payload: dict = {}
-    for agent, (model, effort) in selections.items():
+    for agent, selection in selections.items():
         base = baseline.get(agent, {})
         agent_payload: dict = {}
-        if model != base.get("model"):
-            agent_payload["model"] = {"claude": model}
-        if effort != base.get("effort"):
-            agent_payload["effort"] = {"claude": effort}
+        if selection.model != base.get("model"):
+            agent_payload["model"] = {"claude": selection.model}
+        if selection.effort != base.get("effort"):
+            agent_payload["effort"] = {"claude": selection.effort}
         if agent_payload:
             payload[agent] = agent_payload
     return payload
@@ -390,7 +404,7 @@ def build_override_payload(
 
 def build_opencode_override_payload(
     baseline: dict[str, dict[str, str | None]],
-    selections: dict[str, tuple[str, str | None]],
+    selections: dict[str, ModelSelection],
 ) -> dict:
     """Return the partial OpenCode override payload containing only fields the user changed.
 
@@ -403,13 +417,13 @@ def build_opencode_override_payload(
     (``{"effort": {"opencode": None}}``).
     """
     payload: dict = {}
-    for agent, (model, effort) in selections.items():
+    for agent, selection in selections.items():
         base = baseline.get(agent, {})
         agent_payload: dict = {}
-        if model != base.get("model"):
-            agent_payload["model"] = {"opencode": model}
-        if effort != base.get("effort"):
-            agent_payload["effort"] = {"opencode": effort}
+        if selection.model != base.get("model"):
+            agent_payload["model"] = {"opencode": selection.model}
+        if selection.effort != base.get("effort"):
+            agent_payload["effort"] = {"opencode": selection.effort}
         if agent_payload:
             payload[agent] = agent_payload
     return payload

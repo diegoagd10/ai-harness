@@ -17,7 +17,12 @@ from typer.testing import CliRunner
 
 from ai_harness.main import app
 from ai_harness.modules.harness import AgentCli, InstallManifest, install_for_agent_clis, uninstall_for_agent_clis
-from ai_harness.modules.harness.renderers import get_agent_meta
+from ai_harness.modules.harness.renderers import (
+    AgentCaps,
+    _claude_tools,
+    _opencode_permission,
+    get_agent_meta,
+)
 
 EXPECTED_SKILLS = ("branch-pr", "grill-me-one-by-one", "judgment-day")
 MANIFEST_REL = ".ai-harness/installed.json"
@@ -341,8 +346,11 @@ def _build_expected_opencode(overrides: dict | None = None) -> dict[str, dict]:
             "mode": meta["mode"],
             "model": meta["model"]["opencode"],
         }
-        if "permission" in meta:
-            entry["permission"] = meta["permission"]
+        caps = meta.get("caps")
+        if isinstance(caps, AgentCaps):
+            permission = _opencode_permission(caps)
+            if permission:
+                entry["permission"] = permission
         result[name] = entry
     return result
 
@@ -372,14 +380,10 @@ def _build_expected_claude(overrides: dict | None = None) -> dict[str, dict]:
         if not is_primary:
             entry["name"] = name
             entry["model"] = meta["model"]["claude"]
-        # Translate OpenCode permission to Claude-native tools allow-list
-        permission = meta.get("permission")
-        if isinstance(permission, dict) and permission.get("edit") == "deny" and permission.get("write") == "deny":
-            if not is_primary:
-                tools = ["Read", "Grep", "Glob", "Bash"]
-                if permission.get("bash") == "deny":
-                    tools.remove("Bash")
-                entry["tools"] = ", ".join(tools)
+        # Translate caps to a Claude tools allow-list (restricted agents only)
+        caps = meta.get("caps")
+        if not is_primary and isinstance(caps, AgentCaps) and caps != AgentCaps():
+            entry["tools"] = ", ".join(_claude_tools(caps))
         result[name] = deepcopy(entry)
     return result
 

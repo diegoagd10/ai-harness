@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 import pytest
 from typer.testing import CliRunner
 
-from ai_harness.commands import parse_single_agent_cli
+from ai_harness.commands import parse_agent_clis
 from ai_harness.main import app
 from ai_harness.modules.harness import AgentCli
 from ai_harness.modules.harness.renderers import (
@@ -31,6 +31,7 @@ from ai_harness.modules.harness.renderers import (
     write_override_store,
 )
 from ai_harness.modules.wizard.pure import (
+    ModelSelection,
     build_agent_list_rows,
     build_confirmation_rows,
     build_effort_picker_rows,
@@ -56,31 +57,29 @@ OVERRIDES_REL = ".ai-harness/overrides.json"
 
 
 # ---------------------------------------------------------------------------
-# parse_single_agent_cli — CLI arg validation
+# parse_agent_clis — CLI arg parsing (the set_models command enforces len == 1)
 # ---------------------------------------------------------------------------
 
 
-def test_parse_single_agent_cli_accepts_valid_name() -> None:
+def test_parse_agent_clis_accepts_valid_name() -> None:
     """A single known agent CLI is parsed verbatim."""
-    assert parse_single_agent_cli("claude") == [AgentCli.CLAUDE]
+    assert parse_agent_clis("claude") == [AgentCli.CLAUDE]
 
 
-def test_parse_single_agent_cli_strips_whitespace() -> None:
+def test_parse_agent_clis_strips_whitespace() -> None:
     """Surrounding whitespace is stripped from the input."""
-    assert parse_single_agent_cli("  claude  ") == [AgentCli.CLAUDE]
+    assert parse_agent_clis("  claude  ") == [AgentCli.CLAUDE]
 
 
-def test_parse_single_agent_cli_rejects_empty() -> None:
-    """An empty / whitespace-only string returns an empty list (caller rejects)."""
-    assert parse_single_agent_cli("") == []
-    assert parse_single_agent_cli("   ") == []
+def test_parse_agent_clis_returns_empty_for_blank() -> None:
+    """An empty / whitespace-only string returns an empty list (caller decides)."""
+    assert parse_agent_clis("") == []
+    assert parse_agent_clis("   ") == []
 
 
-def test_parse_single_agent_cli_rejects_multiple_via_comma() -> None:
-    """Comma-separated input is parsed as a list; the caller is responsible for rejecting multi."""
-    # parse_agent_clis itself returns a list — the set_models command must reject len != 1.
-    # The helper's contract is "returns a list" — the set_models command layer enforces single.
-    assert parse_single_agent_cli("claude,opencode") == [AgentCli.CLAUDE, AgentCli.OPENCODE]
+def test_parse_agent_clis_accepts_multiple_via_comma() -> None:
+    """Comma-separated input parses to a list — the set_models command rejects len != 1."""
+    assert parse_agent_clis("claude,opencode") == [AgentCli.CLAUDE, AgentCli.OPENCODE]
 
 
 # ---------------------------------------------------------------------------
@@ -355,8 +354,8 @@ def test_build_opencode_override_payload_no_changes_returns_empty() -> None:
         "implementor": {"model": "openai/gpt-5.5-mini", "effort": None},
     }
     selections = {
-        "explorer": ("openai/gpt-5.5", "high"),
-        "implementor": ("openai/gpt-5.5-mini", None),
+        "explorer": ModelSelection("openai/gpt-5.5", "high"),
+        "implementor": ModelSelection("openai/gpt-5.5-mini", None),
     }
     assert build_opencode_override_payload(baseline, selections) == {}
 
@@ -369,7 +368,7 @@ def test_build_opencode_override_payload_keys_under_opencode() -> None:
     as :func:`build_override_payload` uses for ``claude``.
     """
     baseline = {"implementor": {"model": "openai/gpt-5.5-mini", "effort": None}}
-    selections = {"implementor": ("openai/gpt-5.5", "high")}
+    selections = {"implementor": ModelSelection("openai/gpt-5.5", "high")}
 
     payload = build_opencode_override_payload(baseline, selections)
 
@@ -388,7 +387,7 @@ def test_build_opencode_override_payload_does_not_collide_with_claude() -> None:
     overrides; the Claude slot for the same agent must remain untouched.
     """
     baseline = {"implementor": {"model": "sonnet", "effort": None}}
-    selections = {"implementor": ("openai/gpt-5.5", "high")}
+    selections = {"implementor": ModelSelection("openai/gpt-5.5", "high")}
 
     payload = build_opencode_override_payload(baseline, selections)
 
@@ -405,7 +404,7 @@ def test_build_opencode_override_payload_clears_stale_effort_on_non_reasoning_mo
     skip effort" acceptance criterion. This diff clears the stale slot.
     """
     baseline = {"validator": {"model": "openai/gpt-5.5", "effort": "high"}}
-    selections = {"validator": ("openai/gpt-5.5-mini", None)}
+    selections = {"validator": ModelSelection("openai/gpt-5.5-mini", None)}
 
     payload = build_opencode_override_payload(baseline, selections)
 
@@ -1099,7 +1098,7 @@ def test_run_opencode_wizard_esc_on_effort_phase_agent_chooser_returns_to_model_
         "implementor",
         "openai/gpt-5.5",
         "__continue__",
-        tui._ESC_BACK,
+        tui.Nav.ESC_BACK,
         "__continue__",
         "__continue__",
     )
@@ -1133,7 +1132,7 @@ def test_run_opencode_wizard_esc_at_model_phase_agent_chooser_is_ignored(
 
     scripted = _ScriptedSelect()
     scripted.queue(
-        tui._ESC_BACK,
+        tui.Nav.ESC_BACK,
         "__continue__",
         "__continue__",
     )
@@ -1455,9 +1454,9 @@ def test_build_agent_list_rows_missing_agent_gets_default_model() -> None:
 def test_build_confirmation_rows_includes_model_and_effort() -> None:
     """Confirmation rows show ``agent: model / effort`` for each agent."""
     selections = {
-        "explorer": ("haiku", "low"),
-        "implementor": ("opus", "high"),
-        "validator": ("sonnet", None),
+        "explorer": ModelSelection("haiku", "low"),
+        "implementor": ModelSelection("opus", "high"),
+        "validator": ModelSelection("sonnet", None),
     }
     rows = build_confirmation_rows(selections)
 
@@ -1504,9 +1503,9 @@ def test_build_override_payload_no_changes_returns_empty() -> None:
         "validator": {"model": "sonnet", "effort": None},
     }
     selections = {
-        "explorer": ("sonnet", None),
-        "implementor": ("sonnet", None),
-        "validator": ("sonnet", None),
+        "explorer": ModelSelection("sonnet", None),
+        "implementor": ModelSelection("sonnet", None),
+        "validator": ModelSelection("sonnet", None),
     }
     assert build_override_payload(baseline, selections) == {}
 
@@ -1519,7 +1518,7 @@ def test_build_override_payload_does_not_pollute_with_template_defaults() -> Non
     ``{"implementor": {"model": {"claude": "sonnet"}}}`` to overrides.json.
     """
     baseline = {agent: {"model": "sonnet", "effort": None} for agent in claude_wizard_agents()}
-    selections = {agent: ("sonnet", None) for agent in claude_wizard_agents()}
+    selections = {agent: ModelSelection("sonnet", None) for agent in claude_wizard_agents()}
     payload = build_override_payload(baseline, selections)
 
     # No agent appears in the payload at all.
@@ -1537,9 +1536,9 @@ def test_build_override_payload_only_changed_model_is_written() -> None:
         "validator": {"model": "sonnet", "effort": None},
     }
     selections = {
-        "explorer": ("sonnet", None),
-        "implementor": ("opus", None),
-        "validator": ("sonnet", None),
+        "explorer": ModelSelection("sonnet", None),
+        "implementor": ModelSelection("opus", None),
+        "validator": ModelSelection("sonnet", None),
     }
     payload = build_override_payload(baseline, selections)
 
@@ -1552,7 +1551,7 @@ def test_build_override_payload_only_changed_effort_is_written() -> None:
         "validator": {"model": "sonnet", "effort": None},
     }
     selections = {
-        "validator": ("sonnet", "high"),
+        "validator": ModelSelection("sonnet", "high"),
     }
     payload = build_override_payload(baseline, selections)
 
@@ -1565,7 +1564,7 @@ def test_build_override_payload_both_fields_changed_writes_both() -> None:
         "implementor": {"model": "sonnet", "effort": None},
     }
     selections = {
-        "implementor": ("opus", "high"),
+        "implementor": ModelSelection("opus", "high"),
     }
     payload = build_override_payload(baseline, selections)
 
@@ -1589,9 +1588,9 @@ def test_build_override_payload_keeps_existing_non_default_override_untouched() 
     }
     # User changes nothing — confirms with current values as-is.
     selections = {
-        "explorer": ("sonnet", None),
-        "implementor": ("haiku", None),
-        "validator": ("sonnet", None),
+        "explorer": ModelSelection("sonnet", None),
+        "implementor": ModelSelection("haiku", None),
+        "validator": ModelSelection("sonnet", None),
     }
     payload = build_override_payload(baseline, selections)
 
@@ -1607,7 +1606,7 @@ def test_build_override_payload_effort_change_from_value_to_other() -> None:
         "implementor": {"model": "sonnet", "effort": "low"},
     }
     selections = {
-        "implementor": ("sonnet", "high"),
+        "implementor": ModelSelection("sonnet", "high"),
     }
     payload = build_override_payload(baseline, selections)
 
@@ -1625,7 +1624,7 @@ def test_build_override_payload_unsetting_effort_writes_empty_effort_entry() -> 
         "validator": {"model": "sonnet", "effort": "high"},
     }
     selections = {
-        "validator": ("sonnet", None),
+        "validator": ModelSelection("sonnet", None),
     }
     payload = build_override_payload(baseline, selections)
 
@@ -1642,7 +1641,7 @@ def test_build_override_payload_ignores_agent_missing_from_baseline() -> None:
     """
     baseline: dict[str, dict[str, str | None]] = {}
     selections = {
-        "explorer": ("opus", "high"),
+        "explorer": ModelSelection("opus", "high"),
     }
     payload = build_override_payload(baseline, selections)
 
@@ -2252,7 +2251,7 @@ def test_ask_confirm_prints_blank_line_after_header(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(tui._console, "print", lambda *a, **kw: printed.append(a))
     monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: _ScriptedConfirm().queue(True))
 
-    tui._ask_confirm("set-models · claude — confirm", {"implementor": ("opus", "high")})
+    tui._ask_confirm("set-models · claude — confirm", {"implementor": ModelSelection("opus", "high")})
 
     assert printed[0][0].__class__.__name__ == "Panel"
     assert printed[1] == ("",)
@@ -2316,7 +2315,7 @@ def test_filterable_select_escape_exits_with_esc_back_sentinel() -> None:
     processor.feed(KeyPress(Keys.Escape, "\x1b"))
     processor.process_keys()
 
-    assert exit_results == [tui._ESC_BACK]
+    assert exit_results == [tui.Nav.ESC_BACK]
 
 
 def test_filterable_select_jk_moves_inquirer_pointer() -> None:
@@ -2390,7 +2389,7 @@ def test_ask_confirm_esc_binding_real_application_does_not_raise() -> None:
     with create_pipe_input() as inp:
         question = questionary.confirm("Confirm?", default=True, input=inp, output=DummyOutput())
         # Exercise the exact helper _ask_confirm relies on to attach Esc.
-        tui._attach_esc_back(question.application, tui._ESC_BACK)
+        tui._attach_esc_back(question.application, tui.Nav.ESC_BACK)
 
 
 def test_ask_confirm_esc_binding_real_application_exits_with_esc_back() -> None:
@@ -2403,12 +2402,12 @@ def test_ask_confirm_esc_binding_real_application_exits_with_esc_back() -> None:
 
     with create_pipe_input() as inp:
         question = questionary.confirm("Confirm?", default=True, input=inp, output=DummyOutput())
-        tui._attach_esc_back(question.application, tui._ESC_BACK)
+        tui._attach_esc_back(question.application, tui.Nav.ESC_BACK)
 
         inp.send_text("\x1b")
         answer = question.ask()
 
-    assert answer == tui._ESC_BACK
+    assert answer == tui.Nav.ESC_BACK
 
 
 def test_filterable_select_esc_binding_uses_shared_helper_real_application() -> None:
@@ -2437,7 +2436,7 @@ def test_filterable_select_esc_binding_uses_shared_helper_real_application() -> 
     processor.feed(KeyPress(Keys.Escape, "\x1b"))
     processor.process_keys()
 
-    assert exit_results == [tui._ESC_BACK]
+    assert exit_results == [tui.Nav.ESC_BACK]
 
 
 def test_filterable_select_jk_skips_disabled_choices() -> None:
@@ -2994,12 +2993,12 @@ def test_ask_continue_or_agent_esc_is_ignored_on_first_model_phase(monkeypatch: 
     from ai_harness.modules.wizard import tui
 
     monkeypatch.setattr(
-        tui, "_filterable_select", lambda *a, **kw: type("_Q", (), {"ask": lambda self: tui._ESC_BACK})()
+        tui, "_filterable_select", lambda *a, **kw: type("_Q", (), {"ask": lambda self: tui.Nav.ESC_BACK})()
     )
 
     result = tui._ask_continue_or_agent("model", {})
 
-    assert result == tui._ESC_BACK, "the first phase has no back target — Esc must surface the raw sentinel"
+    assert result == tui.Nav.ESC_BACK, "the first phase has no back target — Esc must surface the raw sentinel"
 
 
 def test_ask_continue_or_agent_esc_maps_to_back_on_effort_phase(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -3007,7 +3006,7 @@ def test_ask_continue_or_agent_esc_maps_to_back_on_effort_phase(monkeypatch: pyt
     from ai_harness.modules.wizard import tui
 
     monkeypatch.setattr(
-        tui, "_filterable_select", lambda *a, **kw: type("_Q", (), {"ask": lambda self: tui._ESC_BACK})()
+        tui, "_filterable_select", lambda *a, **kw: type("_Q", (), {"ask": lambda self: tui.Nav.ESC_BACK})()
     )
 
     result = tui._ask_continue_or_agent("effort", {})
@@ -3020,12 +3019,12 @@ def test_ask_opencode_continue_or_agent_esc_ignored_on_first_phase(monkeypatch: 
     from ai_harness.modules.wizard import tui
 
     monkeypatch.setattr(
-        tui, "_filterable_select", lambda *a, **kw: type("_Q", (), {"ask": lambda self: tui._ESC_BACK})()
+        tui, "_filterable_select", lambda *a, **kw: type("_Q", (), {"ask": lambda self: tui.Nav.ESC_BACK})()
     )
 
     result = tui._ask_opencode_continue_or_agent("model", {})
 
-    assert result == tui._ESC_BACK
+    assert result == tui.Nav.ESC_BACK
 
 
 def test_run_claude_wizard_esc_at_model_phase_agent_chooser_redraws_same_screen(
@@ -3043,7 +3042,7 @@ def test_run_claude_wizard_esc_at_model_phase_agent_chooser_redraws_same_screen(
     # Phase 2 (effort): continue.
     scripted = _ScriptedSelect()
     scripted.queue(
-        tui._ESC_BACK,
+        tui.Nav.ESC_BACK,
         "__continue__",
         "__continue__",
     )
@@ -3071,7 +3070,7 @@ def test_run_claude_wizard_esc_in_model_picker_returns_to_agent_choice(
     scripted = _ScriptedSelect()
     scripted.queue(
         "implementor",
-        tui._ESC_BACK,
+        tui.Nav.ESC_BACK,
         "__continue__",
         "__continue__",
     )
@@ -3107,7 +3106,7 @@ def test_run_claude_wizard_esc_on_effort_phase_agent_chooser_returns_to_model_ph
         "implementor",
         "opus",
         "__continue__",
-        tui._ESC_BACK,
+        tui.Nav.ESC_BACK,
         "__continue__",
         "__continue__",
     )
@@ -3144,7 +3143,7 @@ def test_run_claude_wizard_esc_on_confirm_screen_returns_to_effort_phase(
     )
     monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
 
-    confirm_responses = [tui._ESC_BACK, True]
+    confirm_responses = [tui.Nav.ESC_BACK, True]
 
     class _ConfirmSeq:
         def ask(self) -> object:

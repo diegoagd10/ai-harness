@@ -37,14 +37,3 @@ def parse_agent_clis(raw: str) -> list[AgentCli]:
         except ValueError:
             raise typer.BadParameter(f"Unknown agent CLI {name!r}. Valid agent CLIs: {valid}") from None
     return parsed
-
-
-def parse_single_agent_cli(raw: str) -> list[AgentCli]:
-    """Parse ``-o`` for commands that require exactly one agent CLI.
-
-    This is a thin alias for :func:`parse_agent_clis` with a name that
-    signals the caller's intent: ``set-models`` rejects lists of length
-    != 1 at the command layer. Use :func:`parse_agent_clis` for callers
-    that accept any list (including empty / multi).
-    """
-    return parse_agent_clis(raw)
