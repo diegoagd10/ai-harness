@@ -143,6 +143,11 @@ def test_uninstall_no_args_removes_everything_and_manifest(tmp_path: Path) -> No
     for name in _CLAUDE_SUBAGENT_NAMES:
         assert not (tmp_path / ".claude" / "agents" / f"{name}.md").exists()
     assert not (tmp_path / ".claude" / "skills" / _CLAUDE_SKILL_NAME / "SKILL.md").exists()
+    # Copilot loop agents removed
+    for name in _LOOP_AGENT_NAMES:
+        assert not (tmp_path / ".copilot" / "agents" / f"{name}.agent.md").exists(), (
+            f"copilot agent {name} should be removed"
+        )
     for name in EXPECTED_SKILLS:
         assert not (tmp_path / ".agents" / "skills" / name / "SKILL.md").exists()
     assert not (tmp_path / MANIFEST_REL).exists()
@@ -162,6 +167,8 @@ def test_uninstall_only_claude_keeps_generic_and_copilot(tmp_path: Path) -> None
     # survivors
     assert (tmp_path / ".agents" / "AGENTS.md").is_file()
     assert (tmp_path / ".github" / "copilot-instructions.md").is_file()
+    for name in _LOOP_AGENT_NAMES:
+        assert (tmp_path / ".copilot" / "agents" / f"{name}.agent.md").is_file(), f"copilot agent {name} should survive"
     assert (tmp_path / MANIFEST_REL).is_file()
 
 
@@ -176,6 +183,8 @@ def test_uninstall_only_generic_keeps_claude_and_copilot(tmp_path: Path) -> None
     assert (tmp_path / ".claude" / "skills" / _CLAUDE_SKILL_NAME / "SKILL.md").is_file(), "claude skill should survive"
     # Copilot survives
     assert (tmp_path / ".github" / "copilot-instructions.md").is_file()
+    for name in _LOOP_AGENT_NAMES:
+        assert (tmp_path / ".copilot" / "agents" / f"{name}.agent.md").is_file(), f"copilot agent {name} should survive"
 
 
 def test_uninstall_multiple_agent_clis_keeps_remaining(tmp_path: Path) -> None:
@@ -188,6 +197,11 @@ def test_uninstall_multiple_agent_clis_keeps_remaining(tmp_path: Path) -> None:
     for name in _CLAUDE_SUBAGENT_NAMES:
         assert not (tmp_path / ".claude" / "agents" / f"{name}.md").exists()
     assert not (tmp_path / ".claude" / "skills" / _CLAUDE_SKILL_NAME / "SKILL.md").exists()
+    # Copilot loop agents also removed
+    for name in _LOOP_AGENT_NAMES:
+        assert not (tmp_path / ".copilot" / "agents" / f"{name}.agent.md").exists(), (
+            f"copilot agent {name} should be removed"
+        )
     assert (tmp_path / ".agents" / "AGENTS.md").is_file()
 
 
@@ -424,16 +438,274 @@ def test_install_opencode_skips_persona_and_skills(tmp_path: Path) -> None:
     assert not (tmp_path / ".config" / "opencode" / "skills").exists()
 
 
-def test_generic_and_copilot_do_not_get_loop_agents(tmp_path: Path) -> None:
+def test_install_copilot_writes_loop_agents(tmp_path: Path) -> None:
+    """Copilot now gets loop agents under ~/.copilot/agents/ in addition to persona+skills."""
     install_for_agent_clis([AgentCli.GENERIC, AgentCli.COPILOT], home=tmp_path)
 
-    # No loop agents under generic or copilot paths
-    for base_dir in (".agents", ".github", ".copilot"):
+    # Copilot persona + skills (existing behaviour)
+    _assert_persona_written(tmp_path / ".github" / "copilot-instructions.md")
+    _assert_skills_written(tmp_path / ".copilot" / "skills", "copilot")
+
+    # Copilot loop agents — all four rendered as .agent.md
+    agent_dir = tmp_path / ".copilot" / "agents"
+    for name in _LOOP_AGENT_NAMES:
+        agent_path = agent_dir / f"{name}.agent.md"
+        assert agent_path.is_file(), f"copilot agent {name} missing: {agent_path}"
+        assert agent_path.stat().st_size > 0, f"copilot agent {name} empty: {agent_path}"
+
+    # No loop agents leaked to generic paths
+    for base_dir in (".agents",):
         for name in _LOOP_AGENT_NAMES:
             assert not (tmp_path / base_dir / f"{name}.md").exists(), f"loop agent leaked to {base_dir}/{name}.md"
+            assert not (tmp_path / base_dir / f"{name}.agent.md").exists(), (
+                f"loop agent leaked to {base_dir}/{name}.agent.md"
+            )
 
 
-def test_install_opencode_is_byte_identical_on_reinstall(tmp_path: Path) -> None:
+def test_install_copilot_manifest_records_agents(tmp_path: Path) -> None:
+    """Copilot manifest entries include the four .agent.md paths."""
+    install_for_agent_clis([AgentCli.GENERIC, AgentCli.COPILOT], home=tmp_path)
+
+    data = json.loads((tmp_path / MANIFEST_REL).read_text(encoding="utf-8"))
+    assert "copilot" in data["files_by_agent_cli"]
+    copilot_files = data["files_by_agent_cli"]["copilot"]
+    # 5 persona+skills + 4 loop agents = 9
+    assert len(copilot_files) == 9
+    assert any(".copilot/agents/" in f for f in copilot_files), "copilot manifest should contain agent paths"
+    for name in _LOOP_AGENT_NAMES:
+        expected = f".copilot/agents/{name}.agent.md"
+        assert any(expected in f for f in copilot_files), f"copilot manifest should contain {expected}"
+
+
+def test_install_copilot_is_byte_identical_on_reinstall(tmp_path: Path) -> None:
+    """Copilot loop agents are byte-identical on reinstall."""
+    install_for_agent_clis([AgentCli.GENERIC, AgentCli.COPILOT], home=tmp_path)
+
+    agent_dir = tmp_path / ".copilot" / "agents"
+    first_pass: dict[str, bytes] = {}
+    for name in _LOOP_AGENT_NAMES:
+        first_pass[name] = (agent_dir / f"{name}.agent.md").read_bytes()
+
+    # Reinstall
+    install_for_agent_clis([AgentCli.GENERIC, AgentCli.COPILOT], home=tmp_path)
+    for name in _LOOP_AGENT_NAMES:
+        second = (agent_dir / f"{name}.agent.md").read_bytes()
+        assert second == first_pass[name], f"{name}: copilot reinstall not byte-identical"
+
+
+def test_install_copilot_rendered_body_matches_template_verbatim(tmp_path: Path) -> None:
+    """Rendered Copilot agent body text matches template body verbatim (no spawn allowlist append)."""
+    from importlib.resources import files
+
+    install_for_agent_clis([AgentCli.GENERIC, AgentCli.COPILOT], home=tmp_path)
+    templates_dir = files("ai_harness.resources") / "loop-agent"
+
+    for name in _LOOP_AGENT_NAMES:
+        template_body = (templates_dir / f"{name}.md").read_text(encoding="utf-8")
+
+        rendered = (tmp_path / ".copilot" / "agents" / f"{name}.agent.md").read_text(encoding="utf-8")
+        rendered_body = rendered.split("---", 2)[2].removeprefix("\n")
+
+        assert rendered_body == template_body, f"{name}: body does not match template verbatim"
+
+
+def test_install_copilot_frontmatter_name_and_description_only(tmp_path: Path) -> None:
+    """Every Copilot .agent.md frontmatter has only name and description."""
+    install_for_agent_clis([AgentCli.GENERIC, AgentCli.COPILOT], home=tmp_path)
+
+    agent_dir = tmp_path / ".copilot" / "agents"
+    for name in _LOOP_AGENT_NAMES:
+        fm = _read_frontmatter(agent_dir / f"{name}.agent.md")
+        assert fm.get("name") == name, f"{name}: expected name={name!r}, got {fm.get('name')!r}"
+        assert "description" in fm, f"{name}: description missing"
+        for forbidden in (
+            "model",
+            "tools",
+            "user-invocable",
+            "disable-model-invocation",
+            "mode",
+            "permission",
+            "color",
+        ):
+            assert forbidden not in fm, f"{name}: forbidden key {forbidden!r} present"
+
+
+def test_install_claude_copilot_opencode_together_no_cross_leak(tmp_path: Path) -> None:
+    """Installing all three together renders each CLI's agents into its own directory."""
+    install_for_agent_clis(
+        [AgentCli.GENERIC, AgentCli.CLAUDE, AgentCli.COPILOT, AgentCli.OPENCODE],
+        home=tmp_path,
+    )
+
+    # Claude agents in .claude/agents/
+    for name in _CLAUDE_SUBAGENT_NAMES:
+        assert (tmp_path / ".claude" / "agents" / f"{name}.md").is_file()
+    assert (tmp_path / ".claude" / "skills" / _CLAUDE_SKILL_NAME / "SKILL.md").is_file()
+
+    # Copilot agents in .copilot/agents/
+    for name in _LOOP_AGENT_NAMES:
+        assert (tmp_path / ".copilot" / "agents" / f"{name}.agent.md").is_file()
+
+    # OpenCode agents in .config/opencode/agent/
+    for name in _LOOP_AGENT_NAMES:
+        assert (tmp_path / ".config" / "opencode" / "agent" / f"{name}.md").is_file()
+
+    # No cross-leak: copilot agents not in claude dir, etc.
+    for name in _LOOP_AGENT_NAMES:
+        assert not (tmp_path / ".claude" / "agents" / f"{name}.agent.md").exists()
+        assert not (tmp_path / ".copilot" / "agents" / f"{name}.md").exists()
+        assert not (tmp_path / ".config" / "opencode" / "agent" / f"{name}.agent.md").exists()
+
+
+# ---------------------------------------------------------------------------
+# Copilot uninstall — observable behaviour
+# ---------------------------------------------------------------------------
+
+
+def test_uninstall_only_copilot_keeps_generic_and_removes_agents(tmp_path: Path) -> None:
+    """Uninstalling Copilot removes persona+skills AND the four loop agents, leaves generic."""
+    install_for_agent_clis([AgentCli.GENERIC, AgentCli.COPILOT], home=tmp_path)
+    uninstall_for_agent_clis([AgentCli.COPILOT], home=tmp_path)
+
+    # Copilot persona+skills removed
+    assert not (tmp_path / ".github" / "copilot-instructions.md").exists()
+    # Copilot loop agents removed
+    agent_dir = tmp_path / ".copilot" / "agents"
+    for name in _LOOP_AGENT_NAMES:
+        assert not (agent_dir / f"{name}.agent.md").exists(), f"{name}: copilot agent still present"
+
+    # Generic survives
+    assert (tmp_path / ".agents" / "AGENTS.md").is_file()
+    # Manifest still exists (has generic)
+    assert (tmp_path / MANIFEST_REL).is_file()
+
+
+def test_uninstall_no_args_removes_copilot_agents(tmp_path: Path) -> None:
+    """Full uninstall removes Copilot agents."""
+    install_for_agent_clis([AgentCli.GENERIC, AgentCli.COPILOT], home=tmp_path)
+    uninstall_for_agent_clis(None, home=tmp_path)
+
+    agent_dir = tmp_path / ".copilot" / "agents"
+    for name in _LOOP_AGENT_NAMES:
+        assert not (agent_dir / f"{name}.agent.md").exists(), f"{name}: still present after full uninstall"
+    assert not (tmp_path / ".github" / "copilot-instructions.md").exists()
+    assert not (tmp_path / ".agents" / "AGENTS.md").exists()
+    assert not (tmp_path / MANIFEST_REL).exists()
+
+
+def test_uninstall_copilot_cleans_empty_dirs_preserves_unrelated(tmp_path: Path) -> None:
+    """Uninstalling Copilot prunes ~/.copilot/agents/ but leaves existing unrelated files."""
+    install_for_agent_clis([AgentCli.GENERIC, AgentCli.COPILOT], home=tmp_path)
+
+    # Create an unrelated file under ~/.copilot/ (e.g. user's own config)
+    unrelated = tmp_path / ".copilot" / "unrelated.txt"
+    unrelated.parent.mkdir(parents=True, exist_ok=True)
+    unrelated.write_text("user data")
+
+    uninstall_for_agent_clis([AgentCli.COPILOT], home=tmp_path)
+
+    # Loop agents and persona+skills removed
+    assert not (tmp_path / ".copilot" / "agents").exists(), "copilot agents dir should be pruned"
+    assert not (tmp_path / ".github" / "copilot-instructions.md").exists()
+    # Unrelated file survives
+    assert unrelated.is_file(), "unrelated copilot file must survive uninstall"
+
+
+def test_uninstall_copilot_leaves_claude_and_opencode_intact(tmp_path: Path) -> None:
+    """Uninstalling Copilot leaves Claude and OpenCode loop agents intact."""
+    install_for_agent_clis(
+        [AgentCli.GENERIC, AgentCli.CLAUDE, AgentCli.COPILOT, AgentCli.OPENCODE],
+        home=tmp_path,
+    )
+    uninstall_for_agent_clis([AgentCli.COPILOT], home=tmp_path)
+
+    # Copilot removed
+    for name in _LOOP_AGENT_NAMES:
+        assert not (tmp_path / ".copilot" / "agents" / f"{name}.agent.md").exists()
+
+    # Claude agents survive
+    for name in _CLAUDE_SUBAGENT_NAMES:
+        assert (tmp_path / ".claude" / "agents" / f"{name}.md").is_file()
+    assert (tmp_path / ".claude" / "skills" / _CLAUDE_SKILL_NAME / "SKILL.md").is_file()
+
+    # OpenCode agents survive
+    for name in _LOOP_AGENT_NAMES:
+        assert (tmp_path / ".config" / "opencode" / "agent" / f"{name}.md").is_file()
+
+    # Generic survives
+    assert (tmp_path / ".agents" / "AGENTS.md").is_file()
+    assert (tmp_path / MANIFEST_REL).is_file()
+
+
+# ---------------------------------------------------------------------------
+# CLI adapter — copilot
+# ---------------------------------------------------------------------------
+
+
+def test_cli_install_copilot_writes_agents(isolated_home: Path) -> None:
+    """cli install -o copilot writes loop agents under ~/.copilot/agents/."""
+    result = runner.invoke(app, ["install", "-o", "copilot"])
+    assert result.exit_code == 0, result.stderr
+
+    agent_dir = isolated_home / ".copilot" / "agents"
+    for name in _LOOP_AGENT_NAMES:
+        assert (agent_dir / f"{name}.agent.md").is_file(), f"CLI install: copilot {name} missing"
+
+    # Generic (5 files: 1 persona + 3 skill dirs + 1 nested ref)
+    # + Copilot (9 files: 5 persona+skills + 4 loop agents) = 14 total.
+    assert "14 file(s)" in result.stdout, (
+        f"stdout should report 14 written files (5 generic + 9 copilot), got: {result.stdout!r}"
+    )
+
+
+def test_cli_uninstall_copilot_removes_agents(isolated_home: Path) -> None:
+    """cli uninstall -o copilot removes agents and persona+skills."""
+    runner.invoke(app, ["install", "-o", "copilot"])
+    result = runner.invoke(app, ["uninstall", "-o", "copilot"])
+    assert result.exit_code == 0, result.stderr
+
+    agent_dir = isolated_home / ".copilot" / "agents"
+    for name in _LOOP_AGENT_NAMES:
+        assert not (agent_dir / f"{name}.agent.md").exists(), f"CLI uninstall: copilot {name} remaining"
+    assert not (isolated_home / ".github" / "copilot-instructions.md").exists()
+
+
+# ---------------------------------------------------------------------------
+# Re-render — copilot
+# ---------------------------------------------------------------------------
+
+
+def test_re_render_copilot_writes_loop_agents_no_manifest_touch(tmp_path: Path) -> None:
+    """Re-rendering Copilot writes loop agents but does not touch the manifest."""
+    from ai_harness.modules.harness import re_render_for_agent_clis
+
+    install_for_agent_clis([AgentCli.GENERIC, AgentCli.COPILOT], home=tmp_path)
+
+    before = json.loads((tmp_path / MANIFEST_REL).read_text(encoding="utf-8"))
+    before_files = {k: sorted(v) for k, v in before["files_by_agent_cli"].items()}
+
+    written = re_render_for_agent_clis([AgentCli.COPILOT], home=tmp_path)
+
+    assert written, "re-render should write Copilot loop agents"
+    for name in _LOOP_AGENT_NAMES:
+        assert (tmp_path / ".copilot" / "agents" / f"{name}.agent.md") in written
+
+    # Manifest is preserved verbatim
+    after = json.loads((tmp_path / MANIFEST_REL).read_text(encoding="utf-8"))
+    after_files = {k: sorted(v) for k, v in after["files_by_agent_cli"].items()}
+    assert after_files == before_files, "re-render must not modify the manifest"
+
+
+def test_re_render_copilot_with_no_prior_install_creates_files_no_manifest(tmp_path: Path) -> None:
+    """Re-rendering Copilot without prior install writes loop agents, no manifest."""
+    from ai_harness.modules.harness import re_render_for_agent_clis
+
+    written = re_render_for_agent_clis([AgentCli.COPILOT], home=tmp_path)
+
+    assert written, "re-render writes Copilot loop agents even with no prior install"
+    for name in _LOOP_AGENT_NAMES:
+        assert (tmp_path / ".copilot" / "agents" / f"{name}.agent.md").is_file()
+    assert not (tmp_path / MANIFEST_REL).exists(), "re-render must not create the install manifest"
     install_for_agent_clis([AgentCli.GENERIC, AgentCli.OPENCODE], home=tmp_path)
 
     agent_dir = tmp_path / ".config" / "opencode" / "agent"

@@ -424,6 +424,7 @@ def _render_claude_skill(name: str, overrides: dict | None = None) -> tuple[str,
 
 _CLAUDE_AGENTS_DIR = ".claude/agents"
 _CLAUDE_SKILL_DIR = ".claude/skills/loop-orchestrator"
+_COPILOT_AGENT_DIR = ".copilot/agents"
 _OPENCODE_AGENT_DIR = ".config/opencode/agent"
 
 
@@ -448,6 +449,43 @@ def _render_opencode(name: str, overrides: dict | None = None) -> tuple[str, str
     """Render one OpenCode loop agent as a home-relative (path, content) pair."""
     filename, content = _render_opencode_agent(name, overrides=overrides)
     return f"{_OPENCODE_AGENT_DIR}/{filename}", content
+
+
+def _render_copilot_agent(name: str, overrides: dict | None = None) -> tuple[str, str]:
+    """Render a loop agent template into a Copilot agent file.
+
+    Returns (filename, content) where filename is ``<name>.agent.md`` and content
+    is the full rendered frontmatter + body.
+
+    Frontmatter carries only ``name`` and ``description`` — no ``model``, ``tools``,
+    ``user-invocable``, or ``disable-model-invocation``. The Copilot CLI ignores
+    the agent ``model`` field (github/copilot-cli#1354, #2758) and its frontmatter
+    support lags VS Code, so emitting more would write fields the CLI does not honor.
+    This renderer intentionally does not read or require a copilot model entry in
+    ``_AGENT_META`` (unlike the opencode/claude renderers).
+    """
+    meta = get_agent_meta(name, overrides=overrides)
+    body = _read_template_body(name)
+
+    copilot_frontmatter: dict[str, object] = {
+        "name": name,
+        "description": meta.get("description", ""),
+    }
+
+    yaml_text = _yaml_dump_frontmatter(copilot_frontmatter)
+    rendered = f"---\n{yaml_text}\n---\n{body}"
+    return f"{name}.agent.md", rendered
+
+
+def _render_copilot(
+    name: str,
+    overrides: dict | None = None,
+    *,
+    home: Path | None = None,
+) -> tuple[str, str]:
+    """Render one Copilot loop agent as a home-relative (path, content) pair."""
+    filename, content = _render_copilot_agent(name, overrides=overrides)
+    return f"{_COPILOT_AGENT_DIR}/{filename}", content
 
 
 def render_agents(
@@ -479,6 +517,8 @@ def render_agents(
 
     if cli == AgentCli.CLAUDE:
         return [_render_claude(name, overrides=overrides) for name in names]
+    if cli == AgentCli.COPILOT:
+        return [_render_copilot(name, overrides=overrides) for name in names]
     if cli == AgentCli.OPENCODE:
         return [_render_opencode(name, overrides=overrides) for name in names]
     return []

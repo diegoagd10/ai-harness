@@ -83,16 +83,23 @@ def _assert_opencode_missing(h: Path) -> None:
 
 
 def _assert_copilot_exists(h: Path) -> None:
-    """Assert copilot agent CLI paths exist (~/.github/ + ~/.copilot/skills/)."""
+    """Assert copilot agent CLI paths exist (~/.github/ + ~/.copilot/skills/ + ~/.copilot/agents/)."""
     copilot_md = h / ".github" / "copilot-instructions.md"
     assert_file_exists(copilot_md, "copilot ~/.github/copilot-instructions.md")
     assert copilot_md.stat().st_size > 0, f"copilot-instructions.md is empty: {copilot_md}"
     _assert_skills_exist(h / ".copilot" / "skills", "copilot")
+    # Loop agents — all four rendered as .agent.md
+    for name in ("explorer", "implementor", "validator", "loop-orchestrator"):
+        agent_path = h / ".copilot" / "agents" / f"{name}.agent.md"
+        assert_file_exists(agent_path, f"copilot agent {name}")
+        assert agent_path.stat().st_size > 0, f"copilot agent {name} is empty: {agent_path}"
 
 
 def _assert_copilot_missing(h: Path) -> None:
     """Assert copilot agent CLI paths do NOT exist."""
     assert_file_missing(h / ".github" / "copilot-instructions.md", "copilot ~/.github/copilot-instructions.md")
+    for name in ("explorer", "implementor", "validator", "loop-orchestrator"):
+        assert_file_missing(h / ".copilot" / "agents" / f"{name}.agent.md", f"copilot agent {name}")
 
 
 def _assert_manifest_exists(h: Path) -> None:

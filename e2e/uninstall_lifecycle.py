@@ -84,11 +84,16 @@ def _assert_opencode_missing(h: Path) -> None:
 def _assert_copilot_exists(h: Path) -> None:
     assert_file_exists(h / ".github" / "copilot-instructions.md", "copilot ~/.github/copilot-instructions.md")
     _assert_skills_exist(h / ".copilot" / "skills", "copilot")
+    # Loop agents — all four rendered as .agent.md
+    for name in ("explorer", "implementor", "validator", "loop-orchestrator"):
+        assert_file_exists(h / ".copilot" / "agents" / f"{name}.agent.md", f"copilot agent {name}")
 
 
 def _assert_copilot_missing(h: Path) -> None:
     assert_file_missing(h / ".github" / "copilot-instructions.md", "copilot ~/.github/copilot-instructions.md")
     _assert_skills_missing(h / ".copilot" / "skills", "copilot")
+    for name in ("explorer", "implementor", "validator", "loop-orchestrator"):
+        assert_file_missing(h / ".copilot" / "agents" / f"{name}.agent.md", f"copilot agent {name}")
 
 
 def run(cli_dir: str) -> None:
