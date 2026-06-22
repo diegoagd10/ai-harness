@@ -36,15 +36,18 @@ _console = Console()
 # Header helpers — rich Panel, matching the set-models wizard style.
 # ---------------------------------------------------------------------------
 
+_KEYBINDING_LEGEND = "↑/↓: navigate · enter: select · Esc: cancel · Ctrl+C: quit"
+
 
 def _print_header(title: str) -> None:
-    """Print a cyan-bordered Panel header matching the set-models wizard look."""
-    _console.print(
-        Panel(
-            f"[bold]{title}[/bold]",
-            border_style="cyan",
-        )
-    )
+    """Print a cyan-bordered Panel header with title and keybinding legend.
+
+    Matches the ``set-models`` wizard style (title + dim legend in a
+    ``rich.Panel``) without importing private helpers from
+    :mod:`ai_harness.modules.wizard.tui`.  The worktree delete is a
+    single-phase flow, so no terminal clear is needed.
+    """
+    _console.print(Panel(f"[bold]{title}[/bold]\n[dim]{_KEYBINDING_LEGEND}[/dim]", border_style="cyan"))
 
 
 # ---------------------------------------------------------------------------
