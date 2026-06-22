@@ -68,105 +68,6 @@ _CONFIG_SOURCE = "AGENTS.md"
 _TREE_SOURCE = "skills"
 
 
-# --- resource access ------------------------------------------------------
-
-
-def _resources_root() -> Path:
-    """Resolve the bundled resources root as a concrete filesystem path."""
-    return Path(str(files(_RESOURCE_PACKAGE))) / _RESOURCE_ROOT
-
-
-# --- small path helpers ---------------------------------------------------
-
-
-def _walk_files(root: Path) -> list[Path]:
-    """All regular files under *root*, sorted for deterministic output."""
-    return sorted((p for p in root.rglob("*") if p.is_file()), key=lambda p: p.as_posix())
-
-
-# --- install artifact writers ---------------------------------------------
-#
-# Each writer takes *home* and returns the absolute paths it wrote. Per-CLI
-# destination knowledge lives in the writers' bound arguments (the persona
-# writer) or in the render seam (the rendered-agents writer) — never in a
-# CLI-keyed path table inside the install loop.
-
-
-def _write_persona_and_skills(home: Path, *, config_dest_rel: str, tree_dest_rel: str) -> list[Path]:
-    """Copy the persona file + skills tree into *home*; return absolute paths written."""
-    resources = _resources_root()
-    written: list[Path] = []
-
-    config_dest = home / config_dest_rel
-    config_dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(resources / _CONFIG_SOURCE, config_dest)
-    written.append(config_dest)
-
-    tree_dest = home / tree_dest_rel
-    shutil.copytree(resources / _TREE_SOURCE, tree_dest, dirs_exist_ok=True)
-    written.extend(_walk_files(tree_dest))
-
-    return written
-
-
-def _write_rendered_agents(home: Path, *, cli: AgentCli) -> list[Path]:
-    """Render the loop agents for *cli* into *home*; return absolute paths written.
-
-    Delegates override-store loading to ``render_agents`` (which reads
-    ``~/.ai-harness/overrides.json`` itself), so a missing file is a no-op
-    and a malformed file fails loudly — no pre-loading duplication here.
-    """
-    written: list[Path] = []
-    for rendered in render_agents(cli, home=home):
-        dest = home / rendered.filename
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(rendered.content, encoding="utf-8")
-        written.append(dest)
-    return written
-
-
-# --- data-driven install plan --------------------------------------------
-#
-# One table maps each agent CLI to its ordered list of artifact writers. The
-# install loop dispatches purely through this table — adding a CLI is one entry.
-
-_InstallWriter = Callable[[Path], list[Path]]
-
-_INSTALL_PLAN: dict[AgentCli, list[_InstallWriter]] = {
-    AgentCli.GENERIC: [
-        partial(_write_persona_and_skills, config_dest_rel=".agents/AGENTS.md", tree_dest_rel=".agents/skills"),
-    ],
-    AgentCli.CLAUDE: [
-        partial(_write_persona_and_skills, config_dest_rel=".claude/CLAUDE.md", tree_dest_rel=".claude/skills"),
-        partial(_write_rendered_agents, cli=AgentCli.CLAUDE),
-    ],
-    AgentCli.COPILOT: [
-        partial(
-            _write_persona_and_skills,
-            config_dest_rel=".github/copilot-instructions.md",
-            tree_dest_rel=".copilot/skills",
-        ),
-        partial(_write_rendered_agents, cli=AgentCli.COPILOT),
-    ],
-    AgentCli.OPENCODE: [
-        partial(_write_rendered_agents, cli=AgentCli.OPENCODE),
-    ],
-}
-
-# Re-render plan — only writers that re-emit loop agents. Used by
-# ``re_render_for_agent_clis`` for scoped refreshes (e.g. after the
-# set-models wizard edits ``overrides.json``) where touching the install
-# manifest would clobber other CLIs. CLIs with no native loop-agent
-# concept (GENERIC) intentionally get an empty list.
-_RENDER_PLAN: dict[AgentCli, list[_InstallWriter]] = {
-    AgentCli.CLAUDE: [partial(_write_rendered_agents, cli=AgentCli.CLAUDE)],
-    AgentCli.COPILOT: [partial(_write_rendered_agents, cli=AgentCli.COPILOT)],
-    AgentCli.OPENCODE: [partial(_write_rendered_agents, cli=AgentCli.OPENCODE)],
-}
-
-
-# --- repo-local scaffolding constants ---------------------------------------
-
 _CODING_STANDARDS_SKELETON = """\
 # Coding Standards
 
@@ -377,6 +278,79 @@ def init_repo(
 
 
 # --- private helpers -------------------------------------------------------
+
+
+def _resources_root() -> Path:
+    """Resolve the bundled resources root as a concrete filesystem path."""
+    return Path(str(files(_RESOURCE_PACKAGE))) / _RESOURCE_ROOT
+
+
+def _walk_files(root: Path) -> list[Path]:
+    """All regular files under *root*, sorted for deterministic output."""
+    return sorted((p for p in root.rglob("*") if p.is_file()), key=lambda p: p.as_posix())
+
+
+def _write_persona_and_skills(home: Path, *, config_dest_rel: str, tree_dest_rel: str) -> list[Path]:
+    """Copy the persona file + skills tree into *home*; return absolute paths written."""
+    resources = _resources_root()
+    written: list[Path] = []
+
+    config_dest = home / config_dest_rel
+    config_dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(resources / _CONFIG_SOURCE, config_dest)
+    written.append(config_dest)
+
+    tree_dest = home / tree_dest_rel
+    shutil.copytree(resources / _TREE_SOURCE, tree_dest, dirs_exist_ok=True)
+    written.extend(_walk_files(tree_dest))
+
+    return written
+
+
+def _write_rendered_agents(home: Path, *, cli: AgentCli) -> list[Path]:
+    """Render the loop agents for *cli* into *home*; return absolute paths written.
+
+    Delegates override-store loading to ``render_agents`` (which reads
+    ``~/.ai-harness/overrides.json`` itself), so a missing file is a no-op
+    and a malformed file fails loudly — no pre-loading duplication here.
+    """
+    written: list[Path] = []
+    for rendered in render_agents(cli, home=home):
+        dest = home / rendered.filename
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(rendered.content, encoding="utf-8")
+        written.append(dest)
+    return written
+
+
+_InstallWriter = Callable[[Path], list[Path]]
+
+_INSTALL_PLAN: dict[AgentCli, list[_InstallWriter]] = {
+    AgentCli.GENERIC: [
+        partial(_write_persona_and_skills, config_dest_rel=".agents/AGENTS.md", tree_dest_rel=".agents/skills"),
+    ],
+    AgentCli.CLAUDE: [
+        partial(_write_persona_and_skills, config_dest_rel=".claude/CLAUDE.md", tree_dest_rel=".claude/skills"),
+        partial(_write_rendered_agents, cli=AgentCli.CLAUDE),
+    ],
+    AgentCli.COPILOT: [
+        partial(
+            _write_persona_and_skills,
+            config_dest_rel=".github/copilot-instructions.md",
+            tree_dest_rel=".copilot/skills",
+        ),
+        partial(_write_rendered_agents, cli=AgentCli.COPILOT),
+    ],
+    AgentCli.OPENCODE: [
+        partial(_write_rendered_agents, cli=AgentCli.OPENCODE),
+    ],
+}
+
+_RENDER_PLAN: dict[AgentCli, list[_InstallWriter]] = {
+    AgentCli.CLAUDE: [partial(_write_rendered_agents, cli=AgentCli.CLAUDE)],
+    AgentCli.COPILOT: [partial(_write_rendered_agents, cli=AgentCli.COPILOT)],
+    AgentCli.OPENCODE: [partial(_write_rendered_agents, cli=AgentCli.OPENCODE)],
+}
 
 
 def _manifest_path(home: Path) -> Path:
