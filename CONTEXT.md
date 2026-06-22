@@ -17,6 +17,18 @@ looping implementor↔validator until clean. The four agents are one unit, not
 loose parts — they are authored together as the *loop agents* under
 `resources/loop-agent/` and installed as a set.
 
+## Worktree
+
+An isolated git working tree a *Loop* session runs in, created by the
+`ai-harness worktree` command at `.ai-harness/worktrees/<Date.now()>` (detached
+at `main`'s HEAD) and gitignored. Its purpose is isolation: a loop running there
+cannot disturb the host repository, so a human can grill / domain-model in the
+host tree — or run a second loop — at the same time without either stepping on
+the other. The human launches their Agent CLI inside it; the worktree is the
+*directory*, distinct from the `loop-run/<ts>` *branch* that gets checked out in
+it.
+_Avoid_: checkout, clone, copy
+
 ## prd-issue
 
 A GitHub issue holding the full context for a unit of product work. It is split
