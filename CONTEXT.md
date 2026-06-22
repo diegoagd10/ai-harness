@@ -20,7 +20,7 @@ loose parts — they are authored together as the *loop agents* under
 ## Worktree
 
 An isolated git working tree a *Loop* session runs in, created by the
-`ai-harness worktree` command at `.ai-harness/worktrees/<Date.now()>` (detached
+`ai-harness worktree create` command at `.ai-harness/worktrees/<Date.now()>` (detached
 at the current branch's HEAD) and gitignored. Its purpose is isolation: a loop
 running there cannot disturb the host repository, so a human can grill /
 domain-model in the host tree — or run a second loop — at the same time without

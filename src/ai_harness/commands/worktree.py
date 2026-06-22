@@ -3,8 +3,8 @@
 No business logic here; the command delegates to the functions in
 :mod:`ai_harness.modules.harness.worktree` and echoes the result.
 
-- Bare ``ai-harness worktree`` creates a detached worktree based on the
-  current branch (identical flow to today, except the base ref).
+- ``ai-harness worktree create`` creates a detached worktree based on the
+  current branch.
 - ``ai-harness worktree delete`` lists ai-harness worktrees, shows an
   interactive picker with a rich Panel header, confirms, and removes
   the selected worktree (no ``--force``).
@@ -28,7 +28,7 @@ from ai_harness.modules.harness.worktree import (
     remove_worktree,
 )
 
-app = typer.Typer(invoke_without_command=True)
+app = typer.Typer()
 
 _console = Console()
 
@@ -66,12 +66,12 @@ def _require_tty() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Bare callback — create worktree
+# create verb — create worktree
 # ---------------------------------------------------------------------------
 
 
-@app.callback()
-def worktree_callback() -> None:
+@app.command(name="create")
+def create_worktree_cmd() -> None:
     """Create an isolated git worktree at .ai-harness/worktrees/<Date.now()>.
 
     Detached at the current branch's HEAD — the orchestrator still owns

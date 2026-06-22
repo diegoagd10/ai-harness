@@ -279,12 +279,12 @@ def test_create_worktree_result_has_path_even_on_failure(tmp_path: Path) -> None
 
 
 # ---------------------------------------------------------------------------
-# CLI adapter — bare create exercised through typer
+# CLI adapter — ``create`` verb exercised through typer
 # ---------------------------------------------------------------------------
 
 
-def test_cli_worktree_echoes_path_and_exits_zero(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """``ai-harness worktree`` echoes the worktree path and exits 0."""
+def test_cli_worktree_create_echoes_path_and_exits_zero(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``ai-harness worktree create`` echoes the worktree path and exits 0."""
     from ai_harness.commands import worktree as cmd
 
     monkeypatch.chdir(tmp_path)
@@ -295,14 +295,14 @@ def test_cli_worktree_echoes_path_and_exits_zero(tmp_path: Path, monkeypatch: py
     )
     monkeypatch.setattr(cmd, "create_worktree", lambda repo_root=None, **kw: fake_result)
 
-    result = runner.invoke(app, ["worktree"])
+    result = runner.invoke(app, ["worktree", "create"])
 
     assert result.exit_code == 0, result.stderr
     assert "Created worktree:" in result.stdout
     assert "12345" in result.stdout
 
 
-def test_cli_worktree_reports_gitignore_written(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cli_worktree_create_reports_gitignore_written(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """When gitignore was written, the CLI reports it."""
     from ai_harness.commands import worktree as cmd
 
@@ -314,13 +314,13 @@ def test_cli_worktree_reports_gitignore_written(tmp_path: Path, monkeypatch: pyt
     )
     monkeypatch.setattr(cmd, "create_worktree", lambda repo_root=None, **kw: fake_result)
 
-    result = runner.invoke(app, ["worktree"])
+    result = runner.invoke(app, ["worktree", "create"])
 
     assert "Created .ai-harness/.gitignore" in result.stdout
     assert "already present" not in result.stdout
 
 
-def test_cli_worktree_reports_gitignore_already_present(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cli_worktree_create_reports_gitignore_already_present(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """When gitignore already existed, the CLI reports it unchanged."""
     from ai_harness.commands import worktree as cmd
 
@@ -332,13 +332,13 @@ def test_cli_worktree_reports_gitignore_already_present(tmp_path: Path, monkeypa
     )
     monkeypatch.setattr(cmd, "create_worktree", lambda repo_root=None, **kw: fake_result)
 
-    result = runner.invoke(app, ["worktree"])
+    result = runner.invoke(app, ["worktree", "create"])
 
     assert "already present" in result.stdout
     assert "Created .ai-harness/.gitignore" not in result.stdout
 
 
-def test_cli_worktree_routes_warning_to_stderr(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cli_worktree_create_routes_warning_to_stderr(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Warning is printed to stderr, not stdout."""
     from ai_harness.commands import worktree as cmd
 
@@ -350,14 +350,14 @@ def test_cli_worktree_routes_warning_to_stderr(tmp_path: Path, monkeypatch: pyte
     )
     monkeypatch.setattr(cmd, "create_worktree", lambda repo_root=None, **kw: fake_result)
 
-    result = runner.invoke(app, ["worktree"])
+    result = runner.invoke(app, ["worktree", "create"])
 
     assert result.exit_code == 0, result.stdout
     assert "Warning:" in result.stderr
     assert "git not found" in result.stderr
 
 
-def test_cli_worktree_does_not_print_created_on_warning(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cli_worktree_create_does_not_print_created_on_warning(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """When warning is set (e.g. detached HEAD), 'Created worktree' must not appear."""
     from ai_harness.commands import worktree as cmd
 
@@ -369,10 +369,23 @@ def test_cli_worktree_does_not_print_created_on_warning(tmp_path: Path, monkeypa
     )
     monkeypatch.setattr(cmd, "create_worktree", lambda repo_root=None, **kw: fake_result)
 
-    result = runner.invoke(app, ["worktree"])
+    result = runner.invoke(app, ["worktree", "create"])
 
     assert "Created worktree:" not in result.stdout
     assert "Warning:" in result.stderr
+
+
+def test_cli_worktree_no_subcommand_exits_with_help() -> None:
+    """``ai-harness worktree`` with no subcommand exits non-zero (Missing command)
+    and ``--help`` lists ``create`` and ``delete``."""
+    result = runner.invoke(app, ["worktree"])
+    assert result.exit_code == 2
+    assert "Missing command" in result.stderr
+
+    help_result = runner.invoke(app, ["worktree", "--help"])
+    assert help_result.exit_code == 0
+    assert "create" in help_result.stdout
+    assert "delete" in help_result.stdout
 
 
 # ---------------------------------------------------------------------------
