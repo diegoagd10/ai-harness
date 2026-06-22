@@ -875,7 +875,7 @@ def test_install_with_partial_overrides_preserves_others(tmp_path: Path) -> None
     validator_fm = _read_frontmatter(tmp_path / ".config" / "opencode" / "agent" / "validator.md")
     orchestrator_fm = _read_frontmatter(tmp_path / ".config" / "opencode" / "agent" / "loop-orchestrator.md")
     assert explorer_fm["model"] == "opencode-go/kimi-k2.7-code"
-    assert validator_fm["model"] == "openai/gpt-4.1-mini"
+    assert validator_fm["model"] == "openai/gpt-5.4-mini"
     assert orchestrator_fm["model"] == "openai/gpt-5.5"
 
 

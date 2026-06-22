@@ -69,7 +69,7 @@ _AGENT_META: dict[str, dict] = {
         ),
         "mode": "subagent",
         "model": {
-            "opencode": "openai/gpt-4.1-mini",
+            "opencode": "openai/gpt-5.4-mini",
             "claude": "sonnet",
         },
         "permission": {"edit": "deny", "write": "deny"},
