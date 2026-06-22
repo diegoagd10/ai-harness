@@ -481,6 +481,40 @@ def test_list_worktrees_filters_non_ai_harness_paths(tmp_path: Path) -> None:
     assert entries == []
 
 
+def test_list_worktrees_excludes_sibling_prefix(tmp_path: Path) -> None:
+    """A path like .ai-harness/worktrees2/<ts> must NOT match the .ai-harness/worktrees/ filter."""
+    worktrees_dir = tmp_path / ".ai-harness" / "worktrees"
+    worktrees2_dir = tmp_path / ".ai-harness" / "worktrees2"
+    worktrees_dir.mkdir(parents=True, exist_ok=True)
+    worktrees2_dir.mkdir(parents=True, exist_ok=True)
+
+    w1 = worktrees_dir / "1782100000000"
+    w2 = worktrees2_dir / "1782100000000"  # same ts under sibling dir
+    w1.mkdir()
+    w2.mkdir()
+
+    porcelain = (
+        f"worktree {tmp_path}\n"
+        "HEAD abc\n"
+        "branch refs/heads/main\n"
+        "\n"
+        f"worktree {w1}\n"
+        "HEAD 1111\n"
+        "branch refs/heads/feat/x\n"
+        "\n"
+        f"worktree {w2}\n"
+        "HEAD 2222\n"
+        "branch refs/heads/feat/y\n"
+        "\n"
+    )
+    run = _FakeRun(returncode=0, stdout=porcelain)
+
+    entries = list_worktrees(tmp_path, _run=run)
+
+    assert len(entries) == 1
+    assert entries[0].path == w1
+
+
 # ---------------------------------------------------------------------------
 # remove_worktree — injected _run seam
 # ---------------------------------------------------------------------------

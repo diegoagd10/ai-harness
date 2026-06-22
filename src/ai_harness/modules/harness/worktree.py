@@ -254,9 +254,11 @@ def _resolve_current_branch(run, repo_root: Path) -> str | None:
 def _parse_worktree_porcelain(porcelain: str, repo_root: Path) -> list[WorktreeEntry]:
     """Parse ``git worktree list --porcelain`` output into WorktreeEntry list.
 
-    Filters to entries whose path is under ``.ai-harness/worktrees/``.
+    Filters to entries whose parent directory is exactly
+    ``.ai-harness/worktrees/`` — sibling paths like ``.ai-harness/worktrees2/``
+    are excluded.
     """
-    prefix = str(repo_root / ".ai-harness" / "worktrees")
+    worktrees_dir = repo_root / ".ai-harness" / "worktrees"
     entries: list[WorktreeEntry] = []
 
     current_path: str | None = None
@@ -274,7 +276,7 @@ def _parse_worktree_porcelain(porcelain: str, repo_root: Path) -> list[WorktreeE
             current_branch = line[len("branch ") :].removeprefix("refs/heads/")
         elif line == "" and current_path is not None:
             # End of one entry — decide whether to keep it.
-            if current_path.startswith(prefix):
+            if Path(current_path).parent == worktrees_dir:
                 path = Path(current_path)
                 ts = path.name
                 detached = current_branch is None
