@@ -27,3 +27,20 @@ class InstallManifest:
 
     agent_clis: list[AgentCli]
     written_paths: list[Path]
+
+
+@dataclass(frozen=True, slots=True)
+class InitResult:
+    """Observable outcome of ``init_repo``.
+
+    Each field reports whether the corresponding artifact was written.
+    ``wrote_labels_policy`` is ``False`` when markers are already present
+    or when ``CLAUDE.md`` does not exist; ``claude_md_missing``
+    distinguishes the two skip cases.
+    """
+
+    wrote_standards: bool
+    wrote_labels_policy: bool
+    claude_md_missing: bool = False
+    created_labels: list[str] = ()
+    label_warnings: list[str] = ()
