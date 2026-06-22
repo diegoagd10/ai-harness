@@ -15,6 +15,9 @@ function in ``renderers.py``.
 
 Public surface (re-exported from the package)
 ---------------------------------------------
+InstallManifest            The exact record uninstall_for_agent_clis consumes.
+InitResult                 Observable outcome of init_repo.
+WriteLabelsResult          Outcome of _write_labels_policy.
 install_for_agent_clis     Map bundled resources to agent CLI paths, write, record manifest.
 re_render_for_agent_clis   Re-write rendered loop agents without touching the install manifest.
 uninstall_for_agent_clis   Remove files recorded in the manifest.
@@ -26,31 +29,27 @@ from __future__ import annotations
 import json
 import shutil
 from collections.abc import Callable
+from dataclasses import dataclass
 from functools import partial
 from importlib.resources import files
 from pathlib import Path
 from typing import NamedTuple
 
 from ai_harness.modules.harness.labels import ensure_labels
-from ai_harness.modules.harness.models import AgentCli, InitResult, InstallManifest
+from ai_harness.modules.harness.models import AgentCli
 from ai_harness.modules.harness.renderers import render_agents
 
+__all__ = [
+    "InitResult",
+    "InstallManifest",
+    "WriteLabelsResult",
+    "init_repo",
+    "install_for_agent_clis",
+    "re_render_for_agent_clis",
+    "uninstall_for_agent_clis",
+]
 
-class WriteLabelsResult(NamedTuple):
-    """Outcome of ``_write_labels_policy``: whether the block was appended and whether CLAUDE.md existed.
-
-    ``wrote`` is ``True`` only when the labels-policy block was appended;
-    ``claude_md_missing`` distinguishes the two skip cases (``False`` →
-    markers already present, ``True`` → ``CLAUDE.md`` absent). Naming the
-    pair avoids the positional ``(wrote, claude_md_missing)`` tuple where
-    callers could swap the booleans.
-    """
-
-    wrote: bool
-    claude_md_missing: bool
-
-
-# --- the secret knowledge this module hides -------------------------------
+# --- constants --------------------------------------------------------------
 #
 # Every agent CLI installs the same two source artifacts — a persona file
 # (AGENTS.md) and a skills tree (skills/) — into agent-CLI-specific
@@ -77,66 +76,12 @@ def _resources_root() -> Path:
     return Path(str(files(_RESOURCE_PACKAGE))) / _RESOURCE_ROOT
 
 
-# --- manifest persistence -------------------------------------------------
-
-
-def _manifest_path(home: Path) -> Path:
-    return home / _MANIFEST_DIR / _MANIFEST_FILENAME
-
-
-def _write_manifest(home: Path, agent_clis: list[AgentCli], files_by_agent_cli: dict[str, list[str]]) -> None:
-    data = {
-        "version": _MANIFEST_VERSION,
-        "agent_clis": [a.value for a in agent_clis],
-        "files_by_agent_cli": files_by_agent_cli,
-    }
-    path = _manifest_path(home)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-
-
-def _read_manifest(home: Path) -> dict | None:
-    path = _manifest_path(home)
-    if not path.is_file():
-        return None
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
 # --- small path helpers ---------------------------------------------------
 
 
 def _walk_files(root: Path) -> list[Path]:
     """All regular files under *root*, sorted for deterministic output."""
     return sorted((p for p in root.rglob("*") if p.is_file()), key=lambda p: p.as_posix())
-
-
-def _relative_to(home: Path, path: Path) -> str:
-    """A path expressed relative to *home* as a POSIX string (portable on disk)."""
-    return path.relative_to(home).as_posix()
-
-
-def _prune_empty_dirs(dirs: set[Path], stop_at: Path) -> None:
-    """Remove now-empty directories created by install, never touching *stop_at*.
-
-    Only directories that are actually empty are removed (``rmdir`` refuses
-    non-empty dirs), so user files that happen to live alongside an agent CLI's
-    directory (e.g. an existing ~/.github/) are preserved.
-    """
-    candidates: set[Path] = set()
-    for start in dirs:
-        if start == stop_at:
-            continue
-        candidates.add(start)
-        for ancestor in start.parents:
-            if ancestor == stop_at:
-                break
-            candidates.add(ancestor)
-    for candidate in sorted(candidates, key=lambda p: len(p.parts), reverse=True):
-        try:
-            candidate.rmdir()
-        except OSError:
-            # not empty, missing, or not a directory — leave it alone
-            pass
 
 
 # --- install artifact writers ---------------------------------------------
@@ -218,6 +163,82 @@ _RENDER_PLAN: dict[AgentCli, list[_InstallWriter]] = {
     AgentCli.COPILOT: [partial(_write_rendered_agents, cli=AgentCli.COPILOT)],
     AgentCli.OPENCODE: [partial(_write_rendered_agents, cli=AgentCli.OPENCODE)],
 }
+
+
+# --- repo-local scaffolding constants ---------------------------------------
+
+_CODING_STANDARDS_SKELETON = """\
+# Coding Standards
+
+## Style
+
+## Testing
+
+## Architecture
+
+## Commits
+
+## Quality gates
+"""
+
+_LABELS_POLICY_BLOCK = """\
+<!-- ai-harness:start -->
+
+## Loop label policy
+
+- A **prd-issue** carries `ready-for-agent` only — never `loop`.
+- A **sub-issue** carries `ready-for-agent` + `loop`.
+
+<!-- ai-harness:end -->
+"""
+
+_AI_HARNESS_START = "<!-- ai-harness:start -->"
+_AI_HARNESS_END = "<!-- ai-harness:end -->"
+
+
+# --- public types -----------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class InstallManifest:
+    """The exact record ``uninstall_for_agent_clis`` consumes.
+
+    Persisted to ``~/.ai-harness/installed.json``.
+    """
+
+    agent_clis: list[AgentCli]
+    written_paths: list[Path]
+
+
+@dataclass(frozen=True, slots=True)
+class InitResult:
+    """Observable outcome of ``init_repo``.
+
+    Each field reports whether the corresponding artifact was written.
+    ``wrote_labels_policy`` is ``False`` when markers are already present
+    or when ``CLAUDE.md`` does not exist; ``claude_md_missing``
+    distinguishes the two skip cases.
+    """
+
+    wrote_standards: bool
+    wrote_labels_policy: bool
+    claude_md_missing: bool = False
+    created_labels: tuple[str, ...] = ()
+    label_warnings: tuple[str, ...] = ()
+
+
+class WriteLabelsResult(NamedTuple):
+    """Outcome of ``_write_labels_policy``: whether the block was appended and whether CLAUDE.md existed.
+
+    ``wrote`` is ``True`` only when the labels-policy block was appended;
+    ``claude_md_missing`` distinguishes the two skip cases (``False`` →
+    markers already present, ``True`` → ``CLAUDE.md`` absent). Naming the
+    pair avoids the positional ``(wrote, claude_md_missing)`` tuple where
+    callers could swap the booleans.
+    """
+
+    wrote: bool
+    claude_md_missing: bool
 
 
 # --- public operations ----------------------------------------------------
@@ -320,37 +341,6 @@ def uninstall_for_agent_clis(agent_clis: list[AgentCli] | None, *, home: Path | 
         _write_manifest(home, remaining, remaining_files)
 
 
-# --- repo-local scaffolding (init) ---------------------------------------
-
-_CODING_STANDARDS_SKELETON = """\
-# Coding Standards
-
-## Style
-
-## Testing
-
-## Architecture
-
-## Commits
-
-## Quality gates
-"""
-
-_LABELS_POLICY_BLOCK = """\
-<!-- ai-harness:start -->
-
-## Loop label policy
-
-- A **prd-issue** carries `ready-for-agent` only — never `loop`.
-- A **sub-issue** carries `ready-for-agent` + `loop`.
-
-<!-- ai-harness:end -->
-"""
-
-_AI_HARNESS_START = "<!-- ai-harness:start -->"
-_AI_HARNESS_END = "<!-- ai-harness:end -->"
-
-
 def init_repo(
     repo_root: Path | None = None,
 ) -> InitResult:
@@ -384,6 +374,60 @@ def init_repo(
         created_labels=tuple(label_result.created),
         label_warnings=tuple(label_result.warnings),
     )
+
+
+# --- private helpers -------------------------------------------------------
+
+
+def _manifest_path(home: Path) -> Path:
+    return home / _MANIFEST_DIR / _MANIFEST_FILENAME
+
+
+def _write_manifest(home: Path, agent_clis: list[AgentCli], files_by_agent_cli: dict[str, list[str]]) -> None:
+    data = {
+        "version": _MANIFEST_VERSION,
+        "agent_clis": [a.value for a in agent_clis],
+        "files_by_agent_cli": files_by_agent_cli,
+    }
+    path = _manifest_path(home)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+def _read_manifest(home: Path) -> dict | None:
+    path = _manifest_path(home)
+    if not path.is_file():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _relative_to(home: Path, path: Path) -> str:
+    """A path expressed relative to *home* as a POSIX string (portable on disk)."""
+    return path.relative_to(home).as_posix()
+
+
+def _prune_empty_dirs(dirs: set[Path], stop_at: Path) -> None:
+    """Remove now-empty directories created by install, never touching *stop_at*.
+
+    Only directories that are actually empty are removed (``rmdir`` refuses
+    non-empty dirs), so user files that happen to live alongside an agent CLI's
+    directory (e.g. an existing ~/.github/) are preserved.
+    """
+    candidates: set[Path] = set()
+    for start in dirs:
+        if start == stop_at:
+            continue
+        candidates.add(start)
+        for ancestor in start.parents:
+            if ancestor == stop_at:
+                break
+            candidates.add(ancestor)
+    for candidate in sorted(candidates, key=lambda p: len(p.parts), reverse=True):
+        try:
+            candidate.rmdir()
+        except OSError:
+            # not empty, missing, or not a directory — leave it alone
+            pass
 
 
 def _write_coding_standards(root: Path) -> bool:
