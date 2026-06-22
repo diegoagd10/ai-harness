@@ -3,12 +3,15 @@
 Each render function takes a template name and returns the rendered string with
 CLI-specific frontmatter injected from code constants. Resource template files
 contain only the shared prompt body — all metadata (description, mode, model,
-permissions) lives in ``_AGENT_META`` below.
+permissions) lives in ``_AGENT_META``.
 
 Public surface
 --------------
-render_agents           Render loop agents for a CLI as home-relative ``RenderedFile`` records (filename + content).
-get_agent_meta          Return the metadata dict for a named agent.
+AgentCaps              What an agent may do, in CLI-neutral terms.
+RenderedFile           One rendered agent file: a home-relative path and the file's full content.
+render_agents          Render loop agents for a CLI as home-relative ``RenderedFile`` records.
+get_agent_meta         Return the metadata dict for a named agent.
+write_override_store   Deep-merge into the per-agent override store at ``~/.ai-harness/overrides.json``.
 
 All other render mechanics (per-CLI render functions, discovery, mode dispatch,
 destination layout) are private and owned by ``render_agents``.
@@ -28,8 +31,27 @@ import yaml
 
 from ai_harness.modules.harness.models import AgentCli
 
+__all__ = [
+    "AgentCaps",
+    "RenderedFile",
+    "get_agent_meta",
+    "render_agents",
+    "write_override_store",
+]
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
 _LOOP_AGENT_PACKAGE = "ai_harness.resources"
 _LOOP_AGENT_DIR = "loop-agent"
+
+_OVERRIDES_REL = ".ai-harness/overrides.json"
+
+
+# ---------------------------------------------------------------------------
+# Public types
+# ---------------------------------------------------------------------------
 
 
 class RenderedFile(NamedTuple):
@@ -44,11 +66,9 @@ class RenderedFile(NamedTuple):
     content: str
 
 
-# ---------------------------------------------------------------------------
 # Agent metadata — single source of truth for description, mode, per-CLI
 # models, and permission blocks. Resource templates carry only the prompt
-# body; this constant is what the render functions read.
-# ---------------------------------------------------------------------------
+# body; ``_AGENT_META`` is what the render functions read.
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +86,94 @@ class AgentCaps:
     write: bool = True  # may modify the filesystem (edit + create)
     bash: bool = True  # may run shell commands
     spawn: tuple[str, ...] | None = None  # None = cannot spawn; tuple = subagent allowlist
+
+
+# ---------------------------------------------------------------------------
+# Public functions
+# ---------------------------------------------------------------------------
+
+
+def render_agents(
+    cli: AgentCli,
+    names: list[str] | None = None,
+    overrides: dict | None = None,
+    *,
+    home: Path | None = None,
+) -> list[RenderedFile]:
+    """Render the loop agents for *cli* as home-relative ``RenderedFile`` records.
+
+    The sole public agent-render entry. Owns skill-vs-agent mode dispatch,
+    destination directory layout, and filename. Returns POSIX home-relative
+    paths in discovery (sorted) order so output is byte-identical to the prior
+    inline emission.
+
+    *names* defaults to the discovered loop agents; pass an explicit list to
+    render a subset. *overrides* is an optional per-agent partial overlay
+    deep-merged over the template defaults; ``None`` loads the override
+    store from ``home/.ai-harness/overrides.json`` (default
+    ``Path.home()``), ``{}`` is an explicit no-op. CLIs without native
+    agent support return an empty list.
+    """
+    if names is None:
+        names = _discover_loop_agents()
+
+    if overrides is None:
+        overrides = _load_override_store(home if home is not None else Path.home())
+
+    if cli == AgentCli.CLAUDE:
+        return [_render_claude(name, overrides=overrides) for name in names]
+    if cli == AgentCli.COPILOT:
+        return [_render_copilot(name, overrides=overrides) for name in names]
+    if cli == AgentCli.OPENCODE:
+        return [_render_opencode(name, overrides=overrides) for name in names]
+    return []
+
+
+def get_agent_meta(name: str, overrides: dict | None = None, *, home: Path | None = None) -> dict:
+    """Return the metadata dict for a named agent (from ``_AGENT_META``).
+
+    *overrides* is an optional per-agent partial overlay (see project docs).
+    When ``None`` (the default), the override store is loaded from
+    ``home/.ai-harness/overrides.json`` (``Path.home()`` when *home* is
+    ``None``); an absent file is a no-op, a malformed file raises
+    ``json.JSONDecodeError``. When provided, the dict is used verbatim —
+    callers can pass ``{}`` for an explicit empty store, sidestepping the
+    disk lookup. The override entry for *name* is deep-merged over the
+    template defaults; absent or unknown agents keep their template values.
+    The returned dict is always a fresh copy so callers cannot mutate the
+    shared template state.
+
+    Public so tests can derive expected frontmatter from the same source.
+    """
+    meta = _AGENT_META.get(name)
+    if meta is None:
+        raise ValueError(f"Unknown agent template: {name!r}")
+    if overrides is None:
+        overrides = _load_override_store(home if home is not None else Path.home())
+    override_entry = overrides.get(name, {})
+    return _deep_merge(meta, override_entry)
+
+
+def write_override_store(home: Path, payload: dict) -> None:
+    """Deep-merge *payload* into the per-agent override store and write it back.
+
+    Public so the ``set-models`` wizard can persist user choices without
+    re-implementing the store path. Existing entries for other agents, or
+    for the same agent under different fields, are preserved — only the
+    keys present in *payload* change. The file is written atomically: an
+    in-memory merge, then a single write to ``~/.ai-harness/overrides.json``.
+    Malformed existing JSON is raised as-is (matching the loader's contract).
+    """
+    existing = _load_override_store(home)
+    merged = _deep_merge(existing, payload)
+    path = home / _OVERRIDES_REL
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(merged, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Private helpers
+# ---------------------------------------------------------------------------
 
 
 def _opencode_permission(caps: AgentCaps) -> dict:
@@ -165,13 +273,6 @@ def _loop_agent_dir() -> Traversable:
     return files(_LOOP_AGENT_PACKAGE) / _LOOP_AGENT_DIR
 
 
-# ---------------------------------------------------------------------------
-# Override store — ``<home>/.ai-harness/overrides.json``
-# ---------------------------------------------------------------------------
-
-_OVERRIDES_REL = ".ai-harness/overrides.json"
-
-
 def _load_override_store(home: Path) -> dict:
     """Return the per-agent override store at ``home/.ai-harness/overrides.json``.
 
@@ -184,64 +285,6 @@ def _load_override_store(home: Path) -> dict:
     if not path.is_file():
         return {}
     return json.loads(path.read_text(encoding="utf-8"))
-
-
-def write_override_store(home: Path, payload: dict) -> None:
-    """Deep-merge *payload* into the per-agent override store and write it back.
-
-    Public so the ``set-models`` wizard can persist user choices without
-    re-implementing the store path. Existing entries for other agents, or
-    for the same agent under different fields, are preserved — only the
-    keys present in *payload* change. The file is written atomically: an
-    in-memory merge, then a single write to ``~/.ai-harness/overrides.json``.
-    Malformed existing JSON is raised as-is (matching the loader's contract).
-    """
-    existing = _load_override_store(home)
-    merged = _deep_merge(existing, payload)
-    path = home / _OVERRIDES_REL
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(merged, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-
-def _discover_loop_agents() -> list[str]:
-    """Return sorted list of loop agent template names (without .md extension)."""
-    root = _loop_agent_dir()
-    names: list[str] = []
-    for p in sorted(root.glob("*.md")):
-        names.append(p.stem)
-    return names
-
-
-def _read_template_source(name: str) -> str:
-    """Return the raw template text for a named agent (e.g. 'explorer')."""
-    root = _loop_agent_dir()
-    path = root / f"{name}.md"
-    return path.read_text(encoding="utf-8")
-
-
-def get_agent_meta(name: str, overrides: dict | None = None, *, home: Path | None = None) -> dict:
-    """Return the metadata dict for a named agent (from ``_AGENT_META``).
-
-    *overrides* is an optional per-agent partial overlay (see project docs).
-    When ``None`` (the default), the override store is loaded from
-    ``home/.ai-harness/overrides.json`` (``Path.home()`` when *home* is
-    ``None``); an absent file is a no-op, a malformed file raises
-    ``json.JSONDecodeError``. When provided, the dict is used verbatim —
-    callers can pass ``{}`` for an explicit empty store, sidestepping the
-    disk lookup. The override entry for *name* is deep-merged over the
-    template defaults; absent or unknown agents keep their template values.
-    The returned dict is always a fresh copy so callers cannot mutate the
-    shared template state.
-
-    Public so tests can derive expected frontmatter from the same source.
-    """
-    meta = _AGENT_META.get(name)
-    if meta is None:
-        raise ValueError(f"Unknown agent template: {name!r}")
-    if overrides is None:
-        overrides = _load_override_store(home if home is not None else Path.home())
-    override_entry = overrides.get(name, {})
-    return _deep_merge(meta, override_entry)
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
@@ -275,6 +318,22 @@ def _get_agent_mode(
     ``~/.ai-harness/overrides.json`` read at the ambient ``$HOME``.
     """
     return get_agent_meta(name, overrides=overrides, home=home).get("mode", "subagent")
+
+
+def _discover_loop_agents() -> list[str]:
+    """Return sorted list of loop agent template names (without .md extension)."""
+    root = _loop_agent_dir()
+    names: list[str] = []
+    for p in sorted(root.glob("*.md")):
+        names.append(p.stem)
+    return names
+
+
+def _read_template_source(name: str) -> str:
+    """Return the raw template text for a named agent (e.g. 'explorer')."""
+    root = _loop_agent_dir()
+    path = root / f"{name}.md"
+    return path.read_text(encoding="utf-8")
 
 
 def _read_template_body(name: str) -> str:
@@ -452,9 +511,9 @@ def _render_claude_skill(name: str, overrides: dict | None = None) -> RenderedFi
 
 
 # ---------------------------------------------------------------------------
-# Agent-render seam — the sole public entry for rendered-agent emission.
-# Owns skill-vs-agent mode dispatch, destination directory layout, and
-# filename. Callers state the CLI; they never assemble paths themselves.
+# Agent-render seam — per-CLI dispatch helpers that own skill-vs-agent mode
+# dispatch, destination directory layout, and filename.  Callers state the
+# CLI; they never assemble paths themselves.
 # ---------------------------------------------------------------------------
 
 _CLAUDE_AGENTS_DIR = ".claude/agents"
@@ -521,39 +580,3 @@ def _render_copilot(
     """Render one Copilot loop agent as a home-relative ``RenderedFile`` record."""
     rendered = _render_copilot_agent(name, overrides=overrides)
     return RenderedFile(f"{_COPILOT_AGENT_DIR}/{rendered.filename}", rendered.content)
-
-
-def render_agents(
-    cli: AgentCli,
-    names: list[str] | None = None,
-    overrides: dict | None = None,
-    *,
-    home: Path | None = None,
-) -> list[RenderedFile]:
-    """Render the loop agents for *cli* as home-relative ``RenderedFile`` records.
-
-    The sole public agent-render entry. Owns skill-vs-agent mode dispatch,
-    destination directory layout, and filename. Returns POSIX home-relative
-    paths in discovery (sorted) order so output is byte-identical to the prior
-    inline emission.
-
-    *names* defaults to the discovered loop agents; pass an explicit list to
-    render a subset. *overrides* is an optional per-agent partial overlay
-    deep-merged over the template defaults; ``None`` loads the override
-    store from ``home/.ai-harness/overrides.json`` (default
-    ``Path.home()``), ``{}`` is an explicit no-op. CLIs without native
-    agent support return an empty list.
-    """
-    if names is None:
-        names = _discover_loop_agents()
-
-    if overrides is None:
-        overrides = _load_override_store(home if home is not None else Path.home())
-
-    if cli == AgentCli.CLAUDE:
-        return [_render_claude(name, overrides=overrides) for name in names]
-    if cli == AgentCli.COPILOT:
-        return [_render_copilot(name, overrides=overrides) for name in names]
-    if cli == AgentCli.OPENCODE:
-        return [_render_opencode(name, overrides=overrides) for name in names]
-    return []

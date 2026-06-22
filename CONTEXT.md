@@ -21,12 +21,13 @@ loose parts — they are authored together as the *loop agents* under
 
 An isolated git working tree a *Loop* session runs in, created by the
 `ai-harness worktree` command at `.ai-harness/worktrees/<Date.now()>` (detached
-at `main`'s HEAD) and gitignored. Its purpose is isolation: a loop running there
-cannot disturb the host repository, so a human can grill / domain-model in the
-host tree — or run a second loop — at the same time without either stepping on
-the other. The human launches their Agent CLI inside it; the worktree is the
-*directory*, distinct from the `loop-run/<ts>` *branch* that gets checked out in
-it.
+at the current branch's HEAD) and gitignored. Its purpose is isolation: a loop
+running there cannot disturb the host repository, so a human can grill /
+domain-model in the host tree — or run a second loop — at the same time without
+either stepping on the other. The human launches their Agent CLI inside it; the
+worktree is the *directory*, distinct from the `loop-run/<ts>` *branch* that
+gets checked out in it.  Cleanup is available via `ai-harness worktree delete`
+(interactive picker) or native `git worktree remove|prune|list`.
 _Avoid_: checkout, clone, copy
 
 ## prd-issue

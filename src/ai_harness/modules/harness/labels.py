@@ -3,6 +3,11 @@
 Only the loop's two fixed labels are created: ``ready-for-agent`` and ``loop``.
 The other four canonical triage labels belong to ``setup-matt-pocock-skills``
 and are not touched here (see ADR 0005).
+
+Public surface
+--------------
+LabelResult    Outcome dataclass with *created* and *warnings* lists.
+ensure_labels  Create ``ready-for-agent`` and ``loop`` GitHub labels via ``gh label create``.
 """
 
 from __future__ import annotations
@@ -10,6 +15,8 @@ from __future__ import annotations
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+
+__all__ = ["LabelResult", "ensure_labels"]
 
 _LOOP_LABELS = [
     ("ready-for-agent", "7057ff", "Fully specified, ready for an AFK agent"),

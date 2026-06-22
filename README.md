@@ -94,12 +94,13 @@ Five commands:
   and `opencode`).
 
 - `ai-harness worktree` — creates an isolated git worktree at
-  `.ai-harness/worktrees/<Date.now()>`, detached at `main`'s HEAD. Lazily
-  writes a nested `.gitignore` so throwaway worktrees are never committed.
+  `.ai-harness/worktrees/<Date.now()>`, detached at the current branch's HEAD.
+  Lazily writes a nested `.gitignore` so throwaway worktrees are never committed.
   Launch your Agent CLI inside this directory to run the loop without disturbing
-  the host repo — run a grill session or a second loop in parallel. Cleanup is
-  native git: `git worktree remove .ai-harness/worktrees/<ts>` /
-  `git worktree prune` / `git worktree list`.
+  the host repo — run a grill session or a second loop in parallel. Interactive
+  cleanup is available via `ai-harness worktree delete`; native git works too:
+  `git worktree remove .ai-harness/worktrees/<ts>` / `git worktree prune` /
+  `git worktree list`.
 
 ## Getting started
 
@@ -187,19 +188,22 @@ Because the Agent CLI's working directory is inherited by every subagent, every
 `git`, `pytest`, and file-access command operates inside the worktree by
 construction — no per-command discipline needed.
 
-When the session is done, clean up with native git:
+When the session is done, clean up interactively or with native git:
 
 ```bash
+# Interactive picker — lists worktrees, confirms, removes, prunes:
+ai-harness worktree delete
+
+# Or manual cleanup:
 git worktree remove .ai-harness/worktrees/1782139126824
-# Or prune all stale worktrees at once:
 git worktree prune
-# List remaining worktrees:
 git worktree list
 ```
 
 The command is deliberately thin plumbing: it does not create the `loop-run`
-branch (the orchestrator still owns branch naming) and has no remove/list verb
-because `git worktree remove|prune|list` already cover cleanup.
+branch (the orchestrator still owns branch naming).  The `delete` verb provides
+a convenient interactive picker; native `git worktree remove|prune|list` remain
+available for scripting.
 
 ## Supported agent CLIs
 

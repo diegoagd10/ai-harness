@@ -6,14 +6,14 @@ from ai_harness.commands.init import init
 from ai_harness.commands.install import install
 from ai_harness.commands.set_models import set_models
 from ai_harness.commands.uninstall import uninstall
-from ai_harness.commands.worktree import worktree
+from ai_harness.commands.worktree import app as worktree_app
 
 app = typer.Typer()
 app.command()(init)
 app.command()(install)
 app.command()(set_models)
 app.command()(uninstall)
-app.command()(worktree)
+app.add_typer(worktree_app, name="worktree")
 
 
 @app.callback()
