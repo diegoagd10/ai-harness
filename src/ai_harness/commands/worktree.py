@@ -41,7 +41,7 @@ _console = Console()
 # Header helpers — rich Panel, matching the set-models wizard style.
 # ---------------------------------------------------------------------------
 
-_KEYBINDING_LEGEND = "↑/↓: navigate · enter: select · Esc: cancel · Ctrl+C: quit"
+_KEYBINDING_LEGEND = "↑/↓: navigate · enter: select · Ctrl+C: quit"
 
 
 def _print_header(title: str) -> None:
@@ -112,6 +112,10 @@ def delete_worktrees() -> None:
     asks for confirmation, then removes the selected worktree with
     ``git worktree remove`` (no ``--force``) and prunes automatically.
     """
+
+    if _console.is_terminal:
+        _console.clear()
+
     _require_tty()
 
     entries: list[WorktreeEntry] = list_worktrees()
