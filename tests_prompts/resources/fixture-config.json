@@ -1,0 +1,7 @@
+{
+  "branch": "loop/42-1781911435329",
+  "base_branch": "loop-run/1781911000000",
+  "git_user_name": "Prompt Eval",
+  "git_user_email": "prompt-eval@example.invalid",
+  "initial_commit_message": "chore: initial fixture"
+}
