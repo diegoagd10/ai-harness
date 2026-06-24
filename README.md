@@ -142,7 +142,7 @@ Once the Prerequisites are in place, the full workflow for turning a feature ide
 into implemented code is:
 
 ```
-setup-matt-pocock-skills → ai-harness init → grill-with-docs → to-prd → to-issues → loop
+setup-matt-pocock-skills → ai-harness init → grill-with-docs → to-prd → to-design → to-issues → loop
 ```
 
 1. **`setup-matt-pocock-skills`** — one-time skill that configures this repo for
@@ -160,11 +160,18 @@ setup-matt-pocock-skills → ai-harness init → grill-with-docs → to-prd → 
    project tracker. A prd-issue holds the full product context for a unit of
    work.
 
-5. **`to-issues`** — breaks the prd-issue into independent, grab-able
-   **sub-issues** using tracer-bullet vertical slices. Each sub-issue is labeled
-   for the loop to pick up.
+5. **`to-design`** — hardens the prd-issue's light seam sketch into a rigorous
+   **deep-module design**, recorded as one ADR in `docs/adr/`. That ADR is the
+   seam contract: `to-issues` slices within these modules and the loop's
+   `validator` audits depth against it. Forward, greenfield design — the inverse
+   of `improve-codebase-architecture` (which remediates existing shallow code).
 
-6. **Loop** — the cohesive multi-agent workflow that drains ready sub-issues onto
+6. **`to-issues`** — breaks the prd-issue into independent, grab-able
+   **sub-issues** using tracer-bullet vertical slices, sliced *within* the
+   modules the design ADR defined. Each sub-issue is labeled for the loop to
+   pick up.
+
+7. **Loop** — the cohesive multi-agent workflow that drains ready sub-issues onto
    session branches: `explorer` reads the issue and maps the codebase →
    `implementor` writes the change → `validator` reviews it. The loop iterates
    implementor ↔ validator until clean, then commits.
