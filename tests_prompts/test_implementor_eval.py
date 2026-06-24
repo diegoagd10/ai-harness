@@ -8,8 +8,7 @@ from harness import EvalContext, evaluate
 from implementor_eval import BRANCH, CHECKS, Facts
 
 TDD_READ_EVENT = (
-    '{"type":"tool_use","part":{"tool":"read",'
-    '"state":{"input":{"filePath":"/home/x/.agents/skills/tdd/SKILL.md"}}}}'
+    '{"type":"tool_use","part":{"tool":"read","state":{"input":{"filePath":"/home/x/.agents/skills/tdd/SKILL.md"}}}}'
 )
 
 

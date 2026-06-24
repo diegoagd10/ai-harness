@@ -11,6 +11,7 @@ Add an assertion -> append a Check to CHECKS below
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sys
 from dataclasses import dataclass
@@ -25,7 +26,9 @@ SKILLS = RESOURCES / "skills"
 PROMPTS = RESOURCES / "prompts"
 
 IMPLEMENTOR_PROMPT = REPO_ROOT / "src" / "ai_harness" / "resources" / "loop-agent" / "implementor.md"
-CODING_STANDARDS = RESOURCES / "CODING_STANDARDS.md"
+# Which CODING_STANDARDS.md to drop into the sandbox. Override to test a variant
+# (e.g. CODING_STANDARDS_FILE=CODING_STANDARDS.no-number.md REQUIRE_ISSUE_TAG=0).
+CODING_STANDARDS = RESOURCES / os.environ.get("CODING_STANDARDS_FILE", "CODING_STANDARDS.md")
 TDD_SKILL = SKILLS / "tdd" / "SKILL.md"
 PROMPT_TEMPLATE = PROMPTS / "implementor-prompt.md"
 PROMPTS_JSONL = PROMPTS / "implementor-prompts.jsonl"
@@ -34,6 +37,8 @@ CONFIG = json.loads((RESOURCES / "fixture-config.json").read_text(encoding="utf-
 BRANCH = CONFIG["branch"]
 BASE_BRANCH = CONFIG["base_branch"]
 ISSUE_TAG = "[#42] "  # matches the issue number in implementor-prompt.md
+# Whether the active coding standard requires the issue tag in the commit subject.
+REQUIRE_ISSUE_TAG = os.environ.get("REQUIRE_ISSUE_TAG", "1") == "1"
 
 
 # --- what we observe after the implementor runs ------------------------
@@ -94,9 +99,7 @@ def gather(repo: Path, initial_sha: str, stdout: str) -> Facts:
     return Facts(
         branch=run("git", "branch", "--show-current", cwd=repo).stdout.strip(),
         head=run("git", "rev-parse", "HEAD", cwd=repo).stdout.strip(),
-        commit_count=int(
-            run("git", "rev-list", "--count", f"{initial_sha}..HEAD", cwd=repo).stdout.strip()
-        ),
+        commit_count=int(run("git", "rev-list", "--count", f"{initial_sha}..HEAD", cwd=repo).stdout.strip()),
         subject=run("git", "log", "-1", "--pretty=%s", cwd=repo).stdout.strip(),
         tests_passed=tests.returncode == 0,
         clean_working_tree=not run("git", "status", "--porcelain", cwd=repo).stdout.strip(),
@@ -160,9 +163,14 @@ CHECKS: list[Check] = [
     ),
     Check(
         "commit_subject_format",
-        "commit subject starts with the issue tag and has a message",
-        lambda c: c.facts.subject.startswith(ISSUE_TAG)
-        and len(c.facts.subject) > len(ISSUE_TAG),
+        "commit subject has a message (and the issue tag when the standard requires it)",
+        lambda c: (
+            bool(c.facts.subject)
+            and (
+                not REQUIRE_ISSUE_TAG
+                or (c.facts.subject.startswith(ISSUE_TAG) and len(c.facts.subject) > len(ISSUE_TAG))
+            )
+        ),
     ),
     Check(
         "clean_working_tree",
