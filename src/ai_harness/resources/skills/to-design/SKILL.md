@@ -43,11 +43,20 @@ re-litigate. Load `/codebase-design` for the vocabulary.
 
 For each unit of behaviour the PRD implies, decide ONE deep module:
 
-- **Interface** — everything a caller must know (signature, invariants, ordering,
-  error modes, config, performance), kept as small as possible.
+- **Responsibility** — the one job this module owns. Name it by that job, in
+  `CONTEXT.md` vocabulary. Reject **god objects** (one module owning several unrelated
+  jobs) and **misleading names** (a name implying a responsibility the module does not
+  have — e.g. a "Diary" that also creates Foods).
+- **Interface shape** — the operations a caller needs and what crosses the seam (which
+  domain types go in, which domain values come out, error modes), kept as small as
+  possible. You PROPOSE the exact signatures, names, and return types — do NOT extract
+  them from the user one method at a time. They are your design output, not an
+  interview.
 - **What it hides** — the implementation complexity that does NOT cross the seam.
 - **Seam placement** — where the interface lives. Prefer the highest existing seam;
-  the fewer seams, the better.
+  the fewer seams, the better. Mark collaborators that are NOT public test seams (pure
+  helpers, the shared persistence module) as **internal** — tested transitively through
+  the seams that use them, never mocked.
 
 Apply the **deletion test** to each: if deleting it concentrates complexity, it earns
 its keep; if it just moves complexity around, fold it away. Reject shallow modules
@@ -62,9 +71,15 @@ Pick the deepest. Skip for trivial seams — design-it-twice is for the load-bea
 
 ### 4. Grill the seams with the user
 
-Run `/grilling` over the proposed module set. Resolve each branch: does this seam
-belong here? Is anything shallow? What varies across this seam (one adapter =
-hypothetical, two = real)? Iterate until the user approves the module boundaries.
+Run `/grilling` over the proposed module set — at the **boundary** level only: does
+this seam belong here? Is anything shallow? What varies across this seam (one adapter =
+hypothetical, two = real)? Is any module a god object or misnamed? Iterate until the
+user approves the module boundaries.
+
+Do NOT grill the user method-by-method on signatures, names, or return types. The
+interface contract is your design output: present it whole for the user to react to and
+adjust, not as a per-method Q&A. Bikeshedding each method one at a time is
+implementation altitude, not design.
 
 ### 5. Keep the domain model current
 
@@ -95,10 +110,17 @@ For each module:
 ### <Module name> (use CONTEXT.md vocabulary)
 
 - **Seam**: where the interface lives.
-- **Interface**: what a caller must know — methods, key params, invariants, error
-  modes. Keep it small.
+- **Interface**: the operations a caller needs — key params, invariants, error modes.
+  Keep it small. Inline the exact type/signature block once below if it is the contract
+  `to-issues` slices within.
 - **Hides**: the implementation complexity behind the seam.
 - **Depth note**: one line on why this is deep, not shallow (the deletion test result).
+
+### Internal collaborators (not test seams)
+
+For each helper or persistence module behind the public seams: its interface, what it
+hides, and a note that it is covered transitively through the seams that use it — never
+mocked. These exist so the deletion test passes for the public seams.
 
 ## Seam map
 
