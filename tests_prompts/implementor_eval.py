@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from config import REPO_ROOT, RESOURCES
-from harness import Check, EvalContext, EvalSpec, run, run_eval
+from harness import Check, EvalSpec, run, run_eval
 
 # --- where this eval's resources live ----------------------------------
 FIXTURE = RESOURCES / "fixture"
