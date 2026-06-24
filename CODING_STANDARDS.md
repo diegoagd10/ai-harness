@@ -1,14 +1,9 @@
 # Coding Standards
 
-These rules apply to every commit on every branch. `.opencode/agent/validator.md` enforces them for the autonomous loop; `.opencode/agent/implementor.md` follows them when writing code.
-
-This file is project-specific by design. To reuse the `.opencode/agent/` loop in another project, drop a new `CODING_STANDARDS.md` at that project's root — the agent prompts themselves don't change.
-
 ## Style
 
 - **Python 3.12 only.** `.python-version` and `pyproject.toml [project] requires-python` are authoritative.
-- **Line length: 120** (`tool.ruff.line-length`).
-- **Imports**: isort-ordered (`I` rule). `from __future__ import annotations` MUST be the first import of every module that uses PEP-604 unions, generics, or forward references.
+- **Imports**: `from __future__ import annotations` MUST be the first import of every module that uses PEP-604 unions, generics, or forward references.
 - **Type hints everywhere** — including private helpers and typer callbacks. Prefer builtin generics (`list[str]`, `dict[str, int]`) over `from typing import List/Dict`.
 - **Docstrings**:
   - Module-level docstring REQUIRED on every module. Imperative tone, one line preferred.
@@ -32,35 +27,12 @@ This file is project-specific by design. To reuse the `.opencode/agent/` loop in
 
 ## Architecture
 
-- **src layout**: all package code under `src/ai_harness/`. Subdirs: `commands/` (typer adapters), `modules/` (domain logic), `resources/` (files copied at install time).
-- **Thin CLI adapters**: each `commands/<name>.py` is a typer entrypoint that delegates to a single `modules/` function. No business logic in typer callbacks.
-- **Single responsibility per module.** Prefer composition over inheritance.
-- **Idempotent install / uninstall.** Re-running `install` is a no-op (or only updates drifted files); `uninstall` removes exactly what `install` created.
-- **No new top-level packages** without an ADR in `docs/adr/`. Read `docs/adr/` before changing module boundaries.
-- **Tuples → named types when they escape a function**. A tuple literal or `tuple[...]` annotation is acceptable when:
-  - The shape is homogeneous (`tuple[str, ...]`, `tuple[int, int]` coords used arithmetically), OR
-  - It is consumed by immediate unpacking within the same function and never crosses a function boundary.
-  Replace with a `NamedTuple` (preferred for pure value records) or `frozen dataclass` (when methods/defaults are needed) when **any** of the following holds:
-  - The tuple is returned (RETURN) or accepted as a parameter (PARAM) across module boundaries.
-  - The shape has ≥ 2 heterogeneous fields (different types or different semantic roles).
-  - The same shape repeats in ≥ 3 sites — DRY the record into one named type.
-  Do NOT replace:
-  - `dict.items()` unpacking (`for k, v in d.items()`) — that is iteration, not a record.
-  - Tuple unpacking in `for` loops / multiple assignment.
-  - Fixed-vocabulary module-level constants of homogeneous tuples (`CLAUDE_MODELS = ("haiku", ...)`).
-  - One-off 2-tuples whose meaning is documented in the function's docstring and used in a single site (e.g. `(children, index)`).
+- Typer commands: `src/ai_harness/commands/`
+- Deep modules: `src/ai_harness/modules/`
 
 ## Commits
 
-This section is the loop's source of truth for commit-message format — the implementor and
-orchestrator defer to it rather than hardcoding a convention. Edit this section to change
-how the loop writes commits (e.g. `[{issue_number}] <description>`).
-
-- **Conventional Commits**: `<type>(<scope>): <subject>`. Allowed types: `feat`, `fix`, `refactor`, `chore`, `docs`, `test`.
-- Subject ≤ 72 chars, imperative mood ("add", not "added"), no trailing period.
-- `Closes #<NUMBER>` on the last line is *optional* — nothing in loop automation depends on it (the orchestrator closes issues via `gh issue close`, and PRD drain scans issue bodies, not commit messages). Teams may omit or replace it.
-- **NEVER use the `RALPH:` prefix** — it is not a convention in this repo.
-- One logical change per commit. Do not mix refactors with feature changes.
+`[{issue_number}] {slug}`
 
 ## Quality gates
 
