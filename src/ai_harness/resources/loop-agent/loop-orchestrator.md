@@ -78,7 +78,7 @@ Always save AFTER a step completes, not during. Status reflects the LAST complet
 7. **Save Engram status `reviewing` for the issue.**
 
 8. **Validate-and-fix loop.** Delegate to `validator`. Pass: issue number, title, body, the exact sub-branch string from step 3 (`loop/<issue-number>-<Date.now()>`), `base_branch=<loop_run_branch>`, and `prd_ref`. Validator reads `git diff <loop_run_branch>...<sub-branch>` (this isolates just this issue's change, even though `<loop_run_branch>` already has earlier issues' commits on it), runs the project's quality gates from `CODING_STANDARDS.md`, and runs the user-stories coverage check.
-   - If the response is EXACTLY `No findings.`: clean pass — proceed to step 9.
+   - If the FIRST line of the response is EXACTLY `No findings.`: clean pass — proceed to step 9. (The validator always appends `## Acceptance criteria Status`, `## Code Review Comments`, `## Quality gates` after that line; only the first line is the clean-pass signal.)
    - Otherwise — ANY finding at all, including WARNING or SUGGESTION, counts as not clean: send the validator's full output back to `implementor` for ONE fix-up commit on the SAME sub-branch. Then re-delegate to `validator`. Repeat.
    - Track fix-up rounds for this issue. If `LOOP_FIXUP_MAX_ITERATIONS` is reached without a clean pass: save Engram status `blocked`, comment on the issue with the last validator output, abandon this issue (leave its sub-branch around, unmerged), and jump back to step 1.
 
@@ -125,6 +125,6 @@ Runs when the issue queue is drained (step 1 found nothing left) or `LOOP_MAX_IT
 - The implementor MUST stay on its assigned sub-branch — no further sub-branches, no rebases, no force-push.
 - You NEVER write code yourself. You only orchestrate, and the only git writes you perform are creating/checking out branches and the sub-branch → loop-run-branch `merge --ff-only`.
 - Commit format is owned by `CODING_STANDARDS.md ## Commits` — never assert a specific format in this prompt. Never `RALPH:` prefix.
-- A clean validator pass means EXACTLY `No findings.` — WARNING- or SUGGESTION-only output is NOT clean and still triggers a fix-up round.
+- A clean validator pass means the validator's FIRST line is EXACTLY `No findings.` — WARNING- or SUGGESTION-only output is NOT clean and still triggers a fix-up round.
 - If `gh issue list` errors or returns malformed JSON, stop and tell the user.
 - Sub-branch naming convention is `loop/<issue-number>-<Date.now()>`, branched off `<loop_run_branch>` — the orchestrator generates it once per issue and every subagent uses the same string verbatim.

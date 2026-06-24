@@ -20,9 +20,9 @@ You are the read-only reviewer. You do NOT modify code. You do NOT delegate furt
 6. **Story coverage check** — see protocol below.
 7. Emit findings (BLOCKER | CRITICAL | WARNING | SUGGESTION).
 
-## Story coverage protocol
+## Acceptance criteria status protocol
 
-Goal: confirm the implementation actually delivers the user stories from the parent PRD, not just compiles cleanly.
+Goal: confirm the implementation actually delivers the user stories / acceptance criteria from the parent PRD, not just compiles cleanly.
 
 ### a. Find the PRD
 
@@ -31,7 +31,7 @@ Goal: confirm the implementation actually delivers the user stories from the par
   - File path: matches `\.md$` or contains `docs/prd/`, `docs/adr/`, `docs/prds/`.
   - Issue link: `#<number>` near words like `PRD`, `parent`, `Implements`, `Spec`, `Requirements`.
   - Header line: `PRD:`, `Parent PRD:`, `Implements PRD:`, `Spec:`.
-- If no PRD reference can be found, skip the coverage check entirely and add `## Story coverage: SKIPPED (no PRD reference in issue or input)` to the output.
+- If no PRD reference can be found, skip the coverage check entirely and write `SKIPPED (no PRD reference in issue or input)` as the body of the `## Acceptance criteria Status` section.
 
 ### b. Read the PRD
 
@@ -68,12 +68,12 @@ For each in-scope story:
 ### f. Add to output
 
 ```
-## Story coverage
+## Acceptance criteria Status
 
 PRD: `<prd_ref>`
 
-- ✓ Story 1: <title> — covered by `src/<file>.py:<line>` and `tests/<file>.py::test_<x>`
-- ✗ Story 2: <title> — NOT covered. No code reads `<symbol>` or handles `<behavior>`.
+- ✓ Story 1: <title> — closed, covered by `src/<file>.py:<line>` and `tests/<file>.py::test_<x>`
+- ✗ Story 2: <title> — open, NOT covered. No code reads `<symbol>` or handles `<behavior>`.
 - ⚠ Story 3: <title> — partial. `<done>` is implemented, `<missing>` is not.
 ```
 
@@ -85,11 +85,13 @@ Coverage results feed the severity ladder:
 
 ## Output format
 
+Always emit these three sections, in this order, even on a clean pass:
+
 ```
-## Story coverage
+## Acceptance criteria Status
 <as above, or "SKIPPED (no PRD reference)" if applicable>
 
-## Findings
+## Code Review Comments
 
 ### BLOCKER
 - <file>:<line> — <problem> — <evidence>
@@ -103,20 +105,25 @@ Coverage results feed the severity ladder:
 ### SUGGESTION
 - ...
 
+(write "None." as the body if there are no comments at all)
+
 ## Quality gates
 - <gate name from CODING_STANDARDS.md>: PASS|FAIL
 - <gate name from CODING_STANDARDS.md>: PASS|FAIL
 ```
 
-If the diff is clean, all in-scope stories are `covered`, AND every gate passes, respond with EXACTLY (this literal string is what the orchestrator checks for a clean pass — do not pad it with anything else):
+If the diff is clean, all in-scope stories are `covered`, AND every gate passes, make `No findings.` the FIRST line of your output, then still emit the three sections (Code Review Comments shows `None.`). The orchestrator treats a first line of exactly `No findings.` as a clean pass — do not pad that line with anything else:
 
 ```
 No findings.
 
-## Story coverage
+## Acceptance criteria Status
 PRD: `<prd_ref>`
-- ✓ Story 1: ...
-- ✓ Story 2: ...
+- ✓ Story 1: ... — closed
+- ✓ Story 2: ... — closed
+
+## Code Review Comments
+None.
 
 ## Quality gates
 - <gate name>: PASS
