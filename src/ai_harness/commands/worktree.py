@@ -76,14 +76,22 @@ def _require_tty() -> None:
 
 
 @app.command(name="create")
-def create_worktree_cmd() -> None:
-    """Create an isolated git worktree at .ai-harness/worktrees/<Date.now()>.
+def create_worktree_cmd(
+    directory_name: str | None = typer.Option(
+        None, "-dn", "--directory-name", help="Worktree directory name (default: timestamp)."
+    ),
+    branch_name: str | None = typer.Option(
+        None, "-bn", "--branch-name", help="Branch name to create for the worktree (default: timestamp)."
+    ),
+) -> None:
+    """Create an isolated git worktree under .ai-harness/worktrees/ on a new branch.
 
-    Detached at the current branch's HEAD — the orchestrator still owns
-    branch naming.  Native ``git worktree remove|prune|list`` cover cleanup,
-    or use ``ai-harness worktree delete`` for an interactive picker.
+    Based on the current branch's HEAD.  ``-dn``/``-bn`` name the directory and
+    branch; both default to a millisecond timestamp.  Native
+    ``git worktree remove|prune|list`` cover cleanup, or use
+    ``ai-harness worktree delete`` for an interactive picker.
     """
-    result: WorktreeResult = create_worktree()
+    result: WorktreeResult = create_worktree(dir_name=directory_name, branch_name=branch_name)
 
     if result.warning:
         # On detached HEAD or other failure, print the warning and exit

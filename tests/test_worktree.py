@@ -175,6 +175,49 @@ def test_create_worktree_gitignore_written_only_when_file_absent(tmp_path: Path)
 
 
 # ---------------------------------------------------------------------------
+# Custom directory / branch names
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not _has_git(), reason="git required")
+def test_create_worktree_uses_custom_dir_name(tmp_path: Path) -> None:
+    """``dir_name`` overrides the timestamp as the worktree directory name."""
+    root = _make_git_repo(tmp_path)
+
+    result = create_worktree(root, dir_name="bla")
+
+    assert result.warning is None
+    assert result.path == root / ".ai-harness" / "worktrees" / "bla"
+    assert result.path.is_dir()
+
+
+@pytest.mark.skipif(not _has_git(), reason="git required")
+def test_create_worktree_uses_custom_branch_name(tmp_path: Path) -> None:
+    """``branch_name`` creates the worktree on that new branch (not detached)."""
+    root = _make_git_repo(tmp_path)
+
+    result = create_worktree(root, dir_name="bla", branch_name="feature/bla")
+
+    assert result.warning is None
+    head = _git("rev-parse", "--abbrev-ref", "HEAD", cwd=result.path).stdout.strip()
+    assert head == "feature/bla"
+
+
+@pytest.mark.skipif(not _has_git(), reason="git required")
+def test_create_worktree_defaults_branch_to_timestamp(tmp_path: Path) -> None:
+    """With no names given, both the dir and the branch default to the timestamp."""
+    root = _make_git_repo(tmp_path)
+
+    result = create_worktree(root)
+
+    assert result.warning is None
+    ts = result.path.name
+    assert ts.isdigit()
+    head = _git("rev-parse", "--abbrev-ref", "HEAD", cwd=result.path).stdout.strip()
+    assert head == ts
+
+
+# ---------------------------------------------------------------------------
 # Branch resolution — real git
 # ---------------------------------------------------------------------------
 
@@ -281,6 +324,30 @@ def test_create_worktree_result_has_path_even_on_failure(tmp_path: Path) -> None
 # ---------------------------------------------------------------------------
 # CLI adapter — ``create`` verb exercised through typer
 # ---------------------------------------------------------------------------
+
+
+def test_cli_worktree_create_passes_dir_and_branch_options(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``-dn``/``-bn`` are forwarded to ``create_worktree`` as dir_name/branch_name."""
+    from ai_harness.commands import worktree as cmd
+
+    monkeypatch.chdir(tmp_path)
+    captured: dict[str, object] = {}
+
+    def _fake_create(repo_root: Path | None = None, **kw: object) -> WorktreeResult:
+        captured.update(kw)
+        return WorktreeResult(
+            path=tmp_path / ".ai-harness" / "worktrees" / "bla",
+            gitignore_written=True,
+            warning=None,
+        )
+
+    monkeypatch.setattr(cmd, "create_worktree", _fake_create)
+
+    result = runner.invoke(app, ["worktree", "create", "-dn", "bla", "-bn", "feature/bla"])
+
+    assert result.exit_code == 0, result.stderr
+    assert captured["dir_name"] == "bla"
+    assert captured["branch_name"] == "feature/bla"
 
 
 def test_cli_worktree_create_echoes_path_and_exits_zero(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

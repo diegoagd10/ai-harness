@@ -1,8 +1,9 @@
 """Git worktree isolation command for the loop workflow.
 
-Creates a detached worktree at ``.ai-harness/worktrees/<Date.now()>``
-from the current branch's HEAD and lazily writes a nested
+Creates a worktree on a new branch under ``.ai-harness/worktrees/``,
+based on the current branch's HEAD, and lazily writes a nested
 ``.ai-harness/.gitignore`` so throwaway worktrees are never committed.
+The directory and branch names default to a millisecond timestamp.
 
 Also provides listing and removal of ai-harness worktrees — all decision
 logic lives behind the ``_run`` seam so tests can inject fake subprocess
@@ -81,17 +82,26 @@ class RemoveResult:
     error: str | None
 
 
-def create_worktree(repo_root: Path | None = None, *, _run: _Runner = None) -> WorktreeResult:
-    """Create a detached git worktree at ``.ai-harness/worktrees/<Date.now()>`` from the current branch.
+def create_worktree(
+    repo_root: Path | None = None,
+    *,
+    dir_name: str | None = None,
+    branch_name: str | None = None,
+    _run: _Runner = None,
+) -> WorktreeResult:
+    """Create a git worktree on a new branch under ``.ai-harness/worktrees/``.
+
+    *dir_name* names the worktree directory; *branch_name* names the branch
+    created for it.  Both default to a millisecond timestamp when omitted, so
+    a bare ``create`` yields ``.ai-harness/worktrees/<ts>`` on branch ``<ts>``.
 
     Resolves the current branch with ``git symbolic-ref --short HEAD`` and
-    uses it as the ``--detach`` start-point.  On a detached HEAD (no current
+    uses it as the new branch's start-point.  On a detached HEAD (no current
     branch) the function returns a warning and creates no worktree directory
     — there is no fallback to ``main``.
 
     Lazily writes ``.ai-harness/.gitignore`` containing ``worktrees/``
-    on first invocation if that file is absent. The worktree is created
-    detached — the orchestrator still owns branch naming.
+    on first invocation if that file is absent.
 
     On failure (git missing, non-zero exit, OS error), *warning* is set
     and the result is still returned — no exception is raised.
@@ -104,13 +114,15 @@ def create_worktree(repo_root: Path | None = None, *, _run: _Runner = None) -> W
         repo_root = Path.cwd()
 
     ts = str(int(time.time() * 1000))
-    worktree_dir = repo_root / ".ai-harness" / "worktrees" / ts
+    dir_name = dir_name or ts
+    branch_name = branch_name or ts
+    worktree_dir = repo_root / ".ai-harness" / "worktrees" / dir_name
 
     gitignore_written = _write_gitignore(repo_root)
 
-    # Resolve the current branch.
-    branch = _resolve_current_branch(run, repo_root)
-    if branch is None:
+    # Resolve the current branch to use as the new branch's start-point.
+    start_point = _resolve_current_branch(run, repo_root)
+    if start_point is None:
         # Detached HEAD — no current branch to base on.
         return WorktreeResult(
             path=worktree_dir,
@@ -123,7 +135,7 @@ def create_worktree(repo_root: Path | None = None, *, _run: _Runner = None) -> W
         )
 
     warning: str | None = None
-    args = ["git", "worktree", "add", "--detach", str(worktree_dir), branch]
+    args = ["git", "worktree", "add", "-b", branch_name, str(worktree_dir), start_point]
     try:
         completed = run(args, capture_output=True, text=True, cwd=str(repo_root))
     except FileNotFoundError as exc:

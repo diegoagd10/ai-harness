@@ -94,7 +94,9 @@ Five commands:
   and `opencode`).
 
 - `ai-harness worktree create` — creates an isolated git worktree at
-  `.ai-harness/worktrees/<Date.now()>`, detached at the current branch's HEAD.
+  `.ai-harness/worktrees/<dir>` on a new branch, based on the current branch's
+  HEAD. `-dn`/`--directory-name` and `-bn`/`--branch-name` set the directory and
+  branch; both default to a `<Date.now()>` timestamp when omitted.
   Lazily writes a nested `.gitignore` so throwaway worktrees are never committed.
   Launch your Agent CLI inside this directory to run the loop without disturbing
   the host repo — run a grill session or a second loop in parallel. Interactive
