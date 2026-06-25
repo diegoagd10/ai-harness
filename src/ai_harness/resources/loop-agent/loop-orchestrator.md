@@ -75,6 +75,21 @@ skills:    loaded | fallback | none
 4. **Explore.** Delegate to `explorer` with the issue number, title, body. It returns a plan
    (affected files, steps, edge cases, test surface, risks). Do not skip.
 
+4.5. **Gate explorer.**
+   - Read the explorer's `result.status`. `ok` → proceed to step 5. `ambiguous`/`blocked` →
+     `gh issue comment <N> --body "Explorer returned <status>: <summary>"`, then back to step 1.
+   - **Path spot-check:** pick 2–3 paths from the `artifacts:` field. Run
+     `git ls-files <path>` or `test -e <path>` for each. A `[NEW]`-prefixed path is exempt
+     from the existence check — it is a new file the plan proposes to create. A path that
+     does not exist AND is NOT `[NEW]`-prefixed → **hallucination**. Log each bad path.
+   - **Hallucination response:** re-run the explorer ONCE, naming the bad paths explicitly:
+     `"The following paths from your report do not exist and are not marked [NEW]: <list>.
+     Re-run the exploration and produce a corrected report."` If the second report still
+     contains non-existent non-`[NEW]` paths → `gh issue comment <N>` with the failing paths
+     and back to step 1 (skip the issue).
+   - **Drift check:** `git diff --stat <base_sha>..HEAD` to confirm no unrelated changes
+     landed before proceeding.
+
 5. **Implement.** Delegate to `implementor` with the issue number, title, body, and explorer's
    report. Forward the cached gate list and test runner explicitly:
    `"Quality gates (run in this order, all must pass): <list>. Test runner: <cmd>. TDD is mandatory; follow ~/.agents/skills/tdd/SKILL.md."`
@@ -96,6 +111,20 @@ skills:    loaded | fallback | none
       (`git stash -u` first). Passes → treat as clean. Fails → keep looping.
     - Hit `LOOP_FIXUP_MAX_ITERATIONS` without a clean pass → comment the last validator output on
       the issue, leave it open, back to step 1.
+
+6.5. **Gate implementor.**
+   - `git rev-parse <claimed_sha>` — must resolve to a commit that is reachable on the current
+     branch (`git branch --contains <sha>`). If it does not resolve or is not on the branch
+     → defect in the implementor's claimed artifact.
+   - `git status --porcelain` — must be empty. Stray files or unstaged changes mean the
+     implementor did not leave a clean tree.
+   - Commit message must contain the issue number literally (e.g. `#91`). `git log -1 <sha>
+     --format=%s` and confirm the number appears.
+   - **Fail → corrective re-run ONCE.** Name the specific defect (e.g. "SHA not on branch",
+     "working tree not clean", "commit message missing issue number"). Send back to the
+     implementor for one fix-up commit.
+   - Still failing after one corrective re-run → `gh issue comment <N>` with the last gate
+     output and leave the issue open. Back to step 1.
 
 7. **Close the issue.**
    `gh issue close <N> --comment "Implemented on <branch>. Validator: clean. <2-3 line summary>. Ships to main when the session PR merges."`
@@ -165,3 +194,5 @@ turns will be possible in this mode.
 - A clean pass means the validator emitted `result.status: clean` in its result block;
   `No findings.` is the authoritative back-compat signal — treat either as clean.
 - `gh issue list` errors or malformed JSON → stop and tell the user.
+- Never forward a sub-agent's claimed file paths or SHA without confirming they resolve.
+  A hallucinated path stops the issue; it does not ride to the next phase.

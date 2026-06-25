@@ -1168,3 +1168,92 @@ def test_orchestrator_documents_engram_launch_ledger() -> None:
 
     # Fallback when Engram unavailable
     assert "fallback" in body.lower(), "orchestrator body must document Engram-unavailable fallback path"
+
+
+# ---------------------------------------------------------------------------
+# Story 2 — gatekeeper anti-hallucination (orchestrator + explorer)
+# ---------------------------------------------------------------------------
+
+
+def test_orchestrator_documents_gatekeeper_anti_hallucination() -> None:
+    """Orchestrator template documents step 4.5 (gate explorer), step 6.5
+    (gate implementor), path/SHA existence checks, re-run-once-then-stop
+    semantics, and hallucination hard rule."""
+    from importlib.resources import files
+
+    root = files("ai_harness.resources") / "loop-agent"
+    body = (root / "loop-orchestrator.md").read_text(encoding="utf-8")
+
+    # Step 4.5 — gate explorer (must be present as a numbered step heading)
+    assert "4.5" in body and "Gate explorer" in body, "orchestrator must document step 4.5 **Gate explorer.**"
+
+    # Path spot-check commands — the gate must document how to verify file existence
+    assert "git ls-files" in body or "test -e" in body, (
+        "orchestrator gate explorer must document path existence check via git ls-files or test -e"
+    )
+
+    # [NEW] prefix exemption — new files are exempt from existence check
+    assert "[NEW]" in body, "orchestrator must document [NEW] marker exemption for new files in gate explorer"
+
+    # Step 6.5 — gate implementor (must be present as a numbered step heading)
+    assert "6.5" in body and "Gate implementor" in body, "orchestrator must document step 6.5 **Gate implementor.**"
+
+    # SHA resolution check
+    assert "git rev-parse" in body, "orchestrator gate implementor must document git rev-parse SHA resolution check"
+
+    # git status porcelain check for clean working tree
+    assert "git status --porcelain" in body, (
+        "orchestrator gate implementor must document git status --porcelain empty check"
+    )
+
+    # Commit message must contain issue number
+    commit_msg_check = "commit message" in body.lower() and "issue number" in body.lower()
+    assert commit_msg_check, "orchestrator gate implementor must document commit message issue number check"
+
+    # Re-run-once-then-stop semantics for both gates
+    assert "re-run" in body.lower() and "once" in body.lower(), (
+        "orchestrator must document re-run-once-then-stop semantics for both gates"
+    )
+
+    # Hallucination hard rule in ## Hard rules section
+    assert "hallucinat" in body.lower(), "orchestrator hard rules must contain the hallucinated path/SHA rule"
+
+
+def test_explorer_documents_new_file_marker() -> None:
+    """Explorer template documents [NEW] prefix convention for new files in
+    ## Affected files and artifacts: field, and includes the convention in
+    the ## Behavior section."""
+    from importlib.resources import files
+
+    root = files("ai_harness.resources") / "loop-agent"
+    body = (root / "explorer.md").read_text(encoding="utf-8")
+
+    # [NEW] prefix must appear in the template
+    assert "[NEW]" in body, "explorer template must document [NEW] prefix convention for new files"
+
+    # The ## Affected files example must show [NEW] prefix usage
+    affected_idx = body.find("## Affected files")
+    assert affected_idx >= 0, "explorer must have ## Affected files section"
+    # Grab from ## Affected files to next ## section or end
+    after_affected = body[affected_idx:]
+    next_section = after_affected.find("\n## ", len("## Affected files"))
+    affected_content = after_affected[:next_section] if next_section >= 0 else after_affected
+    assert "[NEW]" in affected_content, "explorer ## Affected files example must show [NEW] prefix on a new file"
+
+    # artifacts: field documentation must mention [NEW] prefix
+    artifacts_idx = body.find("artifacts:")
+    assert artifacts_idx >= 0, "explorer must have artifacts: field documentation"
+    # The artifacts bullet below the fenced block should mention [NEW]
+    result_start = body.find("## Result")
+    assert result_start >= 0
+    result_end = body.find("\n## ", result_start + len("## Result"))
+    result_content = body[result_start:result_end] if result_end >= 0 else body[result_start:]
+    assert "[NEW]" in result_content, "explorer artifacts: field documentation must mention [NEW] prefix convention"
+
+    # ## Behavior section must document [NEW] convention
+    behavior_idx = body.find("## Behavior")
+    assert behavior_idx >= 0, "explorer must have ## Behavior section"
+    after_behavior = body[behavior_idx:]
+    next_section_b = after_behavior.find("\n##", len("## Behavior"))
+    behavior_content = after_behavior[:next_section_b] if next_section_b >= 0 else after_behavior
+    assert "[NEW]" in behavior_content, "explorer ## Behavior section must document [NEW] convention for new files"

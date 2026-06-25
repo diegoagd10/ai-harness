@@ -19,7 +19,8 @@ skills:    loaded | fallback | none
 - `status: ambiguous` when the issue body is vague or underspecified.
 - `status: blocked` when the explorer cannot produce a plan (e.g. missing PRD).
 - `next: needs-clarification` maps to `ambiguous` or `blocked`.
-- `artifacts` lists every affected-file path named in the report body.
+- `artifacts` lists every affected-file path named in the report body. Prefix newly-created
+  files with `[NEW]` (e.g. `artifacts: [NEW] path/to/new_file.md path/to/existing.py`).
 
 ## Input
 
@@ -29,6 +30,7 @@ skills:    loaded | fallback | none
 
 ```
 ## Affected files
+- [NEW] path/to/new_file.md
 - path/to/file1.py
 
 ## Plan
@@ -59,3 +61,6 @@ skills:    loaded | fallback | none
 - Preexisting behavior that looks like a bug → flag it under Risks / unknowns as
   `preexisting, possibly wrong: preserve or fix?` so the implementor and validator share one
   expectation, instead of fighting over it in the fix-up loop.
+- Prefix every newly-created file path with `[NEW]` in `## Affected files` and the `artifacts:`
+  result field. Existing files get no prefix. This lets the orchestrator gate exempt new files
+  from its path existence check.
