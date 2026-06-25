@@ -1,3 +1,7 @@
+## Loop variant: tdd skill load
+
+Load the `tdd` skill: `~/.agents/skills/tdd/SKILL.md`. Follow Red → Green → Refactor.
+
 ## If blocked
 
 - Comment: `gh issue comment <N> --body "BLOCKED: <one-paragraph reason>"`.

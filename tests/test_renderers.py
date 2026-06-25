@@ -1170,24 +1170,41 @@ class TestSddComposition:
         assert body == _read_template_body("sdd-explorer"), f"{cli.value}: sdd-explorer body != composed template"
 
     def test_sdd_bodies_contain_no_matt_pocock_skill_path(self) -> None:
-        """The sdd-agent/*.md overlays reference no matt-pocock skill path.
+        """The composed SDD bodies reference no matt-pocock skill path.
 
-        The SDD flow is self-contained: TDD discipline lives in the overlay
+        The SDD flow is self-contained: TDD discipline lives in the SDD overlay
         prompt text, not in an external ``~/.agents/skills/tdd/SKILL.md`` load.
-        The generic core is shared with the Loop trio (regression-guarded
-        byte-identical) and is NOT checked here — only the SDD overlay's own
-        contribution is verified self-contained.
+        The composed body (``generic/<base>.md`` + ``sdd-agent/<sdd-name>.md``)
+        must not contain the literal skill path either — the shared generic
+        core must not leak a matt-pocock path through the composition. This is
+        the strict reading of issue #84's acceptance: the literal path must not
+        appear in the SDD composed body the agent actually receives.
         """
         import re
-        from importlib.resources import files
+
+        from ai_harness.modules.harness.renderers import _read_template_body
 
         pattern = re.compile(r"tdd/SKILL\.md|~/.agents/skills/tdd")
-        sdd_dir = files("ai_harness.resources") / "sdd-agent"
         for name in ("sdd-explorer", "sdd-implementor", "sdd-validator"):
-            text = (sdd_dir / f"{name}.md").read_text(encoding="utf-8")
-            assert not pattern.search(text), (
-                f"{name}: SDD overlay references a matt-pocock skill path; the overlay must be self-contained"
+            body = _read_template_body(name)
+            assert not pattern.search(body), (
+                f"{name}: composed SDD body references a matt-pocock skill path; the SDD flow must be self-contained"
             )
+
+    def test_sdd_implementor_composed_body_has_no_gh_issue_comment(self) -> None:
+        """The composed sdd-implementor body does not instruct the agent to comment on a GitHub issue.
+
+        The SDD change is file-backed — there is no GitHub issue to comment on.
+        The Loop trio's ``gh issue comment`` instruction lives in the Loop
+        overlay, not the generic core, so it must not leak into the SDD composed
+        body via the shared generic core.
+        """
+        from ai_harness.modules.harness.renderers import _read_template_body
+
+        body = _read_template_body("sdd-implementor")
+        assert "gh issue comment" not in body, (
+            "sdd-implementor composed body must not reference `gh issue comment` — the SDD change is file-backed"
+        )
 
     def test_sdd_validator_body_contains_spec_compliance_matrix(self) -> None:
         """The sdd-validator overlay carries the Spec Compliance Matrix contract."""

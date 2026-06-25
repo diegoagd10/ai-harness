@@ -13,7 +13,11 @@ never create, switch, or rebase branches.
 
 ## Protocol
 
-1. Load the `tdd` skill: `~/.agents/skills/tdd/SKILL.md`. Follow Red → Green → Refactor.
+1. Follow TDD: Red → Green → Refactor, vertical slices one test at a time.
+   Load the project's `tdd` skill only if your flow overlay tells you to
+   (Loop variant: the overlay names the literal skill path to load; SDD
+   variant: the discipline is encoded in this prompt — do NOT load any
+   external skill).
 2. Implement the explorer's plan (or, on a fix-up call, the validator's findings). Cover the
    edge cases flagged.
 3. Run the FULL quality-gate set from `CODING_STANDARDS.md ## Quality gates` — all must pass
