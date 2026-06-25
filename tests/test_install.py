@@ -499,13 +499,12 @@ def test_install_copilot_is_byte_identical_on_reinstall(tmp_path: Path) -> None:
 
 def test_install_copilot_rendered_body_matches_template_verbatim(tmp_path: Path) -> None:
     """Rendered Copilot agent body text matches template body verbatim (no spawn allowlist append)."""
-    from importlib.resources import files
+    from ai_harness.modules.harness.renderers import _read_template_body
 
     install_for_agent_clis([AgentCli.GENERIC, AgentCli.COPILOT], home=tmp_path)
-    templates_dir = files("ai_harness.resources") / "loop-agent"
 
     for name in _LOOP_AGENT_NAMES:
-        template_body = (templates_dir / f"{name}.md").read_text(encoding="utf-8")
+        template_body = _read_template_body(name)
 
         rendered = (tmp_path / ".copilot" / "agents" / f"{name}.agent.md").read_text(encoding="utf-8")
         rendered_body = rendered.split("---", 2)[2].removeprefix("\n")
@@ -944,12 +943,14 @@ def test_install_claude_rendered_body_matches_template_verbatim(tmp_path: Path) 
     """Rendered Claude agent and skill body text matches template body verbatim."""
     from importlib.resources import files
 
+    from ai_harness.modules.harness.renderers import _read_template_body
+
     install_for_agent_clis([AgentCli.GENERIC, AgentCli.CLAUDE], home=tmp_path)
     templates_dir = files("ai_harness.resources") / "loop-agent"
 
     for name in _CLAUDE_SUBAGENT_NAMES:
-        # Template body is the entire file (no frontmatter)
-        template_body = (templates_dir / f"{name}.md").read_text(encoding="utf-8")
+        # Template body is the composed body (generic layer + loop-agent overlay).
+        template_body = _read_template_body(name)
 
         # Rendered file has frontmatter injected by code — extract body.
         # `---\n...\n---\nbody` → split[2] = `\nbody`, strip leading newline.
@@ -960,7 +961,8 @@ def test_install_claude_rendered_body_matches_template_verbatim(tmp_path: Path) 
 
     # Orchestrator skill — template body is a prefix; the renderer appends a
     # Claude-only spawn allowlist prose section (permission.task is not valid
-    # in Claude skill frontmatter).
+    # in Claude skill frontmatter). loop-orchestrator has no generic layer, so
+    # the composed body equals the single loop-agent file verbatim.
     template_body = (templates_dir / f"{_CLAUDE_SKILL_NAME}.md").read_text(encoding="utf-8")
 
     rendered = (tmp_path / ".claude" / "skills" / _CLAUDE_SKILL_NAME / "SKILL.md").read_text(encoding="utf-8")

@@ -931,17 +931,16 @@ def test_copilot_loop_orchestrator_is_agent_not_skill() -> None:
 
 
 def test_copilot_rendered_body_matches_template_verbatim() -> None:
-    """Copilot agent body equals the shared template body unchanged."""
-    from importlib.resources import files
+    """Copilot agent body equals the composed template body unchanged."""
+    from ai_harness.modules.harness.renderers import _read_template_body
 
     pairs = render_agents(AgentCli.COPILOT)
-    templates_dir = files("ai_harness.resources") / "loop-agent"
 
     for name in ("explorer", "implementor", "validator", "loop-orchestrator"):
         pair = _find_pair(pairs, name)
         assert pair is not None, f"{name} not found"
 
-        template_body = (templates_dir / f"{name}.md").read_text(encoding="utf-8")
+        template_body = _read_template_body(name)
         rendered_body = pair[1].split("---", 2)[2].removeprefix("\n")
 
         assert rendered_body == template_body, f"{name}: body does not match template verbatim"
@@ -1024,3 +1023,42 @@ def test_caps_translation_is_per_capability() -> None:
         "write": "deny",
         "task": {"*": "deny", "explorer": "allow"},
     }
+
+
+# ---------------------------------------------------------------------------
+# Composition seam — generic/<agent>.md + loop-agent/<agent>.md concatenation.
+# The rendered body for the three shared loop agents is composed from a
+# generic layer (common core) and a loop-agent overlay. The composition must
+# be byte-identical to the pre-split single file, captured here as a fixture
+# so later SDD slices that edit either layer can detect any drift.
+# ---------------------------------------------------------------------------
+
+
+class TestCompositionGoldenFixture:
+    """Golden test: compose(generic/<X> + loop-agent/<X>) == pre-split <X>.md."""
+
+    @pytest.mark.parametrize("agent", ["explorer", "implementor", "validator"])
+    def test_compose_equals_fixture(self, agent: str) -> None:
+        """Composed body for a split agent equals the captured pre-split fixture."""
+        from ai_harness.modules.harness.renderers import _read_template_body
+
+        fixture_path = Path(__file__).parent / "fixtures" / "loop_agent_pre_split" / f"{agent}.md"
+        expected = fixture_path.read_text(encoding="utf-8")
+        assert _read_template_body(agent) == expected
+
+    @pytest.mark.parametrize("agent", ["explorer", "implementor", "validator"])
+    def test_compose_is_deterministic(self, agent: str) -> None:
+        """Composition is pure — two reads yield the same bytes (no shared state)."""
+        from ai_harness.modules.harness.renderers import _read_template_body
+
+        assert _read_template_body(agent) == _read_template_body(agent)
+
+
+class TestCompositionDiscovery:
+    """Agent discovery yields the same agent set across the composition seam."""
+
+    def test_discover_yields_same_agent_set(self) -> None:
+        """_discover_loop_agents still returns the four pre-split agents, sorted."""
+        from ai_harness.modules.harness.renderers import _discover_loop_agents
+
+        assert _discover_loop_agents() == ["explorer", "implementor", "loop-orchestrator", "validator"]

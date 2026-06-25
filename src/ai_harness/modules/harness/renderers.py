@@ -45,6 +45,7 @@ __all__ = [
 
 _LOOP_AGENT_PACKAGE = "ai_harness.resources"
 _LOOP_AGENT_DIR = "loop-agent"
+_GENERIC_AGENT_DIR = "generic"
 
 _OVERRIDES_REL = ".ai-harness/overrides.json"
 
@@ -273,6 +274,16 @@ def _loop_agent_dir() -> Traversable:
     return files(_LOOP_AGENT_PACKAGE) / _LOOP_AGENT_DIR
 
 
+def _generic_agent_dir() -> Traversable:
+    """Return the generic agent resource directory path.
+
+    Holds the shared-core layer of the three split loop agents
+    (``explorer``/``implementor``/``validator``). Single-file agents that have
+    no generic layer are returned unchanged by :func:`_read_template_body`.
+    """
+    return files(_LOOP_AGENT_PACKAGE) / _GENERIC_AGENT_DIR
+
+
 def _load_override_store(home: Path) -> dict:
     """Return the per-agent override store at ``home/.ai-harness/overrides.json``.
 
@@ -337,7 +348,19 @@ def _read_template_source(name: str) -> str:
 
 
 def _read_template_body(name: str) -> str:
-    """Return the prompt body for a named agent (full template text — no frontmatter)."""
+    """Return the prompt body for a named agent.
+
+    Composed from ``generic/<name>.md`` + ``loop-agent/<name>.md`` by plain
+    concatenation, byte-identical to the pre-split single file. Single-file
+    agents (no ``generic/<name>.md``) are returned unchanged from the
+    ``loop-agent/`` resource — discovery and callers see the same agent set
+    as before the composition seam.
+    """
+    generic_path = _generic_agent_dir() / f"{name}.md"
+    if generic_path.is_file():
+        generic_content = generic_path.read_text(encoding="utf-8")
+        loop_content = _read_template_source(name)
+        return generic_content + loop_content
     return _read_template_source(name)
 
 
