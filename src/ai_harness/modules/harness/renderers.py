@@ -283,6 +283,20 @@ _AGENT_META: dict[str, dict] = {
         },
         "caps": AgentCaps(write=False, spawn=("sdd-explorer", "sdd-propose", "sdd-spec", "sdd-design", "sdd-tasks")),
     },
+    "Sdd-Implementor-Loop": {
+        "description": (
+            "SDD Implementation Loop orchestrator — drives the file-backed apply ↔ verify "
+            "fix-up loop for one named change until the validator is clean, then archives "
+            "and opens ONE PR. Runs inside the worktree; other ready changes are untouched."
+        ),
+        "mode": "primary",
+        "color": "error",
+        "model": {
+            "opencode": "openai/gpt-5.5",
+            "claude": "sonnet",
+        },
+        "caps": AgentCaps(write=False, spawn=("sdd-implementor", "sdd-validator", "sdd-archive")),
+    },
     "sdd-explorer": {
         "description": (
             "Read-only investigator for the SDD change-flow. Reads the change folder "

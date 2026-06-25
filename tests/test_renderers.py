@@ -53,6 +53,7 @@ def test_render_agents_claude_returns_agents_and_skill() -> None:
 
     paths = [path for path, _ in pairs]
     assert paths == [
+        ".claude/skills/Sdd-Implementor-Loop/SKILL.md",
         ".claude/skills/Sdd-Planning-Loop/SKILL.md",
         ".claude/agents/explorer.md",
         ".claude/agents/implementor.md",
@@ -78,6 +79,7 @@ def test_render_agents_opencode_returns_agents_under_agent_dir() -> None:
 
     paths = [path for path, _ in pairs]
     assert paths == [
+        ".config/opencode/agent/Sdd-Implementor-Loop.md",
         ".config/opencode/agent/Sdd-Planning-Loop.md",
         ".config/opencode/agent/explorer.md",
         ".config/opencode/agent/implementor.md",
@@ -901,6 +903,7 @@ def test_render_agents_copilot_returns_all_agent_files() -> None:
 
     paths = [path for path, _ in pairs]
     assert paths == [
+        ".copilot/agents/Sdd-Implementor-Loop.agent.md",
         ".copilot/agents/Sdd-Planning-Loop.agent.md",
         ".copilot/agents/explorer.agent.md",
         ".copilot/agents/implementor.agent.md",
@@ -1088,15 +1091,17 @@ class TestCompositionDiscovery:
         """_discover_agents returns every composed agent (Loop + SDD), sorted.
 
         Discovery scans both ``loop-agent/`` and ``sdd-agent/`` and returns
-        the deduped, sorted union — currently thirteen names: the ``Sdd-
-        Planning-Loop`` primary (ASCII-sorts first), the Loop trio +
-        ``loop-orchestrator``, the SDD overlay trio (sdd-explorer/
-        sdd-implementor/sdd-validator), and the SDD-only phase agents
-        (sdd-propose / sdd-spec / sdd-design / sdd-tasks / sdd-archive).
+        the deduped, sorted union — currently fourteen names: the two ``Sdd-*``
+        primaries (ASCII-sort first: ``Sdd-Implementor-Loop`` then
+        ``Sdd-Planning-Loop``), the Loop trio + ``loop-orchestrator``, the SDD
+        overlay trio (sdd-explorer/sdd-implementor/sdd-validator), and the
+        SDD-only phase agents (sdd-propose / sdd-spec / sdd-design /
+        sdd-tasks / sdd-archive).
         """
         from ai_harness.modules.harness.renderers import _discover_agents
 
         assert _discover_agents() == [
+            "Sdd-Implementor-Loop",
             "Sdd-Planning-Loop",
             "explorer",
             "implementor",
@@ -1282,24 +1287,26 @@ _SDD_ONLY_PHASE_AGENTS = ("sdd-propose", "sdd-spec", "sdd-design", "sdd-tasks", 
 class TestSddOnlyComposition:
     """Composition, discovery, metadata, and rendering for the SDD-only phase agents."""
 
-    def test_discover_yields_thirteen_agents(self) -> None:
-        """_discover_agents returns all thirteen composed agent names, sorted.
+    def test_discover_yields_fourteen_agents(self) -> None:
+        """_discover_agents returns all fourteen composed agent names, sorted.
 
         The SDD-only phase agents land in discovery because they live under
-        ``sdd-agent/`` alongside the SDD overlay trio and the ``Sdd-Planning-
-        Loop`` primary. The sorted union with ``loop-agent/`` is the thirteen-
-        agent set; the SDD-only five, the SDD overlay trio, and the SDD
-        planning primary are all present.
+        ``sdd-agent/`` alongside the SDD overlay trio and the two ``Sdd-*``
+        primaries. The sorted union with ``loop-agent/`` is the fourteen-agent
+        set; the SDD-only five, the SDD overlay trio, and the two SDD
+        orchestrator primaries are all present.
         """
         from ai_harness.modules.harness.renderers import _discover_agents
 
         names = _discover_agents()
         assert names == sorted(names)
-        assert len(names) == 13
+        assert len(names) == 14
         assert set(_SDD_ONLY_PHASE_AGENTS) <= set(names)
         assert {"sdd-explorer", "sdd-implementor", "sdd-validator"} <= set(names)
         assert "Sdd-Planning-Loop" in names
+        assert "Sdd-Implementor-Loop" in names
         assert set(names) == {
+            "Sdd-Implementor-Loop",
             "Sdd-Planning-Loop",
             "explorer",
             "implementor",
@@ -1623,4 +1630,106 @@ def test_sdd_planning_loop_body_contains_no_forbidden_literals() -> None:
     assert not pattern.search(body), (
         "Sdd-Planning-Loop body contains a forbidden literal; the SDD flow must be "
         "self-contained and file-backed with no external-skill or issue-mutation strings"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Sdd-Implementor-Loop — the implementation-flow primary orchestrator (#87).
+# Drives apply ↔ verify for one named change until the validator is clean,
+# then archives and opens ONE PR. Renders into its own per-primary skill dir.
+# ---------------------------------------------------------------------------
+
+
+def test_sdd_implementor_loop_agent_meta_has_correct_spawn() -> None:
+    """_AGENT_META['Sdd-Implementor-Loop'] is primary with the three SDD implementation subagents as spawn allowlist."""
+    meta = get_agent_meta("Sdd-Implementor-Loop", overrides={})
+    assert meta["mode"] == "primary"
+    caps = meta.get("caps")
+    assert isinstance(caps, AgentCaps)
+    assert caps.write is False
+    assert caps.spawn == ("sdd-implementor", "sdd-validator", "sdd-archive")
+
+
+def test_render_claude_sdd_implementor_loop_emits_skill_in_its_own_dir() -> None:
+    """Rendering Sdd-Implementor-Loop for Claude lands in its own per-primary skill dir."""
+    pairs = render_agents(AgentCli.CLAUDE, ["Sdd-Implementor-Loop"])
+
+    assert len(pairs) == 1
+    path, _content = pairs[0]
+    assert path == ".claude/skills/Sdd-Implementor-Loop/SKILL.md"
+
+
+def test_rendered_claude_skill_contains_sdd_implementor_loop_spawn_prose() -> None:
+    """The Sdd-Implementor-Loop Claude skill body injects the three-name spawn allowlist as prose."""
+    pairs = render_agents(AgentCli.CLAUDE, ["Sdd-Implementor-Loop"])
+
+    assert len(pairs) == 1
+    body = pairs[0][1].split("---", 2)[-1]
+
+    assert "Only spawn these subagents" in body
+    for name in ("sdd-implementor", "sdd-validator", "sdd-archive"):
+        assert name in body, f"spawn allowlist missing {name!r} in Sdd-Implementor-Loop skill body"
+
+
+def _sdd_implementor_loop_body() -> str:
+    """Return the composed Sdd-Implementor-Loop template body."""
+    from ai_harness.modules.harness.renderers import _read_template_body
+
+    return _read_template_body("Sdd-Implementor-Loop")
+
+
+def test_sdd_implementor_loop_body_mentions_one_named_change() -> None:
+    """The Sdd-Implementor-Loop body references naming a single change for the session."""
+    body = _sdd_implementor_loop_body()
+    assert "ONE change" in body or "ONE named change" in body, (
+        "Sdd-Implementor-Loop body must reference naming a single change"
+    )
+
+
+def test_sdd_implementor_loop_body_mentions_apply_verify_archive_phases() -> None:
+    """The Sdd-Implementor-Loop body names the three SDD implementation subagents it delegates to."""
+    body = _sdd_implementor_loop_body()
+    for name in ("sdd-implementor", "sdd-validator", "sdd-archive"):
+        assert name in body, f"Sdd-Implementor-Loop body missing subagent {name!r}"
+
+
+def test_sdd_implementor_loop_body_mentions_one_pr() -> None:
+    """The Sdd-Implementor-Loop body commits to opening exactly one pull request per session."""
+    body = _sdd_implementor_loop_body()
+    assert "ONE PR" in body or "one pull request" in body, "Sdd-Implementor-Loop body must commit to ONE PR per session"
+
+
+def test_sdd_implementor_loop_body_mentions_other_changes_untouched() -> None:
+    """The Sdd-Implementor-Loop body states other ready changes are left untouched."""
+    body = _sdd_implementor_loop_body()
+    assert "left untouched" in body, "Sdd-Implementor-Loop body must state other changes are left untouched"
+
+
+def test_sdd_implementor_loop_body_contains_no_forbidden_literals() -> None:
+    """The Sdd-Implementor-Loop body carries none of the forbidden literal strings.
+
+    The body must prohibit external-skill loading and GitHub-issue mutation
+    WITHOUT containing the literal strings ``matt-pocock``,
+    ``~/.agents/skills/tdd``, ``tdd/SKILL.md``, or ``gh issue comment``. The
+    SDD implementation flow is self-contained and file-backed.
+    """
+    import re
+
+    body = _sdd_implementor_loop_body()
+    pattern = re.compile(r"matt-pocock|~/.agents/skills/tdd|tdd/SKILL\.md|gh issue comment")
+    assert not pattern.search(body), (
+        "Sdd-Implementor-Loop body contains a forbidden literal; the flow must be "
+        "self-contained and file-backed with no external-skill or issue-mutation strings"
+    )
+
+
+def test_sdd_implementor_loop_body_contains_no_issue_commit_format() -> None:
+    """The Sdd-Implementor-Loop body does not reference the issue-number commit format.
+
+    The change is file-backed; commit messages reference the change name, not a
+    GitHub issue number. The body must not contain the literal ``#issue``.
+    """
+    body = _sdd_implementor_loop_body()
+    assert "#issue" not in body, (
+        "Sdd-Implementor-Loop body must not contain the `#issue` literal — the change is file-backed"
     )
