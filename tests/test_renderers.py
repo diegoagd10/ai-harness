@@ -1257,3 +1257,46 @@ def test_explorer_documents_new_file_marker() -> None:
     next_section_b = after_behavior.find("\n##", len("## Behavior"))
     behavior_content = after_behavior[:next_section_b] if next_section_b >= 0 else after_behavior
     assert "[NEW]" in behavior_content, "explorer ## Behavior section must document [NEW] convention for new files"
+
+
+# ---------------------------------------------------------------------------
+# Story 5 — skill-resolution feedback (orchestrator compaction-safety)
+# ---------------------------------------------------------------------------
+
+
+def test_orchestrator_documents_skill_feedback_recovery() -> None:
+    """Orchestrator template documents skill-resolution feedback subsection
+    keyed off the ``skills:`` header value. Must reference ``fallback`` and
+    ``none`` as triggers, describe re-injection of skill paths into the next
+    delegation, mention noting the recovery, and frame it as a compaction-
+    safety mechanism — not a hard block.
+    """
+    from importlib.resources import files
+
+    root = files("ai_harness.resources") / "loop-agent"
+    body = (root / "loop-orchestrator.md").read_text(encoding="utf-8")
+
+    # Subsection heading for skill-resolution feedback must exist
+    assert "Skill-resolution feedback" in body, "orchestrator must have a Skill-resolution feedback subsection"
+    assert "compaction-safety" in body or "compaction safety" in body.lower(), (
+        "orchestrator must frame skill-resolution as a compaction-safety mechanism"
+    )
+
+    # Must reference the ``skills:`` header value
+    assert "skills:" in body, "orchestrator must reference skills: header value"
+
+    # ``fallback`` and ``none`` must be mentioned as triggers
+    assert "fallback" in body.lower(), "orchestrator must mention fallback as a skill-resolution trigger"
+    assert "none" in body.lower(), "orchestrator must mention none as a skill-resolution trigger"
+
+    # Must describe re-injection of skill paths
+    assert "re-inject" in body.lower(), "orchestrator must describe re-injection of skill paths"
+
+    # Must mention noting the recovery
+    assert "note" in body.lower() or "noting" in body.lower(), "orchestrator must mention noting the recovery"
+
+    # Scope: only implementor gets forwarded skill paths in this iteration
+    assert "implementor" in body.lower(), "orchestrator must document that re-injection is scoped to implementor"
+
+    # Must NOT be a hard block (bold markers in markdown: "**not**")
+    assert "hard block" in body.lower(), "orchestrator must state skill-resolution feedback is not a hard block"

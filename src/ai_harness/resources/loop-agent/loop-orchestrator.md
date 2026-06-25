@@ -162,6 +162,29 @@ If Engram is unavailable, degrade to an in-context `(phase, issue#, round)` set
 for the current turn and note the degradation. No durable deduplication across
 turns will be possible in this mode.
 
+### Skill-resolution feedback (compaction-safety)
+
+Every sub-agent result carries a `skills:` header (`loaded | fallback | none`).
+The orchestrator reads this value from each delegation's `result` fenced block
+to detect compaction-induced skill loss:
+
+- **`skills: fallback` or `skills: none`** → the sub-agent's skills were not
+  correctly loaded (e.g. after compaction dropped the forwarded skill paths).
+  Note the recovery and re-inject the relevant skill paths into the next
+  delegation prompt.
+
+- Do **not** treat as a hard block — the sub-agent may still produce valid
+  work using fallback heuristics.
+
+- **Scope (this iteration):** only the implementor receives forwarded skill
+  paths (`~/.agents/skills/tdd/SKILL.md` per the implementor delegation in
+  step 5). Explorer and validator receive none. Re-injection is currently
+  scoped to the implementor; the pattern is extensible to other roles when
+  they gain forwarded skill paths.
+
+This is a compaction-safety mechanism: it lets the orchestrator self-correct
+skill loss across compaction boundaries without blocking the pipeline.
+
 ## Session end
 
 1. No commits ahead of `main` → nothing landed; report and stop, no PR.
