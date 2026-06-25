@@ -1133,3 +1133,38 @@ def test_validator_describes_forwarded_gate_preference() -> None:
     assert "fall back" in body.lower() or "fallback" in body.lower(), (
         "validator body must describe fallback to CODING_STANDARDS.md"
     )
+
+
+# ---------------------------------------------------------------------------
+# Story 4 — Engram launch ledger (orchestrator body)
+# ---------------------------------------------------------------------------
+
+
+def test_orchestrator_documents_engram_launch_ledger() -> None:
+    """Orchestrator body documents the Engram launch ledger with pre-launch check,
+    post-launch append (capture_prompt: false), cross-turn recovery, and fallback."""
+    pairs = render_agents(AgentCli.CLAUDE)
+    pair = _find_pair(pairs, "loop-orchestrator")
+    assert pair is not None
+    body = pair[1].split("---", 2)[-1]
+
+    # Engram topic key format: loop/{branch}/launch-log
+    assert "loop/" in body and "launch-log" in body, (
+        "orchestrator body must reference Engram topic key loop/{branch}/launch-log"
+    )
+
+    # Pre-launch check: mem_search + mem_get_observation
+    assert "mem_search" in body, "orchestrator body must document pre-launch mem_search call"
+    assert "mem_get_observation" in body, "orchestrator body must document pre-launch mem_get_observation call"
+
+    # Post-launch: mem_save with capture_prompt: false
+    assert "mem_save" in body, "orchestrator body must document post-launch mem_save call"
+    assert "capture_prompt: false" in body, "orchestrator body must specify capture_prompt: false for ledger saves"
+
+    # Recovery across compaction / cross-turn
+    assert "compaction" in body.lower() or "cross-turn" in body.lower(), (
+        "orchestrator body must document compaction or cross-turn recovery"
+    )
+
+    # Fallback when Engram unavailable
+    assert "fallback" in body.lower(), "orchestrator body must document Engram-unavailable fallback path"

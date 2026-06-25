@@ -102,6 +102,37 @@ skills:    loaded | fallback | none
 
 8. **Check the cap.** Handled `LOOP_MAX_ITERATIONS` issues → **Session end**. Else back to step 1.
 
+### Launch ledger (Engram-backed)
+
+Before every delegation, the orchestrator checks a durable launch ledger in
+Engram to prevent launching the same phase twice for the same issue/round. The
+ledger is keyed by the session branch (`<branch>` from Setup step 1).
+
+**Topic key:** `loop/{branch}/launch-log`.
+
+**Pre-launch check:**
+1. `mem_search(query: "loop/{branch}/launch-log", project: "{project}")`.
+2. `mem_get_observation(id)` on the result.
+3. If the tuple `(phase, issue#, round)` is already present in the ledger, do
+   **not** launch again — recover the prior result instead.
+
+**Post-launch append:**
+4. After a successful launch, merge the `(phase, issue#, round)` tuple into the
+   ledger via read-merge-write: call `mem_save` with
+   `topic_key: "loop/{branch}/launch-log"`, `type: "architecture"`,
+   `capture_prompt: false`. Never overwrite the existing log — always
+   merge new entries.
+
+**Recovery across turns and compaction:**
+After a new turn or compaction, re-read the ledger from Engram via
+`mem_search` + `mem_get_observation` to recover prior launch state. The ledger
+persists durably so the guard holds across compaction boundaries.
+
+**Fallback (Engram unavailable):**
+If Engram is unavailable, degrade to an in-context `(phase, issue#, round)` set
+for the current turn and note the degradation. No durable deduplication across
+turns will be possible in this mode.
+
 ## Session end
 
 1. No commits ahead of `main` → nothing landed; report and stop, no PR.
