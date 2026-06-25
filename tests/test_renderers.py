@@ -1511,22 +1511,116 @@ def test_sdd_planning_loop_body_mentions_all_five_phases_and_stop_condition() ->
     assert "ready" in body.lower()
 
 
+_LOOP_ORCHESTRATOR_PRE86_FIXTURE = Path(__file__).parent / "fixtures" / "loop_orchestrator_claude_pre86.md"
+
+
 def test_loop_orchestrator_render_byte_identical_after_change() -> None:
     """Rendering loop-orchestrator for Claude is byte-identical to the pre-#86 emission.
 
-    Regression guard: per-primary skill-dir routing must not change
-    ``loop-orchestrator``'s rendered path or content. The skill dir derives
-    from the agent name, so 'loop-orchestrator' still lands at
-    ``.claude/skills/loop-orchestrator/SKILL.md`` with unchanged content.
+    Regression guard: the per-primary skill-dir routing introduced in #86
+    must not change ``loop-orchestrator``'s rendered path OR content. The
+    fixture is the full rendered output captured at the #86 base SHA
+    (``e899a75``) — path ``.claude/skills/loop-orchestrator/SKILL.md`` plus
+    every byte of frontmatter + body. If ``_claude_skill_dir`` ever returns
+    anything other than ``.claude/skills/loop-orchestrator`` for this name,
+    or any byte of the body drifts, this test fails.
     """
     pairs = render_agents(AgentCli.CLAUDE, ["loop-orchestrator"])
 
     assert len(pairs) == 1
     path, content = pairs[0]
     assert path == ".claude/skills/loop-orchestrator/SKILL.md"
-    # Frontmatter + body shape: frontmatter carries only description. Body
-    # starts with the loop-orchestrator template body verbatim and ends with
-    # a Subagent spawn allowlist prose section.
-    assert content.startswith("---\n")
-    fm = _parse_frontmatter(content)
-    assert set(fm.keys()) == {"description"}
+    expected = _LOOP_ORCHESTRATOR_PRE86_FIXTURE.read_text(encoding="utf-8")
+    assert content == expected, (
+        "loop-orchestrator Claude render drifted from the pre-#86 baseline; "
+        "per-primary skill-dir routing must be byte-identical for this name"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Sdd-Planning-Loop body — direct prose coverage for stories 4/5/11/12/31
+# and the forbidden-literals guard (issue #86 BLOCKER fix-up).
+# ---------------------------------------------------------------------------
+
+
+def _sdd_planning_loop_body() -> str:
+    """Return the composed Sdd-Planning-Loop template body."""
+    from ai_harness.modules.harness.renderers import _read_template_body
+
+    return _read_template_body("Sdd-Planning-Loop")
+
+
+def test_sdd_planning_loop_body_mentions_grill_front_end() -> None:
+    """The Sdd-Planning-Loop body opens with the interactive grilling entry points.
+
+    Story 4: the user enters the orchestrator via the front-end grilling
+    commands, so both ``/grill-with-docs`` and ``/grill-me`` must appear.
+    """
+    body = _sdd_planning_loop_body()
+    assert "/grill-with-docs" in body, "Sdd-Planning-Loop body must mention /grill-with-docs entry point"
+    assert "/grill-me" in body, "Sdd-Planning-Loop body must mention /grill-me entry point"
+
+
+def test_sdd_planning_loop_body_mentions_all_five_artifacts() -> None:
+    """The Sdd-Planning-Loop body names all five planning artifacts.
+
+    Story 5: the loop drives the five-artifact gate, so every artifact
+    filename must appear in the body.
+    """
+    body = _sdd_planning_loop_body()
+    for artifact in ("exploration.md", "proposal.md", "spec.md", "design.md", "tasks.md"):
+        assert artifact in body, f"Sdd-Planning-Loop body missing artifact {artifact!r}"
+
+
+def test_sdd_planning_loop_body_describes_phase_routing_by_artifact_presence() -> None:
+    """The Sdd-Planning-Loop body derives the next phase from artifact presence.
+
+    Story 11: the next phase is not stored in a state file — it is derived
+    from which artifacts already exist on disk. The body must say so.
+    """
+    body = _sdd_planning_loop_body()
+    assert "artifacts already exist" in body or "missing artifact" in body, (
+        "Sdd-Planning-Loop body must describe deriving the next phase from artifact presence"
+    )
+
+
+def test_sdd_planning_loop_body_has_ready_stop_condition() -> None:
+    """The Sdd-Planning-Loop body carries a readiness stop condition.
+
+    Story 12: the loop stops when the change is ready, so the body must
+    state a ready stop condition.
+    """
+    body = _sdd_planning_loop_body()
+    assert "ready" in body.lower(), "Sdd-Planning-Loop body must state a ready stop condition"
+
+
+def test_sdd_planning_loop_body_mentions_fresh_subagent_per_phase() -> None:
+    """The Sdd-Planning-Loop body spawns a fresh subagent per phase.
+
+    Story 31: each phase runs in a fresh subagent context with no memory
+    carried across phases. The body must require a fresh subagent (or
+    delegation to fresh subagents).
+    """
+    body = _sdd_planning_loop_body()
+    assert "fresh" in body.lower(), "Sdd-Planning-Loop body must require fresh subagents"
+    assert "subagent" in body.lower() or "sub-agent" in body.lower() or "delegates" in body.lower(), (
+        "Sdd-Planning-Loop body must mention subagents or delegation for the fresh-context rule"
+    )
+
+
+def test_sdd_planning_loop_body_contains_no_forbidden_literals() -> None:
+    """The Sdd-Planning-Loop body carries none of the forbidden literal strings.
+
+    Issue #86 BLOCKER: the body must prohibit external-skill loading and
+    GitHub-issue mutation WITHOUT containing the literal strings
+    ``matt-pocock``, ``~/.agents/skills/tdd``, ``tdd/SKILL.md``, or
+    ``gh issue comment``. The SDD flow is self-contained and file-backed.
+    """
+    import re
+
+    body = _sdd_planning_loop_body()
+    pattern = re.compile(r"matt-pocock|~/.agents/skills/tdd|tdd/SKILL\.md|gh issue comment")
+    assert not pattern.search(body), (
+        "Sdd-Planning-Loop body contains a forbidden literal; the SDD flow must be "
+        "self-contained and file-backed with no external-skill or issue-mutation strings"
+    )

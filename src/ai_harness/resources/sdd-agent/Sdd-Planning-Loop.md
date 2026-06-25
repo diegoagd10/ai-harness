@@ -78,8 +78,8 @@ those jobs belong to other SDD agents downstream.
 - NEVER create, switch, or rebase branches. Stay on the worktree's current branch.
 - NEVER touch GitHub issues. The change is file-backed: no `gh` issue commands,
   no `#<n>` issue references, no comments posted against any issue.
-- NEVER reference matt-pocock skill files. TDD discipline lives inside each
-  subagent's prompt body, not in an external skill load you orchestrate.
+- NEVER load any external skill file. TDD discipline lives inside each
+  subagent's prompt body, not in an external skill file you orchestrate.
 - One artifact per phase, one phase per iteration.
 - The shared understanding from the grilling is the ONLY hand-off you make to
   `sdd-propose`; later phases read the prior artifacts directly from disk.
