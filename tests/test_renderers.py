@@ -53,6 +53,7 @@ def test_render_agents_claude_returns_agents_and_skill() -> None:
 
     paths = [path for path, _ in pairs]
     assert paths == [
+        ".claude/skills/Sdd-Planning-Loop/SKILL.md",
         ".claude/agents/explorer.md",
         ".claude/agents/implementor.md",
         ".claude/skills/loop-orchestrator/SKILL.md",
@@ -77,6 +78,7 @@ def test_render_agents_opencode_returns_agents_under_agent_dir() -> None:
 
     paths = [path for path, _ in pairs]
     assert paths == [
+        ".config/opencode/agent/Sdd-Planning-Loop.md",
         ".config/opencode/agent/explorer.md",
         ".config/opencode/agent/implementor.md",
         ".config/opencode/agent/loop-orchestrator.md",
@@ -881,10 +883,10 @@ def test_render_agents_mode_override_routes_through_dispatch(tmp_path: Path, mon
         overrides={"implementor": {"mode": "primary"}},
     )
 
-    # Primary → skill directory, with SKILL.md as the leaf filename.
+    # Primary → its own per-primary skill directory, with SKILL.md as the leaf filename.
     skill_paths = [path for path, _ in pairs if path.endswith("/SKILL.md")]
     assert skill_paths, f"expected a SKILL.md dispatch, got {[p for p, _ in pairs]}"
-    assert skill_paths[0].endswith("/loop-orchestrator/SKILL.md")
+    assert skill_paths[0] == ".claude/skills/implementor/SKILL.md"
 
 
 # ---------------------------------------------------------------------------
@@ -894,11 +896,12 @@ def test_render_agents_mode_override_routes_through_dispatch(tmp_path: Path, mon
 
 
 def test_render_agents_copilot_returns_all_agent_files() -> None:
-    """Copilot emits all seven composed agents under .copilot/agents/ with .agent.md extension."""
+    """Copilot emits every discovered agent under .copilot/agents/ with .agent.md extension."""
     pairs = render_agents(AgentCli.COPILOT)
 
     paths = [path for path, _ in pairs]
     assert paths == [
+        ".copilot/agents/Sdd-Planning-Loop.agent.md",
         ".copilot/agents/explorer.agent.md",
         ".copilot/agents/implementor.agent.md",
         ".copilot/agents/loop-orchestrator.agent.md",
@@ -1085,7 +1088,8 @@ class TestCompositionDiscovery:
         """_discover_agents returns every composed agent (Loop + SDD), sorted.
 
         Discovery scans both ``loop-agent/`` and ``sdd-agent/`` and returns
-        the deduped, sorted union — currently twelve names: the Loop trio +
+        the deduped, sorted union — currently thirteen names: the ``Sdd-
+        Planning-Loop`` primary (ASCII-sorts first), the Loop trio +
         ``loop-orchestrator``, the SDD overlay trio (sdd-explorer/
         sdd-implementor/sdd-validator), and the SDD-only phase agents
         (sdd-propose / sdd-spec / sdd-design / sdd-tasks / sdd-archive).
@@ -1093,6 +1097,7 @@ class TestCompositionDiscovery:
         from ai_harness.modules.harness.renderers import _discover_agents
 
         assert _discover_agents() == [
+            "Sdd-Planning-Loop",
             "explorer",
             "implementor",
             "loop-orchestrator",
@@ -1277,22 +1282,25 @@ _SDD_ONLY_PHASE_AGENTS = ("sdd-propose", "sdd-spec", "sdd-design", "sdd-tasks", 
 class TestSddOnlyComposition:
     """Composition, discovery, metadata, and rendering for the SDD-only phase agents."""
 
-    def test_discover_yields_twelve_agents(self) -> None:
-        """_discover_agents returns all twelve composed agent names, sorted.
+    def test_discover_yields_thirteen_agents(self) -> None:
+        """_discover_agents returns all thirteen composed agent names, sorted.
 
         The SDD-only phase agents land in discovery because they live under
-        ``sdd-agent/`` alongside the SDD overlay trio. The sorted union with
-        ``loop-agent/`` is the twelve-agent set; the SDD-only five and the
-        SDD overlay trio are both present.
+        ``sdd-agent/`` alongside the SDD overlay trio and the ``Sdd-Planning-
+        Loop`` primary. The sorted union with ``loop-agent/`` is the thirteen-
+        agent set; the SDD-only five, the SDD overlay trio, and the SDD
+        planning primary are all present.
         """
         from ai_harness.modules.harness.renderers import _discover_agents
 
         names = _discover_agents()
         assert names == sorted(names)
-        assert len(names) == 12
+        assert len(names) == 13
         assert set(_SDD_ONLY_PHASE_AGENTS) <= set(names)
         assert {"sdd-explorer", "sdd-implementor", "sdd-validator"} <= set(names)
+        assert "Sdd-Planning-Loop" in names
         assert set(names) == {
+            "Sdd-Planning-Loop",
             "explorer",
             "implementor",
             "loop-orchestrator",
@@ -1439,3 +1447,86 @@ def test_sdd_archive_body_specifies_archive_folder_move() -> None:
     assert "mv docs/changes/" in text
     assert "verify-report.md" in text
     assert "No findings." in text
+
+
+# ---------------------------------------------------------------------------
+# Per-primary skill dir — each ``mode: primary`` agent renders to its own
+# Claude skill directory derived from its name (issue #86). ``loop-orchestrator``
+# stays byte-identical to its pre-change destination.
+# ---------------------------------------------------------------------------
+
+
+def test_claude_skill_dir_is_per_primary() -> None:
+    """_claude_skill_dir derives the Claude skill dir from a primary agent name."""
+    from ai_harness.modules.harness.renderers import _claude_skill_dir
+
+    assert _claude_skill_dir("Sdd-Planning-Loop") == ".claude/skills/Sdd-Planning-Loop"
+
+
+def test_claude_skill_dir_loop_orchestrator_unchanged() -> None:
+    """_claude_skill_dir('loop-orchestrator') equals the old hardcoded constant byte-for-byte."""
+    from ai_harness.modules.harness.renderers import _claude_skill_dir
+
+    assert _claude_skill_dir("loop-orchestrator") == ".claude/skills/loop-orchestrator"
+
+
+def test_render_claude_sdd_planning_loop_emits_skill_in_its_own_dir() -> None:
+    """Rendering Sdd-Planning-Loop for Claude lands in its own per-primary skill dir."""
+    pairs = render_agents(AgentCli.CLAUDE, ["Sdd-Planning-Loop"])
+
+    assert len(pairs) == 1
+    path, _content = pairs[0]
+    assert path == ".claude/skills/Sdd-Planning-Loop/SKILL.md"
+
+
+def test_rendered_claude_skill_contains_spawn_allowlist_prose() -> None:
+    """The Sdd-Planning-Loop Claude skill body injects the five-name spawn allowlist as prose."""
+    pairs = render_agents(AgentCli.CLAUDE, ["Sdd-Planning-Loop"])
+
+    assert len(pairs) == 1
+    body = pairs[0][1].split("---", 2)[-1]
+
+    assert "Only spawn these subagents" in body
+    for name in ("sdd-explorer", "sdd-propose", "sdd-spec", "sdd-design", "sdd-tasks"):
+        assert name in body, f"spawn allowlist missing {name!r} in Sdd-Planning-Loop skill body"
+
+
+def test_sdd_planning_loop_agent_meta_entry_has_correct_caps_and_spawn() -> None:
+    """_AGENT_META['Sdd-Planning-Loop'] is primary with the five SDD phase agents as spawn allowlist."""
+    meta = get_agent_meta("Sdd-Planning-Loop", overrides={})
+    assert meta["mode"] == "primary"
+    caps = meta.get("caps")
+    assert isinstance(caps, AgentCaps)
+    assert caps.write is False
+    assert caps.spawn == ("sdd-explorer", "sdd-propose", "sdd-spec", "sdd-design", "sdd-tasks")
+
+
+def test_sdd_planning_loop_body_mentions_all_five_phases_and_stop_condition() -> None:
+    """The Sdd-Planning-Loop body names all five phase agents and a ready stop condition."""
+    from ai_harness.modules.harness.renderers import _read_template_body
+
+    body = _read_template_body("Sdd-Planning-Loop")
+    for name in ("sdd-explorer", "sdd-propose", "sdd-spec", "sdd-design", "sdd-tasks"):
+        assert name in body, f"Sdd-Planning-Loop body missing phase agent {name!r}"
+    assert "ready" in body.lower()
+
+
+def test_loop_orchestrator_render_byte_identical_after_change() -> None:
+    """Rendering loop-orchestrator for Claude is byte-identical to the pre-#86 emission.
+
+    Regression guard: per-primary skill-dir routing must not change
+    ``loop-orchestrator``'s rendered path or content. The skill dir derives
+    from the agent name, so 'loop-orchestrator' still lands at
+    ``.claude/skills/loop-orchestrator/SKILL.md`` with unchanged content.
+    """
+    pairs = render_agents(AgentCli.CLAUDE, ["loop-orchestrator"])
+
+    assert len(pairs) == 1
+    path, content = pairs[0]
+    assert path == ".claude/skills/loop-orchestrator/SKILL.md"
+    # Frontmatter + body shape: frontmatter carries only description. Body
+    # starts with the loop-orchestrator template body verbatim and ends with
+    # a Subagent spawn allowlist prose section.
+    assert content.startswith("---\n")
+    fm = _parse_frontmatter(content)
+    assert set(fm.keys()) == {"description"}

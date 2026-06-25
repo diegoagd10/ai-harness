@@ -267,6 +267,22 @@ _AGENT_META: dict[str, dict] = {
         },
         "caps": AgentCaps(write=False, spawn=("explorer", "implementor", "validator")),
     },
+    "Sdd-Planning-Loop": {
+        "description": (
+            "SDD Planning Loop orchestrator — drives the file-backed planning flow for one named "
+            "change. User runs /grill-with-docs or /grill-me to reach shared understanding, then "
+            "the orchestrator delegates explore -> propose -> spec -> design -> tasks to fresh "
+            "subagents, derived from which artifacts already exist in docs/changes/<name>/. "
+            "Stops when all five artifacts are present (change is ready)."
+        ),
+        "mode": "primary",
+        "color": "error",
+        "model": {
+            "opencode": "openai/gpt-5.5",
+            "claude": "sonnet",
+        },
+        "caps": AgentCaps(write=False, spawn=("sdd-explorer", "sdd-propose", "sdd-spec", "sdd-design", "sdd-tasks")),
+    },
     "sdd-explorer": {
         "description": (
             "Read-only investigator for the SDD change-flow. Reads the change folder "
@@ -698,9 +714,20 @@ def _render_claude_skill(name: str, overrides: dict | None = None) -> RenderedFi
 # ---------------------------------------------------------------------------
 
 _CLAUDE_AGENTS_DIR = ".claude/agents"
-_CLAUDE_SKILL_DIR = ".claude/skills/loop-orchestrator"
 _COPILOT_AGENT_DIR = ".copilot/agents"
 _OPENCODE_AGENT_DIR = ".config/opencode/agent"
+
+
+def _claude_skill_dir(name: str) -> str:
+    """Return the Claude skill directory for a ``mode: primary`` agent name.
+
+    Each primary agent renders into its own skill directory derived from its
+    name, so a new primary (e.g. ``Sdd-Planning-Loop``) lands in
+    ``.claude/skills/Sdd-Planning-Loop/`` without disturbing another primary's
+    directory. For ``loop-orchestrator`` this returns the prior hardcoded
+    constant ``.claude/skills/loop-orchestrator`` byte-for-byte.
+    """
+    return f".claude/skills/{name}"
 
 
 def _render_claude(
@@ -711,11 +738,12 @@ def _render_claude(
 ) -> RenderedFile:
     """Render one Claude loop agent as a home-relative ``RenderedFile`` record.
 
-    Primary agents become the orchestrator skill; all others become subagents.
+    Primary agents become the orchestrator skill in their own per-primary dir;
+    all others become subagents.
     """
     if _get_agent_mode(name, overrides=overrides, home=home) == "primary":
         rendered = _render_claude_skill(name, overrides=overrides)
-        return RenderedFile(f"{_CLAUDE_SKILL_DIR}/{rendered.filename}", rendered.content)
+        return RenderedFile(f"{_claude_skill_dir(name)}/{rendered.filename}", rendered.content)
     rendered = _render_claude_agent(name, overrides=overrides)
     return RenderedFile(f"{_CLAUDE_AGENTS_DIR}/{rendered.filename}", rendered.content)
 

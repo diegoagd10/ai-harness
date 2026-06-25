@@ -309,6 +309,7 @@ _LOOP_AGENT_NAMES = (
     "implementor",
     "validator",
     "loop-orchestrator",
+    "Sdd-Planning-Loop",
     "sdd-archive",
     "sdd-design",
     "sdd-explorer",
@@ -486,8 +487,8 @@ def test_install_copilot_manifest_records_agents(tmp_path: Path) -> None:
     data = json.loads((tmp_path / MANIFEST_REL).read_text(encoding="utf-8"))
     assert "copilot" in data["files_by_agent_cli"]
     copilot_files = data["files_by_agent_cli"]["copilot"]
-    # 6 persona+skills + 12 composed agents = 18
-    assert len(copilot_files) == 18
+    # 6 persona+skills + 13 composed agents = 19
+    assert len(copilot_files) == 19
     assert any(".copilot/agents/" in f for f in copilot_files), "copilot manifest should contain agent paths"
     for name in _LOOP_AGENT_NAMES:
         expected = f".copilot/agents/{name}.agent.md"
@@ -668,9 +669,9 @@ def test_cli_install_copilot_writes_agents(isolated_home: Path) -> None:
         assert (agent_dir / f"{name}.agent.md").is_file(), f"CLI install: copilot {name} missing"
 
     # Generic (6 files: 1 persona + 4 skill dirs + 1 nested ref)
-    # + Copilot (18 files: 6 persona+skills + 12 composed agents) = 24 total.
-    assert "24 file(s)" in result.stdout, (
-        f"stdout should report 24 written files (6 generic + 18 copilot), got: {result.stdout!r}"
+    # + Copilot (19 files: 6 persona+skills + 13 composed agents) = 25 total.
+    assert "25 file(s)" in result.stdout, (
+        f"stdout should report 25 written files (6 generic + 19 copilot), got: {result.stdout!r}"
     )
 
 
@@ -784,9 +785,9 @@ def test_cli_install_opencode_writes_agents(isolated_home: Path) -> None:
         assert (agent_dir / f"{name}.md").is_file(), f"CLI install: {name} missing"
 
     # PRD story 17: stdout reports file count including the composed agents.
-    # Generic (1 persona + 4 skill dirs + 1 nested ref = 6 files) + 12 OpenCode agents = 18 total.
-    assert "18 file(s)" in result.stdout, (
-        f"stdout should report 18 written files (6 generic + 12 opencode agents), got: {result.stdout!r}"
+    # Generic (1 persona + 4 skill dirs + 1 nested ref = 6 files) + 13 OpenCode agents = 19 total.
+    assert "19 file(s)" in result.stdout, (
+        f"stdout should report 19 written files (6 generic + 13 opencode agents), got: {result.stdout!r}"
     )
 
 
@@ -855,6 +856,11 @@ def test_install_claude_writes_subagents_and_skill(tmp_path: Path) -> None:
     skill_path = _assert_claude_skill_written(tmp_path)
     _assert_frontmatter_matches(skill_path, _EXPECTED_CLAUDE_FRONTMATTER[_CLAUDE_SKILL_NAME])
 
+    # Sdd-Planning-Loop primary renders to its own per-primary skill dir (#86)
+    sdd_skill_path = tmp_path / ".claude" / "skills" / "Sdd-Planning-Loop" / "SKILL.md"
+    assert sdd_skill_path.is_file(), f"Sdd-Planning-Loop skill missing: {sdd_skill_path}"
+    _assert_frontmatter_matches(sdd_skill_path, _EXPECTED_CLAUDE_FRONTMATTER["Sdd-Planning-Loop"])
+
     # Generic still installed
     assert (tmp_path / ".agents" / "AGENTS.md").is_file()
 
@@ -865,8 +871,8 @@ def test_install_claude_writes_subagents_and_skill(tmp_path: Path) -> None:
     data = json.loads((tmp_path / MANIFEST_REL).read_text(encoding="utf-8"))
     assert "claude" in data["files_by_agent_cli"]
     claude_files = data["files_by_agent_cli"]["claude"]
-    # 6 persona+skills (CLAUDE.md + 4 skills + 1 nested ref) + 11 subagents + 1 skill = 18
-    assert len(claude_files) == 18
+    # 6 persona+skills (CLAUDE.md + 4 skills + 1 nested ref) + 11 subagents + 2 skills = 19
+    assert len(claude_files) == 19
 
 
 def test_install_claude_subagents_have_name_field(tmp_path: Path) -> None:
@@ -1066,11 +1072,15 @@ def test_cli_install_claude_writes_agents_and_skill(isolated_home: Path) -> None
     assert (isolated_home / ".claude" / "skills" / _CLAUDE_SKILL_NAME / "SKILL.md").is_file(), (
         "CLI install: claude skill missing"
     )
+    # Sdd-Planning-Loop primary renders to its own per-primary skill dir (#86)
+    assert (isolated_home / ".claude" / "skills" / "Sdd-Planning-Loop" / "SKILL.md").is_file(), (
+        "CLI install: Sdd-Planning-Loop skill missing"
+    )
 
     # Generic (6 files: 1 persona + 4 skill dirs + 1 nested ref)
-    # + Claude (18 files: 6 persona+skills + 12 loop artifacts: 11 subagents + 1 skill) = 24 total.
-    assert "24 file(s)" in result.stdout, (
-        f"stdout should report 24 written files (6 generic + 18 claude), got: {result.stdout!r}"
+    # + Claude (19 files: 6 persona+skills + 13 loop artifacts: 11 subagents + 2 skills) = 25 total.
+    assert "25 file(s)" in result.stdout, (
+        f"stdout should report 25 written files (6 generic + 19 claude), got: {result.stdout!r}"
     )
 
 
