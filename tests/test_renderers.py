@@ -1057,12 +1057,11 @@ _LOOP_AGENT_NAMES = ("explorer", "implementor", "validator", "loop-orchestrator"
 
 
 def test_each_agent_template_has_result_section() -> None:
-    """Every agent that emits a result block has a ## Result section with a result fenced block."""
+    """Every loop agent (including orchestrator) has a ## Result section with a result fenced block."""
     from importlib.resources import files
 
     root = files("ai_harness.resources") / "loop-agent"
-    # Only the three sub-agents emit result blocks; the orchestrator reads them.
-    for name in ("explorer", "implementor", "validator"):
+    for name in ("explorer", "implementor", "validator", "loop-orchestrator"):
         body = (root / f"{name}.md").read_text(encoding="utf-8")
         assert "## Result" in body, f"{name}: missing ## Result section"
         assert "```result" in body, f"{name}: missing result fenced block"

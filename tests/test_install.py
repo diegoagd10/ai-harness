@@ -1322,11 +1322,12 @@ def test_result_contract_is_bundled_in_resources() -> None:
 
 
 def test_each_loop_agent_template_contains_result_block() -> None:
-    """Every loop agent template (explorer, implementor, validator) contains a result fenced block."""
+    """Every loop agent template contains a result fenced block.
+    (explorer, implementor, validator, loop-orchestrator)."""
     from importlib.resources import files
 
     root = files("ai_harness.resources") / "loop-agent"
-    for name in ("explorer", "implementor", "validator"):
+    for name in ("explorer", "implementor", "validator", "loop-orchestrator"):
         body = (root / f"{name}.md").read_text(encoding="utf-8")
         assert "## Result" in body, f"{name}: missing ## Result section"
         assert "```result" in body, f"{name}: missing result fenced block"

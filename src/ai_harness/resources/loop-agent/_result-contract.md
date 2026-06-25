@@ -41,6 +41,12 @@ primary routing signal. On validator output, `status: clean` is the primary
 clean-pass indicator; the literal `No findings.` first line is retained as an
 authoritative back-compat signal.
 
+At session end the orchestrator EMITS its own result block:
+
+- `status`: `done` | `blocked`
+- `next`: `stop` | `escalate`
+- `artifacts`: PR URL (or empty string on block) and space-separated closed-issue numbers
+
 ## `skills` field
 
 - `loaded`: the agent successfully loaded at least one skill file from disk.

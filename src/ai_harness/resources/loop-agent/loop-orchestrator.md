@@ -27,6 +27,25 @@ block as the FIRST structured output. The block is defined in
 - **Implementor**: read `status` to route to validate, handle blockage, or
   arbitrate `gate-not-reproduced`.
 
+## Result
+
+Emit a `result` fenced block as the FIRST structured output at session end.
+
+```result
+status:    done | blocked
+next:      stop | escalate
+artifacts: <PR URL>, <closed-issue numbers>
+skills:    loaded | fallback | none
+```
+
+- `status: done` when the session completed normally and a PR was opened.
+- `status: blocked` when the session could not make progress (e.g. no `gh`
+  CLI, no open issues, or push failure).
+- `artifacts` is the PR URL (or empty string on block) and a
+  space-separated list of closed issue numbers.
+- `next: escalate` when the orchestrator hits an unrecoverable error the
+  human must resolve.
+
 ## Inputs
 
 - `LOOP_MAX_ITERATIONS` (default `20`) — max issues handled this session.
