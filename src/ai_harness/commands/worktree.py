@@ -78,15 +78,15 @@ def _require_tty() -> None:
 @app.command(name="create")
 def create_worktree_cmd(
     directory_name: str | None = typer.Option(
-        None, "-dn", "--directory-name", help="Worktree directory name (default: timestamp)."
+        None, "-d", "--directory-name", help="Worktree directory name (default: timestamp)."
     ),
     branch_name: str | None = typer.Option(
-        None, "-bn", "--branch-name", help="Branch name to create for the worktree (default: timestamp)."
+        None, "-b", "--branch-name", help="Branch name to create for the worktree (default: timestamp)."
     ),
 ) -> None:
     """Create an isolated git worktree under .ai-harness/worktrees/ on a new branch.
 
-    Based on the current branch's HEAD.  ``-dn``/``-bn`` name the directory and
+    Based on the current branch's HEAD.  ``-d``/``-b`` name the directory and
     branch; both default to a millisecond timestamp.  Native
     ``git worktree remove|prune|list`` cover cleanup, or use
     ``ai-harness worktree delete`` for an interactive picker.

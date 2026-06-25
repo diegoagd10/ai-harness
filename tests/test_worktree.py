@@ -327,7 +327,7 @@ def test_create_worktree_result_has_path_even_on_failure(tmp_path: Path) -> None
 
 
 def test_cli_worktree_create_passes_dir_and_branch_options(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """``-dn``/``-bn`` are forwarded to ``create_worktree`` as dir_name/branch_name."""
+    """``-d``/``-b`` are forwarded to ``create_worktree`` as dir_name/branch_name."""
     from ai_harness.commands import worktree as cmd
 
     monkeypatch.chdir(tmp_path)
@@ -343,7 +343,7 @@ def test_cli_worktree_create_passes_dir_and_branch_options(tmp_path: Path, monke
 
     monkeypatch.setattr(cmd, "create_worktree", _fake_create)
 
-    result = runner.invoke(app, ["worktree", "create", "-dn", "bla", "-bn", "feature/bla"])
+    result = runner.invoke(app, ["worktree", "create", "-d", "bla", "-b", "feature/bla"])
 
     assert result.exit_code == 0, result.stderr
     assert captured["dir_name"] == "bla"
