@@ -1298,3 +1298,105 @@ def test_re_render_claude_applies_overrides_from_store(tmp_path: Path) -> None:
 
     fm = _read_frontmatter(tmp_path / ".claude" / "agents" / "implementor.md")
     assert fm["model"] == "opus"
+
+
+# ---------------------------------------------------------------------------
+# Result contract — _result-contract.md and result blocks in agent templates
+# ---------------------------------------------------------------------------
+
+
+def test_result_contract_is_bundled_in_resources() -> None:
+    """_result-contract.md is bundled in the loop-agent resource directory."""
+    from importlib.resources import files
+
+    root = files("ai_harness.resources") / "loop-agent"
+    contract = root / "_result-contract.md"
+    assert contract.is_file(), "_result-contract.md missing from loop-agent resources"
+    content = contract.read_text(encoding="utf-8")
+    assert "```result" in content, "contract must define result fenced block format"
+    assert "status:" in content, "contract must define status field"
+    assert "Explorer" in content
+    assert "Implementor" in content
+    assert "Validator" in content
+    assert "Loop-orchestrator" in content
+
+
+def test_each_loop_agent_template_contains_result_block() -> None:
+    """Every loop agent template contains a result fenced block.
+    (explorer, implementor, validator, loop-orchestrator)."""
+    from importlib.resources import files
+
+    root = files("ai_harness.resources") / "loop-agent"
+    for name in ("explorer", "implementor", "validator", "loop-orchestrator"):
+        body = (root / f"{name}.md").read_text(encoding="utf-8")
+        assert "## Result" in body, f"{name}: missing ## Result section"
+        assert "```result" in body, f"{name}: missing result fenced block"
+        assert "status:" in body, f"{name}: missing status field"
+
+
+def test_validator_template_still_documents_no_findings() -> None:
+    """The validator template preserves the No findings. clean-pass signal alongside result block."""
+    from importlib.resources import files
+
+    root = files("ai_harness.resources") / "loop-agent"
+    body = (root / "validator.md").read_text(encoding="utf-8")
+    assert "No findings." in body, "validator must still document No findings. back-compat signal"
+    assert "result.status: clean" in body, "validator must document result.status: clean as primary signal"
+
+
+def test_discover_loop_agents_excludes_underscore_files() -> None:
+    """_discover_loop_agents returns exactly 4 agents, no _-prefixed files."""
+    from ai_harness.modules.harness.renderers import _discover_loop_agents
+
+    names = _discover_loop_agents()
+    assert names == ["explorer", "implementor", "loop-orchestrator", "validator"]
+    assert "_result-contract" not in names
+    assert len(names) == 4
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator gate fixes (#90/#91 review findings)
+# ---------------------------------------------------------------------------
+
+
+def _orchestrator_body() -> str:
+    """Return the loop-orchestrator template text from bundled resources."""
+    from importlib.resources import files
+
+    root = files("ai_harness.resources") / "loop-agent"
+    return (root / "loop-orchestrator.md").read_text(encoding="utf-8")
+
+
+def test_orchestrator_does_not_reference_uninstalled_contract_file() -> None:
+    """Orchestrator must not point agents at _result-contract.md.
+
+    The contract file is bundled in-package but never rendered to the install
+    destination, so a runtime reference would dangle. Each agent embeds its own
+    result block, so the orchestrator needs no external pointer.
+    """
+    assert "_result-contract.md" not in _orchestrator_body()
+
+
+def test_implementor_gate_runs_before_validation() -> None:
+    """The implementor artifact gate must precede the validate-and-fix step.
+
+    Catches a hallucinated SHA / dirty tree before spending a validator cycle.
+    """
+    body = _orchestrator_body()
+    assert "Gate implementor" in body
+    assert "Validate-and-fix" in body
+    assert body.index("Gate implementor") < body.index("Validate-and-fix")
+
+
+def test_gate_explorer_spotchecks_before_proceeding() -> None:
+    """The explorer gate runs the path spot-check before deciding to proceed."""
+    body = _orchestrator_body()
+    assert body.index("Path spot-check") < body.index("proceed to step 5")
+
+
+def test_drift_check_specifies_remediation() -> None:
+    """The drift check names a concrete action (skip / re-run), not just a check."""
+    body = _orchestrator_body()
+    idx = body.index("Drift check")
+    segment = body[idx : idx + 400].lower()
+    assert "skip" in segment or "re-run" in segment

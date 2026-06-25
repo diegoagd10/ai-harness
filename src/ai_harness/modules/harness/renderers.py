@@ -321,11 +321,16 @@ def _get_agent_mode(
 
 
 def _discover_loop_agents() -> list[str]:
-    """Return sorted list of loop agent template names (without .md extension)."""
+    """Return sorted list of loop agent template names (without .md extension).
+
+    Files whose name starts with ``_`` (e.g. ``_result-contract.md``) are
+    excluded — they are bundled resources, not agents.
+    """
     root = _loop_agent_dir()
     names: list[str] = []
     for p in sorted(root.glob("*.md")):
-        names.append(p.stem)
+        if not p.name.startswith("_"):
+            names.append(p.stem)
     return names
 
 

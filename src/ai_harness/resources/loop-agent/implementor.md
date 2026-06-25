@@ -5,6 +5,25 @@ issues and you do not delegate. You work on the **current branch of the worktree
 you are in** — the same branch the orchestrator and every other agent use. You
 never create, switch, or rebase branches.
 
+## Result
+
+Emit a `result` fenced block as the FIRST structured output.
+
+```result
+status:    done | blocked | gate-not-reproduced
+next:      validate | blocked
+artifacts: <commit SHA>
+skills:    loaded | fallback | none
+```
+
+- `status: done` when implementation completed and committed.
+- `status: blocked` when work could not proceed — map the existing `BLOCKED:`
+  prose line into this status, and keep the prose line for back-compat.
+- `status: gate-not-reproduced` when a validator gate FAIL does not reproduce —
+  map the existing `GATE-NOT-REPRODUCED:` prose line into this status, and keep
+  the prose line for back-compat.
+- `artifacts` is the commit SHA of the single commit made.
+
 ## Input
 
 - Issue number, title, body.
@@ -16,9 +35,11 @@ never create, switch, or rebase branches.
 1. Load the `tdd` skill: `~/.agents/skills/tdd/SKILL.md`. Follow Red → Green → Refactor.
 2. Implement the explorer's plan (or, on a fix-up call, the validator's findings). Cover the
    edge cases flagged.
-3. Run the FULL quality-gate set from `CODING_STANDARDS.md ## Quality gates` — all must pass
-   before you commit. Leave the working tree clean: `git status --porcelain` shows only your
-   commit, no stray files (a stray file that fails lint looks like your bug to the validator).
+3. Run the quality gates. Use the gate list and test runner the orchestrator forwarded. If none
+   were forwarded (standalone invocation), fall back to reading `CODING_STANDARDS.md ## Quality gates`
+   and `## Testing`. All gates must pass before you commit. Leave the working tree clean:
+   `git status --porcelain` shows only your commit, no stray files (a stray file that fails lint
+   looks like your bug to the validator).
 4. **Make ONE commit** on the current branch (one additional commit on a fix-up call):
    - Format per `CODING_STANDARDS.md ## Commits`. Never the `RALPH:` prefix.
    - The issue number must appear literally (e.g. `#42`).
@@ -42,3 +63,5 @@ never create, switch, or rebase branches.
 - No drive-by refactors outside the issue's scope.
 - `CODING_STANDARDS.md` at the project root owns style, testing, and the gate commands. If it's
   missing, fall back to the project's own lint/test config and proceed cautiously.
+- Prefer the forwarded quality-gate list and test runner; fall back to `CODING_STANDARDS.md`
+  only when invoked standalone with no forwarded data.

@@ -19,6 +19,7 @@ from ai_harness.modules.harness.models import AgentCli
 from ai_harness.modules.harness.renderers import (
     AgentCaps,
     _claude_tools,
+    _discover_loop_agents,
     _opencode_permission,
     get_agent_meta,
     render_agents,
@@ -1024,3 +1025,281 @@ def test_caps_translation_is_per_capability() -> None:
         "write": "deny",
         "task": {"*": "deny", "explorer": "allow"},
     }
+
+
+# ---------------------------------------------------------------------------
+# Result contract — _result-contract.md is bundled but not discovered as agent
+# ---------------------------------------------------------------------------
+
+
+def test_discover_loop_agents_excludes_underscore_prefixed_files() -> None:
+    """_discover_loop_agents returns only the four real agents, skipping _result-contract.md."""
+    names = _discover_loop_agents()
+
+    assert names == ["explorer", "implementor", "loop-orchestrator", "validator"]
+    assert "_result-contract" not in names
+    assert len(names) == 4
+
+
+def test_result_contract_file_exists_in_resources() -> None:
+    """_result-contract.md is bundled as a package resource in loop-agent/."""
+    from importlib.resources import files
+
+    root = files("ai_harness.resources") / "loop-agent"
+    contract = root / "_result-contract.md"
+    assert contract.is_file(), "_result-contract.md missing from loop-agent resources"
+    content = contract.read_text(encoding="utf-8")
+    assert "result" in content
+    assert "status:" in content
+
+
+_LOOP_AGENT_NAMES = ("explorer", "implementor", "validator", "loop-orchestrator")
+
+
+def test_each_agent_template_has_result_section() -> None:
+    """Every loop agent (including orchestrator) has a ## Result section with a result fenced block."""
+    from importlib.resources import files
+
+    root = files("ai_harness.resources") / "loop-agent"
+    for name in ("explorer", "implementor", "validator", "loop-orchestrator"):
+        body = (root / f"{name}.md").read_text(encoding="utf-8")
+        assert "## Result" in body, f"{name}: missing ## Result section"
+        assert "```result" in body, f"{name}: missing result fenced block"
+
+
+def test_orchestrator_template_documents_result_contract() -> None:
+    """The orchestrator template documents the result contract as primary routing signal."""
+    from importlib.resources import files
+
+    root = files("ai_harness.resources") / "loop-agent"
+    body = (root / "loop-orchestrator.md").read_text(encoding="utf-8")
+    assert "result" in body.lower(), "orchestrator must document result contract"
+    assert "status:" in body, "orchestrator must reference status field"
+    assert "No findings." in body, "orchestrator must preserve No findings. back-compat"
+
+
+def test_validator_template_documents_no_findings() -> None:
+    """The validator template still documents the No findings. clean-pass signal."""
+    from importlib.resources import files
+
+    root = files("ai_harness.resources") / "loop-agent"
+    body = (root / "validator.md").read_text(encoding="utf-8")
+    assert "No findings." in body, "validator template must document No findings. signal"
+    assert "result.status: clean" in body, "validator template must reference result.status: clean"
+
+
+# ---------------------------------------------------------------------------
+# Story 3 — gate-command forwarding (orchestrator → implementor + validator)
+# ---------------------------------------------------------------------------
+
+
+def test_orchestrator_setup_documents_gate_caching() -> None:
+    """Orchestrator Setup section documents one-time gate resolution from CODING_STANDARDS.md."""
+    pairs = render_agents(AgentCli.CLAUDE)
+    pair = _find_pair(pairs, "loop-orchestrator")
+    assert pair is not None
+    body = pair[1].split("---", 2)[-1]
+
+    assert "CODING_STANDARDS.md" in body, "orchestrator body must reference CODING_STANDARDS.md"
+    assert "Quality gates" in body or "quality gate" in body.lower(), (
+        "orchestrator body must mention quality gates or gate resolution"
+    )
+    assert "cache" in body.lower() or "once" in body.lower(), (
+        "orchestrator body must describe one-time or cached gate resolution"
+    )
+
+
+def test_implementor_describes_forwarded_gate_preference() -> None:
+    """Implementor protocol prefers forwarded gate list, falls back to self-discovery."""
+    pairs = render_agents(AgentCli.CLAUDE)
+    pair = _find_pair(pairs, "implementor")
+    assert pair is not None
+    body = pair[1].split("---", 2)[-1]
+
+    assert "forwarded" in body.lower(), "implementor body must mention forwarded gate list"
+    assert "fall back" in body.lower() or "fallback" in body.lower(), (
+        "implementor body must describe fallback to CODING_STANDARDS.md"
+    )
+
+
+def test_validator_describes_forwarded_gate_preference() -> None:
+    """Validator gate rules prefer forwarded gate list, falls back to self-discovery."""
+    pairs = render_agents(AgentCli.CLAUDE)
+    pair = _find_pair(pairs, "validator")
+    assert pair is not None
+    body = pair[1].split("---", 2)[-1]
+
+    assert "forwarded" in body.lower(), "validator body must mention forwarded gate list"
+    assert "fall back" in body.lower() or "fallback" in body.lower(), (
+        "validator body must describe fallback to CODING_STANDARDS.md"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Story 4 — Engram launch ledger (orchestrator body)
+# ---------------------------------------------------------------------------
+
+
+def test_orchestrator_documents_engram_launch_ledger() -> None:
+    """Orchestrator body documents the Engram launch ledger with pre-launch check,
+    post-launch append (capture_prompt: false), cross-turn recovery, and fallback."""
+    pairs = render_agents(AgentCli.CLAUDE)
+    pair = _find_pair(pairs, "loop-orchestrator")
+    assert pair is not None
+    body = pair[1].split("---", 2)[-1]
+
+    # Engram topic key format: loop/{branch}/launch-log
+    assert "loop/" in body and "launch-log" in body, (
+        "orchestrator body must reference Engram topic key loop/{branch}/launch-log"
+    )
+
+    # Pre-launch check: mem_search + mem_get_observation
+    assert "mem_search" in body, "orchestrator body must document pre-launch mem_search call"
+    assert "mem_get_observation" in body, "orchestrator body must document pre-launch mem_get_observation call"
+
+    # Post-launch: mem_save with capture_prompt: false
+    assert "mem_save" in body, "orchestrator body must document post-launch mem_save call"
+    assert "capture_prompt: false" in body, "orchestrator body must specify capture_prompt: false for ledger saves"
+
+    # Recovery across compaction / cross-turn
+    assert "compaction" in body.lower() or "cross-turn" in body.lower(), (
+        "orchestrator body must document compaction or cross-turn recovery"
+    )
+
+    # Fallback when Engram unavailable
+    assert "fallback" in body.lower(), "orchestrator body must document Engram-unavailable fallback path"
+
+
+# ---------------------------------------------------------------------------
+# Story 2 — gatekeeper anti-hallucination (orchestrator + explorer)
+# ---------------------------------------------------------------------------
+
+
+def test_orchestrator_documents_gatekeeper_anti_hallucination() -> None:
+    """Orchestrator template documents step 4.5 (gate explorer), step 5.5
+    (gate implementor, before validation), path/SHA existence checks,
+    re-run-once-then-stop semantics, and hallucination hard rule."""
+    from importlib.resources import files
+
+    root = files("ai_harness.resources") / "loop-agent"
+    body = (root / "loop-orchestrator.md").read_text(encoding="utf-8")
+
+    # Step 4.5 — gate explorer (must be present as a numbered step heading)
+    assert "4.5" in body and "Gate explorer" in body, "orchestrator must document step 4.5 **Gate explorer.**"
+
+    # Path spot-check commands — the gate must document how to verify file existence
+    assert "git ls-files" in body or "test -e" in body, (
+        "orchestrator gate explorer must document path existence check via git ls-files or test -e"
+    )
+
+    # [NEW] prefix exemption — new files are exempt from existence check
+    assert "[NEW]" in body, "orchestrator must document [NEW] marker exemption for new files in gate explorer"
+
+    # Step 5.5 — gate implementor runs before validation (must be a numbered step heading)
+    assert "5.5" in body and "Gate implementor" in body, "orchestrator must document step 5.5 **Gate implementor.**"
+    assert body.index("Gate implementor") < body.index("Validate-and-fix"), (
+        "gate implementor must run before the validate-and-fix step"
+    )
+
+    # SHA resolution check
+    assert "git rev-parse" in body, "orchestrator gate implementor must document git rev-parse SHA resolution check"
+
+    # git status porcelain check for clean working tree
+    assert "git status --porcelain" in body, (
+        "orchestrator gate implementor must document git status --porcelain empty check"
+    )
+
+    # Commit message must contain issue number
+    commit_msg_check = "commit message" in body.lower() and "issue number" in body.lower()
+    assert commit_msg_check, "orchestrator gate implementor must document commit message issue number check"
+
+    # Re-run-once-then-stop semantics for both gates
+    assert "re-run" in body.lower() and "once" in body.lower(), (
+        "orchestrator must document re-run-once-then-stop semantics for both gates"
+    )
+
+    # Hallucination hard rule in ## Hard rules section
+    assert "hallucinat" in body.lower(), "orchestrator hard rules must contain the hallucinated path/SHA rule"
+
+
+def test_explorer_documents_new_file_marker() -> None:
+    """Explorer template documents [NEW] prefix convention for new files in
+    ## Affected files and artifacts: field, and includes the convention in
+    the ## Behavior section."""
+    from importlib.resources import files
+
+    root = files("ai_harness.resources") / "loop-agent"
+    body = (root / "explorer.md").read_text(encoding="utf-8")
+
+    # [NEW] prefix must appear in the template
+    assert "[NEW]" in body, "explorer template must document [NEW] prefix convention for new files"
+
+    # The ## Affected files example must show [NEW] prefix usage
+    affected_idx = body.find("## Affected files")
+    assert affected_idx >= 0, "explorer must have ## Affected files section"
+    # Grab from ## Affected files to next ## section or end
+    after_affected = body[affected_idx:]
+    next_section = after_affected.find("\n## ", len("## Affected files"))
+    affected_content = after_affected[:next_section] if next_section >= 0 else after_affected
+    assert "[NEW]" in affected_content, "explorer ## Affected files example must show [NEW] prefix on a new file"
+
+    # artifacts: field documentation must mention [NEW] prefix
+    artifacts_idx = body.find("artifacts:")
+    assert artifacts_idx >= 0, "explorer must have artifacts: field documentation"
+    # The artifacts bullet below the fenced block should mention [NEW]
+    result_start = body.find("## Result")
+    assert result_start >= 0
+    result_end = body.find("\n## ", result_start + len("## Result"))
+    result_content = body[result_start:result_end] if result_end >= 0 else body[result_start:]
+    assert "[NEW]" in result_content, "explorer artifacts: field documentation must mention [NEW] prefix convention"
+
+    # ## Behavior section must document [NEW] convention
+    behavior_idx = body.find("## Behavior")
+    assert behavior_idx >= 0, "explorer must have ## Behavior section"
+    after_behavior = body[behavior_idx:]
+    next_section_b = after_behavior.find("\n##", len("## Behavior"))
+    behavior_content = after_behavior[:next_section_b] if next_section_b >= 0 else after_behavior
+    assert "[NEW]" in behavior_content, "explorer ## Behavior section must document [NEW] convention for new files"
+
+
+# ---------------------------------------------------------------------------
+# Story 5 — skill-resolution feedback (orchestrator compaction-safety)
+# ---------------------------------------------------------------------------
+
+
+def test_orchestrator_documents_skill_feedback_recovery() -> None:
+    """Orchestrator template documents skill-resolution feedback subsection
+    keyed off the ``skills:`` header value. Must reference ``fallback`` and
+    ``none`` as triggers, describe re-injection of skill paths into the next
+    delegation, mention noting the recovery, and frame it as a compaction-
+    safety mechanism — not a hard block.
+    """
+    from importlib.resources import files
+
+    root = files("ai_harness.resources") / "loop-agent"
+    body = (root / "loop-orchestrator.md").read_text(encoding="utf-8")
+
+    # Subsection heading for skill-resolution feedback must exist
+    assert "Skill-resolution feedback" in body, "orchestrator must have a Skill-resolution feedback subsection"
+    assert "compaction-safety" in body or "compaction safety" in body.lower(), (
+        "orchestrator must frame skill-resolution as a compaction-safety mechanism"
+    )
+
+    # Must reference the ``skills:`` header value
+    assert "skills:" in body, "orchestrator must reference skills: header value"
+
+    # ``fallback`` and ``none`` must be mentioned as triggers
+    assert "fallback" in body.lower(), "orchestrator must mention fallback as a skill-resolution trigger"
+    assert "none" in body.lower(), "orchestrator must mention none as a skill-resolution trigger"
+
+    # Must describe re-injection of skill paths
+    assert "re-inject" in body.lower(), "orchestrator must describe re-injection of skill paths"
+
+    # Must mention noting the recovery
+    assert "note" in body.lower() or "noting" in body.lower(), "orchestrator must mention noting the recovery"
+
+    # Scope: only implementor gets forwarded skill paths in this iteration
+    assert "implementor" in body.lower(), "orchestrator must document that re-injection is scoped to implementor"
+
+    # Must NOT be a hard block (bold markers in markdown: "**not**")
+    assert "hard block" in body.lower(), "orchestrator must state skill-resolution feedback is not a hard block"
