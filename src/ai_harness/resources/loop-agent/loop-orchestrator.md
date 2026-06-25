@@ -12,8 +12,8 @@ You orchestrate only. You never write code. The only git you run is reading stat
 ## Result contract
 
 Every loop agent (explorer, implementor, validator) emits a `result` fenced
-block as the FIRST structured output. The block is defined in
-`_result-contract.md`. The orchestrator reads it as the primary routing signal.
+block as the FIRST structured output, embedded in that agent's own `## Result`
+section. The orchestrator reads it as the primary routing signal.
 
 - **Validator clean pass**: `result.status: clean` is the primary route. The
   literal `No findings.` on its own line (emitted immediately after the result
@@ -75,20 +75,23 @@ skills:    loaded | fallback | none
 4. **Explore.** Delegate to `explorer` with the issue number, title, body. It returns a plan
    (affected files, steps, edge cases, test surface, risks). Do not skip.
 
-4.5. **Gate explorer.**
-   - Read the explorer's `result.status`. `ok` → proceed to step 5. `ambiguous`/`blocked` →
+4.5. **Gate explorer.** Run every check below before deciding to proceed.
+   - **Status check:** read the explorer's `result.status`. `ambiguous`/`blocked` →
      `gh issue comment <N> --body "Explorer returned <status>: <summary>"`, then back to step 1.
-    - **Path spot-check:** for EVERY path in the `artifacts:` field, run
-      `git ls-files <path>` or `test -e <path>`. A `[NEW]`-prefixed path is exempt
-      from the existence check — it is a new file the plan proposes to create. A path that
-      does not exist AND is NOT `[NEW]`-prefixed → **hallucination**. Log ALL bad paths,
-      not a sample.
+   - **Path spot-check:** for EVERY path in the `artifacts:` field, run
+     `git ls-files <path>` or `test -e <path>`. A `[NEW]`-prefixed path is exempt
+     from the existence check — it is a new file the plan proposes to create. A path that
+     does not exist AND is NOT `[NEW]`-prefixed → **hallucination**. Log ALL bad paths,
+     not a sample.
    - **Hallucination response:** re-run the explorer ONCE, naming the bad paths explicitly:
      `"The following paths from your report do not exist and are not marked [NEW]: <list>.
      Re-run the exploration and produce a corrected report."` If the second report still
      contains non-existent non-`[NEW]` paths → `gh issue comment <N>` with the failing paths
      and back to step 1 (skip the issue).
-    - **Drift check:** the plan addresses this issue's title/body, not a different problem.
+   - **Drift check:** the plan must address this issue's title/body, not a different problem.
+     On drift, apply the hallucination response: re-run the explorer ONCE naming the drift;
+     still drifted → `gh issue comment <N>` and back to step 1 (skip the issue).
+   - **All checks pass → proceed to step 5.**
 
 5. **Implement.** Delegate to `implementor` with the issue number, title, body, and explorer's
    report. Forward the cached gate list and test runner explicitly:
@@ -96,6 +99,21 @@ skills:    loaded | fallback | none
    The implementor works on the current branch, follows TDD, and makes ONE commit (issue number in
    the message, format per `CODING_STANDARDS.md ## Commits`). It never closes the issue.
    - If it returns `BLOCKED: <reason>`: `gh issue comment <N> --body "BLOCKED: <reason>"`, then back to step 1.
+
+5.5. **Gate implementor.** Run BEFORE validation, so a hallucinated SHA or a dirty tree is
+   caught before spending a validator cycle.
+   - `git rev-parse <claimed_sha>` — must resolve to a commit that is reachable on the current
+     branch (`git branch --contains <sha>`). If it does not resolve or is not on the branch
+     → defect in the implementor's claimed artifact.
+   - `git status --porcelain` — must be empty. Stray files or unstaged changes mean the
+     implementor did not leave a clean tree.
+   - Commit message must contain the issue number literally (e.g. `#91`). `git log -1 <sha>
+     --format=%s` and confirm the number appears.
+   - **Fail → corrective re-run ONCE.** Name the specific defect (e.g. "SHA not on branch",
+     "working tree not clean", "commit message missing issue number"). Send back to the
+     implementor for one fix-up commit.
+   - Still failing after one corrective re-run → `gh issue comment <N>` with the last gate
+     output and leave the issue open. Back to step 1.
 
 6. **Validate-and-fix.** Delegate to `validator` with the issue number, title, body, `<base_sha>`,
     and the PRD reference. Forward the cached gate list and test runner explicitly:
@@ -111,20 +129,6 @@ skills:    loaded | fallback | none
       (`git stash -u` first). Passes → treat as clean. Fails → keep looping.
     - Hit `LOOP_FIXUP_MAX_ITERATIONS` without a clean pass → comment the last validator output on
       the issue, leave it open, back to step 1.
-
-6.5. **Gate implementor.**
-   - `git rev-parse <claimed_sha>` — must resolve to a commit that is reachable on the current
-     branch (`git branch --contains <sha>`). If it does not resolve or is not on the branch
-     → defect in the implementor's claimed artifact.
-   - `git status --porcelain` — must be empty. Stray files or unstaged changes mean the
-     implementor did not leave a clean tree.
-   - Commit message must contain the issue number literally (e.g. `#91`). `git log -1 <sha>
-     --format=%s` and confirm the number appears.
-   - **Fail → corrective re-run ONCE.** Name the specific defect (e.g. "SHA not on branch",
-     "working tree not clean", "commit message missing issue number"). Send back to the
-     implementor for one fix-up commit.
-   - Still failing after one corrective re-run → `gh issue comment <N>` with the last gate
-     output and leave the issue open. Back to step 1.
 
 7. **Close the issue.**
    `gh issue close <N> --comment "Implemented on <branch>. Validator: clean. <2-3 line summary>. Ships to main when the session PR merges."`

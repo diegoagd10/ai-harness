@@ -1176,9 +1176,9 @@ def test_orchestrator_documents_engram_launch_ledger() -> None:
 
 
 def test_orchestrator_documents_gatekeeper_anti_hallucination() -> None:
-    """Orchestrator template documents step 4.5 (gate explorer), step 6.5
-    (gate implementor), path/SHA existence checks, re-run-once-then-stop
-    semantics, and hallucination hard rule."""
+    """Orchestrator template documents step 4.5 (gate explorer), step 5.5
+    (gate implementor, before validation), path/SHA existence checks,
+    re-run-once-then-stop semantics, and hallucination hard rule."""
     from importlib.resources import files
 
     root = files("ai_harness.resources") / "loop-agent"
@@ -1195,8 +1195,11 @@ def test_orchestrator_documents_gatekeeper_anti_hallucination() -> None:
     # [NEW] prefix exemption — new files are exempt from existence check
     assert "[NEW]" in body, "orchestrator must document [NEW] marker exemption for new files in gate explorer"
 
-    # Step 6.5 — gate implementor (must be present as a numbered step heading)
-    assert "6.5" in body and "Gate implementor" in body, "orchestrator must document step 6.5 **Gate implementor.**"
+    # Step 5.5 — gate implementor runs before validation (must be a numbered step heading)
+    assert "5.5" in body and "Gate implementor" in body, "orchestrator must document step 5.5 **Gate implementor.**"
+    assert body.index("Gate implementor") < body.index("Validate-and-fix"), (
+        "gate implementor must run before the validate-and-fix step"
+    )
 
     # SHA resolution check
     assert "git rev-parse" in body, "orchestrator gate implementor must document git rev-parse SHA resolution check"

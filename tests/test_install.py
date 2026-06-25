@@ -1352,3 +1352,51 @@ def test_discover_loop_agents_excludes_underscore_files() -> None:
     assert names == ["explorer", "implementor", "loop-orchestrator", "validator"]
     assert "_result-contract" not in names
     assert len(names) == 4
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator gate fixes (#90/#91 review findings)
+# ---------------------------------------------------------------------------
+
+
+def _orchestrator_body() -> str:
+    """Return the loop-orchestrator template text from bundled resources."""
+    from importlib.resources import files
+
+    root = files("ai_harness.resources") / "loop-agent"
+    return (root / "loop-orchestrator.md").read_text(encoding="utf-8")
+
+
+def test_orchestrator_does_not_reference_uninstalled_contract_file() -> None:
+    """Orchestrator must not point agents at _result-contract.md.
+
+    The contract file is bundled in-package but never rendered to the install
+    destination, so a runtime reference would dangle. Each agent embeds its own
+    result block, so the orchestrator needs no external pointer.
+    """
+    assert "_result-contract.md" not in _orchestrator_body()
+
+
+def test_implementor_gate_runs_before_validation() -> None:
+    """The implementor artifact gate must precede the validate-and-fix step.
+
+    Catches a hallucinated SHA / dirty tree before spending a validator cycle.
+    """
+    body = _orchestrator_body()
+    assert "Gate implementor" in body
+    assert "Validate-and-fix" in body
+    assert body.index("Gate implementor") < body.index("Validate-and-fix")
+
+
+def test_gate_explorer_spotchecks_before_proceeding() -> None:
+    """The explorer gate runs the path spot-check before deciding to proceed."""
+    body = _orchestrator_body()
+    assert body.index("Path spot-check") < body.index("proceed to step 5")
+
+
+def test_drift_check_specifies_remediation() -> None:
+    """The drift check names a concrete action (skip / re-run), not just a check."""
+    body = _orchestrator_body()
+    idx = body.index("Drift check")
+    segment = body[idx : idx + 400].lower()
+    assert "skip" in segment or "re-run" in segment
