@@ -46,6 +46,7 @@ __all__ = [
 _LOOP_AGENT_PACKAGE = "ai_harness.resources"
 _LOOP_AGENT_DIR = "loop-agent"
 _GENERIC_AGENT_DIR = "generic"
+_SDD_AGENT_DIR = "sdd-agent"
 
 _OVERRIDES_REL = ".ai-harness/overrides.json"
 
@@ -101,22 +102,22 @@ def render_agents(
     *,
     home: Path | None = None,
 ) -> list[RenderedFile]:
-    """Render the loop agents for *cli* as home-relative ``RenderedFile`` records.
+    """Render the loop and SDD agents for *cli* as home-relative ``RenderedFile`` records.
 
     The sole public agent-render entry. Owns skill-vs-agent mode dispatch,
     destination directory layout, and filename. Returns POSIX home-relative
     paths in discovery (sorted) order so output is byte-identical to the prior
     inline emission.
 
-    *names* defaults to the discovered loop agents; pass an explicit list to
-    render a subset. *overrides* is an optional per-agent partial overlay
-    deep-merged over the template defaults; ``None`` loads the override
-    store from ``home/.ai-harness/overrides.json`` (default
-    ``Path.home()``), ``{}`` is an explicit no-op. CLIs without native
-    agent support return an empty list.
+    *names* defaults to the discovered agents (Loop trio + ``loop-orchestrator``
+    + SDD trio); pass an explicit list to render a subset. *overrides* is an
+    optional per-agent partial overlay deep-merged over the template defaults;
+    ``None`` loads the override store from ``home/.ai-harness/overrides.json``
+    (default ``Path.home()``), ``{}`` is an explicit no-op. CLIs without
+    native agent support return an empty list.
     """
     if names is None:
-        names = _discover_loop_agents()
+        names = _discover_agents()
 
     if overrides is None:
         overrides = _load_override_store(home if home is not None else Path.home())
@@ -266,6 +267,44 @@ _AGENT_META: dict[str, dict] = {
         },
         "caps": AgentCaps(write=False, spawn=("explorer", "implementor", "validator")),
     },
+    "sdd-explorer": {
+        "description": (
+            "Read-only investigator for the SDD change-flow. Reads the change folder "
+            "and writes exploration.md into docs/changes/<name>/ before implementation."
+        ),
+        "mode": "subagent",
+        "model": {
+            "opencode": "opencode-go/kimi-k2.7-code",
+            "claude": "sonnet",
+        },
+        "caps": AgentCaps(write=False),
+    },
+    "sdd-implementor": {
+        "description": (
+            "Implements one named SDD change. TDD, quality gates, ONE commit "
+            "referencing the change name (no #issue). Marks items [x] in tasks.md. "
+            "No GitHub issue comment on blocked — the change is file-backed."
+        ),
+        "mode": "subagent",
+        "model": {
+            "opencode": "opencode-go/deepseek-v4-pro",
+            "claude": "sonnet",
+        },
+    },
+    "sdd-validator": {
+        "description": (
+            "Read-only reviewer for the SDD change-flow. Emits verify-report.md containing "
+            "a Spec Compliance Matrix: one row per Given/When/Then scenario mapped "
+            "to a passing covering test. CRITICAL UNTESTED for any scenario with no "
+            "passing test. Blocks the change from being archived while untested."
+        ),
+        "mode": "subagent",
+        "model": {
+            "opencode": "openai/gpt-5.4-mini",
+            "claude": "sonnet",
+        },
+        "caps": AgentCaps(write=False),
+    },
 }
 
 
@@ -282,6 +321,17 @@ def _generic_agent_dir() -> Traversable:
     no generic layer are returned unchanged by :func:`_read_template_body`.
     """
     return files(_LOOP_AGENT_PACKAGE) / _GENERIC_AGENT_DIR
+
+
+def _sdd_agent_dir() -> Traversable:
+    """Return the sdd-agent resource directory path.
+
+    Holds the SDD-flow overlays (``sdd-explorer``/``sdd-implementor``/
+    ``sdd-validator``) composed over the same generic core the Loop trio uses.
+    The overlay is appended to ``generic/<base>.md`` where ``base`` is the
+    SDD name with the ``sdd-`` prefix stripped (see :func:`_read_template_body`).
+    """
+    return files(_LOOP_AGENT_PACKAGE) / _SDD_AGENT_DIR
 
 
 def _load_override_store(home: Path) -> dict:
@@ -331,13 +381,19 @@ def _get_agent_mode(
     return get_agent_meta(name, overrides=overrides, home=home).get("mode", "subagent")
 
 
-def _discover_loop_agents() -> list[str]:
-    """Return sorted list of loop agent template names (without .md extension)."""
-    root = _loop_agent_dir()
-    names: list[str] = []
-    for p in sorted(root.glob("*.md")):
-        names.append(p.stem)
-    return names
+def _discover_agents() -> list[str]:
+    """Return the sorted, deduped list of composed agent template names.
+
+    Scans both ``loop-agent/`` and ``sdd-agent/`` and returns the union of
+    their stems (without ``.md``), sorted alphabetically. The Loop trio and
+    ``loop-orchestrator`` come from ``loop-agent/``; the SDD trio
+    (``sdd-explorer``/``sdd-implementor``/``sdd-validator``) comes from
+    ``sdd-agent/``. Single-file SDD planning agents (future) will also be
+    discovered here once they land under ``sdd-agent/``.
+    """
+    loop_names = [p.stem for p in _loop_agent_dir().glob("*.md")]
+    sdd_names = [p.stem for p in _sdd_agent_dir().glob("*.md")]
+    return sorted(set(loop_names) | set(sdd_names))
 
 
 def _read_template_source(name: str) -> str:
@@ -350,17 +406,36 @@ def _read_template_source(name: str) -> str:
 def _read_template_body(name: str) -> str:
     """Return the prompt body for a named agent.
 
-    Composed from ``generic/<name>.md`` + ``loop-agent/<name>.md`` by plain
-    concatenation, byte-identical to the pre-split single file. Single-file
-    agents (no ``generic/<name>.md``) are returned unchanged from the
-    ``loop-agent/`` resource — discovery and callers see the same agent set
-    as before the composition seam.
+    Composed from ``generic/<name>.md`` + ``<flow>-agent/<name>.md`` by plain
+    concatenation. The Loop flow composes ``loop-agent/<name>`` over
+    ``generic/<name>``; the SDD flow strips the ``sdd-`` prefix to reuse the
+    same generic core and composes ``sdd-agent/<name>`` over it. Single-file
+    agents (no generic layer — e.g. ``loop-orchestrator``) are returned
+    unchanged from the ``loop-agent/`` resource.
+
+    The Loop trio's composed body is byte-identical to the pre-split single
+    file (regression-guarded by ``TestCompositionGoldenFixture``); the SDD
+    trio's composed body is ``generic/<base>`` + the SDD overlay, where
+    ``<base>`` is ``<name>`` with the ``sdd-`` prefix removed.
     """
     generic_path = _generic_agent_dir() / f"{name}.md"
     if generic_path.is_file():
-        generic_content = generic_path.read_text(encoding="utf-8")
-        loop_content = _read_template_source(name)
-        return generic_content + loop_content
+        overlay_path = _loop_agent_dir() / f"{name}.md"
+        return generic_path.read_text(encoding="utf-8") + overlay_path.read_text(encoding="utf-8")
+
+    # SDD variant: strip the "sdd-" prefix to find the shared generic core,
+    # then compose the SDD overlay over it. The generic core is the same one
+    # the Loop trio uses; the SDD overlay appends change-flow-specific
+    # sections that supersede the generic's issue-shaped ones in prose.
+    if name.startswith("sdd-"):
+        base = name[len("sdd-") :]
+        generic_base = _generic_agent_dir() / f"{base}.md"
+        if generic_base.is_file():
+            overlay_path = _sdd_agent_dir() / f"{name}.md"
+            return generic_base.read_text(encoding="utf-8") + overlay_path.read_text(encoding="utf-8")
+
+    # Single-file agent (e.g. loop-orchestrator) — no generic layer, no SDD
+    # variant. Read directly from the loop-agent resource.
     return _read_template_source(name)
 
 

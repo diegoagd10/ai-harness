@@ -304,7 +304,15 @@ def test_cli_uninstall_invalid_agent_cli_errors(isolated_home: Path) -> None:
 # OpenCode agent install — observable behaviour
 # ---------------------------------------------------------------------------
 
-_LOOP_AGENT_NAMES = ("explorer", "implementor", "validator", "loop-orchestrator")
+_LOOP_AGENT_NAMES = (
+    "explorer",
+    "implementor",
+    "validator",
+    "loop-orchestrator",
+    "sdd-explorer",
+    "sdd-implementor",
+    "sdd-validator",
+)
 
 
 def _assert_opencode_agent_written(base: Path, name: str) -> Path:
@@ -473,8 +481,8 @@ def test_install_copilot_manifest_records_agents(tmp_path: Path) -> None:
     data = json.loads((tmp_path / MANIFEST_REL).read_text(encoding="utf-8"))
     assert "copilot" in data["files_by_agent_cli"]
     copilot_files = data["files_by_agent_cli"]["copilot"]
-    # 6 persona+skills + 4 loop agents = 10
-    assert len(copilot_files) == 10
+    # 6 persona+skills + 7 composed agents = 13
+    assert len(copilot_files) == 13
     assert any(".copilot/agents/" in f for f in copilot_files), "copilot manifest should contain agent paths"
     for name in _LOOP_AGENT_NAMES:
         expected = f".copilot/agents/{name}.agent.md"
@@ -655,9 +663,9 @@ def test_cli_install_copilot_writes_agents(isolated_home: Path) -> None:
         assert (agent_dir / f"{name}.agent.md").is_file(), f"CLI install: copilot {name} missing"
 
     # Generic (6 files: 1 persona + 4 skill dirs + 1 nested ref)
-    # + Copilot (10 files: 6 persona+skills + 4 loop agents) = 16 total.
-    assert "16 file(s)" in result.stdout, (
-        f"stdout should report 16 written files (6 generic + 10 copilot), got: {result.stdout!r}"
+    # + Copilot (13 files: 6 persona+skills + 7 composed agents) = 19 total.
+    assert "19 file(s)" in result.stdout, (
+        f"stdout should report 19 written files (6 generic + 13 copilot), got: {result.stdout!r}"
     )
 
 
@@ -770,10 +778,10 @@ def test_cli_install_opencode_writes_agents(isolated_home: Path) -> None:
     for name in _LOOP_AGENT_NAMES:
         assert (agent_dir / f"{name}.md").is_file(), f"CLI install: {name} missing"
 
-    # PRD story 17: stdout reports file count including the four OpenCode agents.
-    # Generic (1 persona + 4 skill dirs + 1 nested ref = 6 files) + 4 OpenCode agents = 10 total.
-    assert "10 file(s)" in result.stdout, (
-        f"stdout should report 10 written files (6 generic + 4 opencode agents), got: {result.stdout!r}"
+    # PRD story 17: stdout reports file count including the composed agents.
+    # Generic (1 persona + 4 skill dirs + 1 nested ref = 6 files) + 7 OpenCode agents = 13 total.
+    assert "13 file(s)" in result.stdout, (
+        f"stdout should report 13 written files (6 generic + 7 opencode agents), got: {result.stdout!r}"
     )
 
 
@@ -791,7 +799,14 @@ def test_cli_uninstall_opencode_removes_agents(isolated_home: Path) -> None:
 # Claude Code agent install — observable behaviour
 # ---------------------------------------------------------------------------
 
-_CLAUDE_SUBAGENT_NAMES = ("explorer", "implementor", "validator")
+_CLAUDE_SUBAGENT_NAMES = (
+    "explorer",
+    "implementor",
+    "validator",
+    "sdd-explorer",
+    "sdd-implementor",
+    "sdd-validator",
+)
 _CLAUDE_SKILL_NAME = "loop-orchestrator"
 
 
@@ -840,8 +855,8 @@ def test_install_claude_writes_subagents_and_skill(tmp_path: Path) -> None:
     data = json.loads((tmp_path / MANIFEST_REL).read_text(encoding="utf-8"))
     assert "claude" in data["files_by_agent_cli"]
     claude_files = data["files_by_agent_cli"]["claude"]
-    # 6 persona+skills (CLAUDE.md + 4 skills + 1 nested ref) + 3 subagents + 1 skill = 10
-    assert len(claude_files) == 10
+    # 6 persona+skills (CLAUDE.md + 4 skills + 1 nested ref) + 6 subagents + 1 skill = 13
+    assert len(claude_files) == 13
 
 
 def test_install_claude_subagents_have_name_field(tmp_path: Path) -> None:
@@ -1043,9 +1058,9 @@ def test_cli_install_claude_writes_agents_and_skill(isolated_home: Path) -> None
     )
 
     # Generic (6 files: 1 persona + 4 skill dirs + 1 nested ref)
-    # + Claude (10 files: 6 persona+skills + 4 loop artifacts) = 16 total.
-    assert "16 file(s)" in result.stdout, (
-        f"stdout should report 16 written files (6 generic + 10 claude), got: {result.stdout!r}"
+    # + Claude (13 files: 6 persona+skills + 7 loop artifacts: 6 subagents + 1 skill) = 19 total.
+    assert "19 file(s)" in result.stdout, (
+        f"stdout should report 19 written files (6 generic + 13 claude), got: {result.stdout!r}"
     )
 
 

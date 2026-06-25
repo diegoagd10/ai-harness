@@ -48,7 +48,7 @@ def _find_pair(pairs: list[tuple[str, str]], name: str) -> tuple[str, str] | Non
 
 
 def test_render_agents_claude_returns_agents_and_skill() -> None:
-    """Claude emits 3 subagents under .claude/agents/ and the orchestrator skill."""
+    """Claude emits 6 subagents under .claude/agents/ and the orchestrator skill."""
     pairs = render_agents(AgentCli.CLAUDE)
 
     paths = [path for path, _ in pairs]
@@ -56,6 +56,9 @@ def test_render_agents_claude_returns_agents_and_skill() -> None:
         ".claude/agents/explorer.md",
         ".claude/agents/implementor.md",
         ".claude/skills/loop-orchestrator/SKILL.md",
+        ".claude/agents/sdd-explorer.md",
+        ".claude/agents/sdd-implementor.md",
+        ".claude/agents/sdd-validator.md",
         ".claude/agents/validator.md",
     ]
     # content is non-empty rendered text
@@ -64,7 +67,7 @@ def test_render_agents_claude_returns_agents_and_skill() -> None:
 
 
 def test_render_agents_opencode_returns_agents_under_agent_dir() -> None:
-    """OpenCode emits every loop agent under .config/opencode/agent/."""
+    """OpenCode emits every composed agent under .config/opencode/agent/."""
     pairs = render_agents(AgentCli.OPENCODE)
 
     paths = [path for path, _ in pairs]
@@ -72,6 +75,9 @@ def test_render_agents_opencode_returns_agents_under_agent_dir() -> None:
         ".config/opencode/agent/explorer.md",
         ".config/opencode/agent/implementor.md",
         ".config/opencode/agent/loop-orchestrator.md",
+        ".config/opencode/agent/sdd-explorer.md",
+        ".config/opencode/agent/sdd-implementor.md",
+        ".config/opencode/agent/sdd-validator.md",
         ".config/opencode/agent/validator.md",
     ]
     for _, content in pairs:
@@ -877,8 +883,8 @@ def test_render_agents_mode_override_routes_through_dispatch(tmp_path: Path, mon
 # ---------------------------------------------------------------------------
 
 
-def test_render_agents_copilot_returns_four_agent_files() -> None:
-    """Copilot emits all four loop agents under .copilot/agents/ with .agent.md extension."""
+def test_render_agents_copilot_returns_all_agent_files() -> None:
+    """Copilot emits all seven composed agents under .copilot/agents/ with .agent.md extension."""
     pairs = render_agents(AgentCli.COPILOT)
 
     paths = [path for path, _ in pairs]
@@ -886,6 +892,9 @@ def test_render_agents_copilot_returns_four_agent_files() -> None:
         ".copilot/agents/explorer.agent.md",
         ".copilot/agents/implementor.agent.md",
         ".copilot/agents/loop-orchestrator.agent.md",
+        ".copilot/agents/sdd-explorer.agent.md",
+        ".copilot/agents/sdd-implementor.agent.md",
+        ".copilot/agents/sdd-validator.agent.md",
         ".copilot/agents/validator.agent.md",
     ]
     for _, content in pairs:
@@ -1055,10 +1064,170 @@ class TestCompositionGoldenFixture:
 
 
 class TestCompositionDiscovery:
-    """Agent discovery yields the same agent set across the composition seam."""
+    """Agent discovery yields the full composed agent set (Loop + SDD), sorted."""
 
-    def test_discover_yields_same_agent_set(self) -> None:
-        """_discover_loop_agents still returns the four pre-split agents, sorted."""
-        from ai_harness.modules.harness.renderers import _discover_loop_agents
+    def test_discover_yields_all_agents_sorted(self) -> None:
+        """_discover_agents returns the seven composed agents, sorted.
 
-        assert _discover_loop_agents() == ["explorer", "implementor", "loop-orchestrator", "validator"]
+        Renamed from ``_discover_loop_agents`` when the SDD flow was added:
+        discovery now scans both ``loop-agent/`` and ``sdd-agent/`` and returns
+        the deduped, sorted union.
+        """
+        from ai_harness.modules.harness.renderers import _discover_agents
+
+        assert _discover_agents() == [
+            "explorer",
+            "implementor",
+            "loop-orchestrator",
+            "sdd-explorer",
+            "sdd-implementor",
+            "sdd-validator",
+            "validator",
+        ]
+
+
+# ---------------------------------------------------------------------------
+# SDD composition — generic/<base>.md + sdd-agent/<sdd-name>.md concatenation.
+# The SDD flow reuses the same generic core as the Loop trio by stripping the
+# ``sdd-`` prefix, then composes the SDD overlay over it. The SDD overlays are
+# self-contained: they reference no matt-pocock skill path (the TDD discipline
+# lives in the overlay prompt text, not in an external skill load).
+# ---------------------------------------------------------------------------
+
+
+class TestSddComposition:
+    """Composition, discovery, metadata, and rendering for the SDD trio."""
+
+    @pytest.mark.parametrize(
+        "sdd_name, base",
+        [
+            ("sdd-explorer", "explorer"),
+            ("sdd-implementor", "implementor"),
+            ("sdd-validator", "validator"),
+        ],
+    )
+    def test_sdd_read_template_body_composes_generic_plus_sdd_agent(self, sdd_name: str, base: str) -> None:
+        """_read_template_body(<sdd-name>) == generic/<base>.md + sdd-agent/<sdd-name>.md."""
+        from importlib.resources import files
+
+        from ai_harness.modules.harness.renderers import _read_template_body
+
+        generic_body = (files("ai_harness.resources") / "generic" / f"{base}.md").read_text(encoding="utf-8")
+        sdd_overlay = (files("ai_harness.resources") / "sdd-agent" / f"{sdd_name}.md").read_text(encoding="utf-8")
+        assert _read_template_body(sdd_name) == generic_body + sdd_overlay
+
+    def test_discover_yields_seven_agents(self) -> None:
+        """_discover_agents returns exactly seven names in sorted order."""
+        from ai_harness.modules.harness.renderers import _discover_agents
+
+        names = _discover_agents()
+        assert names == sorted(names)
+        assert len(names) == 7
+        assert {"sdd-explorer", "sdd-implementor", "sdd-validator"} <= set(names)
+
+    @pytest.mark.parametrize("sdd_name", ["sdd-explorer", "sdd-implementor", "sdd-validator"])
+    def test_sdd_agent_meta_exists_with_correct_keys(self, sdd_name: str) -> None:
+        """Each SDD agent has description, mode=subagent, and per-CLI model in _AGENT_META.
+
+        Read-only SDD agents (explorer, validator) carry ``caps: AgentCaps(write=False)``;
+        the full-capability SDD implementor omits ``caps`` (matching the Loop's
+        ``implementor`` — full access is the default, expressed by absence).
+        """
+        meta = get_agent_meta(sdd_name, overrides={})
+        assert meta["description"], f"{sdd_name}: description must be non-empty"
+        assert meta["mode"] == "subagent", f"{sdd_name}: mode must be subagent"
+        assert isinstance(meta["model"], dict), f"{sdd_name}: model must be a dict"
+        assert "opencode" in meta["model"], f"{sdd_name}: model.opencode missing"
+        assert "claude" in meta["model"], f"{sdd_name}: model.claude missing"
+
+    @pytest.mark.parametrize("sdd_name", ["sdd-explorer", "sdd-validator"])
+    def test_sdd_readonly_agents_have_write_false_caps(self, sdd_name: str) -> None:
+        """Read-only SDD agents carry ``caps: AgentCaps(write=False)``."""
+        meta = get_agent_meta(sdd_name, overrides={})
+        caps = meta.get("caps")
+        assert isinstance(caps, AgentCaps), f"{sdd_name}: caps must be an AgentCaps instance"
+        assert caps.write is False, f"{sdd_name}: caps.write must be False (read-only)"
+
+    def test_sdd_implementor_has_no_caps_entry(self) -> None:
+        """The SDD implementor is full-capability — ``caps`` is absent (matches Loop's implementor)."""
+        meta = get_agent_meta("sdd-implementor", overrides={})
+        assert "caps" not in meta, "sdd-implementor should omit caps (full access is the default)"
+
+    @pytest.mark.parametrize("cli", [AgentCli.OPENCODE, AgentCli.CLAUDE, AgentCli.COPILOT])
+    def test_render_sdd_explorer_carries_sdd_frontmatter_and_body(self, cli: AgentCli) -> None:
+        """render_agents(cli, ['sdd-explorer']) emits the sdd-explorer frontmatter + composed body."""
+        from ai_harness.modules.harness.renderers import _read_template_body
+
+        pairs = render_agents(cli, ["sdd-explorer"])
+        assert len(pairs) == 1
+        _path, content = pairs[0]
+
+        fm = _parse_frontmatter(content)
+        expected_desc = get_agent_meta("sdd-explorer", overrides={})["description"]
+        assert fm.get("description") == expected_desc, f"{cli.value}: sdd-explorer description mismatch"
+
+        body = content.split("---", 2)[2].removeprefix("\n")
+        assert body == _read_template_body("sdd-explorer"), f"{cli.value}: sdd-explorer body != composed template"
+
+    def test_sdd_bodies_contain_no_matt_pocock_skill_path(self) -> None:
+        """The sdd-agent/*.md overlays reference no matt-pocock skill path.
+
+        The SDD flow is self-contained: TDD discipline lives in the overlay
+        prompt text, not in an external ``~/.agents/skills/tdd/SKILL.md`` load.
+        The generic core is shared with the Loop trio (regression-guarded
+        byte-identical) and is NOT checked here — only the SDD overlay's own
+        contribution is verified self-contained.
+        """
+        import re
+        from importlib.resources import files
+
+        pattern = re.compile(r"tdd/SKILL\.md|~/.agents/skills/tdd")
+        sdd_dir = files("ai_harness.resources") / "sdd-agent"
+        for name in ("sdd-explorer", "sdd-implementor", "sdd-validator"):
+            text = (sdd_dir / f"{name}.md").read_text(encoding="utf-8")
+            assert not pattern.search(text), (
+                f"{name}: SDD overlay references a matt-pocock skill path; the overlay must be self-contained"
+            )
+
+    def test_sdd_validator_body_contains_spec_compliance_matrix(self) -> None:
+        """The sdd-validator overlay carries the Spec Compliance Matrix contract."""
+        from importlib.resources import files
+
+        text = (files("ai_harness.resources") / "sdd-agent" / "sdd-validator.md").read_text(encoding="utf-8")
+        assert "Spec Compliance Matrix" in text
+        assert "UNTESTED" in text
+        assert "verify-report.md" in text
+
+    def test_sdd_implementor_body_has_no_gh_issue_comment(self) -> None:
+        """The sdd-implementor overlay does not instruct the agent to comment on a GitHub issue."""
+        from importlib.resources import files
+
+        text = (files("ai_harness.resources") / "sdd-agent" / "sdd-implementor.md").read_text(encoding="utf-8")
+        assert "gh issue comment" not in text, (
+            "sdd-implementor overlay must not reference `gh issue comment` — the change is file-backed"
+        )
+
+    def test_loop_trio_byte_identical_after_sdd_added(self) -> None:
+        """The Loop trio's rendered body is unchanged by the SDD addition.
+
+        Regression guard: adding ``sdd-agent/`` overlays and the SDD discovery
+        must NOT alter the Loop trio's composed body (generic + loop-agent) for
+        any CLI. The Loop trio stays byte-identical to its pre-SDD state.
+        """
+        from importlib.resources import files
+
+        from ai_harness.modules.harness.renderers import _read_template_body
+
+        generic_dir = files("ai_harness.resources") / "generic"
+        loop_dir = files("ai_harness.resources") / "loop-agent"
+        for name in ("explorer", "implementor", "validator"):
+            expected = (generic_dir / f"{name}.md").read_text(encoding="utf-8") + (loop_dir / f"{name}.md").read_text(
+                encoding="utf-8"
+            )
+            # The composed-body helper itself must still produce the Loop composition.
+            assert _read_template_body(name) == expected, f"{name}: Loop composed body drifted"
+            # And every CLI renders that same body verbatim.
+            for cli in (AgentCli.OPENCODE, AgentCli.CLAUDE, AgentCli.COPILOT):
+                pairs = render_agents(cli, [name])
+                rendered_body = pairs[0][1].split("---", 2)[2].removeprefix("\n")
+                assert rendered_body == expected, f"{name} ({cli.value}): Loop body changed after SDD added"
