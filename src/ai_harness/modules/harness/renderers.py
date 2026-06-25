@@ -305,6 +305,76 @@ _AGENT_META: dict[str, dict] = {
         },
         "caps": AgentCaps(write=False),
     },
+    # SDD-only phase agents — single-file bodies under sdd-agent/, no
+    # generic/loop-agent layer (passthrough composition). They move the
+    # change artifact-by-artifact through propose -> spec -> design -> tasks,
+    # then archive once the validator's report is clean. Tunable via
+    # overrides.json like every other agent.
+    "sdd-propose": {
+        "description": (
+            "Authors the proposal artifact of an SDD change — reads the change "
+            "folder and writes proposal.md with Intent, In/Out of scope, "
+            "Approach, and Risks. Bounds every later phase; touches no code."
+        ),
+        "mode": "subagent",
+        "model": {
+            "opencode": "opencode-go/deepseek-v4-pro",
+            "claude": "sonnet",
+        },
+    },
+    "sdd-spec": {
+        "description": (
+            "Authors the standalone full specification of an SDD change. Writes "
+            "spec.md as Requirements with RFC-2119 strength keywords and flat "
+            "UPPERCASE GIVEN/WHEN/THEN/AND scenarios — at least one per "
+            "requirement covering happy path, edge case, and error state; each "
+            "scenario automatable. No delta sections, no central spec store."
+        ),
+        "mode": "subagent",
+        "model": {
+            "opencode": "opencode-go/deepseek-v4-pro",
+            "claude": "sonnet",
+        },
+    },
+    "sdd-design": {
+        "description": (
+            "Authors the deep-module design of an SDD change. Reads spec.md and "
+            "writes design.md naming the deep modules, their interfaces, and "
+            "the seams where the new code plugs into the existing tree. Touches "
+            "no code."
+        ),
+        "mode": "subagent",
+        "model": {
+            "opencode": "opencode-go/deepseek-v4-pro",
+            "claude": "sonnet",
+        },
+    },
+    "sdd-tasks": {
+        "description": (
+            "Extracts the task list for an SDD change from spec.md and "
+            "design.md. Writes tasks.md as a flat '- [ ]' checklist in TDD "
+            "order (test first), one task doing one named thing; the last task "
+            "is always all quality gates green."
+        ),
+        "mode": "subagent",
+        "model": {
+            "opencode": "openai/gpt-5.4-mini",
+            "claude": "sonnet",
+        },
+    },
+    "sdd-archive": {
+        "description": (
+            "Archives a completed SDD change once verify-report.md's first line "
+            "is exactly 'No findings.'. Moves docs/changes/<name>/ to "
+            "docs/changes/archive/<YYYY-MM-DD>-<name>/ using today's ISO date. "
+            "Blocks on any open finding."
+        ),
+        "mode": "subagent",
+        "model": {
+            "opencode": "openai/gpt-5.4-mini",
+            "claude": "sonnet",
+        },
+    },
 }
 
 
@@ -397,10 +467,23 @@ def _discover_agents() -> list[str]:
 
 
 def _read_template_source(name: str) -> str:
-    """Return the raw template text for a named agent (e.g. 'explorer')."""
-    root = _loop_agent_dir()
-    path = root / f"{name}.md"
-    return path.read_text(encoding="utf-8")
+    """Return the raw template text for a named agent (e.g. 'explorer').
+
+    Lookups up the ``loop-agent/`` resource first (Loop trio + loop-orchestrator
+    + split-agent overlays), then fall back to ``sdd-agent/``. The fallback
+    covers the SDD-only phase agents (``sdd-propose`` / ``sdd-spec`` /
+    ``sdd-design`` / ``sdd-tasks`` / ``sdd-archive``), which are single-file
+    bodies with no generic layer — :func:`_read_template_body` returns them
+    unchanged via this helper. Raises ``FileNotFoundError`` when no template
+    exists under either resource directory.
+    """
+    loop_path = _loop_agent_dir() / f"{name}.md"
+    if loop_path.is_file():
+        return loop_path.read_text(encoding="utf-8")
+    sdd_path = _sdd_agent_dir() / f"{name}.md"
+    if sdd_path.is_file():
+        return sdd_path.read_text(encoding="utf-8")
+    raise FileNotFoundError(f"No template found for {name!r} in loop-agent or sdd-agent")
 
 
 def _read_template_body(name: str) -> str:

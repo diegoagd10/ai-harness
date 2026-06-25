@@ -48,7 +48,7 @@ def _find_pair(pairs: list[tuple[str, str]], name: str) -> tuple[str, str] | Non
 
 
 def test_render_agents_claude_returns_agents_and_skill() -> None:
-    """Claude emits 6 subagents under .claude/agents/ and the orchestrator skill."""
+    """Claude emits every discovered subagent under .claude/agents/ and the orchestrator skill."""
     pairs = render_agents(AgentCli.CLAUDE)
 
     paths = [path for path, _ in pairs]
@@ -56,8 +56,13 @@ def test_render_agents_claude_returns_agents_and_skill() -> None:
         ".claude/agents/explorer.md",
         ".claude/agents/implementor.md",
         ".claude/skills/loop-orchestrator/SKILL.md",
+        ".claude/agents/sdd-archive.md",
+        ".claude/agents/sdd-design.md",
         ".claude/agents/sdd-explorer.md",
         ".claude/agents/sdd-implementor.md",
+        ".claude/agents/sdd-propose.md",
+        ".claude/agents/sdd-spec.md",
+        ".claude/agents/sdd-tasks.md",
         ".claude/agents/sdd-validator.md",
         ".claude/agents/validator.md",
     ]
@@ -75,8 +80,13 @@ def test_render_agents_opencode_returns_agents_under_agent_dir() -> None:
         ".config/opencode/agent/explorer.md",
         ".config/opencode/agent/implementor.md",
         ".config/opencode/agent/loop-orchestrator.md",
+        ".config/opencode/agent/sdd-archive.md",
+        ".config/opencode/agent/sdd-design.md",
         ".config/opencode/agent/sdd-explorer.md",
         ".config/opencode/agent/sdd-implementor.md",
+        ".config/opencode/agent/sdd-propose.md",
+        ".config/opencode/agent/sdd-spec.md",
+        ".config/opencode/agent/sdd-tasks.md",
         ".config/opencode/agent/sdd-validator.md",
         ".config/opencode/agent/validator.md",
     ]
@@ -892,8 +902,13 @@ def test_render_agents_copilot_returns_all_agent_files() -> None:
         ".copilot/agents/explorer.agent.md",
         ".copilot/agents/implementor.agent.md",
         ".copilot/agents/loop-orchestrator.agent.md",
+        ".copilot/agents/sdd-archive.agent.md",
+        ".copilot/agents/sdd-design.agent.md",
         ".copilot/agents/sdd-explorer.agent.md",
         ".copilot/agents/sdd-implementor.agent.md",
+        ".copilot/agents/sdd-propose.agent.md",
+        ".copilot/agents/sdd-spec.agent.md",
+        ".copilot/agents/sdd-tasks.agent.md",
         ".copilot/agents/sdd-validator.agent.md",
         ".copilot/agents/validator.agent.md",
     ]
@@ -1067,11 +1082,13 @@ class TestCompositionDiscovery:
     """Agent discovery yields the full composed agent set (Loop + SDD), sorted."""
 
     def test_discover_yields_all_agents_sorted(self) -> None:
-        """_discover_agents returns the seven composed agents, sorted.
+        """_discover_agents returns every composed agent (Loop + SDD), sorted.
 
-        Renamed from ``_discover_loop_agents`` when the SDD flow was added:
-        discovery now scans both ``loop-agent/`` and ``sdd-agent/`` and returns
-        the deduped, sorted union.
+        Discovery scans both ``loop-agent/`` and ``sdd-agent/`` and returns
+        the deduped, sorted union — currently twelve names: the Loop trio +
+        ``loop-orchestrator``, the SDD overlay trio (sdd-explorer/
+        sdd-implementor/sdd-validator), and the SDD-only phase agents
+        (sdd-propose / sdd-spec / sdd-design / sdd-tasks / sdd-archive).
         """
         from ai_harness.modules.harness.renderers import _discover_agents
 
@@ -1079,8 +1096,13 @@ class TestCompositionDiscovery:
             "explorer",
             "implementor",
             "loop-orchestrator",
+            "sdd-archive",
+            "sdd-design",
             "sdd-explorer",
             "sdd-implementor",
+            "sdd-propose",
+            "sdd-spec",
+            "sdd-tasks",
             "sdd-validator",
             "validator",
         ]
@@ -1115,15 +1137,6 @@ class TestSddComposition:
         generic_body = (files("ai_harness.resources") / "generic" / f"{base}.md").read_text(encoding="utf-8")
         sdd_overlay = (files("ai_harness.resources") / "sdd-agent" / f"{sdd_name}.md").read_text(encoding="utf-8")
         assert _read_template_body(sdd_name) == generic_body + sdd_overlay
-
-    def test_discover_yields_seven_agents(self) -> None:
-        """_discover_agents returns exactly seven names in sorted order."""
-        from ai_harness.modules.harness.renderers import _discover_agents
-
-        names = _discover_agents()
-        assert names == sorted(names)
-        assert len(names) == 7
-        assert {"sdd-explorer", "sdd-implementor", "sdd-validator"} <= set(names)
 
     @pytest.mark.parametrize("sdd_name", ["sdd-explorer", "sdd-implementor", "sdd-validator"])
     def test_sdd_agent_meta_exists_with_correct_keys(self, sdd_name: str) -> None:
@@ -1248,3 +1261,181 @@ class TestSddComposition:
                 pairs = render_agents(cli, [name])
                 rendered_body = pairs[0][1].split("---", 2)[2].removeprefix("\n")
                 assert rendered_body == expected, f"{name} ({cli.value}): Loop body changed after SDD added"
+
+
+# ---------------------------------------------------------------------------
+# SDD-only phase agents — single-file bodies under sdd-agent/ (no generic/
+# loop-agent layer). They discover, render, and install like any other agent
+# — passthrough composition: _read_template_body returns the raw sdd-agent
+# file unchanged. Self-contained — no matt-pocock skill path in any body.
+# ---------------------------------------------------------------------------
+
+
+_SDD_ONLY_PHASE_AGENTS = ("sdd-propose", "sdd-spec", "sdd-design", "sdd-tasks", "sdd-archive")
+
+
+class TestSddOnlyComposition:
+    """Composition, discovery, metadata, and rendering for the SDD-only phase agents."""
+
+    def test_discover_yields_twelve_agents(self) -> None:
+        """_discover_agents returns all twelve composed agent names, sorted.
+
+        The SDD-only phase agents land in discovery because they live under
+        ``sdd-agent/`` alongside the SDD overlay trio. The sorted union with
+        ``loop-agent/`` is the twelve-agent set; the SDD-only five and the
+        SDD overlay trio are both present.
+        """
+        from ai_harness.modules.harness.renderers import _discover_agents
+
+        names = _discover_agents()
+        assert names == sorted(names)
+        assert len(names) == 12
+        assert set(_SDD_ONLY_PHASE_AGENTS) <= set(names)
+        assert {"sdd-explorer", "sdd-implementor", "sdd-validator"} <= set(names)
+        assert set(names) == {
+            "explorer",
+            "implementor",
+            "loop-orchestrator",
+            "sdd-archive",
+            "sdd-design",
+            "sdd-explorer",
+            "sdd-implementor",
+            "sdd-propose",
+            "sdd-spec",
+            "sdd-tasks",
+            "sdd-validator",
+            "validator",
+        }
+
+    @pytest.mark.parametrize("name", list(_SDD_ONLY_PHASE_AGENTS))
+    def test_sdd_only_single_file_bodies_unchanged(self, name: str) -> None:
+        """_read_template_body(<sdd-only>) returns the raw sdd-agent/<name>.md verbatim.
+
+        No generic layer, no loop-agent overlay — passthrough composition.
+        Equality is byte-for-byte against the resource file.
+        """
+        from importlib.resources import files
+
+        from ai_harness.modules.harness.renderers import _read_template_body, _read_template_source
+
+        raw = (files("ai_harness.resources") / "sdd-agent" / f"{name}.md").read_text(encoding="utf-8")
+        assert _read_template_body(name) == raw, f"{name}: body must be the raw single-file content unchanged"
+        assert _read_template_source(name) == raw, f"{name}: source must fall back to sdd-agent/"
+
+    @pytest.mark.parametrize("name", list(_SDD_ONLY_PHASE_AGENTS))
+    def test_sdd_only_agent_meta_exists_with_correct_keys(self, name: str) -> None:
+        """Each SDD-only agent has description, mode=subagent, and per-CLI model in _AGENT_META."""
+        meta = get_agent_meta(name, overrides={})
+        assert meta["description"], f"{name}: description must be non-empty"
+        assert meta["mode"] == "subagent", f"{name}: mode must be subagent"
+        assert isinstance(meta["model"], dict), f"{name}: model must be a dict"
+        assert "opencode" in meta["model"], f"{name}: model.opencode missing"
+        assert "claude" in meta["model"], f"{name}: model.claude missing"
+        assert meta.get("caps") is None, f"{name}: SDD-only phase agents use default caps (no entry)"
+
+    @pytest.mark.parametrize("cli", [AgentCli.OPENCODE, AgentCli.CLAUDE, AgentCli.COPILOT])
+    @pytest.mark.parametrize("name", list(_SDD_ONLY_PHASE_AGENTS))
+    def test_render_sdd_only_agents_carries_correct_frontmatter_and_body(self, cli: AgentCli, name: str) -> None:
+        """render_agents(cli, [<sdd-only>]) emits the frontmatter + passthrough body.
+
+        Frontmatter description matches _AGENT_META; body equals the raw
+        ``sdd-agent/<name>.md`` verbatim (the renderer does not append a
+        spawn allowlist — these agents cannot spawn).
+        """
+        from ai_harness.modules.harness.renderers import _read_template_body
+
+        pairs = render_agents(cli, [name])
+        assert len(pairs) == 1
+        _path, content = pairs[0]
+
+        fm = _parse_frontmatter(content)
+        expected_desc = get_agent_meta(name, overrides={})["description"]
+        assert fm.get("description") == expected_desc, f"{name} ({cli.value}): description mismatch"
+
+        body = content.split("---", 2)[2].removeprefix("\n")
+        assert body == _read_template_body(name), f"{name} ({cli.value}): body != passthrough single file"
+
+    @pytest.mark.parametrize("name", list(_SDD_ONLY_PHASE_AGENTS))
+    def test_sdd_only_agent_mode_is_subagent_for_each_cli(self, name: str) -> None:
+        """Each SDD-only phase agent renders as a subagent (Claude path, OpenCode mode) — never a skill.
+
+        ``loop-orchestrator`` is the only primary mode; the SDD-only five are
+        subagents, so Claude writes them under ``.claude/agents/`` (no skill),
+        and OpenCode frontmatter carries ``mode: subagent``.
+        """
+        from ai_harness.modules.harness.renderers import (
+            _get_agent_mode,
+        )
+
+        assert _get_agent_mode(name, overrides={}) == "subagent", f"{name}: mode must be subagent"
+
+        claude_pairs = render_agents(AgentCli.CLAUDE, [name])
+        assert len(claude_pairs) == 1
+        assert claude_pairs[0][0] == f".claude/agents/{name}.md", f"{name}: must render as Claude subagent, not skill"
+
+        opencode_pairs = render_agents(AgentCli.OPENCODE, [name])
+        assert _parse_frontmatter(opencode_pairs[0][1]).get("mode") == "subagent", (
+            f"{name}: OpenCode frontmatter must carry mode=subagent"
+        )
+
+    def test_sdd_only_bodies_contain_no_matt_pocock_skill_path(self) -> None:
+        """The SDD-only phase bodies reference no matt-pocock skill path.
+
+        The SDD-only flow is self-contained: TDD discipline lives in the body
+        prompt text, not in an external ``~/.agents/skills/tdd/SKILL.md``
+        load. The bodies must not carry the literal skill path either.
+        """
+        import re
+
+        from ai_harness.modules.harness.renderers import _read_template_body
+
+        pattern = re.compile(r"tdd/SKILL\.md|~/.agents/skills/tdd")
+        for name in _SDD_ONLY_PHASE_AGENTS:
+            body = _read_template_body(name)
+            assert not pattern.search(body), (
+                f"{name}: SDD-only body references a matt-pocock skill path; the flow must be self-contained"
+            )
+
+
+def test_sdd_spec_body_specifies_given_when_then_format() -> None:
+    """The sdd-spec single-file body encodes the standalone full-spec format.
+
+    Asserts the body carries the section structure (``# Specification``,
+    ``## Requirements``, ``### Requirement:``) and the RFC-2119 strength
+    keywords plus flat UPPERCASE GIVEN/WHEN/THEN keywords the validator
+    relies on when building the Spec Compliance Matrix.
+    """
+    from importlib.resources import files
+
+    text = (files("ai_harness.resources") / "sdd-agent" / "sdd-spec.md").read_text(encoding="utf-8")
+    assert "# <change> Specification" in text
+    assert "## Requirements" in text
+    assert "### Requirement:" in text
+    assert "MUST" in text
+    assert "SHALL" in text or "SHOULD" in text or "MAY" in text
+    assert "GIVEN" in text
+    assert "WHEN" in text
+    assert "THEN" in text
+    assert "AND" in text
+    assert "RFC 2119" in text
+    # Edge + error coverage is mandated in prose
+    assert "edge case" in text.lower()
+    assert "error state" in text.lower()
+    # Automatable-by-a-test contract must be stated
+    assert "automatable" in text.lower()
+    # The proscription on delta sections / central spec store
+    assert "no delta" in text.lower()
+    assert "no central spec store" in text.lower()
+
+
+def test_sdd_archive_body_specifies_archive_folder_move() -> None:
+    """The sdd-archive single-file body specifies moving the change folder into the dated archive."""
+    from importlib.resources import files
+
+    text = (files("ai_harness.resources") / "sdd-agent" / "sdd-archive.md").read_text(encoding="utf-8")
+    assert "docs/changes/archive/" in text
+    assert "YYYY-MM-DD" in text
+    assert "datetime.date.today().isoformat()" in text
+    assert "mv docs/changes/" in text
+    assert "verify-report.md" in text
+    assert "No findings." in text
