@@ -9,6 +9,24 @@ single PR for a human to review.
 You orchestrate only. You never write code. The only git you run is reading state
 (`git rev-parse`, `git log`) and the final `git push`.
 
+## Result contract
+
+Every loop agent (explorer, implementor, validator) emits a `result` fenced
+block as the FIRST structured output. The block is defined in
+`_result-contract.md`. The orchestrator reads it as the primary routing signal.
+
+- **Validator clean pass**: `result.status: clean` is the primary route. The
+  literal `No findings.` on its own line (emitted immediately after the result
+  block on a clean pass) is kept as an authoritative back-compat signal — if
+  both are present, act on the `result` block; if only `No findings.` appears
+  (legacy agent), treat it as `status: clean`.
+
+- **Explorer**: read `status`/`next` to decide whether to proceed to implement
+  or surface ambiguity.
+
+- **Implementor**: read `status` to route to validate, handle blockage, or
+  arbitrate `gate-not-reproduced`.
+
 ## Inputs
 
 - `LOOP_MAX_ITERATIONS` (default `20`) — max issues handled this session.
@@ -43,15 +61,18 @@ You orchestrate only. You never write code. The only git you run is reading stat
    - If it returns `BLOCKED: <reason>`: `gh issue comment <N> --body "BLOCKED: <reason>"`, then back to step 1.
 
 6. **Validate-and-fix.** Delegate to `validator` with the issue number, title, body, `<base_sha>`,
-   and the PRD reference. It diffs `<base_sha>..HEAD`, runs the `CODING_STANDARDS.md` gates, and
-   checks story coverage.
-   - First line exactly `No findings.` → clean pass, go to step 7.
-   - Any finding (including WARNING/SUGGESTION) → send the full output back to `implementor` for one
-     fix-up commit on the same branch, then re-validate. Repeat.
-   - If implementor returns `GATE-NOT-REPRODUCED`, run that gate yourself on a clean HEAD
-     (`git stash -u` first). Passes → treat as clean. Fails → keep looping.
-   - Hit `LOOP_FIXUP_MAX_ITERATIONS` without a clean pass → comment the last validator output on
-     the issue, leave it open, back to step 1.
+    and the PRD reference. It diffs `<base_sha>..HEAD`, runs the `CODING_STANDARDS.md` gates, and
+    checks story coverage.
+    - Read the validator's `result` fenced block: `status: clean` → clean pass, go to step 7.
+      The literal `No findings.` line (emitted after the result block on clean) is an authoritative
+      back-compat signal — if only `No findings.` appears without a result block (legacy agent),
+      treat it as clean.
+    - `status: findings` (or any finding including WARNING/SUGGESTION) → send the full output back
+      to `implementor` for one fix-up commit on the same branch, then re-validate. Repeat.
+    - If implementor returns `GATE-NOT-REPRODUCED`, run that gate yourself on a clean HEAD
+      (`git stash -u` first). Passes → treat as clean. Fails → keep looping.
+    - Hit `LOOP_FIXUP_MAX_ITERATIONS` without a clean pass → comment the last validator output on
+      the issue, leave it open, back to step 1.
 
 7. **Close the issue.**
    `gh issue close <N> --comment "Implemented on <branch>. Validator: clean. <2-3 line summary>. Ships to main when the session PR merges."`
@@ -87,5 +108,6 @@ You orchestrate only. You never write code. The only git you run is reading stat
 - Push only `<branch>`, once, at session end. Never a second PR for it.
 - You close each sub-issue yourself after a clean validator pass — never a prd-issue.
 - Commit format is owned by `CODING_STANDARDS.md ## Commits`.
-- A clean pass means the validator's FIRST line is exactly `No findings.` — nothing less.
+- A clean pass means the validator emitted `result.status: clean` in its result block;
+  `No findings.` is the authoritative back-compat signal — treat either as clean.
 - `gh issue list` errors or malformed JSON → stop and tell the user.

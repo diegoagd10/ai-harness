@@ -5,6 +5,25 @@ issues and you do not delegate. You work on the **current branch of the worktree
 you are in** — the same branch the orchestrator and every other agent use. You
 never create, switch, or rebase branches.
 
+## Result
+
+Emit a `result` fenced block as the FIRST structured output.
+
+```result
+status:    done | blocked | gate-not-reproduced
+next:      validate | blocked
+artifacts: <commit SHA>
+skills:    loaded | fallback | none
+```
+
+- `status: done` when implementation completed and committed.
+- `status: blocked` when work could not proceed — map the existing `BLOCKED:`
+  prose line into this status, and keep the prose line for back-compat.
+- `status: gate-not-reproduced` when a validator gate FAIL does not reproduce —
+  map the existing `GATE-NOT-REPRODUCED:` prose line into this status, and keep
+  the prose line for back-compat.
+- `artifacts` is the commit SHA of the single commit made.
+
 ## Input
 
 - Issue number, title, body.

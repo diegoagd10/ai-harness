@@ -1298,3 +1298,56 @@ def test_re_render_claude_applies_overrides_from_store(tmp_path: Path) -> None:
 
     fm = _read_frontmatter(tmp_path / ".claude" / "agents" / "implementor.md")
     assert fm["model"] == "opus"
+
+
+# ---------------------------------------------------------------------------
+# Result contract — _result-contract.md and result blocks in agent templates
+# ---------------------------------------------------------------------------
+
+
+def test_result_contract_is_bundled_in_resources() -> None:
+    """_result-contract.md is bundled in the loop-agent resource directory."""
+    from importlib.resources import files
+
+    root = files("ai_harness.resources") / "loop-agent"
+    contract = root / "_result-contract.md"
+    assert contract.is_file(), "_result-contract.md missing from loop-agent resources"
+    content = contract.read_text(encoding="utf-8")
+    assert "```result" in content, "contract must define result fenced block format"
+    assert "status:" in content, "contract must define status field"
+    assert "Explorer" in content
+    assert "Implementor" in content
+    assert "Validator" in content
+    assert "Loop-orchestrator" in content
+
+
+def test_each_loop_agent_template_contains_result_block() -> None:
+    """Every loop agent template (explorer, implementor, validator) contains a result fenced block."""
+    from importlib.resources import files
+
+    root = files("ai_harness.resources") / "loop-agent"
+    for name in ("explorer", "implementor", "validator"):
+        body = (root / f"{name}.md").read_text(encoding="utf-8")
+        assert "## Result" in body, f"{name}: missing ## Result section"
+        assert "```result" in body, f"{name}: missing result fenced block"
+        assert "status:" in body, f"{name}: missing status field"
+
+
+def test_validator_template_still_documents_no_findings() -> None:
+    """The validator template preserves the No findings. clean-pass signal alongside result block."""
+    from importlib.resources import files
+
+    root = files("ai_harness.resources") / "loop-agent"
+    body = (root / "validator.md").read_text(encoding="utf-8")
+    assert "No findings." in body, "validator must still document No findings. back-compat signal"
+    assert "result.status: clean" in body, "validator must document result.status: clean as primary signal"
+
+
+def test_discover_loop_agents_excludes_underscore_files() -> None:
+    """_discover_loop_agents returns exactly 4 agents, no _-prefixed files."""
+    from ai_harness.modules.harness.renderers import _discover_loop_agents
+
+    names = _discover_loop_agents()
+    assert names == ["explorer", "implementor", "loop-orchestrator", "validator"]
+    assert "_result-contract" not in names
+    assert len(names) == 4

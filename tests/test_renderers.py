@@ -19,6 +19,7 @@ from ai_harness.modules.harness.models import AgentCli
 from ai_harness.modules.harness.renderers import (
     AgentCaps,
     _claude_tools,
+    _discover_loop_agents,
     _opencode_permission,
     get_agent_meta,
     render_agents,
@@ -1024,3 +1025,65 @@ def test_caps_translation_is_per_capability() -> None:
         "write": "deny",
         "task": {"*": "deny", "explorer": "allow"},
     }
+
+
+# ---------------------------------------------------------------------------
+# Result contract — _result-contract.md is bundled but not discovered as agent
+# ---------------------------------------------------------------------------
+
+
+def test_discover_loop_agents_excludes_underscore_prefixed_files() -> None:
+    """_discover_loop_agents returns only the four real agents, skipping _result-contract.md."""
+    names = _discover_loop_agents()
+
+    assert names == ["explorer", "implementor", "loop-orchestrator", "validator"]
+    assert "_result-contract" not in names
+    assert len(names) == 4
+
+
+def test_result_contract_file_exists_in_resources() -> None:
+    """_result-contract.md is bundled as a package resource in loop-agent/."""
+    from importlib.resources import files
+
+    root = files("ai_harness.resources") / "loop-agent"
+    contract = root / "_result-contract.md"
+    assert contract.is_file(), "_result-contract.md missing from loop-agent resources"
+    content = contract.read_text(encoding="utf-8")
+    assert "result" in content
+    assert "status:" in content
+
+
+_LOOP_AGENT_NAMES = ("explorer", "implementor", "validator", "loop-orchestrator")
+
+
+def test_each_agent_template_has_result_section() -> None:
+    """Every agent that emits a result block has a ## Result section with a result fenced block."""
+    from importlib.resources import files
+
+    root = files("ai_harness.resources") / "loop-agent"
+    # Only the three sub-agents emit result blocks; the orchestrator reads them.
+    for name in ("explorer", "implementor", "validator"):
+        body = (root / f"{name}.md").read_text(encoding="utf-8")
+        assert "## Result" in body, f"{name}: missing ## Result section"
+        assert "```result" in body, f"{name}: missing result fenced block"
+
+
+def test_orchestrator_template_documents_result_contract() -> None:
+    """The orchestrator template documents the result contract as primary routing signal."""
+    from importlib.resources import files
+
+    root = files("ai_harness.resources") / "loop-agent"
+    body = (root / "loop-orchestrator.md").read_text(encoding="utf-8")
+    assert "result" in body.lower(), "orchestrator must document result contract"
+    assert "status:" in body, "orchestrator must reference status field"
+    assert "No findings." in body, "orchestrator must preserve No findings. back-compat"
+
+
+def test_validator_template_documents_no_findings() -> None:
+    """The validator template still documents the No findings. clean-pass signal."""
+    from importlib.resources import files
+
+    root = files("ai_harness.resources") / "loop-agent"
+    body = (root / "validator.md").read_text(encoding="utf-8")
+    assert "No findings." in body, "validator template must document No findings. signal"
+    assert "result.status: clean" in body, "validator template must reference result.status: clean"
