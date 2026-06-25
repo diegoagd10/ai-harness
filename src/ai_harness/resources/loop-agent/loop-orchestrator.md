@@ -71,10 +71,10 @@ You orchestrate only. You never write code. The only git you run is reading stat
    status list of closed / blocked / still-open issues.
 5. **Link PRD issues.** For each distinct PRD reference among the closed issues:
    - File-path references → plain text only (`gh` can't close a path).
-   - `#<prd>` references → run the drain check: `gh issue list --state open --json number,body --limit 500`,
+   - `#<prd>` references → run the **label-independent drain check**: `gh issue list --state open --json number,body --limit 500`,
      scan each `body` client-side for the literal `#<prd>` token (word-boundary, so `#41` ≠ `#410`).
      Do not use `gh issue list --search` — it tokenizes `#<n>` as a cross-reference (see ADR 0003).
-     Zero open matches → `Closes #<prd>`. One or more → `Part of #<prd>`.
+     Zero open matches → the prd-issue is fully drained → `Closes #<prd>`. One or more → `Part of #<prd>`.
    - The loop never closes a prd-issue itself — only `Closes #<prd>` in a merged PR does that.
 6. Tell the user the PR URL and which issues are in it.
 7. Print `LOOP DONE`.

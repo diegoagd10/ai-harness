@@ -224,7 +224,7 @@ _AGENT_META: dict[str, dict] = {
     },
     "implementor": {
         "description": (
-            "Implements one GitHub issue on an assigned branch. TDD, quality gates, "
+            "Implements one GitHub issue on the worktree's current branch. TDD, quality gates, "
             "ONE commit whose format follows CODING_STANDARDS.md ## Commits; the "
             "issue number must appear in the commit. Never closes the issue itself "
             "— the orchestrator closes it right after a clean validator pass. "
@@ -251,11 +251,11 @@ _AGENT_META: dict[str, dict] = {
     },
     "loop-orchestrator": {
         "description": (
-            "Loop orchestrator — drains loop-labeled sub-issues onto one per-session "
-            "loop branch via explorer → implementor → validator subagents, looping "
+            "Loop orchestrator — drains loop-labeled sub-issues onto the worktree's current "
+            "branch via explorer → implementor → validator subagents, looping "
             "implementor↔validator on any finding until clean, then opens ONE PR for "
-            "the whole session. Never touches local main directly; closes each issue itself "
-            "right after its validator pass is clean."
+            "the whole session. Never creates branches or touches main directly; closes each "
+            "issue itself right after its validator pass is clean."
         ),
         "mode": "primary",
         "color": "error",
