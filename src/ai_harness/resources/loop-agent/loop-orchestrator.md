@@ -78,17 +78,17 @@ skills:    loaded | fallback | none
 4.5. **Gate explorer.**
    - Read the explorer's `result.status`. `ok` → proceed to step 5. `ambiguous`/`blocked` →
      `gh issue comment <N> --body "Explorer returned <status>: <summary>"`, then back to step 1.
-   - **Path spot-check:** pick 2–3 paths from the `artifacts:` field. Run
-     `git ls-files <path>` or `test -e <path>` for each. A `[NEW]`-prefixed path is exempt
-     from the existence check — it is a new file the plan proposes to create. A path that
-     does not exist AND is NOT `[NEW]`-prefixed → **hallucination**. Log each bad path.
+    - **Path spot-check:** for EVERY path in the `artifacts:` field, run
+      `git ls-files <path>` or `test -e <path>`. A `[NEW]`-prefixed path is exempt
+      from the existence check — it is a new file the plan proposes to create. A path that
+      does not exist AND is NOT `[NEW]`-prefixed → **hallucination**. Log ALL bad paths,
+      not a sample.
    - **Hallucination response:** re-run the explorer ONCE, naming the bad paths explicitly:
      `"The following paths from your report do not exist and are not marked [NEW]: <list>.
      Re-run the exploration and produce a corrected report."` If the second report still
      contains non-existent non-`[NEW]` paths → `gh issue comment <N>` with the failing paths
      and back to step 1 (skip the issue).
-   - **Drift check:** `git diff --stat <base_sha>..HEAD` to confirm no unrelated changes
-     landed before proceeding.
+    - **Drift check:** the plan addresses this issue's title/body, not a different problem.
 
 5. **Implement.** Delegate to `implementor` with the issue number, title, body, and explorer's
    report. Forward the cached gate list and test runner explicitly:
