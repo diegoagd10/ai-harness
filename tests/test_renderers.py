@@ -1086,3 +1086,50 @@ def test_validator_template_documents_no_findings() -> None:
     body = (root / "validator.md").read_text(encoding="utf-8")
     assert "No findings." in body, "validator template must document No findings. signal"
     assert "result.status: clean" in body, "validator template must reference result.status: clean"
+
+
+# ---------------------------------------------------------------------------
+# Story 3 — gate-command forwarding (orchestrator → implementor + validator)
+# ---------------------------------------------------------------------------
+
+
+def test_orchestrator_setup_documents_gate_caching() -> None:
+    """Orchestrator Setup section documents one-time gate resolution from CODING_STANDARDS.md."""
+    pairs = render_agents(AgentCli.CLAUDE)
+    pair = _find_pair(pairs, "loop-orchestrator")
+    assert pair is not None
+    body = pair[1].split("---", 2)[-1]
+
+    assert "CODING_STANDARDS.md" in body, "orchestrator body must reference CODING_STANDARDS.md"
+    assert "Quality gates" in body or "quality gate" in body.lower(), (
+        "orchestrator body must mention quality gates or gate resolution"
+    )
+    assert "cache" in body.lower() or "once" in body.lower(), (
+        "orchestrator body must describe one-time or cached gate resolution"
+    )
+
+
+def test_implementor_describes_forwarded_gate_preference() -> None:
+    """Implementor protocol prefers forwarded gate list, falls back to self-discovery."""
+    pairs = render_agents(AgentCli.CLAUDE)
+    pair = _find_pair(pairs, "implementor")
+    assert pair is not None
+    body = pair[1].split("---", 2)[-1]
+
+    assert "forwarded" in body.lower(), "implementor body must mention forwarded gate list"
+    assert "fall back" in body.lower() or "fallback" in body.lower(), (
+        "implementor body must describe fallback to CODING_STANDARDS.md"
+    )
+
+
+def test_validator_describes_forwarded_gate_preference() -> None:
+    """Validator gate rules prefer forwarded gate list, falls back to self-discovery."""
+    pairs = render_agents(AgentCli.CLAUDE)
+    pair = _find_pair(pairs, "validator")
+    assert pair is not None
+    body = pair[1].split("---", 2)[-1]
+
+    assert "forwarded" in body.lower(), "validator body must mention forwarded gate list"
+    assert "fall back" in body.lower() or "fallback" in body.lower(), (
+        "validator body must describe fallback to CODING_STANDARDS.md"
+    )

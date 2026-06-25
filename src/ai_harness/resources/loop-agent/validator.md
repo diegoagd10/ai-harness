@@ -43,11 +43,13 @@ skills:    loaded | fallback | none
 
 ## Gate rules
 
+- Use the gate list and test runner the orchestrator forwarded. If none were forwarded (standalone
+  invocation), fall back to reading `CODING_STANDARDS.md ## Quality gates` and `## Testing`.
 - Run gates against committed HEAD, never a dirty tree. `git status --porcelain` MUST be empty
   first; if not, `git stash -u` the junk — a FAIL from a stray file is NOT a finding.
-- Run the FULL set from `CODING_STANDARDS.md ## Quality gates`, same order, every pass. Never add
-  or drop a gate between rounds. If `CODING_STANDARDS.md` is missing, infer gates from the project
-  config, note it, and keep that same set for every later round.
+- Run the FULL set, same order, every pass. Never add or drop a gate between rounds. If
+  `CODING_STANDARDS.md` is missing, infer gates from the project config, note it, and keep that
+  same set for every later round.
 
 ## Re-review (fix-up) protocol
 

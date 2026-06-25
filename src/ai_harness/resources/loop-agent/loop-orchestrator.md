@@ -57,6 +57,7 @@ skills:    loaded | fallback | none
 
 1. `git rev-parse --abbrev-ref HEAD` → this is `<branch>`, the session branch. Use it as-is.
 2. Confirm it is not `main`. If it is, stop and tell the user — the loop must run on its own worktree branch.
+3. Resolve quality gates and test runner once. Read `CODING_STANDARDS.md ## Quality gates` + `## Testing` from the project root. Cache the ordered gate command list and test runner for the session. If `CODING_STANDARDS.md` is absent, note the fallback once: use the project's own lint/test config and proceed cautiously.
 
 ## Per-issue loop
 
@@ -75,13 +76,16 @@ skills:    loaded | fallback | none
    (affected files, steps, edge cases, test surface, risks). Do not skip.
 
 5. **Implement.** Delegate to `implementor` with the issue number, title, body, and explorer's
-   report. It works on the current branch, follows TDD, and makes ONE commit (issue number in
+   report. Forward the cached gate list and test runner explicitly:
+   `"Quality gates (run in this order, all must pass): <list>. Test runner: <cmd>. TDD is mandatory; follow ~/.agents/skills/tdd/SKILL.md."`
+   The implementor works on the current branch, follows TDD, and makes ONE commit (issue number in
    the message, format per `CODING_STANDARDS.md ## Commits`). It never closes the issue.
    - If it returns `BLOCKED: <reason>`: `gh issue comment <N> --body "BLOCKED: <reason>"`, then back to step 1.
 
 6. **Validate-and-fix.** Delegate to `validator` with the issue number, title, body, `<base_sha>`,
-    and the PRD reference. It diffs `<base_sha>..HEAD`, runs the `CODING_STANDARDS.md` gates, and
-    checks story coverage.
+    and the PRD reference. Forward the cached gate list and test runner explicitly:
+    `"Quality gates (run in this order, all must pass): <list>. Test runner: <cmd>."`
+    The validator diffs `<base_sha>..HEAD`, runs the gates, and checks story coverage.
     - Read the validator's `result` fenced block: `status: clean` → clean pass, go to step 7.
       The literal `No findings.` line (emitted after the result block on clean) is an authoritative
       back-compat signal — if only `No findings.` appears without a result block (legacy agent),
