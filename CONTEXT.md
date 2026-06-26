@@ -100,39 +100,3 @@ engineering skills. The harness documents how to install them but never provisio
 them at *install* time nor removes them at uninstall, because they are user-scoped
 and shared across every repository on the machine.
 _Avoid_: dependency, plugin (when you mean the documented external requirement)
-
-## Change
-
-The file-backed unit of work for the *SDD flow* — a named folder under
-`docs/changes/<name>/` whose markdown artifacts (exploration, proposal, spec,
-design, tasks, verify-report) progress through a fixed dependency graph. It is the
-SDD-flow counterpart to a *sub-issue*: the same role (one reviewable slice of
-work), a different medium (markdown on disk, not a GitHub issue). A change is
-*ready* when its planning artifacts are all present, and is retired by moving its
-folder under `docs/changes/archive/<date>-<name>/`.
-_Avoid_: ticket, issue (when you mean the on-disk change)
-
-## SDD flow
-
-The file-backed sibling of the *Loop*: it drains *changes* instead of GitHub
-issues, and splits into two halves that share one derived state machine. The
-*planning flow* (`Sdd-Planning-Loop`, interactive, run in the host tree) walks
-explore → propose → spec → design → tasks to author a change folder. The
-*implementation flow* (`Sdd-Implementor-Loop`, run in a *Worktree*) takes one named
-change and walks apply ↔ verify until clean → archive, into one PR. Both decide the
-next phase by inspecting which artifacts a change already has —
-there is no manual ready flag. Distinct from the *Loop*, which is GitHub-issue
-based; the two coexist for different jobs.
-_Avoid_: SDD loop, change loop (pick one name — it is the *SDD flow*)
-
-## Shared agent
-
-One of `explorer` / `implementor` / `validator` — the three agents both the *Loop*
-and the *SDD flow* use. Because each must behave differently per flow yet share a
-common core, a shared agent is authored as three layers — `generic/<agent>.md`
-(the core: TDD, quality gates, branch rules), `loop-agent/<agent>.md` (the issue
-overlay) and `sdd-agent/<agent>.md` (the change overlay) — which the build
-*composes* (concatenates) into one *Agent template* per flow before *Render*.
-Distinct from the planning agents (`sdd-propose`/`spec`/`design`/`tasks`), which
-are SDD-only and authored single-file.
-_Avoid_: combine, merge (when you mean *compose* the layers)

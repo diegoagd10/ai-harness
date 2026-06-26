@@ -196,4 +196,4 @@ Sub-agents get a fresh context with NO memory. The orchestrator controls context
 - **Write**: the sub-agent saves significant discoveries/decisions/bug fixes to Engram via `mem_save` (with `project`) BEFORE returning — it has the full detail.
 - **Skills**: orchestrator injects exact `SKILL.md` paths as a `## Skills to load before work` block; the sub-agent reads those files first. Pass paths, not summaries.
 
-**Planning stays interactive** (you + the user + openspec). **Implementation is delegated** (see Implementation Policy).
+**Planning stays interactive** (you + the user). **Implementation is delegated** (see Implementation Policy).
