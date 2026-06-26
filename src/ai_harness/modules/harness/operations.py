@@ -21,7 +21,7 @@ WriteLabelsResult          Outcome of _write_labels_policy.
 install_for_agent_clis     Map bundled resources to agent CLI paths, write, record manifest.
 re_render_for_agent_clis   Re-write rendered loop agents without touching the install manifest.
 uninstall_for_agent_clis   Remove files recorded in the manifest.
-init_repo                  Scaffold CODING_STANDARDS.md skeleton and CLAUDE.md labels-policy block.
+init_repo                  Scaffold CODING_STANDARDS.md skeleton and agent-doc labels-policy block.
 """
 
 from __future__ import annotations
@@ -96,6 +96,11 @@ _LABELS_POLICY_BLOCK = """\
 _AI_HARNESS_START = "<!-- ai-harness:start -->"
 _AI_HARNESS_END = "<!-- ai-harness:end -->"
 
+# Agent docs that receive the labels-policy block, in deterministic write order.
+# CLAUDE.md is Claude Code's persona; AGENTS.md is the OpenCode/generic persona.
+# A repo may have either, both, or neither.
+_LABELS_POLICY_DOCS = ("CLAUDE.md", "AGENTS.md")
+
 
 # --- public types -----------------------------------------------------------
 
@@ -116,30 +121,31 @@ class InitResult:
     """Observable outcome of ``init_repo``.
 
     Each field reports whether the corresponding artifact was written.
-    ``wrote_labels_policy`` is ``False`` when markers are already present
-    or when ``CLAUDE.md`` does not exist; ``claude_md_missing``
-    distinguishes the two skip cases.
+    ``wrote_labels_policy`` is ``True`` when the block reached at least one agent
+    doc; ``labels_policy_targets`` names those docs. ``no_agent_doc`` is ``True``
+    only when neither ``CLAUDE.md`` nor ``AGENTS.md`` exists, distinguishing
+    "nothing to write to" from "all targets already had the block".
     """
 
     wrote_standards: bool
     wrote_labels_policy: bool
-    claude_md_missing: bool = False
+    labels_policy_targets: tuple[str, ...] = ()
+    no_agent_doc: bool = False
     created_labels: tuple[str, ...] = ()
     label_warnings: tuple[str, ...] = ()
 
 
 class WriteLabelsResult(NamedTuple):
-    """Outcome of ``_write_labels_policy``: whether the block was appended and whether CLAUDE.md existed.
+    """Outcome of ``_write_labels_policy``: which agent docs got the block, and whether any existed.
 
-    ``wrote`` is ``True`` only when the labels-policy block was appended;
-    ``claude_md_missing`` distinguishes the two skip cases (``False`` →
-    markers already present, ``True`` → ``CLAUDE.md`` absent). Naming the
-    pair avoids the positional ``(wrote, claude_md_missing)`` tuple where
-    callers could swap the booleans.
+    ``written`` lists the agent docs (``CLAUDE.md``/``AGENTS.md``, in write
+    order) that received the labels-policy block — empty when none did.
+    ``no_agent_doc`` is ``True`` only when neither candidate doc exists, which
+    distinguishes "nothing to write to" from "all targets already had markers".
     """
 
-    wrote: bool
-    claude_md_missing: bool
+    written: tuple[str, ...]
+    no_agent_doc: bool
 
 
 # --- public operations ----------------------------------------------------
@@ -248,10 +254,10 @@ def init_repo(
     """Scaffold repo-local artifacts at *repo_root*.
 
     Writes a titles-only ``CODING_STANDARDS.md`` if it does not exist, and
-    appends a labels-policy block to ``CLAUDE.md`` if the file exists and the
-    ``<!-- ai-harness:start -->`` / ``<!-- ai-harness:end -->`` markers are not
-    already present. Creates the ``ready-for-agent`` and ``loop`` GitHub labels
-    via ``gh label create`` (skips those that already exist).
+    appends a labels-policy block to each agent doc present (``CLAUDE.md`` and/or
+    ``AGENTS.md``) whose ``<!-- ai-harness:start -->`` / ``<!-- ai-harness:end -->``
+    markers are not already present. Creates the ``ready-for-agent`` and ``loop``
+    GitHub labels via ``gh label create`` (skips those that already exist).
 
     Idempotent by per-artifact detection — no sentinel file. Returns an
     ``InitResult`` describing which artifacts were written and which labels were
@@ -264,14 +270,13 @@ def init_repo(
 
     wrote_standards = _write_coding_standards(root)
     labels_result = _write_labels_policy(root)
-    wrote_labels_policy = labels_result.wrote
-    claude_md_missing = labels_result.claude_md_missing
     label_result = ensure_labels(root)
 
     return InitResult(
         wrote_standards=wrote_standards,
-        wrote_labels_policy=wrote_labels_policy,
-        claude_md_missing=claude_md_missing,
+        wrote_labels_policy=bool(labels_result.written),
+        labels_policy_targets=labels_result.written,
+        no_agent_doc=labels_result.no_agent_doc,
         created_labels=tuple(label_result.created),
         label_warnings=tuple(label_result.warnings),
     )
@@ -414,23 +419,30 @@ def _write_coding_standards(root: Path) -> bool:
 
 
 def _write_labels_policy(root: Path) -> WriteLabelsResult:
-    """Append labels-policy block to ``CLAUDE.md``.
+    """Append the labels-policy block to each agent doc present at *root*.
 
-    Returns a :class:`WriteLabelsResult`:
-    - ``WriteLabelsResult(True, False)`` when the block was appended.
-    - ``WriteLabelsResult(False, False)`` when markers are already present (idempotent skip).
-    - ``WriteLabelsResult(False, True)`` when ``CLAUDE.md`` does not exist (silently skipped).
+    Targets ``CLAUDE.md`` and ``AGENTS.md`` (in that order). Each one that exists
+    and lacks the ``ai-harness`` markers receives the block; existing files with
+    the markers, and absent files, are skipped. The block is never created from
+    scratch — a repo opts in by having an agent doc.
+
+    Returns a :class:`WriteLabelsResult` whose ``written`` names the docs that
+    received the block (deterministic order) and whose ``no_agent_doc`` is
+    ``True`` only when neither candidate exists.
     """
-    path = root / "CLAUDE.md"
-    if not path.exists():
-        return WriteLabelsResult(False, True)
-
-    content = path.read_text(encoding="utf-8")
-    if _AI_HARNESS_START in content or _AI_HARNESS_END in content:
-        return WriteLabelsResult(False, False)
-
-    if not content.endswith("\n"):
-        content += "\n"
-    content += "\n" + _LABELS_POLICY_BLOCK + "\n"
-    path.write_text(content, encoding="utf-8")
-    return WriteLabelsResult(True, False)
+    written: list[str] = []
+    found_agent_doc = False
+    for name in _LABELS_POLICY_DOCS:
+        path = root / name
+        if not path.exists():
+            continue
+        found_agent_doc = True
+        content = path.read_text(encoding="utf-8")
+        if _AI_HARNESS_START in content or _AI_HARNESS_END in content:
+            continue
+        if not content.endswith("\n"):
+            content += "\n"
+        content += "\n" + _LABELS_POLICY_BLOCK + "\n"
+        path.write_text(content, encoding="utf-8")
+        written.append(name)
+    return WriteLabelsResult(tuple(written), not found_agent_doc)

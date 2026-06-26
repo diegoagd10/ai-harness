@@ -20,6 +20,7 @@ runner = CliRunner()
 
 CODING_STANDARDS = "CODING_STANDARDS.md"
 CLAUDE_MD = "CLAUDE.md"
+AGENTS_MD = "AGENTS.md"
 
 AI_HARNESS_START = "<!-- ai-harness:start -->"
 AI_HARNESS_END = "<!-- ai-harness:end -->"
@@ -112,7 +113,8 @@ def test_init_repo_appends_labels_policy_when_claude_md_exists_and_no_markers(tm
     result = init_repo(tmp_path)
 
     assert result.wrote_labels_policy is True
-    assert result.claude_md_missing is False
+    assert result.labels_policy_targets == (CLAUDE_MD,)
+    assert result.no_agent_doc is False
 
     content = claude.read_text(encoding="utf-8")
     assert AI_HARNESS_START in content
@@ -149,21 +151,120 @@ Already present.
     result = init_repo(tmp_path)
 
     assert result.wrote_labels_policy is False
-    assert result.claude_md_missing is False
+    assert result.labels_policy_targets == ()
+    assert result.no_agent_doc is False
     assert claude.read_text(encoding="utf-8") == original
 
 
-def test_init_repo_skips_labels_policy_when_no_claude_md(tmp_path: Path) -> None:
-    """Running init_repo when CLAUDE.md does not exist skips without creating it."""
+def test_init_repo_skips_labels_policy_when_no_agent_doc(tmp_path: Path) -> None:
+    """init_repo skips the block when neither CLAUDE.md nor AGENTS.md exists, creating neither."""
     from ai_harness.modules.harness import init_repo
 
     assert not (tmp_path / CLAUDE_MD).exists()
+    assert not (tmp_path / AGENTS_MD).exists()
 
     result = init_repo(tmp_path)
 
     assert result.wrote_labels_policy is False
-    assert result.claude_md_missing is True
+    assert result.labels_policy_targets == ()
+    assert result.no_agent_doc is True
     assert not (tmp_path / CLAUDE_MD).exists()
+    assert not (tmp_path / AGENTS_MD).exists()
+
+
+def test_init_repo_appends_labels_policy_to_agents_md_when_no_claude_md(tmp_path: Path) -> None:
+    """A repo with AGENTS.md but no CLAUDE.md receives the block in AGENTS.md."""
+    from ai_harness.modules.harness import init_repo
+
+    agents = tmp_path / AGENTS_MD
+    original = "# Agent persona\n\nSome content.\n"
+    agents.write_text(original, encoding="utf-8")
+
+    result = init_repo(tmp_path)
+
+    assert result.wrote_labels_policy is True
+    assert result.labels_policy_targets == (AGENTS_MD,)
+    assert result.no_agent_doc is False
+
+    content = agents.read_text(encoding="utf-8")
+    assert AI_HARNESS_START in content
+    assert AI_HARNESS_END in content
+    assert "`loop`" in content
+    assert original in content
+    # CLAUDE.md is never created as a side effect.
+    assert not (tmp_path / CLAUDE_MD).exists()
+
+
+def test_init_repo_appends_labels_policy_to_both_docs_when_both_exist(tmp_path: Path) -> None:
+    """When both CLAUDE.md and AGENTS.md exist, both receive the block, CLAUDE.md first."""
+    from ai_harness.modules.harness import init_repo
+
+    claude = tmp_path / CLAUDE_MD
+    agents = tmp_path / AGENTS_MD
+    claude.write_text("# Claude\n", encoding="utf-8")
+    agents.write_text("# Agents\n", encoding="utf-8")
+
+    result = init_repo(tmp_path)
+
+    assert result.wrote_labels_policy is True
+    assert result.labels_policy_targets == (CLAUDE_MD, AGENTS_MD)
+    assert result.no_agent_doc is False
+    assert AI_HARNESS_START in claude.read_text(encoding="utf-8")
+    assert AI_HARNESS_START in agents.read_text(encoding="utf-8")
+
+
+def test_init_repo_skips_agents_md_when_markers_present(tmp_path: Path) -> None:
+    """AGENTS.md that already carries the markers is left unchanged."""
+    from ai_harness.modules.harness import init_repo
+
+    agents = tmp_path / AGENTS_MD
+    original = f"# Agents\n\n{AI_HARNESS_START}\n\nPresent.\n\n{AI_HARNESS_END}\n"
+    agents.write_text(original, encoding="utf-8")
+
+    result = init_repo(tmp_path)
+
+    assert result.wrote_labels_policy is False
+    assert result.labels_policy_targets == ()
+    assert result.no_agent_doc is False
+    assert agents.read_text(encoding="utf-8") == original
+
+
+def test_init_repo_writes_only_agents_md_when_claude_md_already_marked(tmp_path: Path) -> None:
+    """Both docs exist but only CLAUDE.md has markers: AGENTS.md gets the block, CLAUDE.md untouched."""
+    from ai_harness.modules.harness import init_repo
+
+    claude = tmp_path / CLAUDE_MD
+    agents = tmp_path / AGENTS_MD
+    claude_original = f"# Claude\n\n{AI_HARNESS_START}\n\nPresent.\n\n{AI_HARNESS_END}\n"
+    claude.write_text(claude_original, encoding="utf-8")
+    agents.write_text("# Agents\n", encoding="utf-8")
+
+    result = init_repo(tmp_path)
+
+    assert result.wrote_labels_policy is True
+    assert result.labels_policy_targets == (AGENTS_MD,)
+    assert result.no_agent_doc is False
+    assert claude.read_text(encoding="utf-8") == claude_original
+    assert AI_HARNESS_START in agents.read_text(encoding="utf-8")
+
+
+def test_init_repo_writes_only_claude_md_when_agents_md_already_marked(tmp_path: Path) -> None:
+    """Both docs exist but only AGENTS.md has markers: CLAUDE.md gets the block, AGENTS.md untouched."""
+    from ai_harness.modules.harness import init_repo
+
+    claude = tmp_path / CLAUDE_MD
+    agents = tmp_path / AGENTS_MD
+    claude.write_text("# Claude\n", encoding="utf-8")
+    agents_original = f"# Agents\n\n{AI_HARNESS_START}\n\nPresent.\n\n{AI_HARNESS_END}\n"
+    agents.write_text(agents_original, encoding="utf-8")
+
+    result = init_repo(tmp_path)
+
+    assert result.wrote_labels_policy is True
+    assert result.labels_policy_targets == (CLAUDE_MD,)
+    assert result.no_agent_doc is False
+    assert agents.read_text(encoding="utf-8") == agents_original
+    assert AI_HARNESS_START in claude.read_text(encoding="utf-8")
 
 
 def test_init_repo_appends_labels_policy_to_empty_claude_md(tmp_path: Path) -> None:
@@ -266,17 +367,35 @@ def test_cli_init_reports_labels_policy_skipped_when_markers_present(
     assert "unchanged" in result.stdout.lower()
 
 
-def test_cli_init_reports_labels_policy_skipped_when_no_claude_md(
+def test_cli_init_reports_labels_policy_skipped_when_no_agent_doc(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``ai-harness init`` reports skipping when no CLAUDE.md exists."""
+    """``ai-harness init`` reports skipping when neither CLAUDE.md nor AGENTS.md exists."""
     monkeypatch.chdir(tmp_path)
 
     result = runner.invoke(app, ["init"])
 
     assert result.exit_code == 0, result.stderr
-    assert "No CLAUDE.md found" in result.stdout
+    assert "No CLAUDE.md or AGENTS.md found" in result.stdout
     assert not (tmp_path / CLAUDE_MD).exists()
+    assert not (tmp_path / AGENTS_MD).exists()
+
+
+def test_cli_init_reports_labels_policy_appended_to_agents_md(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``ai-harness init`` names AGENTS.md when it receives the labels-policy block."""
+    monkeypatch.chdir(tmp_path)
+
+    agents = tmp_path / AGENTS_MD
+    agents.write_text("# Agent persona\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["init"])
+
+    assert result.exit_code == 0, result.stderr
+    assert "Appended labels-policy" in result.stdout
+    assert AGENTS_MD in result.stdout
+    content = agents.read_text(encoding="utf-8")
+    assert AI_HARNESS_START in content
+    assert AI_HARNESS_END in content
 
 
 # ---------------------------------------------------------------------------
