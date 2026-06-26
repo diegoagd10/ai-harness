@@ -62,8 +62,11 @@ skills:    loaded | fallback | none
 ## Per-issue loop
 
 1. **List issues.**
-   `gh issue list --state open --label "$LOOP_LABEL" --limit 100 --json number,title,body,labels,comments`
-   Empty → go to **Session end**. (Closed issues drop out on their own.)
+   `gh issue list --state open --label "$LOOP_LABEL" --limit 100 --json number,title,body,labels,comments,state`
+   GitHub's issue index can lag right after a close, so the `--state open` server
+   filter occasionally still returns a just-closed issue. Do not trust it alone:
+   discard client-side any issue whose `state` is not `OPEN` before picking. Empty
+   after that filter → go to **Session end**.
 
 2. **Pick the top issue.** Lowest number first; on ties prefer `bug` > `enhancement` > `chore`.
    Read the body. Note any **PRD reference** (a `*.md`/`docs/prd/` path, or `#<number>` near
