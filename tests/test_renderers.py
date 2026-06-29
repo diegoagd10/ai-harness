@@ -58,7 +58,14 @@ def test_render_agents_claude_returns_agents_and_skill() -> None:
         ".claude/agents/implementor.md",
         ".claude/skills/loop-orchestrator/SKILL.md",
         ".claude/agents/validator.md",
+        ".claude/agents/change-explorer.md",
+        ".claude/agents/change-implementor.md",
         ".claude/skills/change-orchestrator/SKILL.md",
+        ".claude/agents/change-validator.md",
+        ".claude/agents/design.md",
+        ".claude/agents/propose.md",
+        ".claude/agents/specs.md",
+        ".claude/agents/tasks.md",
     ]
     # content is non-empty rendered text
     for _, content in pairs:
@@ -75,7 +82,14 @@ def test_render_agents_opencode_returns_agents_under_agent_dir() -> None:
         ".config/opencode/agent/implementor.md",
         ".config/opencode/agent/loop-orchestrator.md",
         ".config/opencode/agent/validator.md",
+        ".config/opencode/agent/change-explorer.md",
+        ".config/opencode/agent/change-implementor.md",
         ".config/opencode/agent/change-orchestrator.md",
+        ".config/opencode/agent/change-validator.md",
+        ".config/opencode/agent/design.md",
+        ".config/opencode/agent/propose.md",
+        ".config/opencode/agent/specs.md",
+        ".config/opencode/agent/tasks.md",
     ]
     for _, content in pairs:
         assert content.startswith("---\n")
@@ -104,18 +118,24 @@ def test_render_agents_writes_change_orchestrator_to_native_agent_dirs() -> None
 
 
 def test_render_agents_uses_change_orchestrator_template_body() -> None:
-    """Rendered change-orchestrator files use the bundled change-agent prompt body verbatim."""
+    """Rendered change-orchestrator files use the bundled prompt body."""
     from importlib.resources import files
 
     template_body = (files("ai_harness.resources") / "change-agent" / "change-orchestrator.md").read_text(
         encoding="utf-8"
     )
 
-    for cli in (AgentCli.OPENCODE, AgentCli.COPILOT, AgentCli.CLAUDE):
+    for cli in (AgentCli.OPENCODE, AgentCli.COPILOT):
         pair = _find_pair(render_agents(cli), "change-orchestrator")
         assert pair is not None
         rendered_body = pair[1].split("---", 2)[2].removeprefix("\n")
         assert rendered_body == template_body
+
+    pair = _find_pair(render_agents(AgentCli.CLAUDE), "change-orchestrator")
+    assert pair is not None
+    rendered_body = pair[1].split("---", 2)[2].removeprefix("\n")
+    assert rendered_body.startswith(template_body)
+    assert "spawn allowlist" in rendered_body.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -274,7 +294,10 @@ def test_change_orchestrator_meta_declares_primary_restricted_agent() -> None:
     assert meta["mode"] == "primary"
     assert meta["model"]["opencode"] == "openai/gpt-5.5"
     assert meta["model"]["claude"] == "sonnet"
-    assert meta["caps"] == AgentCaps(write=False, spawn=())
+    assert meta["caps"] == AgentCaps(
+        write=False,
+        spawn=("change-explorer", "propose", "design", "specs", "tasks", "change-implementor", "change-validator"),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -340,7 +363,20 @@ def test_change_orchestrator_frontmatter_uses_meta() -> None:
     assert fm["description"] == meta["description"]
     assert fm["mode"] == "primary"
     assert fm["model"] == meta["model"]["opencode"]
-    assert fm["permission"] == {"edit": "deny", "write": "deny", "task": {"*": "deny"}}
+    assert fm["permission"] == {
+        "edit": "deny",
+        "write": "deny",
+        "task": {
+            "*": "deny",
+            "change-explorer": "allow",
+            "propose": "allow",
+            "design": "allow",
+            "specs": "allow",
+            "tasks": "allow",
+            "change-implementor": "allow",
+            "change-validator": "allow",
+        },
+    }
 
 
 def test_opencode_subagents_have_no_color() -> None:
@@ -937,7 +973,14 @@ def test_render_agents_copilot_returns_agent_files() -> None:
         ".copilot/agents/implementor.agent.md",
         ".copilot/agents/loop-orchestrator.agent.md",
         ".copilot/agents/validator.agent.md",
+        ".copilot/agents/change-explorer.agent.md",
+        ".copilot/agents/change-implementor.agent.md",
         ".copilot/agents/change-orchestrator.agent.md",
+        ".copilot/agents/change-validator.agent.md",
+        ".copilot/agents/design.agent.md",
+        ".copilot/agents/propose.agent.md",
+        ".copilot/agents/specs.agent.md",
+        ".copilot/agents/tasks.agent.md",
     ]
     for _, content in pairs:
         assert content.startswith("---\n")
@@ -947,7 +990,20 @@ def test_copilot_frontmatter_has_name_and_description_only() -> None:
     """Every Copilot agent frontmatter contains exactly ``name`` and ``description``."""
     pairs = render_agents(AgentCli.COPILOT)
 
-    for name in ("explorer", "implementor", "validator", "loop-orchestrator", "change-orchestrator"):
+    for name in (
+        "explorer",
+        "implementor",
+        "validator",
+        "loop-orchestrator",
+        "change-explorer",
+        "change-implementor",
+        "change-orchestrator",
+        "change-validator",
+        "design",
+        "propose",
+        "specs",
+        "tasks",
+    ):
         pair = _find_pair(pairs, name)
         assert pair is not None, f"{name} not found in Copilot output"
         fm = _parse_frontmatter(pair[1])
@@ -1086,9 +1142,50 @@ def test_discover_loop_agents_excludes_underscore_prefixed_files() -> None:
     """_discover_loop_agents returns loop and change agents, skipping _result-contract.md."""
     names = _discover_loop_agents()
 
-    assert names == ["explorer", "implementor", "loop-orchestrator", "validator", "change-orchestrator"]
+    assert names == [
+        "explorer",
+        "implementor",
+        "loop-orchestrator",
+        "validator",
+        "change-explorer",
+        "change-implementor",
+        "change-orchestrator",
+        "change-validator",
+        "design",
+        "propose",
+        "specs",
+        "tasks",
+    ]
     assert "_result-contract" not in names
-    assert len(names) == 5
+    assert len(names) == 12
+
+
+def test_change_agent_prompt_set_contains_expected_contract_keywords() -> None:
+    """The bundled change-agent prompts carry the file-backed flow contracts."""
+    from importlib.resources import files
+
+    root = files("ai_harness.resources") / "change-agent"
+    prompts = {path.name: path.read_text(encoding="utf-8") for path in root.iterdir() if path.name.endswith(".md")}
+
+    assert sorted(prompts) == [
+        "change-explorer.md",
+        "change-implementor.md",
+        "change-orchestrator.md",
+        "change-validator.md",
+        "design.md",
+        "propose.md",
+        "specs.md",
+        "tasks.md",
+    ]
+    assert "budget" in prompts["change-explorer.md"]
+    assert "nextRecommended" in prompts["change-orchestrator.md"]
+    assert "verdict" in prompts["change-validator.md"]
+    assert "task-create" in prompts["tasks.md"]
+    assert "task-next" in prompts["change-implementor.md"]
+    assert "task-list" in prompts["change-validator.md"]
+    combined = "\n".join(prompts.values())
+    assert "change start" not in combined
+    assert "change ready" not in combined
 
 
 def test_discover_loop_agents_skips_missing_change_agent_dir(monkeypatch: pytest.MonkeyPatch) -> None:

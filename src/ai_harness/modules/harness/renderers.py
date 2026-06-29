@@ -266,13 +266,89 @@ _AGENT_META: dict[str, dict] = {
         "caps": AgentCaps(write=False, spawn=("explorer", "implementor", "validator")),
     },
     "change-orchestrator": {
-        "description": "Change orchestrator — coordinates planned change sets through the native agent render path.",
+        "description": (
+            "Change orchestrator — coordinates file-backed change sets through explore, planning, "
+            "task creation, implementation, validation, and archive routing."
+        ),
         "mode": "primary",
         "model": {
             "opencode": "openai/gpt-5.5",
             "claude": "sonnet",
         },
-        "caps": AgentCaps(write=False, spawn=()),
+        "caps": AgentCaps(
+            write=False,
+            spawn=("change-explorer", "propose", "design", "specs", "tasks", "change-implementor", "change-validator"),
+        ),
+    },
+    "change-explorer": {
+        "description": (
+            "Change explorer — read-only phase-1 investigator for file-backed changes. "
+            "Estimates LOC budget, writes exploration.md, and reports affected files, plan, and risks."
+        ),
+        "mode": "subagent",
+        "model": {
+            "opencode": "opencode-go/kimi-k2.7-code",
+            "claude": "sonnet",
+        },
+    },
+    "propose": {
+        "description": "Change PRD author — writes prd.md in the sdd-propose structure without publishing anywhere.",
+        "mode": "subagent",
+        "model": {
+            "opencode": "opencode-go/kimi-k2.7-code",
+            "claude": "sonnet",
+        },
+    },
+    "design": {
+        "description": "Change design author — writes design.md using the to-design deep-module structure.",
+        "mode": "subagent",
+        "model": {
+            "opencode": "opencode-go/kimi-k2.7-code",
+            "claude": "sonnet",
+        },
+    },
+    "specs": {
+        "description": (
+            "Change specs author — writes tracer-bullet specs from prd.md capabilities with RFC 2119 "
+            "requirements and GIVEN/WHEN/THEN scenarios."
+        ),
+        "mode": "subagent",
+        "model": {
+            "opencode": "opencode-go/kimi-k2.7-code",
+            "claude": "sonnet",
+        },
+    },
+    "tasks": {
+        "description": (
+            "Change task author — decomposes specs and design, then creates tasks through ai-harness task-create."
+        ),
+        "mode": "subagent",
+        "model": {
+            "opencode": "opencode-go/kimi-k2.7-code",
+            "claude": "sonnet",
+        },
+    },
+    "change-implementor": {
+        "description": (
+            "Change implementor — drains file-backed tasks through task-next and task-done, "
+            "making one commit per task on the current branch."
+        ),
+        "mode": "subagent",
+        "model": {
+            "opencode": "opencode-go/deepseek-v4-pro",
+            "claude": "sonnet",
+        },
+    },
+    "change-validator": {
+        "description": (
+            "Change validator — read-only verdict-bearing reviewer that uses task-list, writes validation.md, "
+            "and reports pass, pass-with-warnings, or fail with critical count."
+        ),
+        "mode": "subagent",
+        "model": {
+            "opencode": "openai/gpt-5.4-mini",
+            "claude": "sonnet",
+        },
     },
 }
 
