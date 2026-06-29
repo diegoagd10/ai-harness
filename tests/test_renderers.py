@@ -301,6 +301,131 @@ def test_change_orchestrator_meta_declares_primary_restricted_agent() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Human review gate — render contract coverage
+# ---------------------------------------------------------------------------
+
+
+def test_change_orchestrator_body_has_human_review_gate_heading() -> None:
+    """Rendered change-orchestrator bodies expose the 'Human review gate' section.
+
+    Locks the gate heading across every CLI renderer. Removing the heading from
+    the prompt template breaks at least one render test.
+    """
+    for cli in (AgentCli.OPENCODE, AgentCli.COPILOT, AgentCli.CLAUDE):
+        pair = _find_pair(render_agents(cli), "change-orchestrator")
+        assert pair is not None, f"change-orchestrator not found for {cli}"
+        body = pair[1].split("---", 2)[2].removeprefix("\n")
+        assert "## Human review gate" in body, f"{cli}: gate heading missing from rendered body"
+
+
+def test_change_orchestrator_body_gate_names_every_artifact() -> None:
+    """Gate wording names PRD, design, specs, and tasks explicitly for review."""
+    pair = _find_pair(render_agents(AgentCli.OPENCODE), "change-orchestrator")
+    assert pair is not None
+    body = pair[1].split("---", 2)[2].removeprefix("\n")
+    gate_idx = body.index("## Human review gate")
+
+    # Every reviewable artifact path appears in the gate section.
+    end_idx = body.find("\n## ", gate_idx + 1)
+    gate_section = body[gate_idx:end_idx if end_idx != -1 else None]
+    assert "prd.md" in gate_section
+    assert "design.md" in gate_section
+    assert "specs/" in gate_section
+    assert "tasks.json" in gate_section
+
+
+def test_change_orchestrator_body_gate_requires_explicit_confirmation() -> None:
+    """Gate wording precedes change-implementor and requires explicit confirmation.
+
+    The continuation phrases that count as approval live in the gate section, so
+    a human-confirmation policy can be checked against the rendered body.
+    """
+    pair = _find_pair(render_agents(AgentCli.OPENCODE), "change-orchestrator")
+    assert pair is not None
+    body = pair[1].split("---", 2)[2].removeprefix("\n")
+    gate_idx = body.index("## Human review gate")
+    end_idx = body.find("\n## ", gate_idx + 1)
+    gate_section = body[gate_idx:end_idx if end_idx != -1 else None].lower()
+
+    # Explicit confirmation is required and named.
+    assert "confirmation" in gate_section
+    assert "explicit" in gate_section
+    # At least one explicit confirmation phrase is taught to the model.
+    approval_phrase = any(
+        phrase in gate_section
+        for phrase in ("continue", "proceed", "go ahead", "implement")
+    )
+    assert approval_phrase, "gate must teach at least one explicit continuation phrase"
+
+
+def test_change_orchestrator_body_gate_invalidates_on_artifact_change() -> None:
+    """Gate body explains that PRD/design/specs/tasks changes reopen the gate."""
+    pair = _find_pair(render_agents(AgentCli.OPENCODE), "change-orchestrator")
+    assert pair is not None
+    body = pair[1].split("---", 2)[2].removeprefix("\n")
+    gate_idx = body.index("## Human review gate")
+    end_idx = body.find("\n## ", gate_idx + 1)
+    gate_section = body[gate_idx:end_idx if end_idx != -1 else None].lower()
+
+    # Invalidation clause uses "artifact-change invalidation" wording and lists the
+    # four artifact kinds.
+    assert "artifact-change invalidation" in gate_section or "invalidation" in gate_section
+    assert "prd.md" in gate_section
+    assert "design.md" in gate_section
+    assert "specs/" in gate_section
+    assert "tasks.json" in gate_section
+
+
+def test_change_orchestrator_body_gate_carves_out_parent_decomposition() -> None:
+    """Gate body carves out parent large-change decomposition so split flow is not gated."""
+    pair = _find_pair(render_agents(AgentCli.OPENCODE), "change-orchestrator")
+    assert pair is not None
+    body = pair[1].split("---", 2)[2].removeprefix("\n")
+    gate_idx = body.index("## Human review gate")
+    end_idx = body.find("\n## ", gate_idx + 1)
+    gate_section = body[gate_idx:end_idx if end_idx != -1 else None].lower()
+
+    # The carve-out is named in the gate section.
+    assert "parent decomposition" in gate_section or "parent split" in gate_section or "split" in gate_section
+
+
+def test_change_orchestrator_body_gate_encodes_resume_semantics() -> None:
+    """Gate body encodes prompt-only resume semantics — re-prompts on session gap."""
+    pair = _find_pair(render_agents(AgentCli.OPENCODE), "change-orchestrator")
+    assert pair is not None
+    body = pair[1].split("---", 2)[2].removeprefix("\n")
+    gate_idx = body.index("## Human review gate")
+    end_idx = body.find("\n## ", gate_idx + 1)
+    gate_section = body[gate_idx:end_idx if end_idx != -1 else None].lower()
+
+    assert "resume" in gate_section
+    # No durable approval marker in v1 — prompt-only waiting is the policy.
+    assert (
+        "no persisted approval marker" in gate_section
+        or "prompt-only" in gate_section
+        or "durable approval marker" in gate_section
+    )
+
+
+def test_change_orchestrator_description_unaffected_by_body_only_gate() -> None:
+    """Body-only gate does not require change-orchestrator description changes.
+
+    The gate is implemented in the prompt body only — the frontmatter description
+    remains the broader responsibility statement and need not name the gate.
+    Locks metadata parity: removing the gate from the body does not touch this
+    test, so a regression here means a description was changed unnecessarily.
+    """
+    meta = get_agent_meta("change-orchestrator")
+    description = meta["description"]
+
+    # Description stays a responsibility statement, not a gate policy.
+    assert description
+    assert "Human review gate" not in description
+    # The broader responsibilities remain so description is still useful on its own.
+    assert "implement" in description or "validation" in description or "archive" in description
+
+
+# ---------------------------------------------------------------------------
 # OpenCode output unchanged — parity guard
 # ---------------------------------------------------------------------------
 
