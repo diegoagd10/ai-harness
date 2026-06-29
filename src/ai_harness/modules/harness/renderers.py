@@ -272,7 +272,7 @@ _AGENT_META: dict[str, dict] = {
         ),
         "mode": "primary",
         "model": {
-            "opencode": "openai/gpt-5.5",
+            "opencode": "minimax/MiniMax-M3",
             "claude": "sonnet",
         },
         "caps": AgentCaps(
@@ -287,7 +287,7 @@ _AGENT_META: dict[str, dict] = {
         ),
         "mode": "subagent",
         "model": {
-            "opencode": "opencode-go/kimi-k2.7-code",
+            "opencode": "minimax/MiniMax-M3",
             "claude": "sonnet",
         },
     },
@@ -295,7 +295,7 @@ _AGENT_META: dict[str, dict] = {
         "description": "Change PRD author — writes prd.md in the sdd-propose structure without publishing anywhere.",
         "mode": "subagent",
         "model": {
-            "opencode": "opencode-go/kimi-k2.7-code",
+            "opencode": "minimax/MiniMax-M3",
             "claude": "sonnet",
         },
     },
@@ -303,7 +303,7 @@ _AGENT_META: dict[str, dict] = {
         "description": "Change design author — writes design.md using the to-design deep-module structure.",
         "mode": "subagent",
         "model": {
-            "opencode": "opencode-go/kimi-k2.7-code",
+            "opencode": "minimax/MiniMax-M3",
             "claude": "sonnet",
         },
     },
@@ -314,7 +314,7 @@ _AGENT_META: dict[str, dict] = {
         ),
         "mode": "subagent",
         "model": {
-            "opencode": "opencode-go/kimi-k2.7-code",
+            "opencode": "minimax/MiniMax-M3",
             "claude": "sonnet",
         },
     },
@@ -324,7 +324,7 @@ _AGENT_META: dict[str, dict] = {
         ),
         "mode": "subagent",
         "model": {
-            "opencode": "opencode-go/kimi-k2.7-code",
+            "opencode": "minimax/MiniMax-M3",
             "claude": "sonnet",
         },
     },
@@ -335,7 +335,7 @@ _AGENT_META: dict[str, dict] = {
         ),
         "mode": "subagent",
         "model": {
-            "opencode": "opencode-go/deepseek-v4-pro",
+            "opencode": "minimax/MiniMax-M3",
             "claude": "sonnet",
         },
     },
@@ -346,7 +346,7 @@ _AGENT_META: dict[str, dict] = {
         ),
         "mode": "subagent",
         "model": {
-            "opencode": "openai/gpt-5.4-mini",
+            "opencode": "minimax/MiniMax-M3",
             "claude": "sonnet",
         },
     },

@@ -292,7 +292,7 @@ def test_change_orchestrator_meta_declares_primary_restricted_agent() -> None:
 
     assert meta["description"]
     assert meta["mode"] == "primary"
-    assert meta["model"]["opencode"] == "openai/gpt-5.5"
+    assert meta["model"]["opencode"] == "minimax/MiniMax-M3"
     assert meta["model"]["claude"] == "sonnet"
     assert meta["caps"] == AgentCaps(
         write=False,
