@@ -49,7 +49,7 @@ def _find_pair(pairs: list[tuple[str, str]], name: str) -> tuple[str, str] | Non
 
 
 def test_render_agents_claude_returns_agents_and_skill() -> None:
-    """Claude emits 3 subagents under .claude/agents/ and the orchestrator skill."""
+    """Claude emits subagents and name-based primary skills."""
     pairs = render_agents(AgentCli.CLAUDE)
 
     paths = [path for path, _ in pairs]
@@ -58,6 +58,7 @@ def test_render_agents_claude_returns_agents_and_skill() -> None:
         ".claude/agents/implementor.md",
         ".claude/skills/loop-orchestrator/SKILL.md",
         ".claude/agents/validator.md",
+        ".claude/skills/change-orchestrator/SKILL.md",
     ]
     # content is non-empty rendered text
     for _, content in pairs:
@@ -65,7 +66,7 @@ def test_render_agents_claude_returns_agents_and_skill() -> None:
 
 
 def test_render_agents_opencode_returns_agents_under_agent_dir() -> None:
-    """OpenCode emits every loop agent under .config/opencode/agent/."""
+    """OpenCode emits every loop and change agent under .config/opencode/agent/."""
     pairs = render_agents(AgentCli.OPENCODE)
 
     paths = [path for path, _ in pairs]
@@ -74,6 +75,7 @@ def test_render_agents_opencode_returns_agents_under_agent_dir() -> None:
         ".config/opencode/agent/implementor.md",
         ".config/opencode/agent/loop-orchestrator.md",
         ".config/opencode/agent/validator.md",
+        ".config/opencode/agent/change-orchestrator.md",
     ]
     for _, content in pairs:
         assert content.startswith("---\n")
@@ -92,6 +94,28 @@ def test_render_agents_honours_explicit_names() -> None:
 def test_render_agents_unknown_cli_returns_empty() -> None:
     """CLIs without native agent support render nothing."""
     assert render_agents(AgentCli.GENERIC) == []
+
+
+def test_render_agents_writes_change_orchestrator_to_native_agent_dirs() -> None:
+    """All native Agent CLIs render the change-orchestrator prompt."""
+    assert _find_pair(render_agents(AgentCli.OPENCODE), "change-orchestrator") is not None
+    assert _find_pair(render_agents(AgentCli.COPILOT), "change-orchestrator") is not None
+    assert _find_pair(render_agents(AgentCli.CLAUDE), "change-orchestrator") is not None
+
+
+def test_render_agents_uses_change_orchestrator_template_body() -> None:
+    """Rendered change-orchestrator files use the bundled change-agent prompt body verbatim."""
+    from importlib.resources import files
+
+    template_body = (files("ai_harness.resources") / "change-agent" / "change-orchestrator.md").read_text(
+        encoding="utf-8"
+    )
+
+    for cli in (AgentCli.OPENCODE, AgentCli.COPILOT, AgentCli.CLAUDE):
+        pair = _find_pair(render_agents(cli), "change-orchestrator")
+        assert pair is not None
+        rendered_body = pair[1].split("---", 2)[2].removeprefix("\n")
+        assert rendered_body == template_body
 
 
 # ---------------------------------------------------------------------------
@@ -242,6 +266,17 @@ def test_loop_orchestrator_description_mentions_loop_labeled_sub_issues() -> Non
     assert "sub-issue" in description
 
 
+def test_change_orchestrator_meta_declares_primary_restricted_agent() -> None:
+    """Change-orchestrator metadata defines native models and restrictive capabilities."""
+    meta = get_agent_meta("change-orchestrator")
+
+    assert meta["description"]
+    assert meta["mode"] == "primary"
+    assert meta["model"]["opencode"] == "openai/gpt-5.5"
+    assert meta["model"]["claude"] == "sonnet"
+    assert meta["caps"] == AgentCaps(write=False, spawn=())
+
+
 # ---------------------------------------------------------------------------
 # OpenCode output unchanged — parity guard
 # ---------------------------------------------------------------------------
@@ -292,6 +327,20 @@ def test_opencode_orchestrator_has_error_color() -> None:
     assert pair is not None
     fm = _parse_frontmatter(pair[1])
     assert fm.get("color") == "error", f"expected color=error, got {fm.get('color')!r}"
+
+
+def test_change_orchestrator_frontmatter_uses_meta() -> None:
+    """Change-orchestrator renders OpenCode frontmatter from _AGENT_META."""
+    pairs = render_agents(AgentCli.OPENCODE)
+    pair = _find_pair(pairs, "change-orchestrator")
+    assert pair is not None
+    fm = _parse_frontmatter(pair[1])
+    meta = get_agent_meta("change-orchestrator")
+
+    assert fm["description"] == meta["description"]
+    assert fm["mode"] == "primary"
+    assert fm["model"] == meta["model"]["opencode"]
+    assert fm["permission"] == {"edit": "deny", "write": "deny", "task": {"*": "deny"}}
 
 
 def test_opencode_subagents_have_no_color() -> None:
@@ -869,7 +918,7 @@ def test_render_agents_mode_override_routes_through_dispatch(tmp_path: Path, mon
     # Primary → skill directory, with SKILL.md as the leaf filename.
     skill_paths = [path for path, _ in pairs if path.endswith("/SKILL.md")]
     assert skill_paths, f"expected a SKILL.md dispatch, got {[p for p, _ in pairs]}"
-    assert skill_paths[0].endswith("/loop-orchestrator/SKILL.md")
+    assert skill_paths[0].endswith("/implementor/SKILL.md")
 
 
 # ---------------------------------------------------------------------------
@@ -878,8 +927,8 @@ def test_render_agents_mode_override_routes_through_dispatch(tmp_path: Path, mon
 # ---------------------------------------------------------------------------
 
 
-def test_render_agents_copilot_returns_four_agent_files() -> None:
-    """Copilot emits all four loop agents under .copilot/agents/ with .agent.md extension."""
+def test_render_agents_copilot_returns_agent_files() -> None:
+    """Copilot emits loop and change agents under .copilot/agents/ with .agent.md extension."""
     pairs = render_agents(AgentCli.COPILOT)
 
     paths = [path for path, _ in pairs]
@@ -888,6 +937,7 @@ def test_render_agents_copilot_returns_four_agent_files() -> None:
         ".copilot/agents/implementor.agent.md",
         ".copilot/agents/loop-orchestrator.agent.md",
         ".copilot/agents/validator.agent.md",
+        ".copilot/agents/change-orchestrator.agent.md",
     ]
     for _, content in pairs:
         assert content.startswith("---\n")
@@ -897,7 +947,7 @@ def test_copilot_frontmatter_has_name_and_description_only() -> None:
     """Every Copilot agent frontmatter contains exactly ``name`` and ``description``."""
     pairs = render_agents(AgentCli.COPILOT)
 
-    for name in ("explorer", "implementor", "validator", "loop-orchestrator"):
+    for name in ("explorer", "implementor", "validator", "loop-orchestrator", "change-orchestrator"):
         pair = _find_pair(pairs, name)
         assert pair is not None, f"{name} not found in Copilot output"
         fm = _parse_frontmatter(pair[1])
@@ -1033,12 +1083,84 @@ def test_caps_translation_is_per_capability() -> None:
 
 
 def test_discover_loop_agents_excludes_underscore_prefixed_files() -> None:
-    """_discover_loop_agents returns only the four real agents, skipping _result-contract.md."""
+    """_discover_loop_agents returns loop and change agents, skipping _result-contract.md."""
+    names = _discover_loop_agents()
+
+    assert names == ["explorer", "implementor", "loop-orchestrator", "validator", "change-orchestrator"]
+    assert "_result-contract" not in names
+    assert len(names) == 5
+
+
+def test_discover_loop_agents_skips_missing_change_agent_dir(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Missing change-agent resources do not block loop-agent discovery."""
+    monkeypatch.setattr(
+        "ai_harness.modules.harness.renderers._AGENT_RESOURCE_DIRS",
+        ("loop-agent", "missing-change-agent"),
+    )
+
     names = _discover_loop_agents()
 
     assert names == ["explorer", "implementor", "loop-orchestrator", "validator"]
-    assert "_result-contract" not in names
-    assert len(names) == 4
+
+
+def test_discover_loop_agents_skips_empty_change_agent_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Empty change-agent resources leave the loop-agent render set unchanged."""
+    from importlib.resources import files
+
+    package_root = files("ai_harness.resources")
+    empty_root = tmp_path / "resources"
+    (empty_root / "empty-change-agent").mkdir(parents=True)
+    monkeypatch.setattr(
+        "ai_harness.modules.harness.renderers.files",
+        lambda package: package_root if package == "ai_harness.resources" else files(package),
+    )
+    monkeypatch.setattr(
+        "ai_harness.modules.harness.renderers._AGENT_RESOURCE_DIRS",
+        ("loop-agent", empty_root / "empty-change-agent"),
+    )
+
+    names = _discover_loop_agents()
+
+    assert names == ["explorer", "implementor", "loop-orchestrator", "validator"]
+
+
+def test_discover_loop_agents_excludes_underscore_prefixed_files_in_any_resource_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Underscore-prefixed markdown files are bundled resources, never agents."""
+    loop_root = tmp_path / "loop-agent"
+    change_root = tmp_path / "change-agent"
+    loop_root.mkdir()
+    change_root.mkdir()
+    (loop_root / "explorer.md").write_text("loop", encoding="utf-8")
+    (change_root / "change-orchestrator.md").write_text("change", encoding="utf-8")
+    (change_root / "_shared.md").write_text("shared", encoding="utf-8")
+    monkeypatch.setattr(
+        "ai_harness.modules.harness.renderers._AGENT_RESOURCE_DIRS",
+        (loop_root, change_root),
+    )
+
+    names = _discover_loop_agents()
+
+    assert names == ["explorer", "change-orchestrator"]
+    assert "_shared" not in names
+
+
+def test_discover_loop_agents_raises_on_name_collision(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Template names must be unique across resource dirs."""
+    loop_root = tmp_path / "loop-agent"
+    change_root = tmp_path / "change-agent"
+    loop_root.mkdir()
+    change_root.mkdir()
+    (loop_root / "shared.md").write_text("loop", encoding="utf-8")
+    (change_root / "shared.md").write_text("change", encoding="utf-8")
+    monkeypatch.setattr(
+        "ai_harness.modules.harness.renderers._AGENT_RESOURCE_DIRS",
+        (loop_root, change_root),
+    )
+
+    with pytest.raises(ValueError, match="Duplicate agent template 'shared'"):
+        _discover_loop_agents()
 
 
 def test_result_contract_file_exists_in_resources() -> None:

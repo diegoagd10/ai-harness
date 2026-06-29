@@ -43,8 +43,8 @@ __all__ = [
 # Constants
 # ---------------------------------------------------------------------------
 
-_LOOP_AGENT_PACKAGE = "ai_harness.resources"
-_LOOP_AGENT_DIR = "loop-agent"
+_AGENT_PACKAGE = "ai_harness.resources"
+_AGENT_RESOURCE_DIRS: tuple[str | Traversable, ...] = ("loop-agent", "change-agent")
 
 _OVERRIDES_REL = ".ai-harness/overrides.json"
 
@@ -265,12 +265,35 @@ _AGENT_META: dict[str, dict] = {
         },
         "caps": AgentCaps(write=False, spawn=("explorer", "implementor", "validator")),
     },
+    "change-orchestrator": {
+        "description": "Change orchestrator — coordinates planned change sets through the native agent render path.",
+        "mode": "primary",
+        "model": {
+            "opencode": "openai/gpt-5.5",
+            "claude": "sonnet",
+        },
+        "caps": AgentCaps(write=False, spawn=()),
+    },
 }
 
 
-def _loop_agent_dir() -> Traversable:
-    """Return the loop-agent resource directory path."""
-    return files(_LOOP_AGENT_PACKAGE) / _LOOP_AGENT_DIR
+def _agent_resource_dirs() -> list[Traversable]:
+    """Return existing agent resource directories in render order."""
+    package_root = files(_AGENT_PACKAGE)
+    roots: list[Traversable] = []
+    for entry in _AGENT_RESOURCE_DIRS:
+        root = package_root / entry if isinstance(entry, str) else entry
+        if root.is_dir():
+            roots.append(root)
+    return roots
+
+
+def _agent_template_files(root: Traversable) -> list[Traversable]:
+    """Return visible markdown template files from *root* in stable order."""
+    return sorted(
+        (p for p in root.iterdir() if p.is_file() and p.name.endswith(".md") and not p.name.startswith("_")),
+        key=lambda p: p.name,
+    )
 
 
 def _load_override_store(home: Path) -> dict:
@@ -321,24 +344,36 @@ def _get_agent_mode(
 
 
 def _discover_loop_agents() -> list[str]:
-    """Return sorted list of loop agent template names (without .md extension).
+    """Return list of agent template names (without .md extension) in resource-set order.
 
     Files whose name starts with ``_`` (e.g. ``_result-contract.md``) are
     excluded — they are bundled resources, not agents.
     """
-    root = _loop_agent_dir()
     names: list[str] = []
-    for p in sorted(root.glob("*.md")):
-        if not p.name.startswith("_"):
-            names.append(p.stem)
+    seen: dict[str, str] = {}
+    for root in _agent_resource_dirs():
+        for p in _agent_template_files(root):
+            name = Path(p.name).stem
+            if name in seen:
+                raise ValueError(f"Duplicate agent template {name!r} in {seen[name]} and {root}")
+            seen[name] = str(root)
+            names.append(name)
     return names
 
 
 def _read_template_source(name: str) -> str:
     """Return the raw template text for a named agent (e.g. 'explorer')."""
-    root = _loop_agent_dir()
-    path = root / f"{name}.md"
-    return path.read_text(encoding="utf-8")
+    matches: list[Traversable] = []
+    for root in _agent_resource_dirs():
+        path = root / f"{name}.md"
+        if path.is_file():
+            matches.append(path)
+    if len(matches) > 1:
+        paths = ", ".join(str(path) for path in matches)
+        raise ValueError(f"Duplicate agent template {name!r} found in: {paths}")
+    if not matches:
+        raise ValueError(f"Unknown agent template: {name!r}")
+    return matches[0].read_text(encoding="utf-8")
 
 
 def _read_template_body(name: str) -> str:
@@ -522,7 +557,7 @@ def _render_claude_skill(name: str, overrides: dict | None = None) -> RenderedFi
 # ---------------------------------------------------------------------------
 
 _CLAUDE_AGENTS_DIR = ".claude/agents"
-_CLAUDE_SKILL_DIR = ".claude/skills/loop-orchestrator"
+_CLAUDE_SKILLS_DIR = ".claude/skills"
 _COPILOT_AGENT_DIR = ".copilot/agents"
 _OPENCODE_AGENT_DIR = ".config/opencode/agent"
 
@@ -539,7 +574,7 @@ def _render_claude(
     """
     if _get_agent_mode(name, overrides=overrides, home=home) == "primary":
         rendered = _render_claude_skill(name, overrides=overrides)
-        return RenderedFile(f"{_CLAUDE_SKILL_DIR}/{rendered.filename}", rendered.content)
+        return RenderedFile(f"{_CLAUDE_SKILLS_DIR}/{name}/{rendered.filename}", rendered.content)
     rendered = _render_claude_agent(name, overrides=overrides)
     return RenderedFile(f"{_CLAUDE_AGENTS_DIR}/{rendered.filename}", rendered.content)
 
