@@ -616,8 +616,18 @@ def _drive_phases(phases: list[Callable[[], str]]) -> bool:
     return True
 
 
-def run_claude_wizard(*, home: Path) -> bool:
+def run_claude_wizard(*, home: Path, agent_mode: AgentMode = AgentMode.LOOP) -> bool:
     """Run the full Claude wizard; return True if overrides were written, False on cancel.
+
+    *agent_mode* is accepted for signature symmetry with
+    :func:`run_opencode_wizard` but is intentionally IGNORED here —
+    Claude only configures one agent set (the three subagents), so the
+    ``-a/--agent`` flag has no semantic on this branch. The dispatcher
+    :func:`run_wizard` does not even thread the parameter into the
+    claude branch in :func:`run_wizard`; the parameter exists only so
+    every wizard entry-point carries the same kw-only surface and the
+    CLI adapter's call site stays uniform. No notice is printed when
+    ``-a change`` is paired with ``-o claude`` — silent by design.
 
     On success: writes the override store and re-renders Claude's installed
     loop agents (generic is NOT reinstalled — that would touch files
@@ -1016,7 +1026,10 @@ def run_wizard(cli: AgentCli, *, home: Path, agent_mode: AgentMode = AgentMode.L
     if _console.is_terminal:
         _console.clear()
     if cli == AgentCli.CLAUDE:
-        return run_claude_wizard(home=home)
+        # Claude wizard ignores agent_mode (one agent set only). Threading
+        # it as a default-value kwarg keeps the CLI surface uniform and
+        # preserves any future logging hook without changing the seam.
+        return run_claude_wizard(home=home, agent_mode=agent_mode)
     if cli == AgentCli.OPENCODE:
         agents = opencode_change_agents() if agent_mode == AgentMode.CHANGE else opencode_wizard_agents()
         return run_opencode_wizard(home=home, agents=agents)

@@ -1346,6 +1346,85 @@ def test_run_opencode_wizard_change_agent_set_re_renders_change_agent_files(
 
 
 # ---------------------------------------------------------------------------
+# Claude wizard — ``-a`` flag is silently ignored
+# ---------------------------------------------------------------------------
+
+
+def test_cli_set_models_agent_flag_with_claude_is_silently_ignored(
+    isolated_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``set-models -o claude -a change`` runs the Claude wizard with no override pollution.
+
+    Acceptance scenarios 3 + 4: the ``-a`` flag is fully silent when
+    ``-o claude`` is selected. No warning, no error, no informational
+    notice. After confirm the override store MUST NOT gain any
+    ``change-*`` / ``propose`` / ``design`` / ``specs`` / ``tasks`` key
+    (those are the change-agent names — they don't belong on the
+    Claude branch).
+    """
+    from ai_harness.modules.wizard import tui
+
+    monkeypatch.setattr(tui.questionary, "select", _ScriptedSelect)
+    monkeypatch.setattr(tui.questionary, "confirm", _ScriptedConfirm)
+    _ScriptedSelect.instances = []
+    _ScriptedConfirm.instances = []
+
+    # Edit one Claude-loop-agent (implementor) → opus, then confirm. This
+    # would normally write implementor's claude override.
+    scripted = _ScriptedSelect()
+    scripted.queue("implementor", "opus", "__continue__", "__continue__")
+    monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
+    confirm = _ScriptedConfirm().queue(True)
+    monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
+
+    # Drive the CLI with -o claude -a change. CliRunner has no TTY but the
+    # wizard is fully scripted — the run_wizard_or_bail TTY guard short-circuits
+    # to True without touching questionary. We patch the seam so the test
+    # actually exercises the wizard body without a TTY.
+    from ai_harness.commands import set_models as set_models_mod
+
+    captured_stdout: list[str] = []
+
+    def fake_run_wizard_or_bail(cli, *, home, agent_mode=AgentMode.LOOP):
+        # The Claude wizard must reach the body with no TTY guard firing.
+        # Bypass by patching sys.stdin.isatty() via the existing bail code's path:
+        # call the wizard directly, bypassing the TTY check.
+        from ai_harness.modules.harness import AgentCli as _AgentCli
+
+        assert cli == _AgentCli.CLAUDE
+        # agent_mode is threaded but must be ignored — the body runs unchanged.
+        result = tui.run_claude_wizard(home=home, agent_mode=agent_mode)
+        captured_stdout.append("done")
+        return result
+
+    monkeypatch.setattr(set_models_mod, "run_wizard_or_bail", fake_run_wizard_or_bail)
+
+    result = runner.invoke(app, ["set-models", "-o", "claude", "-a", "change"])
+
+    # Wizard completed without error — the flag was silently ignored.
+    assert result.exit_code == 0, f"unexpected non-zero exit, output:\n{result.stdout}\n{result.stderr}"
+    combined = f"{result.stdout} {result.stderr}".lower()
+    # The captured output must NOT mention "ignored" / "warning" / "note":
+    # the silent-ignore contract is byte-stable.
+    for forbidden in ("ignored", "warning", "note"):
+        assert forbidden not in combined, f"silent-ignore contract violated: output mentions {forbidden!r}\n{combined}"
+
+    # Override store must contain ONLY the Claude-loop-agent keys. No
+    # change-agent keys were ever written by the Claude branch.
+    overrides_path = isolated_home / ".ai-harness" / "overrides.json"
+    if overrides_path.exists():
+        overrides = json.loads(overrides_path.read_text(encoding="utf-8"))
+        keys = set(overrides.keys())
+        forbidden_prefixes = ("change-", "propose", "design", "specs", "tasks")
+        polluted = {k for k in keys if any(k.startswith(p) or k == p for p in forbidden_prefixes)}
+        assert not polluted, (
+            f"Claude wizard with -a change must NOT pollute the override store with "
+            f"change-agent keys; polluted: {sorted(polluted)}, all keys: {sorted(keys)}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Agent chooser — label format, Continue label, Separator (issue #55)
 # ---------------------------------------------------------------------------
 
