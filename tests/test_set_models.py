@@ -723,7 +723,7 @@ def test_run_opencode_wizard_no_changes_does_not_create_override_file(
     confirm = _ScriptedConfirm().queue(True)
     monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
 
-    wrote = tui.run_opencode_wizard(home=tmp_path)
+    wrote = tui.run_opencode_wizard(home=tmp_path, agents=opencode_wizard_agents())
 
     assert wrote is True
     assert not _override_file(tmp_path).exists(), (
@@ -778,7 +778,7 @@ def test_run_opencode_wizard_non_reasoning_model_skips_effort_prompt(
     confirm = _ScriptedConfirm().queue(True)
     monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
 
-    wrote = tui.run_opencode_wizard(home=tmp_path)
+    wrote = tui.run_opencode_wizard(home=tmp_path, agents=opencode_wizard_agents())
 
     assert wrote is True
     overrides = json.loads(_override_file(tmp_path).read_text(encoding="utf-8"))
@@ -832,7 +832,7 @@ def test_run_opencode_wizard_reasoning_model_prompts_for_effort(
     confirm = _ScriptedConfirm().queue(True)
     monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
 
-    wrote = tui.run_opencode_wizard(home=tmp_path)
+    wrote = tui.run_opencode_wizard(home=tmp_path, agents=opencode_wizard_agents())
 
     assert wrote is True
     overrides = json.loads(_override_file(tmp_path).read_text(encoding="utf-8"))
@@ -859,7 +859,7 @@ def test_run_opencode_wizard_opencode_absent_returns_false_with_guidance(
     monkeypatch.setattr(tui, "_resolve_opencode_binary", lambda: None)
     monkeypatch.setattr(tui, "_load_opencode_catalog", lambda *a, **kw: pytest.fail("should not be called"))
 
-    wrote = tui.run_opencode_wizard(home=tmp_path)
+    wrote = tui.run_opencode_wizard(home=tmp_path, agents=opencode_wizard_agents())
 
     assert wrote is False
     assert not _override_file(tmp_path).exists()
@@ -917,7 +917,7 @@ def test_run_opencode_wizard_preserves_existing_install_manifest(
     confirm = _ScriptedConfirm().queue(True)
     monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
 
-    wrote = tui.run_opencode_wizard(home=tmp_path)
+    wrote = tui.run_opencode_wizard(home=tmp_path, agents=opencode_wizard_agents())
 
     assert wrote is True
     after = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -957,7 +957,7 @@ def test_run_opencode_wizard_ctrl_c_at_model_phase_writes_nothing(
 
     monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: _CtrlC())
 
-    wrote = tui.run_opencode_wizard(home=tmp_path)
+    wrote = tui.run_opencode_wizard(home=tmp_path, agents=opencode_wizard_agents())
 
     assert wrote is False
     assert not _override_file(tmp_path).exists()
@@ -1002,7 +1002,7 @@ def test_run_opencode_wizard_back_from_model_picker_returns_to_agent_choice(
     confirm = _ScriptedConfirm().queue(True)
     monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
 
-    wrote = tui.run_opencode_wizard(home=tmp_path)
+    wrote = tui.run_opencode_wizard(home=tmp_path, agents=opencode_wizard_agents())
 
     assert wrote is True
     assert not _override_file(tmp_path).exists(), (
@@ -1053,7 +1053,7 @@ def test_run_opencode_wizard_back_from_effort_picker_returns_to_agent_choice(
     confirm = _ScriptedConfirm().queue(True)
     monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
 
-    wrote = tui.run_opencode_wizard(home=tmp_path)
+    wrote = tui.run_opencode_wizard(home=tmp_path, agents=opencode_wizard_agents())
 
     assert wrote is True
     overrides = json.loads(_override_file(tmp_path).read_text(encoding="utf-8"))
@@ -1110,7 +1110,7 @@ def test_run_opencode_wizard_back_from_effort_phase_returns_to_model_phase(
     confirm = _ScriptedConfirm().queue(True)
     monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
 
-    wrote = tui.run_opencode_wizard(home=tmp_path)
+    wrote = tui.run_opencode_wizard(home=tmp_path, agents=opencode_wizard_agents())
 
     assert wrote is True
     overrides = json.loads(_override_file(tmp_path).read_text(encoding="utf-8"))
@@ -1136,7 +1136,7 @@ def test_run_opencode_wizard_no_back_choice_in_first_model_phase_agent_chooser(
         return _Q()
 
     monkeypatch.setattr(tui, "_filterable_select", fake_select)
-    tui._ask_opencode_continue_or_agent("model", {})
+    tui._ask_opencode_continue_or_agent("model", {}, opencode_wizard_agents())
 
     assert captured, "the agent chooser did not call _filterable_select"
     values = [choice.value for choice in captured[0]]
@@ -1179,7 +1179,7 @@ def test_run_opencode_wizard_esc_on_effort_phase_agent_chooser_returns_to_model_
     confirm = _ScriptedConfirm().queue(True)
     monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
 
-    wrote = tui.run_opencode_wizard(home=tmp_path)
+    wrote = tui.run_opencode_wizard(home=tmp_path, agents=opencode_wizard_agents())
 
     assert wrote is True
     overrides = json.loads(_override_file(tmp_path).read_text(encoding="utf-8"))
@@ -1213,10 +1213,136 @@ def test_run_opencode_wizard_esc_at_model_phase_agent_chooser_is_ignored(
     confirm = _ScriptedConfirm().queue(True)
     monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
 
-    wrote = tui.run_opencode_wizard(home=tmp_path)
+    wrote = tui.run_opencode_wizard(home=tmp_path, agents=opencode_wizard_agents())
 
     assert wrote is True
     assert not _override_file(tmp_path).exists()
+
+
+# ---------------------------------------------------------------------------
+# Opencode wizard — change-agent set (-a change) full-flow + re-render scope
+# ---------------------------------------------------------------------------
+
+
+def test_run_opencode_wizard_change_agent_set_writes_eight_overrides(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``-a change`` happy path: editing each of the 8 change agents writes 8 override keys.
+
+    Acceptance scenario 1: the wizard's agent chooser lists the 8 change
+    agents (orchestrator first), and after confirm the override store
+    contains exactly those 8 agent keys. The selective-write contract
+    means every edited agent produces a (model) override; agents the
+    user does not touch stay out of the store.
+    """
+    from ai_harness.modules.wizard import tui
+
+    monkeypatch.setattr(tui, "_resolve_opencode_binary", lambda: "/fake/opencode")
+
+    def fake_loader(home: Path, *, runner=None) -> tuple[list[str], dict]:
+        return ["openai/gpt-5.5"], {
+            "alpha": {
+                "models": {
+                    "openai/gpt-5.5": {"reasoning": True, "cost": {"input": 3, "output": 15}},
+                },
+            },
+        }
+
+    monkeypatch.setattr(tui, "_load_opencode_catalog", fake_loader)
+    monkeypatch.setattr(tui.questionary, "select", _ScriptedSelect)
+    monkeypatch.setattr(tui.questionary, "confirm", _ScriptedConfirm)
+    _ScriptedSelect.instances = []
+    _ScriptedConfirm.instances = []
+
+    scripted = _ScriptedSelect()
+    # Model phase: edit each of the 8 change agents, then advance to effort.
+    change_agents = list(opencode_change_agents())
+    for agent in change_agents:
+        scripted.queue(agent, "openai/gpt-5.5")
+    # Continue past model phase, continue past effort phase (no edits).
+    scripted.queue("__continue__", "__continue__")
+    monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
+    confirm = _ScriptedConfirm().queue(True)
+    monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
+
+    wrote = tui.run_opencode_wizard(home=tmp_path, agents=tuple(change_agents))
+
+    assert wrote is True
+    overrides = json.loads(_override_file(tmp_path).read_text(encoding="utf-8"))
+    # All 8 change-agent keys present, each with the picked model under model.opencode.
+    assert set(overrides.keys()) == set(change_agents), (
+        f"expected exactly the 8 change-agent keys, got {sorted(overrides.keys())}"
+    )
+    for agent in change_agents:
+        assert overrides[agent]["model"]["opencode"] == "openai/gpt-5.5"
+        # No effort override — the test never picked one.
+        assert "effort" not in overrides[agent]
+
+
+def test_run_opencode_wizard_change_agent_set_re_renders_change_agent_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``-a change`` re-renders ALL 12 .config/opencode/agent/*.md files (re-render scope locked at 12).
+
+    Acceptance criterion ``req:re-render-scope-001``: ``_discover_loop_agents``
+    MUST continue to walk BOTH ``loop-agent/`` and ``change-agent/`` so
+    that every on-disk prompt reflects fresh override state, regardless
+    of which agent set was just configured. After a `-a change` confirm,
+    all 4 loop-agent files AND all 8 change-agent files must be
+    re-emitted. The loop-agent files' frontmatter must NOT regress to
+    a state that ignores any pre-existing override.
+    """
+    from ai_harness.modules.wizard import tui
+
+    monkeypatch.setattr(tui, "_resolve_opencode_binary", lambda: "/fake/opencode")
+
+    def fake_loader(home: Path, *, runner=None) -> tuple[list[str], dict]:
+        return ["openai/gpt-5.5"], {
+            "alpha": {
+                "models": {
+                    "openai/gpt-5.5": {"reasoning": True, "cost": {"input": 3, "output": 15}},
+                },
+            },
+        }
+
+    monkeypatch.setattr(tui, "_load_opencode_catalog", fake_loader)
+    monkeypatch.setattr(tui.questionary, "select", _ScriptedSelect)
+    monkeypatch.setattr(tui.questionary, "confirm", _ScriptedConfirm)
+    _ScriptedSelect.instances = []
+    _ScriptedConfirm.instances = []
+
+    scripted = _ScriptedSelect()
+    change_agents = list(opencode_change_agents())
+    for agent in change_agents:
+        scripted.queue(agent, "openai/gpt-5.5")
+    scripted.queue("__continue__", "__continue__")
+    monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
+    confirm = _ScriptedConfirm().queue(True)
+    monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
+
+    wrote = tui.run_opencode_wizard(home=tmp_path, agents=tuple(change_agents))
+
+    assert wrote is True
+    # The 12 agent files the renderer discovered: 4 loop + 8 change.
+    expected_names = list(opencode_wizard_agents()) + list(opencode_change_agents())
+    assert len(expected_names) == 12, "loop + change must total 12 — discovery sanity"
+
+    agent_dir = tmp_path / ".config" / "opencode" / "agent"
+    assert agent_dir.is_dir(), "the wizard must have written the agent dir on re-render"
+    for name in expected_names:
+        path = agent_dir / f"{name}.md"
+        assert path.is_file(), f"expected re-rendered file at {path}"
+
+    # The 8 change-agent files must carry the picked model in their frontmatter.
+    for name in change_agents:
+        text = (agent_dir / f"{name}.md").read_text(encoding="utf-8")
+        # Frontmatter is the YAML block between the first '---' markers; the
+        # renderer's _yaml_dump_frontmatter places `model: <id>` plainly.
+        assert "model: openai/gpt-5.5" in text, (
+            f"{name}.md frontmatter must contain the picked model, got:\n{text[:300]}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1267,7 +1393,7 @@ def test_ask_opencode_continue_or_agent_uses_dash_label_format(monkeypatch: pyte
         return _Q()
 
     monkeypatch.setattr(tui, "_filterable_select", fake_select)
-    tui._ask_opencode_continue_or_agent("model", {"implementor": "openai/gpt-5.5"})
+    tui._ask_opencode_continue_or_agent("model", {"implementor": "openai/gpt-5.5"}, opencode_wizard_agents())
 
     titles = [choice.title for choice in captured[0] if isinstance(choice, questionary.Choice)]
     assert "implementor - openai/gpt-5.5" in titles
@@ -1343,7 +1469,7 @@ def test_ask_opencode_continue_or_agent_has_separator_before_continue(monkeypatc
         return _Q()
 
     monkeypatch.setattr(tui, "_filterable_select", fake_select)
-    tui._ask_opencode_continue_or_agent("model", {})
+    tui._ask_opencode_continue_or_agent("model", {}, opencode_wizard_agents())
 
     choices = captured[0]
     continue_index = next(
@@ -1422,7 +1548,7 @@ def test_ask_opencode_continue_or_agent_has_separator_after_back_on_effort_phase
         return _Q()
 
     monkeypatch.setattr(tui, "_filterable_select", fake_select)
-    tui._ask_opencode_continue_or_agent("effort", {})
+    tui._ask_opencode_continue_or_agent("effort", {}, opencode_wizard_agents())
 
     choices = captured[0]
     back_index = next(i for i, c in enumerate(choices) if isinstance(c, questionary.Choice) and c.value == "__back__")
@@ -1449,7 +1575,7 @@ def test_ask_opencode_continue_or_agent_model_phase_has_no_leading_separator(
         return _Q()
 
     monkeypatch.setattr(tui, "_filterable_select", fake_select)
-    tui._ask_opencode_continue_or_agent("model", {})
+    tui._ask_opencode_continue_or_agent("model", {}, opencode_wizard_agents())
 
     choices = captured[0]
     assert not any(c.value == "__back__" for c in choices if isinstance(c, questionary.Choice))
@@ -3188,7 +3314,7 @@ def test_ask_opencode_continue_or_agent_esc_ignored_on_first_phase(monkeypatch: 
         tui, "_filterable_select", lambda *a, **kw: type("_Q", (), {"ask": lambda self: tui.Nav.ESC_BACK})()
     )
 
-    result = tui._ask_opencode_continue_or_agent("model", {})
+    result = tui._ask_opencode_continue_or_agent("model", {}, opencode_wizard_agents())
 
     assert result == tui.Nav.ESC_BACK
 
