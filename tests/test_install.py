@@ -78,6 +78,9 @@ def test_install_claude_writes_loop_agents(tmp_path: Path) -> None:
     assert (tmp_path / ".claude" / "skills" / _CLAUDE_SKILL_NAME / "SKILL.md").is_file(), (
         "claude orchestrator skill missing"
     )
+    assert (tmp_path / ".claude" / "skills" / _CHANGE_AGENT_NAME / "SKILL.md").is_file(), (
+        "claude change orchestrator skill missing"
+    )
 
 
 def test_install_copilot_uses_github_persona_and_copilot_skills(tmp_path: Path) -> None:
@@ -148,8 +151,8 @@ def test_uninstall_no_args_removes_everything_and_manifest(tmp_path: Path) -> No
     for name in _CLAUDE_SUBAGENT_NAMES:
         assert not (tmp_path / ".claude" / "agents" / f"{name}.md").exists()
     assert not (tmp_path / ".claude" / "skills" / _CLAUDE_SKILL_NAME / "SKILL.md").exists()
-    # Copilot loop agents removed
-    for name in _LOOP_AGENT_NAMES:
+    # Copilot native agents removed
+    for name in _NATIVE_AGENT_NAMES:
         assert not (tmp_path / ".copilot" / "agents" / f"{name}.agent.md").exists(), (
             f"copilot agent {name} should be removed"
         )
@@ -169,10 +172,11 @@ def test_uninstall_only_claude_keeps_generic_and_copilot(tmp_path: Path) -> None
     for name in _CLAUDE_SUBAGENT_NAMES:
         assert not (tmp_path / ".claude" / "agents" / f"{name}.md").exists()
     assert not (tmp_path / ".claude" / "skills" / _CLAUDE_SKILL_NAME / "SKILL.md").exists()
+    assert not (tmp_path / ".claude" / "skills" / _CHANGE_AGENT_NAME / "SKILL.md").exists()
     # survivors
     assert (tmp_path / ".agents" / "AGENTS.md").is_file()
     assert (tmp_path / ".github" / "copilot-instructions.md").is_file()
-    for name in _LOOP_AGENT_NAMES:
+    for name in _NATIVE_AGENT_NAMES:
         assert (tmp_path / ".copilot" / "agents" / f"{name}.agent.md").is_file(), f"copilot agent {name} should survive"
     assert (tmp_path / MANIFEST_REL).is_file()
 
@@ -186,9 +190,12 @@ def test_uninstall_only_generic_keeps_claude_and_copilot(tmp_path: Path) -> None
     for name in _CLAUDE_SUBAGENT_NAMES:
         assert (tmp_path / ".claude" / "agents" / f"{name}.md").is_file(), f"claude {name} should survive"
     assert (tmp_path / ".claude" / "skills" / _CLAUDE_SKILL_NAME / "SKILL.md").is_file(), "claude skill should survive"
+    assert (tmp_path / ".claude" / "skills" / _CHANGE_AGENT_NAME / "SKILL.md").is_file(), (
+        "claude change skill should survive"
+    )
     # Copilot survives
     assert (tmp_path / ".github" / "copilot-instructions.md").is_file()
-    for name in _LOOP_AGENT_NAMES:
+    for name in _NATIVE_AGENT_NAMES:
         assert (tmp_path / ".copilot" / "agents" / f"{name}.agent.md").is_file(), f"copilot agent {name} should survive"
 
 
@@ -202,8 +209,9 @@ def test_uninstall_multiple_agent_clis_keeps_remaining(tmp_path: Path) -> None:
     for name in _CLAUDE_SUBAGENT_NAMES:
         assert not (tmp_path / ".claude" / "agents" / f"{name}.md").exists()
     assert not (tmp_path / ".claude" / "skills" / _CLAUDE_SKILL_NAME / "SKILL.md").exists()
-    # Copilot loop agents also removed
-    for name in _LOOP_AGENT_NAMES:
+    assert not (tmp_path / ".claude" / "skills" / _CHANGE_AGENT_NAME / "SKILL.md").exists()
+    # Copilot native agents also removed
+    for name in _NATIVE_AGENT_NAMES:
         assert not (tmp_path / ".copilot" / "agents" / f"{name}.agent.md").exists(), (
             f"copilot agent {name} should be removed"
         )
@@ -305,6 +313,27 @@ def test_cli_uninstall_invalid_agent_cli_errors(isolated_home: Path) -> None:
 # ---------------------------------------------------------------------------
 
 _LOOP_AGENT_NAMES = ("explorer", "implementor", "validator", "loop-orchestrator")
+_CHANGE_SUBAGENT_NAMES = (
+    "change-explorer",
+    "change-implementor",
+    "change-validator",
+    "design",
+    "propose",
+    "specs",
+    "tasks",
+)
+_CHANGE_AGENT_NAME = "change-orchestrator"
+_NATIVE_AGENT_NAMES = (
+    *_LOOP_AGENT_NAMES,
+    "change-explorer",
+    "change-implementor",
+    _CHANGE_AGENT_NAME,
+    "change-validator",
+    "design",
+    "propose",
+    "specs",
+    "tasks",
+)
 
 
 def _assert_opencode_agent_written(base: Path, name: str) -> Path:
@@ -339,7 +368,7 @@ def _build_expected_opencode(overrides: dict | None = None) -> dict[str, dict]:
     this avoids reading the real ``~/.ai-harness/overrides.json`` at import.
     """
     result: dict[str, dict] = {}
-    for name in _LOOP_AGENT_NAMES:
+    for name in _NATIVE_AGENT_NAMES:
         meta = get_agent_meta(name, overrides=overrides)
         entry: dict[str, object] = {
             "description": meta["description"],
@@ -370,7 +399,7 @@ def _build_expected_claude(overrides: dict | None = None) -> dict[str, dict]:
     from copy import deepcopy
 
     result: dict[str, dict] = {}
-    for name in _LOOP_AGENT_NAMES:
+    for name in _NATIVE_AGENT_NAMES:
         meta = get_agent_meta(name, overrides=overrides)
         entry: dict[str, object] = {
             "description": meta["description"],
@@ -417,7 +446,7 @@ def test_install_opencode_writes_agents_and_manifest(tmp_path: Path) -> None:
     manifest = install_for_agent_clis([AgentCli.GENERIC, AgentCli.OPENCODE], home=tmp_path)
 
     # Agents written with exact frontmatter values
-    for name in _LOOP_AGENT_NAMES:
+    for name in _NATIVE_AGENT_NAMES:
         path = _assert_opencode_agent_written(tmp_path, name)
         _assert_frontmatter_matches(path, _EXPECTED_OPENCODE_FRONTMATTER[name])
 
@@ -431,7 +460,7 @@ def test_install_opencode_writes_agents_and_manifest(tmp_path: Path) -> None:
     data = json.loads((tmp_path / MANIFEST_REL).read_text(encoding="utf-8"))
     assert "opencode" in data["files_by_agent_cli"]
     opencode_files = data["files_by_agent_cli"]["opencode"]
-    assert len(opencode_files) == len(_LOOP_AGENT_NAMES)
+    assert len(opencode_files) == len(_NATIVE_AGENT_NAMES)
 
 
 def test_install_opencode_skips_persona_and_skills(tmp_path: Path) -> None:
@@ -450,16 +479,16 @@ def test_install_copilot_writes_loop_agents(tmp_path: Path) -> None:
     _assert_persona_written(tmp_path / ".github" / "copilot-instructions.md")
     _assert_skills_written(tmp_path / ".copilot" / "skills", "copilot")
 
-    # Copilot loop agents — all four rendered as .agent.md
+    # Copilot loop and change agents render as .agent.md
     agent_dir = tmp_path / ".copilot" / "agents"
-    for name in _LOOP_AGENT_NAMES:
+    for name in _NATIVE_AGENT_NAMES:
         agent_path = agent_dir / f"{name}.agent.md"
         assert agent_path.is_file(), f"copilot agent {name} missing: {agent_path}"
         assert agent_path.stat().st_size > 0, f"copilot agent {name} empty: {agent_path}"
 
     # No loop agents leaked to generic paths
     for base_dir in (".agents",):
-        for name in _LOOP_AGENT_NAMES:
+        for name in _NATIVE_AGENT_NAMES:
             assert not (tmp_path / base_dir / f"{name}.md").exists(), f"loop agent leaked to {base_dir}/{name}.md"
             assert not (tmp_path / base_dir / f"{name}.agent.md").exists(), (
                 f"loop agent leaked to {base_dir}/{name}.agent.md"
@@ -467,16 +496,16 @@ def test_install_copilot_writes_loop_agents(tmp_path: Path) -> None:
 
 
 def test_install_copilot_manifest_records_agents(tmp_path: Path) -> None:
-    """Copilot manifest entries include the four .agent.md paths."""
+    """Copilot manifest entries include loop and change .agent.md paths."""
     install_for_agent_clis([AgentCli.GENERIC, AgentCli.COPILOT], home=tmp_path)
 
     data = json.loads((tmp_path / MANIFEST_REL).read_text(encoding="utf-8"))
     assert "copilot" in data["files_by_agent_cli"]
     copilot_files = data["files_by_agent_cli"]["copilot"]
-    # 6 persona+skills + 4 loop agents = 10
-    assert len(copilot_files) == 10
+    # 6 persona+skills + 12 native agents = 18
+    assert len(copilot_files) == 18
     assert any(".copilot/agents/" in f for f in copilot_files), "copilot manifest should contain agent paths"
-    for name in _LOOP_AGENT_NAMES:
+    for name in _NATIVE_AGENT_NAMES:
         expected = f".copilot/agents/{name}.agent.md"
         assert any(expected in f for f in copilot_files), f"copilot manifest should contain {expected}"
 
@@ -487,12 +516,12 @@ def test_install_copilot_is_byte_identical_on_reinstall(tmp_path: Path) -> None:
 
     agent_dir = tmp_path / ".copilot" / "agents"
     first_pass: dict[str, bytes] = {}
-    for name in _LOOP_AGENT_NAMES:
+    for name in _NATIVE_AGENT_NAMES:
         first_pass[name] = (agent_dir / f"{name}.agent.md").read_bytes()
 
     # Reinstall
     install_for_agent_clis([AgentCli.GENERIC, AgentCli.COPILOT], home=tmp_path)
-    for name in _LOOP_AGENT_NAMES:
+    for name in _NATIVE_AGENT_NAMES:
         second = (agent_dir / f"{name}.agent.md").read_bytes()
         assert second == first_pass[name], f"{name}: copilot reinstall not byte-identical"
 
@@ -518,7 +547,7 @@ def test_install_copilot_frontmatter_name_and_description_only(tmp_path: Path) -
     install_for_agent_clis([AgentCli.GENERIC, AgentCli.COPILOT], home=tmp_path)
 
     agent_dir = tmp_path / ".copilot" / "agents"
-    for name in _LOOP_AGENT_NAMES:
+    for name in _NATIVE_AGENT_NAMES:
         fm = _read_frontmatter(agent_dir / f"{name}.agent.md")
         assert fm.get("name") == name, f"{name}: expected name={name!r}, got {fm.get('name')!r}"
         assert "description" in fm, f"{name}: description missing"
@@ -545,17 +574,18 @@ def test_install_claude_copilot_opencode_together_no_cross_leak(tmp_path: Path) 
     for name in _CLAUDE_SUBAGENT_NAMES:
         assert (tmp_path / ".claude" / "agents" / f"{name}.md").is_file()
     assert (tmp_path / ".claude" / "skills" / _CLAUDE_SKILL_NAME / "SKILL.md").is_file()
+    assert (tmp_path / ".claude" / "skills" / _CHANGE_AGENT_NAME / "SKILL.md").is_file()
 
     # Copilot agents in .copilot/agents/
-    for name in _LOOP_AGENT_NAMES:
+    for name in _NATIVE_AGENT_NAMES:
         assert (tmp_path / ".copilot" / "agents" / f"{name}.agent.md").is_file()
 
     # OpenCode agents in .config/opencode/agent/
-    for name in _LOOP_AGENT_NAMES:
+    for name in _NATIVE_AGENT_NAMES:
         assert (tmp_path / ".config" / "opencode" / "agent" / f"{name}.md").is_file()
 
     # No cross-leak: copilot agents not in claude dir, etc.
-    for name in _LOOP_AGENT_NAMES:
+    for name in _NATIVE_AGENT_NAMES:
         assert not (tmp_path / ".claude" / "agents" / f"{name}.agent.md").exists()
         assert not (tmp_path / ".copilot" / "agents" / f"{name}.md").exists()
         assert not (tmp_path / ".config" / "opencode" / "agent" / f"{name}.agent.md").exists()
@@ -567,15 +597,15 @@ def test_install_claude_copilot_opencode_together_no_cross_leak(tmp_path: Path) 
 
 
 def test_uninstall_only_copilot_keeps_generic_and_removes_agents(tmp_path: Path) -> None:
-    """Uninstalling Copilot removes persona+skills AND the four loop agents, leaves generic."""
+    """Uninstalling Copilot removes persona+skills AND native agents, leaves generic."""
     install_for_agent_clis([AgentCli.GENERIC, AgentCli.COPILOT], home=tmp_path)
     uninstall_for_agent_clis([AgentCli.COPILOT], home=tmp_path)
 
     # Copilot persona+skills removed
     assert not (tmp_path / ".github" / "copilot-instructions.md").exists()
-    # Copilot loop agents removed
+    # Copilot native agents removed
     agent_dir = tmp_path / ".copilot" / "agents"
-    for name in _LOOP_AGENT_NAMES:
+    for name in _NATIVE_AGENT_NAMES:
         assert not (agent_dir / f"{name}.agent.md").exists(), f"{name}: copilot agent still present"
 
     # Generic survives
@@ -590,7 +620,7 @@ def test_uninstall_no_args_removes_copilot_agents(tmp_path: Path) -> None:
     uninstall_for_agent_clis(None, home=tmp_path)
 
     agent_dir = tmp_path / ".copilot" / "agents"
-    for name in _LOOP_AGENT_NAMES:
+    for name in _NATIVE_AGENT_NAMES:
         assert not (agent_dir / f"{name}.agent.md").exists(), f"{name}: still present after full uninstall"
     assert not (tmp_path / ".github" / "copilot-instructions.md").exists()
     assert not (tmp_path / ".agents" / "AGENTS.md").exists()
@@ -624,7 +654,7 @@ def test_uninstall_copilot_leaves_claude_and_opencode_intact(tmp_path: Path) -> 
     uninstall_for_agent_clis([AgentCli.COPILOT], home=tmp_path)
 
     # Copilot removed
-    for name in _LOOP_AGENT_NAMES:
+    for name in _NATIVE_AGENT_NAMES:
         assert not (tmp_path / ".copilot" / "agents" / f"{name}.agent.md").exists()
 
     # Claude agents survive
@@ -633,7 +663,7 @@ def test_uninstall_copilot_leaves_claude_and_opencode_intact(tmp_path: Path) -> 
     assert (tmp_path / ".claude" / "skills" / _CLAUDE_SKILL_NAME / "SKILL.md").is_file()
 
     # OpenCode agents survive
-    for name in _LOOP_AGENT_NAMES:
+    for name in _NATIVE_AGENT_NAMES:
         assert (tmp_path / ".config" / "opencode" / "agent" / f"{name}.md").is_file()
 
     # Generic survives
@@ -652,13 +682,12 @@ def test_cli_install_copilot_writes_agents(isolated_home: Path) -> None:
     assert result.exit_code == 0, result.stderr
 
     agent_dir = isolated_home / ".copilot" / "agents"
-    for name in _LOOP_AGENT_NAMES:
+    for name in _NATIVE_AGENT_NAMES:
         assert (agent_dir / f"{name}.agent.md").is_file(), f"CLI install: copilot {name} missing"
 
-    # Generic (6 files: 1 persona + 4 skill dirs + 1 nested ref)
-    # + Copilot (10 files: 6 persona+skills + 4 loop agents) = 16 total.
-    assert "16 file(s)" in result.stdout, (
-        f"stdout should report 16 written files (6 generic + 10 copilot), got: {result.stdout!r}"
+    # Generic (6 files) + Copilot (18 files: 6 persona+skills + 12 native agents) = 24 total.
+    assert "24 file(s)" in result.stdout, (
+        f"stdout should report 24 written files (6 generic + 18 copilot), got: {result.stdout!r}"
     )
 
 
@@ -669,7 +698,7 @@ def test_cli_uninstall_copilot_removes_agents(isolated_home: Path) -> None:
     assert result.exit_code == 0, result.stderr
 
     agent_dir = isolated_home / ".copilot" / "agents"
-    for name in _LOOP_AGENT_NAMES:
+    for name in _NATIVE_AGENT_NAMES:
         assert not (agent_dir / f"{name}.agent.md").exists(), f"CLI uninstall: copilot {name} remaining"
     assert not (isolated_home / ".github" / "copilot-instructions.md").exists()
 
@@ -690,8 +719,8 @@ def test_re_render_copilot_writes_loop_agents_no_manifest_touch(tmp_path: Path) 
 
     written = re_render_for_agent_clis([AgentCli.COPILOT], home=tmp_path)
 
-    assert written, "re-render should write Copilot loop agents"
-    for name in _LOOP_AGENT_NAMES:
+    assert written, "re-render should write Copilot native agents"
+    for name in _NATIVE_AGENT_NAMES:
         assert (tmp_path / ".copilot" / "agents" / f"{name}.agent.md") in written
 
     # Manifest is preserved verbatim
@@ -706,20 +735,20 @@ def test_re_render_copilot_with_no_prior_install_creates_files_no_manifest(tmp_p
 
     written = re_render_for_agent_clis([AgentCli.COPILOT], home=tmp_path)
 
-    assert written, "re-render writes Copilot loop agents even with no prior install"
-    for name in _LOOP_AGENT_NAMES:
+    assert written, "re-render writes Copilot native agents even with no prior install"
+    for name in _NATIVE_AGENT_NAMES:
         assert (tmp_path / ".copilot" / "agents" / f"{name}.agent.md").is_file()
     assert not (tmp_path / MANIFEST_REL).exists(), "re-render must not create the install manifest"
     install_for_agent_clis([AgentCli.GENERIC, AgentCli.OPENCODE], home=tmp_path)
 
     agent_dir = tmp_path / ".config" / "opencode" / "agent"
     first_pass: dict[str, bytes] = {}
-    for name in _LOOP_AGENT_NAMES:
+    for name in _NATIVE_AGENT_NAMES:
         first_pass[name] = (agent_dir / f"{name}.md").read_bytes()
 
     # Reinstall
     install_for_agent_clis([AgentCli.GENERIC, AgentCli.OPENCODE], home=tmp_path)
-    for name in _LOOP_AGENT_NAMES:
+    for name in _NATIVE_AGENT_NAMES:
         second = (agent_dir / f"{name}.md").read_bytes()
         assert second == first_pass[name], f"{name}: reinstall not byte-identical"
 
@@ -735,7 +764,7 @@ def test_uninstall_only_opencode_keeps_generic(tmp_path: Path) -> None:
 
     # OpenCode agents removed
     agent_dir = tmp_path / ".config" / "opencode" / "agent"
-    for name in _LOOP_AGENT_NAMES:
+    for name in _NATIVE_AGENT_NAMES:
         assert not (agent_dir / f"{name}.md").exists(), f"{name}: still present after opencode uninstall"
 
     # Generic survives
@@ -752,7 +781,7 @@ def test_uninstall_no_args_removes_opencode_agents(tmp_path: Path) -> None:
     uninstall_for_agent_clis(None, home=tmp_path)
 
     agent_dir = tmp_path / ".config" / "opencode" / "agent"
-    for name in _LOOP_AGENT_NAMES:
+    for name in _NATIVE_AGENT_NAMES:
         assert not (agent_dir / f"{name}.md").exists(), f"{name}: still present after full uninstall"
     assert not (tmp_path / ".agents" / "AGENTS.md").exists()
     assert not (tmp_path / MANIFEST_REL).exists()
@@ -768,13 +797,13 @@ def test_cli_install_opencode_writes_agents(isolated_home: Path) -> None:
     assert result.exit_code == 0, result.stderr
 
     agent_dir = isolated_home / ".config" / "opencode" / "agent"
-    for name in _LOOP_AGENT_NAMES:
+    for name in _NATIVE_AGENT_NAMES:
         assert (agent_dir / f"{name}.md").is_file(), f"CLI install: {name} missing"
 
-    # PRD story 17: stdout reports file count including the four OpenCode agents.
-    # Generic (1 persona + 4 skill dirs + 1 nested ref = 6 files) + 4 OpenCode agents = 10 total.
-    assert "10 file(s)" in result.stdout, (
-        f"stdout should report 10 written files (6 generic + 4 opencode agents), got: {result.stdout!r}"
+    # PRD story 17: stdout reports file count including native OpenCode agents.
+    # Generic (6 files) + 12 OpenCode agents = 18 total.
+    assert "18 file(s)" in result.stdout, (
+        f"stdout should report 18 written files (6 generic + 12 opencode agents), got: {result.stdout!r}"
     )
 
 
@@ -784,7 +813,7 @@ def test_cli_uninstall_opencode_removes_agents(isolated_home: Path) -> None:
     assert result.exit_code == 0, result.stderr
 
     agent_dir = isolated_home / ".config" / "opencode" / "agent"
-    for name in _LOOP_AGENT_NAMES:
+    for name in _NATIVE_AGENT_NAMES:
         assert not (agent_dir / f"{name}.md").exists(), f"CLI uninstall: {name} remaining"
 
 
@@ -792,7 +821,7 @@ def test_cli_uninstall_opencode_removes_agents(isolated_home: Path) -> None:
 # Claude Code agent install — observable behaviour
 # ---------------------------------------------------------------------------
 
-_CLAUDE_SUBAGENT_NAMES = ("explorer", "implementor", "validator")
+_CLAUDE_SUBAGENT_NAMES = ("explorer", "implementor", "validator", *_CHANGE_SUBAGENT_NAMES)
 _CLAUDE_SKILL_NAME = "loop-orchestrator"
 
 
@@ -830,6 +859,9 @@ def test_install_claude_writes_subagents_and_skill(tmp_path: Path) -> None:
     # Orchestrator skill written
     skill_path = _assert_claude_skill_written(tmp_path)
     _assert_frontmatter_matches(skill_path, _EXPECTED_CLAUDE_FRONTMATTER[_CLAUDE_SKILL_NAME])
+    change_skill_path = tmp_path / ".claude" / "skills" / _CHANGE_AGENT_NAME / "SKILL.md"
+    assert change_skill_path.is_file(), f"claude skill missing: {change_skill_path}"
+    _assert_frontmatter_matches(change_skill_path, _EXPECTED_CLAUDE_FRONTMATTER[_CHANGE_AGENT_NAME])
 
     # Generic still installed
     assert (tmp_path / ".agents" / "AGENTS.md").is_file()
@@ -841,8 +873,8 @@ def test_install_claude_writes_subagents_and_skill(tmp_path: Path) -> None:
     data = json.loads((tmp_path / MANIFEST_REL).read_text(encoding="utf-8"))
     assert "claude" in data["files_by_agent_cli"]
     claude_files = data["files_by_agent_cli"]["claude"]
-    # 6 persona+skills (CLAUDE.md + 4 skills + 1 nested ref) + 3 subagents + 1 skill = 10
-    assert len(claude_files) == 10
+    # 6 persona+skills (CLAUDE.md + 4 skills + 1 nested ref) + 10 subagents + 2 skills = 18
+    assert len(claude_files) == 18
 
 
 def test_install_claude_subagents_have_name_field(tmp_path: Path) -> None:
@@ -945,10 +977,12 @@ def test_install_claude_rendered_body_matches_template_verbatim(tmp_path: Path) 
     from importlib.resources import files
 
     install_for_agent_clis([AgentCli.GENERIC, AgentCli.CLAUDE], home=tmp_path)
-    templates_dir = files("ai_harness.resources") / "loop-agent"
+    loop_templates_dir = files("ai_harness.resources") / "loop-agent"
+    change_templates_dir = files("ai_harness.resources") / "change-agent"
 
     for name in _CLAUDE_SUBAGENT_NAMES:
         # Template body is the entire file (no frontmatter)
+        templates_dir = change_templates_dir if name in _CHANGE_SUBAGENT_NAMES else loop_templates_dir
         template_body = (templates_dir / f"{name}.md").read_text(encoding="utf-8")
 
         # Rendered file has frontmatter injected by code — extract body.
@@ -961,7 +995,7 @@ def test_install_claude_rendered_body_matches_template_verbatim(tmp_path: Path) 
     # Orchestrator skill — template body is a prefix; the renderer appends a
     # Claude-only spawn allowlist prose section (permission.task is not valid
     # in Claude skill frontmatter).
-    template_body = (templates_dir / f"{_CLAUDE_SKILL_NAME}.md").read_text(encoding="utf-8")
+    template_body = (loop_templates_dir / f"{_CLAUDE_SKILL_NAME}.md").read_text(encoding="utf-8")
 
     rendered = (tmp_path / ".claude" / "skills" / _CLAUDE_SKILL_NAME / "SKILL.md").read_text(encoding="utf-8")
     rendered_body = rendered.split("---", 2)[2].removeprefix("\n")
@@ -984,10 +1018,13 @@ def test_uninstall_only_claude_keeps_opencode_loop(tmp_path: Path) -> None:
     for name in _CLAUDE_SUBAGENT_NAMES:
         assert not (tmp_path / ".claude" / "agents" / f"{name}.md").exists(), f"{name}: claude agent still present"
     assert not (tmp_path / ".claude" / "skills" / _CLAUDE_SKILL_NAME / "SKILL.md").exists(), "skill still present"
+    assert not (tmp_path / ".claude" / "skills" / _CHANGE_AGENT_NAME / "SKILL.md").exists(), (
+        "change skill still present"
+    )
 
     # OpenCode agents survive
     agent_dir = tmp_path / ".config" / "opencode" / "agent"
-    for name in _LOOP_AGENT_NAMES:
+    for name in _NATIVE_AGENT_NAMES:
         assert (agent_dir / f"{name}.md").is_file(), f"opencode {name}: should survive claude uninstall"
 
     # Generic survives
@@ -1017,6 +1054,7 @@ def test_uninstall_no_args_removes_claude_agents(tmp_path: Path) -> None:
     for name in _CLAUDE_SUBAGENT_NAMES:
         assert not (tmp_path / ".claude" / "agents" / f"{name}.md").exists()
     assert not (tmp_path / ".claude" / "skills" / _CLAUDE_SKILL_NAME / "SKILL.md").exists()
+    assert not (tmp_path / ".claude" / "skills" / _CHANGE_AGENT_NAME / "SKILL.md").exists()
 
     # Everything else removed too
     assert not (tmp_path / ".agents" / "AGENTS.md").exists()
@@ -1039,11 +1077,13 @@ def test_cli_install_claude_writes_agents_and_skill(isolated_home: Path) -> None
     assert (isolated_home / ".claude" / "skills" / _CLAUDE_SKILL_NAME / "SKILL.md").is_file(), (
         "CLI install: claude skill missing"
     )
+    assert (isolated_home / ".claude" / "skills" / _CHANGE_AGENT_NAME / "SKILL.md").is_file(), (
+        "CLI install: claude change skill missing"
+    )
 
-    # Generic (6 files: 1 persona + 4 skill dirs + 1 nested ref)
-    # + Claude (10 files: 6 persona+skills + 4 loop artifacts) = 16 total.
-    assert "16 file(s)" in result.stdout, (
-        f"stdout should report 16 written files (6 generic + 10 claude), got: {result.stdout!r}"
+    # Generic (6 files) + Claude (18 files: 6 persona+skills + 12 native artifacts) = 24 total.
+    assert "24 file(s)" in result.stdout, (
+        f"stdout should report 24 written files (6 generic + 18 claude), got: {result.stdout!r}"
     )
 
 
@@ -1058,6 +1098,9 @@ def test_cli_uninstall_claude_removes_agents_and_skill(isolated_home: Path) -> N
         assert not (agents_dir / f"{name}.md").exists(), f"CLI uninstall: claude {name} remaining"
     assert not (isolated_home / ".claude" / "skills" / _CLAUDE_SKILL_NAME / "SKILL.md").exists(), (
         "CLI uninstall: claude skill remaining"
+    )
+    assert not (isolated_home / ".claude" / "skills" / _CHANGE_AGENT_NAME / "SKILL.md").exists(), (
+        "CLI uninstall: claude change skill remaining"
     )
 
 
@@ -1112,12 +1155,12 @@ def test_install_without_overrides_is_byte_identical(tmp_path: Path) -> None:
     """No overrides.json → rendered output is byte-identical to the no-override baseline."""
     install_for_agent_clis([AgentCli.GENERIC, AgentCli.OPENCODE], home=tmp_path)
     first_bytes: dict[str, bytes] = {}
-    for name in _LOOP_AGENT_NAMES:
+    for name in _NATIVE_AGENT_NAMES:
         first_bytes[name] = (tmp_path / ".config" / "opencode" / "agent" / f"{name}.md").read_bytes()
 
     # Reinstall with an empty (absent) overrides file
     install_for_agent_clis([AgentCli.GENERIC, AgentCli.OPENCODE], home=tmp_path)
-    for name in _LOOP_AGENT_NAMES:
+    for name in _NATIVE_AGENT_NAMES:
         second = (tmp_path / ".config" / "opencode" / "agent" / f"{name}.md").read_bytes()
         assert second == first_bytes[name], f"{name}: byte-identical reinstall failed (no overrides present)"
 
@@ -1345,13 +1388,26 @@ def test_validator_template_still_documents_no_findings() -> None:
 
 
 def test_discover_loop_agents_excludes_underscore_files() -> None:
-    """_discover_loop_agents returns exactly 4 agents, no _-prefixed files."""
+    """_discover_loop_agents returns loop and change agents, no _-prefixed files."""
     from ai_harness.modules.harness.renderers import _discover_loop_agents
 
     names = _discover_loop_agents()
-    assert names == ["explorer", "implementor", "loop-orchestrator", "validator"]
+    assert names == [
+        "explorer",
+        "implementor",
+        "loop-orchestrator",
+        "validator",
+        "change-explorer",
+        "change-implementor",
+        "change-orchestrator",
+        "change-validator",
+        "design",
+        "propose",
+        "specs",
+        "tasks",
+    ]
     assert "_result-contract" not in names
-    assert len(names) == 4
+    assert len(names) == 12
 
 
 # ---------------------------------------------------------------------------
