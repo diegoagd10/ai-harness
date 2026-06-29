@@ -1,0 +1,176 @@
+{
+  "tasks": [
+    {
+      "id": "1",
+      "title": "Add opencode change-agent vocabulary in pure.py",
+      "spec": "set-models-agent-flag",
+      "phase": "foundation",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "1.1",
+          "title": "Implement: OPENCODE_CHANGE_AGENTS tuple, opencode_change_agents() accessor, AgentMode StrEnum, parse_agent_mode helper in pure.py",
+          "scenario": null,
+          "status": "done"
+        },
+        {
+          "id": "1.2",
+          "title": "test_opencode_change_agents_returns_eight_change_agents \u2014 accessor returns the 8 named agents in pinned order; tuple order matches design.md",
+          "scenario": "req:vocab-opencode-change-agents-001",
+          "status": "done"
+        },
+        {
+          "id": "1.3",
+          "title": "test_parse_agent_mode_accepts_loop_and_change \u2014 parse_agent_mode roundtrip for both valid values",
+          "scenario": "req:vocab-opencode-change-agents-002",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "2",
+      "title": "Add -a/--agent typer flag with strict validation",
+      "spec": "set-models-agent-flag",
+      "phase": "foundation",
+      "depends_on": [
+        "1"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "2.1",
+          "title": "Implement: add typer Option -a/--agent default \"loop\"; route through parse_agent_mode; thread AgentMode into run_wizard_or_bail; help text names the flag and the valid values",
+          "scenario": null,
+          "status": "done"
+        },
+        {
+          "id": "2.2",
+          "title": "test_cli_set_models_default_agent_flag_is_loop \u2014 omitting -a defaults to loop (Scenario 5)",
+          "scenario": "Scenario 5: -a omitted with -o opencode defaults to loop",
+          "status": "done"
+        },
+        {
+          "id": "2.3",
+          "title": "test_cli_set_models_unknown_agent_flag_errors \u2014 -a bogus rejected with typer.BadParameter naming valid set (Scenario 6)",
+          "scenario": "Scenario 6: -a bogus rejected with valid-values hint",
+          "status": "done"
+        },
+        {
+          "id": "2.4",
+          "title": "test_cli_set_models_uppercase_agent_flag_errors \u2014 -a LOOP rejected \u2014 strict lowercase (Scenario 7)",
+          "scenario": "Scenario 7: -a LOOP uppercase rejected \u2014 strict lowercase",
+          "status": "done"
+        },
+        {
+          "id": "2.5",
+          "title": "test_cli_set_models_help_mentions_agent_flag_and_valid_values \u2014 help output pins the new flag and valid values",
+          "scenario": "req:help-text-honest-001",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "3",
+      "title": "Thread AgentMode through opencode wizard dispatch",
+      "spec": "set-models-agent-flag",
+      "phase": "core",
+      "depends_on": [
+        "1",
+        "2"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "3.1",
+          "title": "Implement: thread agent_mode through run_wizard_or_bail, run_wizard, run_opencode_wizard; opencode branch picks opencode_wizard_agents vs opencode_change_agents; re-render call unchanged",
+          "scenario": null,
+          "status": "done"
+        },
+        {
+          "id": "3.2",
+          "title": "test_run_opencode_wizard_change_agent_set_writes_eight_overrides -- scripted full-flow mirroring today opencode happy-path; seeds 8 agents; asserts 8 override rows written",
+          "scenario": "Scenario 1: Opencode -a change targets the 8 change agents",
+          "status": "done"
+        },
+        {
+          "id": "3.3",
+          "title": "test_run_opencode_wizard_change_agent_set_re_renders_change_agent_files -- _discover_loop_agents re-renders all 12 files for change agent set; loop agent set still 4",
+          "scenario": "req:re-render-scope-001",
+          "status": "done"
+        },
+        {
+          "id": "3.4",
+          "title": "Smoke: -a loop preserves today byte-for-byte -- Scenario 2 covered by existing opencode happy-path test; no new assertion required",
+          "scenario": "Scenario 2: Opencode -a loop preserves today behavior",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "4",
+      "title": "Verify claude branch silently ignores -a flag",
+      "spec": "set-models-agent-flag",
+      "phase": "core",
+      "depends_on": [
+        "1",
+        "2",
+        "3"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "4.1",
+          "title": "Implement: claude branch accepts agent_mode param for signature symmetry; ignores value; runs existing claude loop wizard unchanged",
+          "scenario": null,
+          "status": "done"
+        },
+        {
+          "id": "4.2",
+          "title": "test_cli_set_models_agent_flag_with_claude_is_silently_ignored -- after set-models -o claude -a change the override store does NOT gain change-*, propose, design, specs, or tasks keys",
+          "scenario": "Scenario 3: Claude with -a change runs Claude loop wizard silently",
+          "status": "done"
+        },
+        {
+          "id": "4.3",
+          "title": "Smoke: claude with no -a unchanged from today -- Scenario 4 covered by existing claude happy-path test; no new assertion required",
+          "scenario": "Scenario 4: Claude with no -a runs Claude loop wizard today behavior",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "5",
+      "title": "Add e2e sandbox arg-validation case",
+      "spec": "set-models-agent-flag",
+      "phase": "testing",
+      "depends_on": [
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "5.1",
+          "title": "Implement: add new case _test_set_models_unknown_agent_flag_errors to e2e/set_models_lifecycle.py -- set-models -o opencode -a bogus exits non-zero with valid-values hint in combined output",
+          "scenario": null,
+          "status": "done"
+        },
+        {
+          "id": "5.2",
+          "title": "e2e case _test_set_models_unknown_agent_flag_errors asserts exit code 2 plus valid-values hint substring present in stdout+stderr",
+          "scenario": "Scenario 6: -a bogus rejected with valid-values hint",
+          "status": "done"
+        },
+        {
+          "id": "5.3",
+          "title": "e2e sandbox remains green: full file runs set-models_lifecycle including the new case",
+          "scenario": "req:tests-and-e2e-coverage",
+          "status": "done"
+        }
+      ]
+    }
+  ]
+}
