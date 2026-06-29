@@ -31,6 +31,7 @@ from ai_harness.modules.harness.renderers import (
     write_override_store,
 )
 from ai_harness.modules.wizard.pure import (
+    AgentMode,
     ModelSelection,
     build_agent_list_rows,
     build_confirmation_rows,
@@ -43,9 +44,11 @@ from ai_harness.modules.wizard.pure import (
     claude_models,
     claude_wizard_agents,
     join_opencode_catalog,
+    opencode_change_agents,
     opencode_efforts,
     opencode_model_is_reasoning,
     opencode_wizard_agents,
+    parse_agent_mode,
 )
 
 if TYPE_CHECKING:
@@ -120,6 +123,76 @@ def test_opencode_wizard_agents_includes_orchestrator_first() -> None:
 def test_opencode_efforts_is_the_reasoning_effort_set() -> None:
     """OpenCode's ``reasoningEffort`` values are the fixed (low, medium, high) set."""
     assert opencode_efforts() == ("low", "medium", "high")
+
+
+# ---------------------------------------------------------------------------
+# Change-agent vocabulary + AgentMode parser — set-models -a change branch
+# ---------------------------------------------------------------------------
+
+
+def test_opencode_change_agents_returns_eight_change_agents() -> None:
+    """The change-agent set is exactly the eight named agents, orchestrator first.
+
+    Mirrors ``test_opencode_wizard_agents_includes_orchestrator_first``:
+    the orchestrator leads because on OpenCode it is a primary agent
+    carrying a model and effort (not a skill). Order is intentional and
+    pinned — a future rename / re-order is a deliberate design change,
+    not a typo fix.
+    """
+    assert opencode_change_agents() == (
+        "change-orchestrator",
+        "change-explorer",
+        "change-implementor",
+        "change-validator",
+        "propose",
+        "design",
+        "specs",
+        "tasks",
+    )
+
+
+def test_opencode_change_agents_returns_same_tuple_object_each_call() -> None:
+    """The accessor returns the same tuple object on every call (identity-stable).
+
+    The wizard's dispatcher reads the agent tuple at the seam; passing
+    the same object down (instead of fresh tuples each call) keeps the
+    seam's reference stable for any future memoisation / debug logging.
+    """
+    assert opencode_change_agents() is opencode_change_agents()
+
+
+def test_parse_agent_mode_accepts_loop_and_change() -> None:
+    """``parse_agent_mode`` round-trips both valid lowercase values."""
+    assert parse_agent_mode("loop") == AgentMode.LOOP
+    assert parse_agent_mode("change") == AgentMode.CHANGE
+    # StrEnum values compare equal to raw strings — keeps downstream == / Choice(value=...) working.
+    assert parse_agent_mode("loop") == "loop"
+    assert parse_agent_mode("change") == "change"
+
+
+def test_parse_agent_mode_rejects_unknown_value() -> None:
+    """Unknown values raise ValueError naming the valid set explicitly."""
+    with pytest.raises(ValueError) as excinfo:
+        parse_agent_mode("bogus")
+
+    message = str(excinfo.value).lower()
+    assert "loop" in message
+    assert "change" in message
+    assert "bogus" in message  # the rejected value is in the message so the user sees what was wrong
+
+
+def test_parse_agent_mode_rejects_uppercase_strict_lowercase() -> None:
+    """Uppercase / mixed-case variants are rejected — strict-lowercase vocabulary.
+
+    Matches the existing lowercase vocabulary in ``CLAUDE_MODELS`` and
+    ``OPENCODE_REASONING_EFFORTS``. ``"LOOP"`` and ``"Loop"`` are NOT
+    normalised; both raise with the valid-set hint.
+    """
+    for raw in ("LOOP", "Loop", "CHANGE", "cHaNgE"):
+        with pytest.raises(ValueError) as excinfo:
+            parse_agent_mode(raw)
+        assert "loop" in str(excinfo.value).lower()
+        assert "change" in str(excinfo.value).lower()
 
 
 # ---------------------------------------------------------------------------

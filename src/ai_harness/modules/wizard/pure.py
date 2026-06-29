@@ -17,10 +17,50 @@ can use to mark the current selection in the prompt.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING, NamedTuple
 
 if TYPE_CHECKING:
     pass
+
+
+# ---------------------------------------------------------------------------
+# Agent-set mode — the ``-a/--agent`` flag vocabulary.
+#
+# Mirrors the existing ``AgentCli`` (in ``harness/models.py``) and ``Nav``
+# (in ``tui.py``) house style: a ``StrEnum`` whose members compare equal to
+# raw strings so downstream ``==`` / ``Choice(value=...)`` keep working.
+# ``parse_agent_mode`` is the single place that knows about case-sensitivity
+# and the valid set — callers receive a typed value or a clear error.
+# ---------------------------------------------------------------------------
+
+
+class AgentMode(StrEnum):
+    """The ``-a/--agent`` flag's valid values for ``set-models -o opencode``.
+
+    The string values match the lowercase vocabulary already used by
+    ``CLAUDE_MODELS`` and ``OPENCODE_REASONING_EFFORTS`` (strict lowercase,
+    no case folding). Adding a third mode is a one-line enum member plus
+    a parser branch.
+    """
+
+    LOOP = "loop"
+    CHANGE = "change"
+
+
+def parse_agent_mode(raw: str) -> AgentMode:
+    """Parse a raw ``-a/--agent`` string into an :class:`AgentMode`.
+
+    Strict-lowercase: ``"LOOP"`` and ``"Change"`` are rejected — the
+    wizard's vocabulary is lowercase only. Raises :class:`ValueError` with
+    the valid set explicitly named so the CLI adapter can surface it
+    verbatim in a ``typer.BadParameter`` message.
+    """
+    try:
+        return AgentMode(raw)
+    except ValueError as exc:
+        valid = ", ".join(m.value for m in AgentMode)
+        raise ValueError(f"set-models -a got {raw!r}; valid values: {valid}.") from exc
 
 
 class ModelSelection(NamedTuple):
@@ -94,6 +134,35 @@ OPENCODE_REASONING_EFFORTS: tuple[str, ...] = ("low", "medium", "high")
 def opencode_wizard_agents() -> tuple[str, ...]:
     """Return the agents configurable through the OpenCode wizard (orchestrator on top)."""
     return OPENCODE_WIZARD_AGENTS
+
+
+# ---------------------------------------------------------------------------
+# Change-agent set — the second half of the OpenCode wizard's vocabulary.
+#
+# Mirrors ``OPENCODE_WIZARD_AGENTS`` exactly: a frozen tuple and a single
+# accessor that callers consume (the wizard's dispatcher selects between
+# this tuple and ``opencode_wizard_agents()`` based on ``AgentMode``).
+# The eight names mirror the renderer resources under ``change-agent/``
+# (``_discover_loop_agents`` walks that dir on the write path; the wizard
+# does NOT read from the filesystem — pure data is the wizard's source of
+# truth by design).
+# ---------------------------------------------------------------------------
+
+OPENCODE_CHANGE_AGENTS: tuple[str, ...] = (
+    "change-orchestrator",
+    "change-explorer",
+    "change-implementor",
+    "change-validator",
+    "propose",
+    "design",
+    "specs",
+    "tasks",
+)
+
+
+def opencode_change_agents() -> tuple[str, ...]:
+    """Return the agents configurable through the OpenCode ``-a change`` branch."""
+    return OPENCODE_CHANGE_AGENTS
 
 
 def opencode_efforts() -> tuple[str, ...]:
