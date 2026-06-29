@@ -40,6 +40,7 @@ from ai_harness.modules.harness.renderers import (
     write_override_store,
 )
 from ai_harness.modules.wizard.pure import (
+    AgentMode,
     ModelSelection,
     build_confirmation_rows,
     build_effort_picker_rows,
@@ -826,7 +827,7 @@ def _ask_opencode_continue_or_agent(
     return answer
 
 
-def run_opencode_wizard(*, home: Path) -> bool:
+def run_opencode_wizard(*, home: Path, agent_mode: AgentMode = AgentMode.LOOP) -> bool:
     """Run the full OpenCode wizard; return True if overrides were written, False on cancel.
 
     Phases mirror the Claude wizard (agent → model → effort → confirm)
@@ -974,18 +975,22 @@ def run_opencode_wizard(*, home: Path) -> bool:
     return True
 
 
-def run_wizard(cli: AgentCli, *, home: Path) -> bool:
+def run_wizard(cli: AgentCli, *, home: Path, agent_mode: AgentMode = AgentMode.LOOP) -> bool:
     """Run the set-models wizard for *cli*; return True if overrides were written.
 
     Supports Claude and OpenCode. Generic and Copilot are not wizard
     targets at all (the wizard command rejects them up front).
+
+    *agent_mode* selects which agent set the opencode wizard targets —
+    threaded in here so the per-CLI dispatcher's signature stays
+    uniform. The Claude branch ignores it (one agent set only).
     """
     if _console.is_terminal:
         _console.clear()
     if cli == AgentCli.CLAUDE:
         return run_claude_wizard(home=home)
     if cli == AgentCli.OPENCODE:
-        return run_opencode_wizard(home=home)
+        return run_opencode_wizard(home=home, agent_mode=agent_mode)
     raise NotImplementedError(
         f"set-models for {cli.value!r} is not implemented in this slice",
     )
@@ -996,7 +1001,7 @@ def run_wizard(cli: AgentCli, *, home: Path) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def run_wizard_or_bail(cli: AgentCli, *, home: Path) -> bool:
+def run_wizard_or_bail(cli: AgentCli, *, home: Path, agent_mode: AgentMode = AgentMode.LOOP) -> bool:
     """Run the wizard, but bail with a clear error if the prerequisites are missing.
 
     Two distinct pre-flight checks fire BEFORE the wizard itself:
@@ -1015,6 +1020,10 @@ def run_wizard_or_bail(cli: AgentCli, *, home: Path) -> bool:
        readline-style prompts. A non-TTY (e.g. CI, a piped
        subprocess, CliRunner) is a clear user-error path that should
        error rather than hang waiting for stdin that will never come.
+
+    *agent_mode* is the ``-a/--agent`` flag's parsed value (defaults to
+    :data:`AgentMode.LOOP`). The opencode branch consumes it; the
+    claude branch accepts it for signature symmetry and ignores it.
     """
     if cli == AgentCli.OPENCODE:
         binary = _resolve_opencode_binary()
@@ -1032,4 +1041,4 @@ def run_wizard_or_bail(cli: AgentCli, *, home: Path) -> bool:
             "Run it directly in your shell, not via a pipe or non-interactive runner.[/red]"
         )
         return False
-    return run_wizard(cli, home=home)
+    return run_wizard(cli, home=home, agent_mode=agent_mode)

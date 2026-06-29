@@ -15,6 +15,7 @@ import typer
 
 from ai_harness.commands import parse_agent_clis
 from ai_harness.modules.harness import AgentCli
+from ai_harness.modules.wizard.pure import parse_agent_mode
 from ai_harness.modules.wizard.tui import run_wizard_or_bail
 
 _SUPPORTED = (AgentCli.CLAUDE, AgentCli.OPENCODE)
@@ -29,6 +30,18 @@ def set_models(
             help="Exactly one Agent CLI to configure (claude or opencode).",
         ),
     ],
+    agent: Annotated[
+        str,
+        typer.Option(
+            "-a",
+            "--agent",
+            help=(
+                "Configure the agent set when targeting opencode "
+                "('loop' for the four loop agents, 'change' for the eight "
+                "change agents). Ignored for claude."
+            ),
+        ),
+    ] = "loop",
 ) -> None:
     """Run the set-models wizard for the given Agent CLI.
 
@@ -38,6 +51,12 @@ def set_models(
     may carry a comma-separated list, which is also rejected by the
     same exactly-one check. Re-run the wizard to overwrite a previous
     selection. Press Ctrl+C at any prompt to cancel without writing.
+
+    ``-a/--agent`` selects which agent set the opencode wizard targets
+    (``loop`` for the four loop agents, ``change`` for the eight
+    change agents). Strict-lowercase; the wizard ignores the flag when
+    ``-o claude`` is selected — claude has only one agent set so the
+    flag is a no-op there.
     """
     if len(to) > 1:
         valid = ", ".join(a.value for a in _SUPPORTED)
@@ -69,9 +88,19 @@ def set_models(
             "or edit ~/.copilot/settings.json to set the model."
         )
 
+    # Validate -a/--agent. Strict-lowercase: typer accepts any string, so we
+    # route through parse_agent_mode and surface its ValueError verbatim —
+    # the message already names the valid set, which typer prepends with
+    # "Invalid value for '-a'".
+    try:
+        agent_mode = parse_agent_mode(agent)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
     # Both Claude and OpenCode now have a full wizard. The wizard itself
     # surfaces OpenCode-absent or non-TTY errors with clear messages; the
-    # command layer just dispatches.
-    wrote = run_wizard_or_bail(cli, home=Path.home())
+    # command layer just dispatches. agent_mode is threaded through to
+    # run_wizard_or_bail; the claude branch ignores it (one agent set only).
+    wrote = run_wizard_or_bail(cli, home=Path.home(), agent_mode=agent_mode)
     if not wrote:
         raise typer.Exit(code=1)

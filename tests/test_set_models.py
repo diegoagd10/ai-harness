@@ -1951,6 +1951,99 @@ def test_cli_set_models_help_mentions_only_claude_opencode() -> None:
 
 
 # ---------------------------------------------------------------------------
+# -a/--agent flag — strict-lowercase validation + default-is-loop + help text
+# ---------------------------------------------------------------------------
+
+
+def test_cli_set_models_default_agent_flag_is_loop(isolated_home: Path) -> None:
+    """Omitting ``-a`` defaults to ``loop`` — today's byte-for-byte behavior preserved.
+
+    Acceptance scenario 5: ``set-models -o opencode`` (no ``-a``) routes
+    the wizard through the loop-agent branch. With ``-a loop`` added
+    later, the route is identical. Here we verify the flag's *absence*
+    keeps the existing CLI surface intact (a non-zero exit only because
+    CliRunner has no TTY / no opencode binary — the rejection happens
+    AFTER ``-a`` is parsed and defaults).
+    """
+    # Patch the wizard dispatch so we can verify the parsed AgentMode reached
+    # the seam without standing up a real TUI / opencode install. We patch
+    # the symbol where set_models.py imported it (commands.set_models), not
+    # the wizard's own module — module-level imports bind the name once.
+    from ai_harness.commands import set_models as set_models_mod
+
+    captured: dict[str, object] = {}
+
+    def fake_run_wizard_or_bail(cli, *, home, agent_mode=AgentMode.LOOP):
+        captured["cli"] = cli
+        captured["agent_mode"] = agent_mode
+        return False  # force the command to exit non-zero so we can inspect captured
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(set_models_mod, "run_wizard_or_bail", fake_run_wizard_or_bail)
+    try:
+        result = runner.invoke(app, ["set-models", "-o", "opencode"])
+        assert result.exit_code != 0  # we forced non-zero from the fake
+        assert captured.get("cli") == AgentCli.OPENCODE
+        assert captured.get("agent_mode") == AgentMode.LOOP
+    finally:
+        monkeypatch.undo()
+
+
+def test_cli_set_models_unknown_agent_flag_errors(isolated_home: Path) -> None:
+    """``-a bogus`` is rejected with a typer error naming the valid set.
+
+    Acceptance scenario 6: the rejection message names both ``loop`` and
+    ``change`` so the user knows which values are accepted. typer maps
+    ``typer.BadParameter`` to exit code 2.
+    """
+    result = runner.invoke(app, ["set-models", "-o", "opencode", "-a", "bogus"])
+
+    assert result.exit_code != 0
+    combined = f"{result.stdout} {result.stderr}".lower()
+    assert "loop" in combined
+    assert "change" in combined
+    # typer exit code 2 for BadParameter; 1 is also acceptable on this CLI surface
+    assert result.exit_code in (1, 2)
+
+
+def test_cli_set_models_uppercase_agent_flag_errors(isolated_home: Path) -> None:
+    """``-a LOOP`` (uppercase) is rejected — strict lowercase vocabulary.
+
+    Acceptance scenario 7: case-insensitive matching is explicitly out
+    of scope. ``-a LOOP`` errors with the same valid-values hint as
+    ``-a bogus``. ``typer.BadParameter`` → exit code 2.
+    """
+    result = runner.invoke(app, ["set-models", "-o", "opencode", "-a", "LOOP"])
+
+    assert result.exit_code != 0
+    combined = f"{result.stdout} {result.stderr}".lower()
+    assert "loop" in combined
+    assert "change" in combined
+
+
+def test_cli_set_models_help_mentions_agent_flag_and_valid_values() -> None:
+    """``--help`` documents the ``-a/--agent`` flag, names both valid values, and states the claude-ignored note.
+
+    Acceptance criterion ``req:help-text-honest-001``: future refactors
+    must not silently drop the valid-values list or the claude-ignored
+    note. A unit test pins the wording so a typo / drift shows up here.
+    """
+    result = runner.invoke(app, ["set-models", "--help"])
+
+    assert result.exit_code == 0
+    lowered = result.stdout.lower()
+    # Flag is advertised with both short and long forms.
+    assert "-a" in lowered
+    assert "--agent" in lowered
+    # Both valid values are named explicitly.
+    assert "loop" in lowered
+    assert "change" in lowered
+    # The claude-ignored note is present so users discover the silent-ignore contract.
+    assert "claude" in lowered
+    assert "ignored" in lowered or "ignore" in lowered
+
+
+# ---------------------------------------------------------------------------
 # set_models CLI — non-TTY guard for claude (must not hang waiting for stdin)
 # ---------------------------------------------------------------------------
 
