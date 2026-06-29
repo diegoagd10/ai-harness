@@ -39,6 +39,7 @@ def run(cli_dir: str) -> None:
         _test_set_models_multiple_clis_errors(path_env)
         _test_set_models_repeated_o_flags_errors(path_env)
         _test_set_models_unknown_cli_errors(path_env)
+        _test_set_models_unknown_agent_flag_errors(path_env)
         _test_set_models_claude_non_tty_errors(path_env)
         _test_set_models_opencode_non_tty_errors(path_env)
         _test_set_models_opencode_absent_errors(bin_dir)
@@ -142,6 +143,38 @@ def _test_set_models_unknown_cli_errors(path_env: dict[str, str]) -> None:
     assert "bogus" in combined or "valid" in combined.lower(), (
         f"expected error to mention bogus or 'valid', got: {combined!r}"
     )
+
+
+def _test_set_models_unknown_agent_flag_errors(path_env: dict[str, str]) -> None:
+    """`ai-harness set-models -o opencode -a bogus` errors with a clear, non-zero exit.
+
+    Sandbox-level counterpart to ``tests/test_set_models.py::test_cli_set_models_unknown_agent_flag_errors``
+    and ``tests/test_set_models.py::test_cli_set_models_uppercase_agent_flag_errors``.
+    Both ``loop`` and ``change`` must appear in the captured output so the
+    user can see the valid set. The exit code is non-zero — typer maps
+    ``BadParameter`` to exit code 2.
+    """
+    home = sandbox_home()
+    result = run_in_sandbox(
+        home,
+        "ai-harness",
+        "set-models",
+        "-o",
+        "opencode",
+        "-a",
+        "bogus",
+        extra_env=path_env,
+        check=False,
+    )
+
+    assert result.returncode != 0, (
+        f"expected non-zero exit for unknown -a value, got {result.returncode}\n"
+        f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    )
+    combined = f"{result.stdout} {result.stderr}".lower()
+    # The valid-values hint must name BOTH loop and change.
+    assert "loop" in combined, f"expected 'loop' in error, got: {combined!r}"
+    assert "change" in combined, f"expected 'change' in error, got: {combined!r}"
 
 
 def _test_set_models_opencode_non_tty_errors(path_env: dict[str, str]) -> None:
