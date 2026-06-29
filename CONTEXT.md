@@ -19,13 +19,15 @@ loose parts — they are authored together as the *loop agents* under
 
 ## Worktree
 
-An isolated git working tree a *Loop* session runs in, created by the
+An isolated git working tree created by the
 `ai-harness worktree create` command at `.ai-harness/worktrees/<dir>` on a new
 branch based on the current branch's HEAD (`-dn`/`-bn` name the directory and
-branch; both default to a `<Date.now()>` timestamp) and gitignored. Its purpose is isolation: a loop
-running there cannot disturb the host repository, so a human can grill /
-domain-model in the host tree — or run a second loop — at the same time without
-either stepping on the other. The human launches their Agent CLI inside it; the
+branch; both default to a `<Date.now()>` timestamp) and gitignored. It is the
+isolation unit for a *Loop* session (required — the loop refuses `main`) and may
+optionally host a *Change* session (which is worktree-agnostic — see *Change*).
+Its purpose is isolation: a session running there cannot disturb the host
+repository, so a human can grill / domain-model in the host tree — or run a
+second session — at the same time without either stepping on the other. The human launches their Agent CLI inside it; the
 worktree is the *directory*, distinct from the `loop-run/<ts>` *branch* that
 gets checked out in it.  Cleanup is available via `ai-harness worktree delete`
 (interactive picker) or native `git worktree remove|prune|list`.
@@ -47,6 +49,43 @@ sub-issues itself; `LOOP_LABEL` marks which ones are ready to work. Whether a
 prd-issue is fully drained is judged by open sub-issues referencing it, not by
 any label.
 _Avoid_: task, subtask, child ticket
+
+## Change
+
+A file-backed unit of work owned by *change-orchestrator*, living at
+`.ai-harness/changes/{name}/` and advanced through a fixed *phase* pipeline whose
+artifacts on disk are its entire state. The off-GitHub counterpart to a
+*prd-issue*/*sub-issue*: planning and implementation never touch GitHub, and one
+change conventionally becomes one PR.
+_Avoid_: task, ticket, issue (when you mean the local file-backed change)
+
+## Phase
+
+One step in a *Change*'s pipeline (`explore`, `prd`, `design`, `specs`, `tasks`,
+`implement`, `validate`, `archive`), each run by a hidden subagent and marked done
+by the presence of its artifact on disk. Phases form a forward dependency DAG;
+the `implement`↔`validate` fixup cycle is orchestrator runtime behaviour, not a
+DAG edge.
+_Avoid_: step, stage
+
+## Task
+
+The unit of implementation work inside a *Change*, held as a record in `tasks.json`
+and managed only through the `ai-harness task-*` commands (never hand-edited). A task
+is the **commit unit** — `implement` makes one commit per task — and maps to a *Spec*;
+it contains **sub-tasks**, the finer steps that carry the validation scenarios. The
+CLI owns id assignment, dependency ordering, and sub-task → task roll-up.
+_Avoid_: ticket, issue, todo (when you mean the file-backed task record)
+
+## Spec
+
+The **behavioural** contract for one capability of a *Change*: a `specs/{cap}.md`
+file of requirements (RFC 2119) and GIVEN/WHEN/THEN scenarios describing WHAT the
+system must do, not HOW. Distinct from the *Change*'s `design.md` (the
+**structural** contract — module and seam shape). One capability listed in the
+`prd.md` `## Capabilities` section yields one spec file. On *archive* a change's
+specs are promoted to `.ai-harness/specs/{change}/` as the durable living record.
+_Avoid_: requirement doc, design (when you mean the behavioural spec)
 
 ## Agent template
 
