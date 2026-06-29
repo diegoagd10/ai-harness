@@ -1,4 +1,4 @@
-"""Change-orchestrator task commands as thin JSON CLI adapters."""
+"""Change-orchestrator commands as thin JSON CLI adapters."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from typing import Any
 
 import typer
 
+from ai_harness.modules.harness.change import ChangeStatus, ChangeStoreError, change_continue, change_new
 from ai_harness.modules.harness.tasks import (
     SubtaskInput,
     Task,
@@ -20,6 +21,22 @@ from ai_harness.modules.harness.tasks import (
     task_list,
     task_next,
 )
+
+
+def change_new_cmd(change: str = typer.Argument(..., help="Change name.")) -> None:
+    """Create a change and print its status JSON."""
+    try:
+        _print_json(change_new(Path.cwd(), change))
+    except ChangeStoreError as exc:
+        _exit_error(str(exc))
+
+
+def change_continue_cmd(change: str = typer.Argument(..., help="Change name.")) -> None:
+    """Print status JSON for an existing change."""
+    try:
+        _print_json(change_continue(Path.cwd(), change))
+    except ChangeStoreError as exc:
+        _exit_error(str(exc))
 
 
 def task_create_cmd(
@@ -120,12 +137,12 @@ def _parse_json_object(input_json: str) -> dict[str, Any]:
     return payload
 
 
-def _print_json(value: Task | list[Task] | None) -> None:
+def _print_json(value: ChangeStatus | Task | list[Task] | None) -> None:
     """Serialise a command result to JSON at the CLI edge."""
     typer.echo(json.dumps(_to_jsonable(value)))
 
 
-def _to_jsonable(value: Task | list[Task] | None) -> object:
+def _to_jsonable(value: ChangeStatus | Task | list[Task] | None) -> object:
     """Convert domain dataclasses to JSON-compatible values."""
     if value is None:
         return None

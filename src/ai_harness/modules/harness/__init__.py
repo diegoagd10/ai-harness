@@ -4,6 +4,7 @@ Re-exports the public surface so callers import from the package root:
 ``from ai_harness.modules.harness import AgentCli, InstallManifest, install_for_agent_clis``.
 """
 
+from ai_harness.modules.harness.change import ChangeStatus, ChangeStoreError, change_continue, change_new
 from ai_harness.modules.harness.labels import LabelResult, ensure_labels
 from ai_harness.modules.harness.models import AgentCli
 from ai_harness.modules.harness.operations import (
@@ -39,6 +40,8 @@ from ai_harness.modules.harness.worktree import (
 
 __all__ = [
     "AgentCli",
+    "ChangeStatus",
+    "ChangeStoreError",
     "InitResult",
     "InstallManifest",
     "LabelResult",
@@ -53,6 +56,8 @@ __all__ = [
     "WorktreeEntry",
     "WorktreeResult",
     "create_worktree",
+    "change_continue",
+    "change_new",
     "ensure_labels",
     "init_repo",
     "install_for_agent_clis",
