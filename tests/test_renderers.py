@@ -327,7 +327,7 @@ def test_change_orchestrator_body_gate_names_every_artifact() -> None:
 
     # Every reviewable artifact path appears in the gate section.
     end_idx = body.find("\n## ", gate_idx + 1)
-    gate_section = body[gate_idx:end_idx if end_idx != -1 else None]
+    gate_section = body[gate_idx : end_idx if end_idx != -1 else None]
     assert "prd.md" in gate_section
     assert "design.md" in gate_section
     assert "specs/" in gate_section
@@ -345,16 +345,13 @@ def test_change_orchestrator_body_gate_requires_explicit_confirmation() -> None:
     body = pair[1].split("---", 2)[2].removeprefix("\n")
     gate_idx = body.index("## Human review gate")
     end_idx = body.find("\n## ", gate_idx + 1)
-    gate_section = body[gate_idx:end_idx if end_idx != -1 else None].lower()
+    gate_section = body[gate_idx : end_idx if end_idx != -1 else None].lower()
 
     # Explicit confirmation is required and named.
     assert "confirmation" in gate_section
     assert "explicit" in gate_section
     # At least one explicit confirmation phrase is taught to the model.
-    approval_phrase = any(
-        phrase in gate_section
-        for phrase in ("continue", "proceed", "go ahead", "implement")
-    )
+    approval_phrase = any(phrase in gate_section for phrase in ("continue", "proceed", "go ahead", "implement"))
     assert approval_phrase, "gate must teach at least one explicit continuation phrase"
 
 
@@ -365,7 +362,7 @@ def test_change_orchestrator_body_gate_invalidates_on_artifact_change() -> None:
     body = pair[1].split("---", 2)[2].removeprefix("\n")
     gate_idx = body.index("## Human review gate")
     end_idx = body.find("\n## ", gate_idx + 1)
-    gate_section = body[gate_idx:end_idx if end_idx != -1 else None].lower()
+    gate_section = body[gate_idx : end_idx if end_idx != -1 else None].lower()
 
     # Invalidation clause uses "artifact-change invalidation" wording and lists the
     # four artifact kinds.
@@ -383,7 +380,7 @@ def test_change_orchestrator_body_gate_carves_out_parent_decomposition() -> None
     body = pair[1].split("---", 2)[2].removeprefix("\n")
     gate_idx = body.index("## Human review gate")
     end_idx = body.find("\n## ", gate_idx + 1)
-    gate_section = body[gate_idx:end_idx if end_idx != -1 else None].lower()
+    gate_section = body[gate_idx : end_idx if end_idx != -1 else None].lower()
 
     # The carve-out is named in the gate section.
     assert "parent decomposition" in gate_section or "parent split" in gate_section or "split" in gate_section
@@ -396,7 +393,7 @@ def test_change_orchestrator_body_gate_encodes_resume_semantics() -> None:
     body = pair[1].split("---", 2)[2].removeprefix("\n")
     gate_idx = body.index("## Human review gate")
     end_idx = body.find("\n## ", gate_idx + 1)
-    gate_section = body[gate_idx:end_idx if end_idx != -1 else None].lower()
+    gate_section = body[gate_idx : end_idx if end_idx != -1 else None].lower()
 
     assert "resume" in gate_section
     # No durable approval marker in v1 — prompt-only waiting is the policy.
