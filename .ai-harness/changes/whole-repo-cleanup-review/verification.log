@@ -1,0 +1,62 @@
+# Verification Log — whole-repo-cleanup-review
+
+## Verification run: 2026-06-30
+
+### archive-design-doc: history-following invariant
+```
+git log --follow .ai-harness/changes/archive/borrow-gentle-orchestrator/change-orchestrator.md
+→ a95811a docs(cleanup): relocate change-orchestrator design...
+→ aec09f3 docs(change-orchestrator): document borrowed conductor disciplines...
+→ df9b6e4 docs(change-orchestrator): document human review gate seam...
+→ db26d43 Updated documentation...
+→ 52df0aa Phase...
+✅ PASS: history-following confirmed
+
+git mv SHA verification:
+SRC_SHA = e470a6ec724996c19f9cbd5aa67be4adc2c527584a17675935a9b461d71bb6d2
+post-move SHA = e470a6ec724996c19f9cbd5aa67be4adc2c527584a17675935a9b461d71bb6d2
+✅ PASS: byte-identical
+```
+
+### no-stale-references: three-pattern sweep (active docs only)
+```
+rg -n "docs/design/change-orchestrator\.md" -g "!./.git/" -g "!.ai-harness/changes/archive/**"
+→ 0 hits (grep returned no output)
+✅ PASS
+
+rg -n "0011-planning-entry-agent-and-size-routing" -g "!./.git/" -g "!.ai-harness/changes/archive/**"
+→ 0 hits (grep returned no output)
+✅ PASS
+
+rg -n "ADR 0011" -g "!./.git/" -g "!.ai-harness/changes/archive/**"
+→ 0 hits (grep returned no output)
+✅ PASS
+```
+
+### preserve-skills-and-runtime-prompt: negative assertions
+```
+git diff HEAD~3..HEAD --stat .agents/skills/ .claude/skills/
+→ (no output, no files touched)
+✅ PASS
+
+src/ai_harness/resources/change-agent/change-orchestrator.md:
+  HEAD SHA = 7dbf7382d2471b5bbc3c261e03e2f7061bb969c0774bca9191152cdf72eb116b
+  HEAD~3 SHA = 7dbf7382d2471b5bbc3c261e03e2f7061bb969c0774bca9191152cdf72eb116b
+✅ PASS: runtime prompt invariant
+```
+
+### preserve-0008-collision-context: negative assertions
+```
+docs/adr/0008-worktree-current-branch-and-delete.md:
+  HEAD SHA = 458fb312b27f2f3770fdacdeeee29a1ab7abca72fe4b974a9c88f45234216517
+  HEAD~3 SHA = 458fb312b27f2f3770fdacdeeee29a1ab7abca72fe4b974a9c88f45234216517
+✅ PASS
+
+docs/adr/0008-copilot-loop-agents-native-model.md:
+  HEAD SHA = abf16ac88fa9d09df35adaa0808f3dbfe663b0b4480129a8c62609dc929a0c60
+  HEAD~3 SHA = abf16ac88fa9d09df35adaa0808f3dbfe663b0b4480129a8c62609dc929a0c60
+✅ PASS
+```
+
+## Result: ALL CHECKS PASS — no stale references, no invariant violations
+No commit generated per the "pure green = no commit" rule.
