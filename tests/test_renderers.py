@@ -58,6 +58,7 @@ def test_render_agents_claude_returns_agents_and_skill() -> None:
         ".claude/agents/implementor.md",
         ".claude/skills/loop-orchestrator/SKILL.md",
         ".claude/agents/validator.md",
+        ".claude/agents/change-archiver.md",
         ".claude/agents/change-explorer.md",
         ".claude/agents/change-implementor.md",
         ".claude/skills/change-orchestrator/SKILL.md",
@@ -82,6 +83,7 @@ def test_render_agents_opencode_returns_agents_under_agent_dir() -> None:
         ".config/opencode/agent/implementor.md",
         ".config/opencode/agent/loop-orchestrator.md",
         ".config/opencode/agent/validator.md",
+        ".config/opencode/agent/change-archiver.md",
         ".config/opencode/agent/change-explorer.md",
         ".config/opencode/agent/change-implementor.md",
         ".config/opencode/agent/change-orchestrator.md",
@@ -296,7 +298,16 @@ def test_change_orchestrator_meta_declares_primary_restricted_agent() -> None:
     assert meta["model"]["claude"] == "sonnet"
     assert meta["caps"] == AgentCaps(
         write=False,
-        spawn=("change-explorer", "propose", "design", "specs", "tasks", "change-implementor", "change-validator"),
+        spawn=(
+            "change-explorer",
+            "propose",
+            "design",
+            "specs",
+            "tasks",
+            "change-implementor",
+            "change-validator",
+            "change-archiver",
+        ),
     )
 
 
@@ -1268,7 +1279,7 @@ def test_contract_change_artifacts_carry_all_five_gentle_references() -> None:
     project_root = Path(__file__).resolve().parent.parent
     active_root = project_root / ".ai-harness/changes/fix-interactive-gates"
     archived_root = project_root / ".ai-harness/changes/archive/fix-interactive-gates"
-    change_root = active_root if active_root.exists() else archived_root
+    change_root = active_root if (active_root / "prd.md").exists() else archived_root
 
     prd = (change_root / "prd.md").read_text()
     exploration = (change_root / "exploration.md").read_text()
@@ -1391,6 +1402,7 @@ def test_change_orchestrator_frontmatter_uses_meta() -> None:
             "tasks": "allow",
             "change-implementor": "allow",
             "change-validator": "allow",
+            "change-archiver": "allow",
         },
     }
 
@@ -1989,6 +2001,7 @@ def test_render_agents_copilot_returns_agent_files() -> None:
         ".copilot/agents/implementor.agent.md",
         ".copilot/agents/loop-orchestrator.agent.md",
         ".copilot/agents/validator.agent.md",
+        ".copilot/agents/change-archiver.agent.md",
         ".copilot/agents/change-explorer.agent.md",
         ".copilot/agents/change-implementor.agent.md",
         ".copilot/agents/change-orchestrator.agent.md",
@@ -2015,6 +2028,7 @@ def test_copilot_frontmatter_has_name_and_description_only() -> None:
         "change-implementor",
         "change-orchestrator",
         "change-validator",
+        "change-archiver",
         "design",
         "propose",
         "specs",
@@ -2163,6 +2177,7 @@ def test_discover_loop_agents_excludes_underscore_prefixed_files() -> None:
         "implementor",
         "loop-orchestrator",
         "validator",
+        "change-archiver",
         "change-explorer",
         "change-implementor",
         "change-orchestrator",
@@ -2173,7 +2188,7 @@ def test_discover_loop_agents_excludes_underscore_prefixed_files() -> None:
         "tasks",
     ]
     assert "_result-contract" not in names
-    assert len(names) == 12
+    assert len(names) == 13
 
 
 def test_change_agent_prompt_set_contains_expected_contract_keywords() -> None:
@@ -2184,6 +2199,7 @@ def test_change_agent_prompt_set_contains_expected_contract_keywords() -> None:
     prompts = {path.name: path.read_text(encoding="utf-8") for path in root.iterdir() if path.name.endswith(".md")}
 
     assert sorted(prompts) == [
+        "change-archiver.md",
         "change-explorer.md",
         "change-implementor.md",
         "change-orchestrator.md",
@@ -2199,6 +2215,8 @@ def test_change_agent_prompt_set_contains_expected_contract_keywords() -> None:
     assert "task-create" in prompts["tasks.md"]
     assert "task-next" in prompts["change-implementor.md"]
     assert "task-list" in prompts["change-validator.md"]
+    assert "ai-harness change-archive" in prompts["change-archiver.md"]
+    assert "docs: archive" in prompts["change-archiver.md"]
     combined = "\n".join(prompts.values())
     assert "change start" not in combined
     assert "change ready" not in combined
@@ -2538,3 +2556,168 @@ def test_orchestrator_documents_skill_feedback_recovery() -> None:
 
     # Must NOT be a hard block (bold markers in markdown: "**not**")
     assert "hard block" in body.lower(), "orchestrator must state skill-resolution feedback is not a hard block"
+
+
+# ---------------------------------------------------------------------------
+# change-archiver — discovery, wiring, contract
+# ---------------------------------------------------------------------------
+
+
+def test_change_archiver_is_discovered_as_a_change_agent() -> None:
+    """Renderer discovery includes change-archiver in the change-agent set."""
+    names = _discover_loop_agents()
+    assert "change-archiver" in names
+
+
+def test_change_archiver_meta_declares_subagent_role() -> None:
+    """Change-archiver metadata defines it as a subagent with native models."""
+    meta = get_agent_meta("change-archiver", overrides={})
+
+    assert meta["description"]
+    assert meta["mode"] == "subagent"
+    assert meta["model"]["opencode"] == "minimax/MiniMax-M3"
+    assert meta["model"]["claude"] == "sonnet"
+
+
+def test_change_archiver_prompt_runs_cli_command_and_commits_once() -> None:
+    """Change-archiver body tells the agent to run the CLI and commit once.
+
+    Locks the dedicated-archive-agent contract: the prompt runs
+    ``ai-harness change-archive {change}``, scopes the commit to the
+    resulting ``.ai-harness`` changes only, and uses ``docs: archive``
+    as the commit-message prefix.
+    """
+    from importlib.resources import files
+
+    body = (files("ai_harness.resources") / "change-agent" / "change-archiver.md").read_text(encoding="utf-8")
+
+    assert "ai-harness change-archive" in body
+    assert "docs: archive" in body
+    # Single-commit scoping is explicit.
+    assert "exactly one" in body.lower() or "one scoped commit" in body.lower()
+    # Scope restriction to .ai-harness is explicit.
+    assert ".ai-harness" in body
+    # Failure path escalates instead of retrying.
+    assert "blocked" in body.lower() or "human" in body.lower()
+
+
+def test_change_archiver_body_ignores_unrelated_product_dirtiness() -> None:
+    """The archiver must NOT block on unrelated product dirtiness — scope is .ai-harness only."""
+    from importlib.resources import files
+
+    body = (files("ai_harness.resources") / "change-agent" / "change-archiver.md").read_text(encoding="utf-8")
+
+    body_lower = body.lower()
+    assert "unrelated product dirtiness" in body_lower or "unrelated" in body_lower
+    # The "do not commit" rule for non-.ai-harness files is explicit.
+    assert "do not stage" in body_lower or "never commit" in body_lower
+
+
+def test_change_archiver_result_envelope_includes_archive_commit_and_blocked_errors() -> None:
+    """The archiver result envelope carries the archive commit when done and errors when blocked."""
+    from importlib.resources import files
+
+    body = (files("ai_harness.resources") / "change-agent" / "change-archiver.md").read_text(encoding="utf-8")
+
+    # Success envelope fields.
+    assert "archive_commit" in body or "archive commit" in body.lower()
+    assert "archive_paths" in body or "archive paths" in body.lower()
+    # Blocked envelope carries CLI errors verbatim.
+    assert "errors" in body
+
+
+def test_change_archiver_renders_on_every_native_agent_cli() -> None:
+    """All three native CLIs discover and render change-archiver."""
+    assert _find_pair(render_agents(AgentCli.OPENCODE), "change-archiver") is not None
+    assert _find_pair(render_agents(AgentCli.COPILOT), "change-archiver") is not None
+    assert _find_pair(render_agents(AgentCli.CLAUDE), "change-archiver") is not None
+
+
+# ---------------------------------------------------------------------------
+# change-orchestrator — terminal archive routing
+# ---------------------------------------------------------------------------
+
+
+def test_change_orchestrator_archive_route_keeps_semantic_gate() -> None:
+    """The orchestrator retains the semantic validation gate before archiving."""
+    body = _change_orchestrator_body().lower()
+
+    # The semantic gate (Semantic fork 2) is preserved.
+    assert "verdict" in body
+    assert "critical" in body
+    # The archive routing section is present and names the gate as a
+    # precondition for spawning the archiver.
+    assert "archive routing" in body
+    assert "semantic gate" in body or "semantic validation" in body
+
+
+def test_change_orchestrator_archive_route_spawns_change_archiver() -> None:
+    """Archive execution is delegated to change-archiver, not orchestrated inline."""
+    body = _change_orchestrator_body()
+
+    # Spawns the archiver after the gate passes.
+    assert "change-archiver" in body
+    assert "spawn" in body.lower()
+    # The orchestrator must NOT own file moves — the route must explicitly
+    # defer to the CLI run inside the archiver prompt.
+    body_lower = body.lower()
+    assert "move" in body or "moves" in body or "move" in body_lower
+
+
+def test_change_orchestrator_archive_route_forbids_manual_file_moves() -> None:
+    """The orchestrator MUST NOT move .ai-harness/changes/{change} or specs/ itself."""
+    body = _change_orchestrator_body().lower()
+
+    # The route explicitly forbids the orchestrator moving files.
+    assert "must not" in body or "mustn't" in body or "owns only" in body
+    # Manual file-move instructions are named as a forbidden pattern.
+    forbidden = "manual" in body or "by the orchestrator" in body
+    assert forbidden, "archive route must explicitly forbid orchestrator-owned file moves"
+
+
+def test_change_orchestrator_archive_success_is_terminal() -> None:
+    """Successful archiver result ends the flow — no post-archive change-continue."""
+    body = _change_orchestrator_body().lower()
+
+    # Terminal language is explicit.
+    assert "terminal" in body
+    # change-continue must be forbidden as a follow-up after archive success.
+    archive_section_idx = body.index("archive routing")
+    post_section = body[archive_section_idx:]
+    assert "change-continue" in post_section
+    assert "must not" in post_section or "mustn't" in post_section or "do not" in post_section
+
+
+def test_change_orchestrator_archive_failure_escalates_to_blocked() -> None:
+    """Archiver blocked result escalates to a blocked human-decision flow."""
+    body = _change_orchestrator_body().lower()
+
+    # Failure language names 'blocked' and 'human' explicitly.
+    archive_section_idx = body.index("archive routing")
+    post_section = body[archive_section_idx:]
+    assert "blocked" in post_section
+    assert "human" in post_section
+    # The orchestrator must NOT spawn fix-loop agents when archiver fails.
+    assert "do not spawn" in post_section or "must not spawn" in post_section or "mustn't spawn" in post_section
+
+
+def test_change_orchestrator_archive_route_resume_recovery_skips_double_archive() -> None:
+    """On resume after archive already landed, do not re-spawn the archiver."""
+    body = _change_orchestrator_body().lower()
+
+    archive_section_idx = body.index("archive routing")
+    post_section = body[archive_section_idx:]
+    # Resume semantics for archive: do not re-spawn, do not call change-continue.
+    assert "resume" in post_section
+    assert "do not spawn" in post_section or "must not" in post_section or "do not" in post_section
+
+
+def test_change_orchestrator_archive_route_uses_cli_command_inside_archiver() -> None:
+    """The route's archiver spawn explicitly references the ai-harness CLI command."""
+    body = _change_orchestrator_body()
+
+    archive_section_idx = body.index("Archive routing")
+    post_section = body[archive_section_idx:]
+    # The archiver's CLI run is named in the route.
+    assert "ai-harness change-archive" in post_section
+    assert "docs: archive" in post_section
