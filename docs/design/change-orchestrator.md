@@ -28,21 +28,43 @@ subagents — it never hands off to loop-orchestrator. Clean symmetry:
 - **loop** = one worktree drains *many* GitHub issues.
 - **change** = one *change* runs its own pipeline, off GitHub.
 
-## Role — four modes
+## Role — start vs resume (route contract)
 
-On every message, classify before responding:
+On every message, classify before responding. The mode is the command — never
+a folder-presence guess.
 
 1. **Conversational** — questions, greetings, status. Reply, no flow.
 2. **Grill** — context insufficient → `grill-me-one-by-one` until shared
-   understanding. The understanding lives in the **conversation only** (ephemeral;
-   no file). Folder absent = still grilling; folder present = grilling done.
-3. **Start** — context sufficient → run `ai-harness change-new {name}` and begin
-   the pipeline.
-4. **Resume** — continue an existing change (see [Resume](#resume)).
+   understanding. The understanding lives in the **conversation only**
+   (ephemeral; no file).
+3. **Start** — context sufficient and no existing Change being resumed →
+   run:
 
-Two-step classification: conversational vs planning first; within planning,
+   ```bash
+   ai-harness change-new {name}
+   ```
+
+   The CLI hard-errors when the folder already exists (Start-mode name
+   collision → no silent clobber, no implicit resume).
+
+4. **Resume** — continue an existing change. Run:
+
+   ```bash
+   ai-harness change-continue {name}
+   ```
+
+   The CLI hard-errors when the folder is absent (Resume-mode typo → no
+   silent empty-create, no implicit start).
+
+Routing-after-the-call is identical (both commands return the same
+`ai-harness.change-status` envelope), so once the call succeeds the
+orchestrator never sees the difference. The two-step classification is
+the same as before: conversational vs planning first, then
 *enough context?* picks grill (no) vs start (yes). When in doubt, lean
-conversational.
+conversational; never infer start vs resume from folder presence.
+
+The CLI is authoritative for both routes. Disk is authoritative after
+the call.
 
 ## Pipeline (8 phases)
 
@@ -132,21 +154,30 @@ approval marker** in v1.
    acknowledgements — leave the gate open.
 5. After explicit confirmation, the orchestrator spawns `change-implementor`.
 
-**Artifact-change invalidation.** Approval is bound to the artifact set that was
-reviewed in the current conversation. If `prd.md`, `design.md`, anything under
-`specs/`, or `tasks.json` changes between the review request and the
-`change-implementor` launch, the gate reopens: prior approval is stale.
+**Artifact-change invalidation.** Approval is bound to the **exact reviewed
+artifact set** — every file path, in the version reviewed — and only that
+set. If `prd.md`, `design.md`, anything under `specs/`, or `tasks.json`
+changes between the review request and the `change-implementor` launch,
+the gate reopens: prior approval is stale. An edit to any one of those
+files invalidates approval for the whole set; partial carry-over is not
+permitted.
 
-**Resume semantics.** The gate is prompt-only. On resume after a session gap,
-compaction, or new conversation, the orchestrator re-presents the checkpoint
-(re-prompting is cheap; the cost of implementing against unreviewed artifacts
-is not). This is the v1 policy and is intentionally conservative.
+**Resume semantics.** The gate is prompt-only. On resume after a session
+gap, compaction, or new conversation, the orchestrator treats approval
+as absent and re-presents the checkpoint for the current artifact set
+(re-prompting is cheap; the cost of implementing against unreviewed
+artifacts is not). Approval does **not** carry across session
+boundaries; the reviewed artifact set must be re-confirmed in the new
+session, even when the files on disk look unchanged. This is the v1
+policy and is intentionally conservative.
 
 If a future change adds a persisted approval marker (e.g.
-`implementation_approved_for`), the marker MUST be bound to the reviewed
-artifact revision/digest set — **not** to the change name — so a stale marker
-cannot apply to changed artifacts. Until such a marker exists, prompt-only
-waiting is sufficient and no schema change is required.
+`implementation_approved_for`), the marker MUST be bound to the
+reviewed artifact revision/digest set — **not** to the change name —
+so a stale marker cannot apply to changed artifacts, an edited file
+reopens the gate, and a session gap or compaction invalidates the
+marker. Until such a marker exists, prompt-only waiting is sufficient
+and no schema change is required.
 
 **Schema restraint.** No new status token, no new CLI field, no
 `ai-harness.change-status` schema bump is added for the gate. The
@@ -391,36 +422,133 @@ CLI.** No phase carries its own routing token — a deliberate divergence from
 gentle-ai, whose subagents emit `next_recommended` because its store may not be a
 queryable CLI. We always have the CLI, so routing is centralised there.
 
-### Subagent result contract
+### Subagent result envelope
 
-Every change subagent emits one **thin** `result` block — a completion signal, not
-a routing decision — the same shape for all eight phases:
+Every change subagent emits one **shared phase result envelope** — a
+completion signal, not a routing decision — the same shape for all
+phases. Phase-specific facts ride under `semantic_facts`; the
+top-level `status` stays uniform:
 
 ```result
-status:    done | blocked | partial
-artifacts: <paths written this phase>
-skills:    loaded | fallback | none
+status:           done | waiting | blocked | partial
+artifacts:        <paths written this phase>
+summary:          <one-line summary>
+semantic_facts:
+  <phase-specific facts below>
+skills:           loaded | fallback | none
+skill_resolution: ok | degraded: <reason>  (only when degraded)
 ```
 
 - `done` → orchestrator re-runs `change-continue`, routes on `nextRecommended`.
-- `partial` → **`implement` only**: tasks remain (context/batch limit); the CLI's
-  `taskProgress.allComplete: false` keeps `nextRecommended: implement` → re-invoke.
+- `partial` → **`implement` only**: tasks remain (context/batch limit);
+  the CLI's `taskProgress.allComplete: false` keeps
+  `nextRecommended: implement` → re-invoke.
+- `waiting` → orchestrator surfaces the human-action reason and pauses.
 - `blocked` → orchestrator surfaces `blockedReasons` and stops/escalates.
 - `skills` is retained from the loop contract for compaction-safety.
+- `skill_resolution` is mandatory when degraded; it names the fallback or
+  explains the gap. Silent fallback to a wrong path is forbidden.
 
-Two phases carry **one** semantic field beyond the thin block, because their
-routing fork is semantic and the CLI cannot derive it mechanically:
+Phase-specific facts (`semantic_facts`, not a new `status` variant):
 
-- `change-explorer` → `budget: <int>` (LOC) — the orchestrator routes split-vs-`prd`.
-- `change-validator` → `verdict: pass|pass-with-warnings|fail` + `critical: <int>` —
-  the orchestrator routes archive-vs-`implement`.
+- `change-explorer` → `budget: <int>`, `follow_up: [...]`,
+  optional `blocked_reason: <text>`.
+- `change-implementor` → `partial: <bool>`, `remaining_tasks: [...]`,
+  `changed_files: [...]`, optional `blocked_reason: <text>`.
+- `change-validator` → `verdict: pass|pass-with-warnings|fail`,
+  `critical: <int>`, optional `blocked_reason: <text>`.
+- orchestrator waits/stops → `waiting: <bool>`, `blocked_reason: <text>`
+  where applicable.
 
-Both values are **also** written into the artifact prose (`exploration.md`,
-`validation.md`) for humans and for **resume**: re-entering without a fresh result
-block, the orchestrator *reads the artifact prose* to recover them. An LLM reading
-prose is robust; the **CLI never parses it**. The CLI stays purely mechanical —
-file existence + `tasks.json` task records — and the orchestrator owns the two
-semantic forks.
+The orchestrator only consumes `semantic_facts` for routing (e.g. `budget`
+drives split-vs-`prd`, `verdict` + `critical` drive archive-vs-`implement`).
+The CLI never parses semantic facts; only the orchestrator reads them.
+
+**Resume recovery.** Every semantic fact is **also** written into the
+artifact prose so resume can reconstruct it from disk when the
+in-context result block has rolled off:
+
+- `budget` (int) — `exploration.md` "Budget" heading.
+- `partial` + `remaining_tasks` — `implementation.md` "Remaining" list.
+- `changed_files` — `implementation.md` "Commits" lines.
+- `verdict` + `critical` — `validation.md` "Verdict" block.
+
+Both the result block and the artifact prose are written; reading the
+prose on resume is robust because an LLM reading prose is reasonable,
+while the CLI never depends on prose parsing.
+
+### Delegation launch log
+
+The orchestrator keeps a **session-scoped launch log** keyed by
+`(phase, task_fingerprint)` to refuse duplicate delegation in the same
+session.
+
+- `phase` — the change subagent to launch (e.g. `change-explorer`,
+  `change-implementor`, `change-validator`).
+- `task_fingerprint` — a stable hash of phase + targeted artifact set +
+  the requested work. Stable for the same scope; different when artifacts
+  change, scope changes, or the prior task completes.
+
+Before delegation the orchestrator records the key. A second launch with
+the **same** key in the same session is refused: the orchestrator does
+not spawn a duplicate subagent. The refusal returns `status: blocked`
+with `semantic_facts.blocked_reason: "duplicate delegation:
+(phase, task_fingerprint) already launched in this session"` and the
+orchestrator surfaces the reason.
+
+A different fingerprint (artifacts changed, scope changed, prior task
+completed) clears the key and permits a new launch. When session memory
+cannot reliably retain the log (e.g. after compaction), the launch key
+is recorded in the phase artifact (`implementation.md`,
+`exploration.md`, `validation.md`) so resume can reconstruct the launch
+ledger from disk. Only escalate to a CLI/state field if prompt + prose
+recovery prove insufficient across multiple cycles.
+
+### Skill-path injection
+
+Skills reach subagents through **exact `SKILL.md` paths**, resolved from
+the available registry or the orchestrator's loaded skill context —
+never invented, summarised, or guessed.
+
+For every delegated phase that needs skills, the orchestrator builds a
+`Skills to load before work` block listing exact paths, for example:
+
+```
+Skills to load before work:
+- /abs/path/to/skill-foo/SKILL.md
+- /abs/path/to/skill-bar/SKILL.md
+```
+
+Rules:
+
+- Resolve from the registry, the loaded `<available_skills>` block, or
+  established context. Never invent a path; never substitute a summary
+  for a path.
+- If a required skill is missing or cannot be resolved, inject nothing
+  for it and fall back. The subagent must report `skills: fallback`
+  (or `none` when none apply) with a short reason in `skill_resolution`.
+- Silent fallback to a wrong file is forbidden. The orchestrator routes
+  on the reported resolution and surfaces a degraded run to the human.
+
+### Session mode — auto vs interactive phase gate
+
+The orchestrator establishes a **session mode** at the start of a run and
+keeps it stable for the session. Mode is chosen from the command /
+profile context or explicit user instruction; it does not drift
+mid-session.
+
+- **interactive** — pause at every phase gate, especially before
+  `change-implementor`, for explicit user review. The human review gate
+  is mandatory in this mode even when every artifact exists.
+- **auto** — continue across phase gates **only when safe**: the prior
+  phase passed, the current artifact set is reviewed where review is
+  required, and no `failed`, `blocked`, or `waiting` semantic facts
+  are present. Otherwise stop and surface the reason.
+
+Default to interactive when the mode is unclear. Interactive mode is the
+safer default; auto mode is an explicit acceleration that buys speed
+only when gate conditions are satisfied, never at the expense of human
+review of the artifact set.
 
 ## Blocking policy (B — CRITICAL only)
 
