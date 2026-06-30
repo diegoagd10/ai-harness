@@ -317,6 +317,7 @@ _CHANGE_SUBAGENT_NAMES = (
     "change-explorer",
     "change-implementor",
     "change-validator",
+    "change-archiver",
     "design",
     "propose",
     "specs",
@@ -329,6 +330,7 @@ _NATIVE_AGENT_NAMES = (
     "change-implementor",
     _CHANGE_AGENT_NAME,
     "change-validator",
+    "change-archiver",
     "design",
     "propose",
     "specs",
@@ -502,8 +504,8 @@ def test_install_copilot_manifest_records_agents(tmp_path: Path) -> None:
     data = json.loads((tmp_path / MANIFEST_REL).read_text(encoding="utf-8"))
     assert "copilot" in data["files_by_agent_cli"]
     copilot_files = data["files_by_agent_cli"]["copilot"]
-    # 6 persona+skills + 12 native agents = 18
-    assert len(copilot_files) == 18
+    # 6 persona+skills + 13 native agents = 19
+    assert len(copilot_files) == 19
     assert any(".copilot/agents/" in f for f in copilot_files), "copilot manifest should contain agent paths"
     for name in _NATIVE_AGENT_NAMES:
         expected = f".copilot/agents/{name}.agent.md"
@@ -685,9 +687,9 @@ def test_cli_install_copilot_writes_agents(isolated_home: Path) -> None:
     for name in _NATIVE_AGENT_NAMES:
         assert (agent_dir / f"{name}.agent.md").is_file(), f"CLI install: copilot {name} missing"
 
-    # Generic (6 files) + Copilot (18 files: 6 persona+skills + 12 native agents) = 24 total.
-    assert "24 file(s)" in result.stdout, (
-        f"stdout should report 24 written files (6 generic + 18 copilot), got: {result.stdout!r}"
+    # Generic (6 files) + Copilot (19 files: 6 persona+skills + 13 native agents) = 25 total.
+    assert "25 file(s)" in result.stdout, (
+        f"stdout should report 25 written files (6 generic + 19 copilot), got: {result.stdout!r}"
     )
 
 
@@ -801,9 +803,9 @@ def test_cli_install_opencode_writes_agents(isolated_home: Path) -> None:
         assert (agent_dir / f"{name}.md").is_file(), f"CLI install: {name} missing"
 
     # PRD story 17: stdout reports file count including native OpenCode agents.
-    # Generic (6 files) + 12 OpenCode agents = 18 total.
-    assert "18 file(s)" in result.stdout, (
-        f"stdout should report 18 written files (6 generic + 12 opencode agents), got: {result.stdout!r}"
+    # Generic (6 files) + 13 OpenCode agents = 19 total.
+    assert "19 file(s)" in result.stdout, (
+        f"stdout should report 19 written files (6 generic + 13 opencode agents), got: {result.stdout!r}"
     )
 
 
@@ -873,8 +875,8 @@ def test_install_claude_writes_subagents_and_skill(tmp_path: Path) -> None:
     data = json.loads((tmp_path / MANIFEST_REL).read_text(encoding="utf-8"))
     assert "claude" in data["files_by_agent_cli"]
     claude_files = data["files_by_agent_cli"]["claude"]
-    # 6 persona+skills (CLAUDE.md + 4 skills + 1 nested ref) + 10 subagents + 2 skills = 18
-    assert len(claude_files) == 18
+    # 6 persona+skills (CLAUDE.md + 4 skills + 1 nested ref) + 11 subagents + 2 skills = 19
+    assert len(claude_files) == 19
 
 
 def test_install_claude_subagents_have_name_field(tmp_path: Path) -> None:
@@ -1081,9 +1083,9 @@ def test_cli_install_claude_writes_agents_and_skill(isolated_home: Path) -> None
         "CLI install: claude change skill missing"
     )
 
-    # Generic (6 files) + Claude (18 files: 6 persona+skills + 12 native artifacts) = 24 total.
-    assert "24 file(s)" in result.stdout, (
-        f"stdout should report 24 written files (6 generic + 18 claude), got: {result.stdout!r}"
+    # Generic (6 files) + Claude (19 files: 6 persona+skills + 13 native artifacts) = 25 total.
+    assert "25 file(s)" in result.stdout, (
+        f"stdout should report 25 written files (6 generic + 19 claude), got: {result.stdout!r}"
     )
 
 
@@ -1402,7 +1404,7 @@ def test_discover_loop_agents_excludes_underscore_files() -> None:
     expected_change = sorted(opencode_change_agents())
     assert names == [*expected_loop, *expected_change]
     assert "_result-contract" not in names
-    assert len(names) == 12
+    assert len(names) == 13
 
 
 # ---------------------------------------------------------------------------
