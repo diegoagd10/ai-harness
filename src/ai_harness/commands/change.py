@@ -10,7 +10,13 @@ from typing import Any
 
 import typer
 
-from ai_harness.modules.harness.change import ChangeStatus, ChangeStoreError, change_archive, change_continue, change_new
+from ai_harness.modules.harness.change import (
+    ChangeStatus,
+    ChangeStoreError,
+    change_archive,
+    change_continue,
+    change_new,
+)
 from ai_harness.modules.harness.tasks import (
     SubtaskInput,
     Task,

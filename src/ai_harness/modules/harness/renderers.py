@@ -277,7 +277,16 @@ _AGENT_META: dict[str, dict] = {
         },
         "caps": AgentCaps(
             write=False,
-            spawn=("change-explorer", "propose", "design", "specs", "tasks", "change-implementor", "change-validator", "change-archiver"),
+            spawn=(
+                "change-explorer",
+                "propose",
+                "design",
+                "specs",
+                "tasks",
+                "change-implementor",
+                "change-validator",
+                "change-archiver",
+            ),
         ),
     },
     "change-explorer": {

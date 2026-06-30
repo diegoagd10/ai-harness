@@ -298,7 +298,16 @@ def test_change_orchestrator_meta_declares_primary_restricted_agent() -> None:
     assert meta["model"]["claude"] == "sonnet"
     assert meta["caps"] == AgentCaps(
         write=False,
-        spawn=("change-explorer", "propose", "design", "specs", "tasks", "change-implementor", "change-validator", "change-archiver"),
+        spawn=(
+            "change-explorer",
+            "propose",
+            "design",
+            "specs",
+            "tasks",
+            "change-implementor",
+            "change-validator",
+            "change-archiver",
+        ),
     )
 
 
