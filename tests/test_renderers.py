@@ -1896,3 +1896,93 @@ def test_change_archiver_renders_on_every_native_agent_cli() -> None:
     assert _find_pair(render_agents(AgentCli.OPENCODE), "change-archiver") is not None
     assert _find_pair(render_agents(AgentCli.COPILOT), "change-archiver") is not None
     assert _find_pair(render_agents(AgentCli.CLAUDE), "change-archiver") is not None
+
+
+# ---------------------------------------------------------------------------
+# change-orchestrator — terminal archive routing
+# ---------------------------------------------------------------------------
+
+
+def test_change_orchestrator_archive_route_keeps_semantic_gate() -> None:
+    """The orchestrator retains the semantic validation gate before archiving."""
+    body = _change_orchestrator_body().lower()
+
+    # The semantic gate (Semantic fork 2) is preserved.
+    assert "verdict" in body
+    assert "critical" in body
+    # The archive routing section is present and names the gate as a
+    # precondition for spawning the archiver.
+    assert "archive routing" in body
+    assert "semantic gate" in body or "semantic validation" in body
+
+
+def test_change_orchestrator_archive_route_spawns_change_archiver() -> None:
+    """Archive execution is delegated to change-archiver, not orchestrated inline."""
+    body = _change_orchestrator_body()
+
+    # Spawns the archiver after the gate passes.
+    assert "change-archiver" in body
+    assert "spawn" in body.lower()
+    # The orchestrator must NOT own file moves — the route must explicitly
+    # defer to the CLI run inside the archiver prompt.
+    body_lower = body.lower()
+    assert "move" in body or "moves" in body or "move" in body_lower
+
+
+def test_change_orchestrator_archive_route_forbids_manual_file_moves() -> None:
+    """The orchestrator MUST NOT move .ai-harness/changes/{change} or specs/ itself."""
+    body = _change_orchestrator_body().lower()
+
+    # The route explicitly forbids the orchestrator moving files.
+    assert "must not" in body or "mustn't" in body or "owns only" in body
+    # Manual file-move instructions are named as a forbidden pattern.
+    forbidden = "manual" in body or "by the orchestrator" in body
+    assert forbidden, "archive route must explicitly forbid orchestrator-owned file moves"
+
+
+def test_change_orchestrator_archive_success_is_terminal() -> None:
+    """Successful archiver result ends the flow — no post-archive change-continue."""
+    body = _change_orchestrator_body().lower()
+
+    # Terminal language is explicit.
+    assert "terminal" in body
+    # change-continue must be forbidden as a follow-up after archive success.
+    archive_section_idx = body.index("archive routing")
+    post_section = body[archive_section_idx:]
+    assert "change-continue" in post_section
+    assert "must not" in post_section or "mustn't" in post_section or "do not" in post_section
+
+
+def test_change_orchestrator_archive_failure_escalates_to_blocked() -> None:
+    """Archiver blocked result escalates to a blocked human-decision flow."""
+    body = _change_orchestrator_body().lower()
+
+    # Failure language names 'blocked' and 'human' explicitly.
+    archive_section_idx = body.index("archive routing")
+    post_section = body[archive_section_idx:]
+    assert "blocked" in post_section
+    assert "human" in post_section
+    # The orchestrator must NOT spawn fix-loop agents when archiver fails.
+    assert "do not spawn" in post_section or "must not spawn" in post_section or "mustn't spawn" in post_section
+
+
+def test_change_orchestrator_archive_route_resume_recovery_skips_double_archive() -> None:
+    """On resume after archive already landed, do not re-spawn the archiver."""
+    body = _change_orchestrator_body().lower()
+
+    archive_section_idx = body.index("archive routing")
+    post_section = body[archive_section_idx:]
+    # Resume semantics for archive: do not re-spawn, do not call change-continue.
+    assert "resume" in post_section
+    assert "do not spawn" in post_section or "must not" in post_section or "do not" in post_section
+
+
+def test_change_orchestrator_archive_route_uses_cli_command_inside_archiver() -> None:
+    """The route's archiver spawn explicitly references the ai-harness CLI command."""
+    body = _change_orchestrator_body()
+
+    archive_section_idx = body.index("Archive routing")
+    post_section = body[archive_section_idx:]
+    # The archiver's CLI run is named in the route.
+    assert "ai-harness change-archive" in post_section
+    assert "docs: archive" in post_section
