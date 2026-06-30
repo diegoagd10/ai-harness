@@ -177,8 +177,9 @@ sys.exit(0 if s1==s2 else 1)
         "$BINARY" install -o claude 2>&1 || true
         local cfg="$HOME/.ai-harness/installed.json"
         cp "$cfg" /tmp/cfg_before.json 2>/dev/null || true
-        local r; r=$("$BINARY" set-models -o claude 2>/dev/null; echo $?)
-        if [ "$r" -ne 0 ]; then
+        local output rc
+        output=$("$BINARY" set-models -o claude 2>&1); rc=$?
+        if [ "$rc" -ne 0 ]; then
             [ -f /tmp/cfg_before.json ] && [ -f "$cfg" ] \
                 && assert_md5_match /tmp/cfg_before.json "$cfg" "Config unchanged (non-TTY rejection)" \
                 || log_pass "set-models non-zero under non-TTY (no partial writes)"

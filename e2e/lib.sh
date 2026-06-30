@@ -14,9 +14,9 @@ CURRENT_TIER="${CURRENT_TIER:-}"
 
 # Logging
 log_test()  { printf "${YELLOW}[TEST]${NC}  %s\n" "$1"; }
-log_pass()  { printf "${GREEN}[PASS]${NC}  %s\n" "$1"; ((PASSED++)); case "$CURRENT_TIER" in tier1) ((TIER1_PASSED++));; tier2) ((TIER2_PASSED++));; tier3) ((TIER3_PASSED++));; esac; }
-log_fail()  { printf "${RED}[FAIL]${NC}  %s\n" "$1"; ((FAILED++)); case "$CURRENT_TIER" in tier1) ((TIER1_FAILED++));; tier2) ((TIER2_FAILED++));; tier3) ((TIER3_FAILED++));; esac; }
-log_skip()  { printf "${BLUE}[SKIP]${NC}  %s\n" "$1"; ((SKIPPED++)); case "$CURRENT_TIER" in tier1) ((TIER1_SKIPPED++));; tier2) ((TIER2_SKIPPED++));; tier3) ((TIER3_SKIPPED++));; esac; }
+log_pass()  { printf "${GREEN}[PASS]${NC}  %s\n" "${1:-ok}"; PASSED=$((PASSED+1)); case "$CURRENT_TIER" in tier1) TIER1_PASSED=$((TIER1_PASSED+1));; tier2) TIER2_PASSED=$((TIER2_PASSED+1));; tier3) TIER3_PASSED=$((TIER3_PASSED+1));; esac; }
+log_fail()  { printf "${RED}[FAIL]${NC}  %s\n" "${1:-FAIL}"; FAILED=$((FAILED+1)); case "$CURRENT_TIER" in tier1) TIER1_FAILED=$((TIER1_FAILED+1));; tier2) TIER2_FAILED=$((TIER2_FAILED+1));; tier3) TIER3_FAILED=$((TIER3_FAILED+1));; esac; }
+log_skip()  { printf "${BLUE}[SKIP]${NC}  %s\n" "$1"; SKIPPED=$((SKIPPED+1)); case "$CURRENT_TIER" in tier1) TIER1_SKIPPED=$((TIER1_SKIPPED+1));; tier2) TIER2_SKIPPED=$((TIER2_SKIPPED+1));; tier3) TIER3_SKIPPED=$((TIER3_SKIPPED+1));; esac; }
 log_info()  { printf "${BLUE}[INFO]${NC}  %s\n" "$1"; }
 
 # Resolve ai-harness binary (priority: AI_HARNESS_BINARY env > PATH)
