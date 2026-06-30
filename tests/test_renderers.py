@@ -1071,6 +1071,184 @@ def test_change_orchestrator_body_interactive_continue_cannot_chain_auto() -> No
     assert "tasks" in body
 
 
+# ---------------------------------------------------------------------------
+# Renderer behavior contract hardening — fix-interactive-gates task 6
+# ---------------------------------------------------------------------------
+# Subtasks 6.1-6.8 re-anchor the contract by combining the per-subtask
+# assertions into one scenario each. Subtask 6.9 keeps the gentle-orchestrator
+# reference carry-through enforceable from disk.
+
+
+def test_contract_orchestrator_pause_requires_stop_ask_wait() -> None:
+    """Subtask 6.1 — a 'pause' keyword without STOP / ask / wait fails.
+
+    Locks that interactive mode wording cannot be a soft 'pause' alone;
+    it must pair pause semantics with explicit STOP, ask, and wait.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # 'pause' or 'interactive' is not enough on its own.
+    assert "pause" in body or "interactive" in body
+    # STOP / ask / wait must all be present as actual control-flow
+    # verbs in the rendered body, not just keywords.
+    assert "stop" in body
+    assert "ask" in body
+    assert "wait" in body
+
+
+def test_contract_orchestrator_approval_requires_phase_scope() -> None:
+    """Subtask 6.2 — approval keyword without phase scope fails.
+
+    Locks that an approval phrase like 'continue' must be paired with
+    phase-scoped semantics; bare 'approval' or 'continue' is not enough.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Approval vocabulary is present.
+    assert "continue" in body or "approval" in body or "approve" in body
+    # Phase-scoped semantics are explicit.
+    assert (
+        "phase-scoped" in body
+        or "phase scoped" in body
+        or "scoped to" in body
+        or "immediate next phase" in body
+        or "only the immediate next" in body
+    )
+
+
+def test_contract_orchestrator_explore_must_wait_before_prd_same_turn() -> None:
+    """Subtask 6.3 — interactive explore result must wait before PRD.
+
+    Locks that an explore phase whose `nextRecommended` is `prd` does
+    NOT launch `propose` in the same turn; the orchestrator must wait.
+    """
+    body = _change_orchestrator_body().lower()
+
+    assert "explore" in body
+    assert "prd" in body
+    assert "wait" in body
+    # Same-turn PRD launch is forbidden.
+    assert "same turn" in body or "in the same turn" in body or "must not launch" in body or "do not launch" in body
+
+
+def test_contract_orchestrator_continue_after_prd_authorizes_design_only() -> None:
+    """Subtask 6.4 — continue after PRD authorizes design only.
+
+    Locks that a `continue` reply following PRD authorizes `design`
+    only and MUST NOT chain to specs or tasks without another
+    checkpoint.
+    """
+    body = _change_orchestrator_body().lower()
+
+    assert "continue" in body
+    assert "prd" in body
+    assert "design" in body
+    # Specs and tasks are explicitly named as not auto-chained.
+    assert "specs" in body
+    assert "tasks" in body
+    # Each phase needs its own checkpoint.
+    assert "checkpoint" in body or "stop" in body
+
+
+def test_contract_orchestrator_archive_ambiguity_requires_clarification() -> None:
+    """Subtask 6.5 — ambiguous archive request triggers clarification.
+
+    Locks that an archive request whose intent could mean manual
+    archive vs CLI archive is clarified before PRD, not assumed.
+    """
+    body = _change_orchestrator_body().lower()
+
+    assert "archive" in body
+    # Manual archive is contrasted with CLI archive.
+    assert "manual" in body
+    # The orchestrator must ask a clarification question.
+    assert "clarif" in body or "question" in body
+    # CLI archive is not assumed.
+    assert "must not assume" in body or "do not assume" in body or "never assume" in body or "not assumed" in body
+
+
+def test_contract_orchestrator_auto_requires_explicit_or_cached_selection() -> None:
+    """Subtask 6.6 — auto mode without explicit or cached selection fails.
+
+    Locks that auto-continuation is gated on an explicit user
+    instruction or a previously cached session mode. Default fall-
+    through to auto is forbidden.
+    """
+    body = _change_orchestrator_body().lower()
+
+    assert "auto" in body
+    # Auto must be explicit or cached.
+    assert "explicit" in body
+    assert "cached" in body or "cache" in body
+    # Default fall-through to auto is forbidden.
+    assert "fall-through" in body or "fall through" in body or "accidental" in body or "must not" in body
+
+
+def test_contract_orchestrator_auto_gatekeeper_requires_all_four_checks() -> None:
+    """Subtask 6.7 — auto gatekeeper missing any of the four checks fails.
+
+    Locks the four mandatory gatekeeper checks: contract conformance,
+    artifact existence, no drift from PRD scope, and routing coherence.
+    """
+    body = _change_orchestrator_body().lower()
+
+    assert "gatekeeper" in body
+    # All four mandatory checks are spelled out.
+    assert "contract" in body
+    assert "artifact" in body
+    assert "drift" in body or "scope" in body
+    assert "routing" in body or "depend" in body
+
+
+def test_contract_orchestrator_launch_dedup_session_log_required() -> None:
+    """Subtask 6.8 — launch dedup session log is asserted in the prompt.
+
+    Locks that the orchestrator body mentions the session
+    (phase, task-fingerprint) launch log and the duplicate guard.
+    """
+    body = _change_orchestrator_body().lower()
+
+    assert "session" in body
+    assert "launch log" in body or "launch_log" in body
+    # (phase, task-fingerprint) keying.
+    assert "(phase, task_fingerprint)" in body or "(phase, task fingerprint)" in body
+    # Duplicate guard.
+    assert "duplicate" in body
+
+
+def test_contract_change_artifacts_carry_all_five_gentle_references() -> None:
+    """Subtask 6.9 — all five gentle-orchestrator line refs are present.
+
+    Locks carry-through: every required gentle-orchestrator line range
+    must be cited from at least one Change artifact (PRD, exploration,
+    design, specs, or implementation). Removing any one breaks the
+    enforcement contract.
+    """
+    change_root = Path(__file__).resolve().parent.parent / ".ai-harness/changes/fix-interactive-gates"
+    prd = (change_root / "prd.md").read_text()
+    exploration = (change_root / "exploration.md").read_text()
+    design = (change_root / "design.md").read_text()
+    specs_dir = change_root / "specs"
+    specs_files = list(specs_dir.glob("*.md"))
+    specs_text = "\n".join(p.read_text() for p in specs_files)
+
+    # All five gentle-orchestrator line ranges from the PRD mapping.
+    expected_refs = [
+        "sdd-orchestrator.md:100-149",  # Session Preflight hard gate
+        "sdd-orchestrator.md:178-199",  # Execution Mode interactive pauses
+        "sdd-orchestrator.md:200",      # Proposal/grill round before proposal
+        "sdd-orchestrator.md:202-222",  # Automatic Mode Gatekeeper
+        "sdd-orchestrator.md:299-308",  # Sub-Agent Launch Deduplication
+    ]
+
+    combined = prd + exploration + design + specs_text
+    for ref in expected_refs:
+        assert ref in combined, (
+            f"gentle-orchestrator reference {ref!r} missing from "
+            f"PRD/exploration/design/specs under {change_root}"
+        )
+
+
 def test_change_orchestrator_body_frontmatter_parity_after_body_only_edits() -> None:
     """Rendered change-orchestrator frontmatter stays aligned with its source.
 
