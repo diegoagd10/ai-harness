@@ -29,33 +29,10 @@ if [ -z "$BINARY" ]; then
 fi
 log_info "Using binary: $BINARY"
 
-# Side-effect E2E exercises install/injection behaviour. Keep it deterministic
-# by installing the CLI first so subsequent commands (install, uninstall,
-# set-models) have a provisioned binary on PATH.
-if [ "${RUN_FULL_E2E:-0}" = "1" ] || [ "${RUN_BACKUP_TESTS:-0}" = "1" ]; then
-    # Install ai-harness into a temporary isolated tool dir for the test.
-    # UV_TOOL_DIR and UV_TOOL_BIN_DIR keep the host environment clean.
-    AI_HARNESS_E2E_TMPDIR="$(mktemp -d)"
-    export UV_TOOL_DIR="$AI_HARNESS_E2E_TMPDIR/uv-tool"
-    export UV_TOOL_BIN_DIR="$AI_HARNESS_E2E_TMPDIR/bin"
-    mkdir -p "$UV_TOOL_BIN_DIR"
-
-    # Build from source and install into the isolated tool dir.
-    log_info "Provisioning ai-harness into isolated tool dir..."
-    if ! uv build 2>/dev/null; then
-        log_fail "uv build failed"
-        exit 1
-    fi
-    if ! UV_TOOL_DIR="$UV_TOOL_DIR" UV_TOOL_BIN_DIR="$UV_TOOL_BIN_DIR" \
-        uv tool install --dir "$AI_HARNESS_E2E_TMPDIR/uv-tool" . 2>&1; then
-        log_fail "uv tool install failed"
-        exit 1
-    fi
-
-    # Prepend isolated bin dir to PATH so tests use the sandboxed binary.
-    export PATH="$UV_TOOL_BIN_DIR:$PATH"
-    log_info "Sandboxed ai-harness provisioned at: $UV_TOOL_BIN_DIR/ai-harness"
-fi
+# Side-effect E2E exercises install/injection behaviour. The Dockerfile pre-installs
+# ai-harness via 'uv tool install .' so the binary is already on PATH inside the
+# container. The resolve_binary call above finds it and logs its path.
+# No additional provisioning is needed for tier-2/3 tests.
 
 # ===========================================================================
 # TIER 1 — Basic binary + command routing (always run)
