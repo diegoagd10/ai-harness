@@ -1,34 +1,43 @@
 # syntax=docker/dockerfile:1.7
-# Base image: Debian "bookworm-slim" with Python 3.12 and the `uv` binary
-# already installed. Provides uv + the cli source; the e2e suite runs via
-# ``uv run inv test`` which exercises the full install/reinstall/uninstall
-# lifecycle.
-FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+# Dockerfile — isolated test image for ai-harness e2e suite
+# Built and run by e2e/docker-test.sh; not a public seam.
+# Mirrors: gentle-ai/e2e/Dockerfile.ubuntu pattern
+FROM ubuntu:24.04
 
-# Set the working directory for subsequent instructions (created if missing).
-WORKDIR /build
+ENV DEBIAN_FRONTEND=noninteractive
 
-# Copy the project source from the build context (repo root) into the image
-# at /build.
-COPY . /build
+# Install system packages: bash, uv, jq, python3.
+# bash: required for shell test scripts.
+# uv: package manager for Python tool installation.
+# jq: JSON manipulation for assertion helpers.
+# python3: available for assert_valid_json fallback.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash \
+    curl \
+    jq \
+    python3 \
+    python3-venv \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install dev dependencies (invoke, pytest, etc.) so ``uv run inv test`` works.
-# The uv cache is mounted as a build cache so wheel downloads persist across
-# builds, and ``uv sync`` is retried because PyPI fetches inside the build
-# network occasionally time out.
-RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
-    UV_HTTP_TIMEOUT=180 \
-    bash -c 'set -e; \
-      for attempt in 1 2 3 4 5; do \
-        uv sync --group dev && break; \
-        echo "uv sync attempt $attempt/5 failed, retrying in $((attempt*10))s..."; \
-        sleep $((attempt*10)); \
-      done'
-
-# ``uv tool install`` puts executables in ~/.local/bin. The container runs as
-# root, so that's /root/.local/bin — prepend it to PATH so ``ai-harness`` is
-# found once the suite provisions it.
+# Install uv (Astral's fast Python package manager).
+# Mirrors: gentle-ai installs Go; ai-harness needs uv for Python tool install.
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:${PATH}"
 
-# Default command: run the full e2e suite via Invoke.
-CMD ["uv", "run", "inv", "test"]
+# Copy the full project source into the image at /build.
+COPY . /build
+
+# Ensure e2e test scripts are executable.
+RUN chmod +x /build/e2e/e2e_test.sh /build/e2e/lib.sh
+
+# Pre-install ai-harness as a tool so e2e tests can invoke it directly.
+# uv tool install . requires being in the package directory.
+WORKDIR /build
+ENV UV_TOOL_DIR="/root/.local/share/uv/tools/ai-harness"
+ENV UV_TOOL_BIN_DIR="/root/.local/bin"
+RUN uv tool install . --python python3
+
+# Default command: run the canonical e2e test suite.
+# docker-test.sh overrides this with an explicit bash + args invocation.
+CMD ["bash", "/build/e2e/e2e_test.sh"]
