@@ -288,7 +288,7 @@ def test_loop_orchestrator_description_mentions_loop_labeled_sub_issues() -> Non
 
 def test_change_orchestrator_meta_declares_primary_restricted_agent() -> None:
     """Change-orchestrator metadata defines native models and restrictive capabilities."""
-    meta = get_agent_meta("change-orchestrator")
+    meta = get_agent_meta("change-orchestrator", overrides={})
 
     assert meta["description"]
     assert meta["mode"] == "primary"
