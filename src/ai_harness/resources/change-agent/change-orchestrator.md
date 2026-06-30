@@ -97,7 +97,7 @@ not routing decisions.
 | `tasks` | Spawn `tasks`. |
 | `implement` | Run the [Human review gate](#human-review-gate); only spawn `change-implementor` after it passes. |
 | `validate` | Spawn `change-validator`. |
-| `archive` | Apply validator semantic gate; archive only when it passes. |
+| `archive` | Apply validator semantic gate; on pass, spawn `change-archiver`. Treat archiver success as terminal. |
 | `resolve-blockers` | Surface `blockedReasons` and stop. |
 
 ## Interactive phase checkpoint
@@ -329,6 +329,14 @@ Rules:
 - The subagent contract requires `skills: loaded | fallback | none` plus
   `skill_resolution` detail when degraded. Silent fallback to a wrong file
   is forbidden — the orchestrator routes on the reported resolution.
+- **`change-implementor` always receives the TDD skill.** Resolve
+  `<repo-root>/.agents/skills/tdd/SKILL.md` to an absolute path and
+  include it in every implementor delegation's `Skills to load before
+  work` block. Implementor's job is implementation; TDD is the default
+  methodology. No opt-out — even docs-only tasks get the skill loaded
+  (overhead is negligible). The implementor prompt itself stays
+  silent on which skills to expect; injection is the orchestrator's
+  sole responsibility.
 
 ## Delegation launch log (HARD GATE)
 
@@ -386,6 +394,53 @@ On resume, if no fresh validator result is in context, read `validation.md`
 prose to recover verdict and critical count. The CLI never parses semantic
 verdicts.
 
+## Archive routing — delegate to change-archiver
+
+When the semantic gate passes and `nextRecommended` is `archive`, the
+orchestrator owns only the routing decision; the **physical archive
+execution belongs to `change-archiver`**. The orchestrator MUST NOT
+move `.ai-harness/changes/{change}/specs/` or
+`.ai-harness/changes/{change}/` itself. Manual file moves by the
+orchestrator skip the CLI's structural preflight and the transactional
+rollback contract — the CLI owns those.
+
+**Semantic gate (still required).** Confirm validator verdict is
+`pass` or `pass-with-warnings` with `critical == 0`. If validator
+findings are unresolved, do not spawn `change-archiver`; route back
+to `change-implementor` for a fix loop (per Semantic fork 2 above).
+
+**Spawn.** Once the semantic gate passes, spawn `change-archiver`
+with the target Change name. The archiver:
+
+1. Runs exactly one CLI command — `ai-harness change-archive {change}`.
+2. Stages ONLY the resulting `.ai-harness/specs/{change}/` and
+   `.ai-harness/archive/{change}/` paths.
+3. Creates one scoped commit with the message
+   `docs: archive {change}`.
+4. Returns its result envelope (`status: done | blocked`) and stops.
+
+**Terminal on success.** When `change-archiver` reports `done`,
+the archive flow ends. The orchestrator MUST NOT then call
+`ai-harness change-continue {change}` — the Change folder no
+longer exists under `.ai-harness/changes/{change}/` so the command
+would fail, and post-archive continuation is meaningless. Return
+your own `status: done` result with `next: stop`.
+
+**Blocked on failure.** When `change-archiver` reports `blocked`,
+the orchestrator MUST NOT spawn `change-implementor`, `change-validator`,
+or any other subagent to retry or work around the failure. Surface the
+archiver's `errors` field verbatim, mark the flow as
+`status: blocked | next: blocked`, and ask the human to decide how to
+proceed (fix the structural cause, force a manual archive, or roll back).
+
+**Resume recovery.** On resume after a session gap or compaction,
+re-derive archive readiness from `validation.md` (verdict + critical
+count) and `tasks.json` (task progress). If both conditions hold and
+`ai-harness change-archive {change}` already succeeded, the change
+folder has moved to `.ai-harness/archive/{change}/` — do NOT spawn
+`change-archiver` again, do NOT call `change-continue`. Treat the
+flow as already terminal and return `status: done`.
+
 ## Work rules
 
 - Work on the current worktree and current branch. No branch switches, no
@@ -414,7 +469,10 @@ artifacts: <change folder, archive path, or decomposition manifest>
 skills:    loaded | fallback | none
 ```
 
-- `done` means archive routing completed or a confirmed split manifest was
-  written.
+- `done` means archive routing completed (the orchestrator returned
+  `status: done` after `change-archiver` reported success, or a
+  confirmed split manifest was written). Archive is terminal — once
+  `change-archiver` succeeds, the orchestrator MUST NOT continue or
+  call `change-continue`.
 - `waiting` means user confirmation is required before continuing.
 - `blocked` means the CLI or a subagent could not proceed.

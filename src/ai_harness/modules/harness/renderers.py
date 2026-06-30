@@ -277,7 +277,16 @@ _AGENT_META: dict[str, dict] = {
         },
         "caps": AgentCaps(
             write=False,
-            spawn=("change-explorer", "propose", "design", "specs", "tasks", "change-implementor", "change-validator"),
+            spawn=(
+                "change-explorer",
+                "propose",
+                "design",
+                "specs",
+                "tasks",
+                "change-implementor",
+                "change-validator",
+                "change-archiver",
+            ),
         ),
     },
     "change-explorer": {
@@ -343,6 +352,17 @@ _AGENT_META: dict[str, dict] = {
         "description": (
             "Change validator — read-only verdict-bearing reviewer that uses task-list, writes validation.md, "
             "and reports pass, pass-with-warnings, or fail with critical count."
+        ),
+        "mode": "subagent",
+        "model": {
+            "opencode": "minimax/MiniMax-M3",
+            "claude": "sonnet",
+        },
+    },
+    "change-archiver": {
+        "description": (
+            "Change archiver — runs ai-harness change-archive for the target Change and commits "
+            "the resulting .ai-harness archive/spec movement as a single scoped docs commit."
         ),
         "mode": "subagent",
         "model": {

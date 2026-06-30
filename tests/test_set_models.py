@@ -145,6 +145,7 @@ def test_opencode_change_agents_returns_eight_change_agents() -> None:
         "change-explorer",
         "change-implementor",
         "change-validator",
+        "change-archiver",
         "propose",
         "design",
         "specs",
@@ -1271,9 +1272,9 @@ def test_run_opencode_wizard_change_agent_set_writes_eight_overrides(
 
     assert wrote is True
     overrides = json.loads(_override_file(tmp_path).read_text(encoding="utf-8"))
-    # All 8 change-agent keys present, each with the picked model under model.opencode.
+    # All 9 change-agent keys present, each with the picked model under model.opencode.
     assert set(overrides.keys()) == set(change_agents), (
-        f"expected exactly the 8 change-agent keys, got {sorted(overrides.keys())}"
+        f"expected exactly the 9 change-agent keys, got {sorted(overrides.keys())}"
     )
     for agent in change_agents:
         assert overrides[agent]["model"]["opencode"] == "openai/gpt-5.5"
@@ -1285,13 +1286,13 @@ def test_run_opencode_wizard_change_agent_set_re_renders_change_agent_files(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``-a change`` re-renders ALL 12 .config/opencode/agent/*.md files (re-render scope locked at 12).
+    """``-a change`` re-renders ALL 13 .config/opencode/agent/*.md files (re-render scope locked at 13).
 
     Acceptance criterion ``req:re-render-scope-001``: ``_discover_loop_agents``
     MUST continue to walk BOTH ``loop-agent/`` and ``change-agent/`` so
     that every on-disk prompt reflects fresh override state, regardless
     of which agent set was just configured. After a `-a change` confirm,
-    all 4 loop-agent files AND all 8 change-agent files must be
+    all 4 loop-agent files AND all 9 change-agent files must be
     re-emitted. The loop-agent files' frontmatter must NOT regress to
     a state that ignores any pre-existing override.
     """
@@ -1326,9 +1327,9 @@ def test_run_opencode_wizard_change_agent_set_re_renders_change_agent_files(
     wrote = tui.run_opencode_wizard(home=tmp_path, agents=tuple(change_agents))
 
     assert wrote is True
-    # The 12 agent files the renderer discovered: 4 loop + 8 change.
+    # The 13 agent files the renderer discovered: 4 loop + 9 change.
     expected_names = list(opencode_wizard_agents()) + list(opencode_change_agents())
-    assert len(expected_names) == 12, "loop + change must total 12 — discovery sanity"
+    assert len(expected_names) == 13, "loop + change must total 13 — discovery sanity"
 
     agent_dir = tmp_path / ".config" / "opencode" / "agent"
     assert agent_dir.is_dir(), "the wizard must have written the agent dir on re-render"

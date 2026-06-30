@@ -3,6 +3,7 @@ from __future__ import annotations
 import typer
 
 from ai_harness.commands.change import (
+    change_archive_cmd,
     change_continue_cmd,
     change_new_cmd,
     task_create_cmd,
@@ -22,6 +23,7 @@ app.command()(install)
 app.command()(set_models)
 app.command(name="change-new")(change_new_cmd)
 app.command(name="change-continue")(change_continue_cmd)
+app.command(name="change-archive")(change_archive_cmd)
 app.command(name="task-create")(task_create_cmd)
 app.command(name="task-list")(task_list_cmd)
 app.command(name="task-next")(task_next_cmd)
