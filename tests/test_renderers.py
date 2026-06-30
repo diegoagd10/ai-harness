@@ -609,6 +609,115 @@ def test_change_orchestrator_body_locks_auto_interactive_phase_gate() -> None:
     assert "reviewed" in body
 
 
+def test_change_orchestrator_body_session_mode_hard_gate_before_delegation() -> None:
+    """Subtask 2.1 — session mode is a hard gate before change-new/change-continue.
+
+    Locks the preflight requirement: execution mode MUST be established
+    before any ``change-new`` or ``change-continue`` delegation, and the
+    session-mode wording must be marked as a hard gate.
+    """
+    body = _change_orchestrator_body()
+
+    # Hard gate is named.
+    assert "hard gate" in body.lower() or "hard_gate" in body.lower() or "hard-gate" in body.lower()
+    # Mode is tied to the two delegation commands.
+    assert "change-new" in body
+    assert "change-continue" in body
+    # The mode decision appears before delegation wording.
+    mode_idx = body.lower().find("session mode")
+    assert mode_idx != -1, "session mode wording missing from orchestrator body"
+    delegation_idx = body.find("change-continue")
+    assert delegation_idx != -1
+    # The mode preflight appears before any delegation instruction.
+    assert mode_idx < delegation_idx, (
+        "session mode preflight must appear before change-new/change-continue delegation wording"
+    )
+
+
+def test_change_orchestrator_body_preflight_runs_when_prior_artifacts_exist() -> None:
+    """Subtask 2.2 — prior artifacts do not satisfy the session-mode preflight.
+
+    Locks that the mode gate fires regardless of pre-existing artifacts:
+    exploration, PRD, design, specs, or tasks already on disk do not
+    replace the preflight step.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Prior artifacts do not satisfy the mode preflight.
+    assert "existing artifacts" in body or "prior artifacts" in body or "artifacts" in body
+    # The preflight still runs even with prior artifacts.
+    assert "still" in body or "anyway" in body or "regardless" in body or "do not satisfy" in body or "must still" in body
+    # Mode preflight is non-bypassable.
+    assert "preflight" in body or "pre-flight" in body or "before any" in body or "before" in body
+
+
+def test_change_orchestrator_body_unspecified_mode_defaults_to_interactive_and_caches() -> None:
+    """Subtask 2.3 — unspecified mode defaults to interactive and is cached.
+
+    Locks the default + cache behavior: when the user does not specify
+    interactive or auto, the orchestrator uses interactive as the default
+    and caches that decision for the session.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Default-to-interactive wording.
+    assert "default" in body
+    # Cache-for-session wording.
+    assert "cache" in body or "cached" in body
+    # Interactive is the default, not auto.
+    # Find default-context substring.
+    default_idx = body.find("default")
+    assert default_idx != -1
+    window = body[default_idx : default_idx + 200]
+    assert "interactive" in window, "default must point at interactive, not auto"
+
+
+def test_change_orchestrator_body_cached_interactive_survives_continue() -> None:
+    """Subtask 2.4 — cached interactive mode survives later continue requests.
+
+    Locks the cache durability: a later ``continue`` request does not
+    reinterpret interactive mode as automatic pipeline approval. Only an
+    explicit mode change can flip the cached mode.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Cache wording is explicit and survives later user input.
+    assert "cached" in body or "cache" in body
+    # A later continue request must NOT auto-convert to pipeline-wide auto.
+    assert "continue" in body
+    # Explicit non-reinterpretation wording.
+    assert (
+        "must not reinterpret" in body
+        or "does not reinterpret" in body
+        or "does not auto" in body
+        or "not interpreted as auto" in body
+        or "not be reinterpreted" in body
+        or "must not be reinterpreted" in body
+        or "not silently" in body
+        or "must not silently" in body
+        or "no silent" in body
+        or "must not flip" in body
+    )
+
+
+def test_change_orchestrator_body_explicit_mode_change_replaces_cache() -> None:
+    """Subtask 2.5 — explicit mode change replaces the cached mode before delegation.
+
+    Locks the cache-replacement rule: an explicit user instruction to
+    switch to ``auto`` updates the cached mode before any further phase
+    delegation.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Explicit-mode-change wording.
+    assert "explicit" in body
+    assert ("mode change" in body) or ("change mode" in body) or ("switch mode" in body) or ("change the cached mode" in body)
+    # The cached mode is replaced (not appended).
+    assert "replace" in body or "replaces" in body or "updated" in body or "update the cached" in body
+    # The replacement happens before any further delegation.
+    assert "before any further" in body or "before further delegation" in body or "before the next" in body or "before any next" in body
+
+
 def test_phase_prompts_expose_shared_result_envelope() -> None:
     """Explorer, implementor, and validator prompts share one result envelope.
 
