@@ -139,6 +139,39 @@ approval. Ask one clarifying question and wait; do NOT launch the next
 phase. Approval requires an explicit continuation confirmation naming
 the next phase.
 
+## Grill / proposal-question gate
+
+Before `change-new` runs `propose` (PRD), and before any resume that
+points at PRD with weak understanding, the orchestrator MUST run a
+grill / proposal-question round. The gate fires when any of the
+following is true:
+
+- The user request is underspecified (no concrete outcome, no
+  acceptance signal, no targeted users or situation).
+- The requested artifact type is ambiguous — for example, an
+  `archive` request whose intent could mean manual artifact archiving
+  rather than a new `ai-harness archive` CLI command. The orchestrator
+  must ask a clarification question and MUST NOT assume a CLI archive
+  implementation. Manual archive and CLI archive are different scopes
+  and require different Change folders.
+- Business understanding, business rules, impact, edge cases, or
+  tradeoffs are missing from the request.
+- Memory or prior artifacts reveal multiple plausible intents.
+
+**Question content.** The proposal-question round covers: business
+problem and target users, business rules, current-state gap, product
+outcome, implications and impact, edge cases, decision gaps, first-slice
+scope boundaries, non-goals, and product or business tradeoffs. Ask
+focused questions, one at a time, and summarise the resulting
+assumptions before delegating PRD.
+
+**No-bypass rule.** A generic `continue` reply is NOT sufficient to
+launch PRD when the grill gate has flagged weak understanding. The
+orchestrator asks the required clarification question first. This
+applies on both `change-new` (Start) and `change-continue` (Resume)
+paths: continue with weak understanding still triggers the grill gate
+before any PRD delegation.
+
 ## Human review gate
 
 When `nextRecommended` is `implement`, the orchestrator MUST surface a

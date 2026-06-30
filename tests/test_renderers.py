@@ -578,6 +578,105 @@ def test_change_orchestrator_body_binds_approval_to_reviewed_artifact_set() -> N
     assert "approval does not carry" in body or "prompt-only" in body
 
 
+def test_change_orchestrator_body_grill_gate_blocks_weak_understanding() -> None:
+    """Subtask 4.1 — weak understanding blocks PRD with focused intent questions.
+
+    Locks the grill gate: when business intent, rules, impact, edge cases,
+    or tradeoffs are unclear, the orchestrator must ask focused questions
+    and wait before delegating PRD.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Grill/proposal-question gate appears in the body.
+    assert "grill" in body
+    # Gate fires before PRD delegation.
+    assert "before" in body and "prd" in body
+    # Weak or unclear intent is the trigger.
+    assert "weak" in body or "unclear" in body or "underspecified" in body or "ambiguous" in body
+    # The gate asks focused questions and waits.
+    assert "question" in body
+    assert "wait" in body or "before delegating" in body or "before prd" in body
+
+
+def test_change_orchestrator_body_grill_fires_on_continue_with_weak_understanding() -> None:
+    """Subtask 4.2 — continue with weak understanding still triggers grill.
+
+    Locks that the grill gate fires both before `change-new` and during
+    `change-continue` flow: a continue request does not bypass the gate
+    when understanding is still weak.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Continue can also lead into the grill gate.
+    assert "continue" in body
+    # Grill fires on both Start and Resume paths.
+    assert "change-new" in body and "change-continue" in body
+    # Weak understanding still triggers the grill, not PRD delegation.
+    assert ("weak" in body and "grill" in body) or "still triggers" in body or "still applies" in body or "does not bypass" in body
+
+
+def test_change_orchestrator_body_grill_clarifies_archive_vs_manual_archive() -> None:
+    """Subtask 4.3 — ambiguous archive vs manual archive request is clarified.
+
+    Locks that the grill gate explicitly handles the archive ambiguity:
+    when memory or artifacts indicate archive might mean manual artifact
+    archiving, the orchestrator must ask a clarification question and
+    must NOT assume a CLI archive command implementation.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Archive ambiguity is named as a clarification trigger.
+    assert "archive" in body
+    # Manual archive is contrasted with CLI archive.
+    assert "manual" in body
+    # CLI archive assumption is forbidden.
+    assert "must not assume" in body or "do not assume" in body or "never assume" in body or "not a cli assumption" in body or "not assumed" in body
+    # A clarification question is required.
+    assert "clarif" in body or "question" in body
+
+
+def test_change_orchestrator_body_proposal_round_covers_business_understanding() -> None:
+    """Subtask 4.4 — proposal round covers business understanding and tradeoffs.
+
+    Locks the content of the proposal-question round: it must cover
+    business understanding, business rules, impact, edge cases, and
+    tradeoffs so the PRD has enough grounding.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # The five required topic anchors.
+    assert "business" in body
+    assert "rules" in body
+    assert "impact" in body or "implications" in body
+    assert "edge case" in body or "edge cases" in body
+    assert "tradeoff" in body or "trade-offs" in body or "trade off" in body
+
+
+def test_change_orchestrator_body_generic_continue_cannot_bypass_grill() -> None:
+    """Subtask 4.5 — generic continue cannot bypass the grill gate.
+
+    Locks the no-bypass rule: a `continue` reply is not sufficient
+    approval when the grill/proposal-question gate has flagged weak
+    understanding. The orchestrator must ask the required questions
+    instead of launching PRD.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Continue cannot bypass a pending grill gate.
+    assert "continue" in body
+    # The grill gate remains required while intent is weak.
+    assert "grill" in body
+    # A no-bypass wording is required.
+    assert (
+        "not bypass" in body
+        or "does not bypass" in body
+        or "cannot bypass" in body
+        or "must not bypass" in body
+        or "is not sufficient" in body
+        or "cannot approve" in body
+    )
+
+
 def test_change_orchestrator_body_enforces_phase_task_fingerprint_launch_log() -> None:
     """Rendered change-orchestrator refuses duplicate (phase, task_fingerprint) launches.
 
