@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """Unit tests for the set-models wizard pure helpers and CLI arg validation.
 
 Behavioural tests for the data-prep layer (``pure`` module) and the typer

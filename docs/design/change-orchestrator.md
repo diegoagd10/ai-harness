@@ -106,6 +106,70 @@ are all valid. This OR cannot be expressed by the flat AND `requires` list, so
   bounded by `CHANGE_FIXUP_MAX_ITERATIONS` (default `5`). The graph stays
   acyclic; the cycle lives in orchestrator routing keyed on `validate`'s verdict.
 
+## Human review gate — planning-to-implementation seam
+
+Implementation cannot start the instant `nextRecommended` flips to `implement`.
+Between **artifact prerequisite checks** (which block earlier and surface via
+`resolve-blockers`) and the **`change-implementor` launch**, the orchestrator
+runs an explicit human review checkpoint. It is a prompt-level `waiting` step —
+the gate appears in the orchestrator instruction text and in the rendered CLI
+output, but introduces **no new status token, schema field, or persisted
+approval marker** in v1.
+
+**Routing order, end-to-end:**
+
+1. CLI derives `nextRecommended` and `dependencies` from disk (purely mechanical).
+2. If a prerequisite is missing, the orchestrator routes to the missing phase or
+   surfaces `blockedReasons` — the gate does not fire.
+3. When all of `prd.md`, `design.md`, `specs/`, and `tasks.json` are present and
+   `nextRecommended: implement`, the **human review gate** fires before
+   `change-implementor` is spawned.
+4. The gate returns a `waiting` result naming the reviewable artifacts and
+   asking for explicit confirmation. Only an unambiguous continuation reply
+   ("continue" / "proceed" / "go ahead" / "implement", or an unambiguous
+   acknowledgement that names the change as ready) advances past the gate.
+   Ambiguous replies — feedback, questions, requests for edits, vague
+   acknowledgements — leave the gate open.
+5. After explicit confirmation, the orchestrator spawns `change-implementor`.
+
+**Artifact-change invalidation.** Approval is bound to the artifact set that was
+reviewed in the current conversation. If `prd.md`, `design.md`, anything under
+`specs/`, or `tasks.json` changes between the review request and the
+`change-implementor` launch, the gate reopens: prior approval is stale.
+
+**Resume semantics.** The gate is prompt-only. On resume after a session gap,
+compaction, or new conversation, the orchestrator re-presents the checkpoint
+(re-prompting is cheap; the cost of implementing against unreviewed artifacts
+is not). This is the v1 policy and is intentionally conservative.
+
+If a future change adds a persisted approval marker (e.g.
+`implementation_approved_for`), the marker MUST be bound to the reviewed
+artifact revision/digest set — **not** to the change name — so a stale marker
+cannot apply to changed artifacts. Until such a marker exists, prompt-only
+waiting is sufficient and no schema change is required.
+
+**Schema restraint.** No new status token, no new CLI field, no
+`ai-harness.change-status` schema bump is added for the gate. The
+`waiting` result already expresses "human action required" and is reused by
+the parent-split fork (budget > 800). Adding a dedicated review/approved
+status would spread a small policy decision through CLI output, tests, and
+docs before there is evidence it buys resume correctness.
+
+**Parent decomposition carve-out.** The split fork (`budget > 800`) proposes
+child Changes and writes a parent decomposition manifest. That work is
+**planning**, not implementation, so the gate is not applied at the split
+routing point — only at `nextRecommended: implement`. A parent Change must
+remain navigable without being blocked by an implementation-review step.
+
+**Failure modes this seam is meant to prevent:**
+
+- Implementation starting against PRD/design/specs/tasks that the human has
+  not seen in this conversation.
+- Approval carrying across artifact edits (e.g. tasks rewritten to a new
+  scope after the gate was passed).
+- Parent splits blocked because the orchestrator confuses planning
+  decomposition for executable work.
+
 ## Artifact generation
 
 Each planning subagent **reuses a proven artifact structure**, retargeted to write

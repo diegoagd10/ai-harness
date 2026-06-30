@@ -50,10 +50,68 @@ routing decisions.
 | `design` | Spawn `design` unless already done or intentionally skipped. |
 | `specs` | Spawn `specs` unless already done or intentionally skipped. |
 | `tasks` | Spawn `tasks`. |
-| `implement` | Spawn `change-implementor`; re-run while it returns `partial` or CLI task progress has pending work. |
+| `implement` | Run the [Human review gate](#human-review-gate); only spawn `change-implementor` after it passes. |
 | `validate` | Spawn `change-validator`. |
 | `archive` | Apply validator semantic gate; archive only when it passes. |
 | `resolve-blockers` | Surface `blockedReasons` and stop. |
+
+## Human review gate
+
+When `nextRecommended` is `implement`, the orchestrator MUST surface a
+human-in-the-loop review checkpoint **before** spawning `change-implementor`.
+Routing only on `nextRecommended: implement` is not sufficient; the gate is an
+additional step in the same conversation.
+
+**Position.** The gate sits between missing-artifact checks (which fire earlier,
+see [Work rules](#work-rules)) and the `change-implementor` launch. Parent
+large-change decomposition flow is **not** subject to this gate — splitting
+siblings is planning work, not implementation.
+
+**What it does.** When PRD, design, specs, and tasks are present, the
+orchestrator returns a `waiting` result that:
+
+1. Names each reviewable artifact by file path
+   (`.ai-harness/changes/{change}/prd.md`, `design.md`, `specs/`, `tasks.json`).
+2. States explicitly that the human must confirm before implementation begins.
+3. Asks the human to reply with an explicit continuation confirmation (or with
+   feedback, edits, or questions).
+
+**Confirmation policy.** Treat these as approval:
+
+- An explicit "continue" / "proceed" / "go ahead" / "implement" reply.
+- An unambiguous acknowledgement that names the change as ready.
+
+These do **not** count as approval:
+
+- Feedback, questions, requests for edits, or asks for more analysis — stay
+  waiting and address them in the same checkpoint reply.
+- Acknowledgements that do not name continuation (e.g. "looks good, I'll review
+  later").
+
+When the reply is ambiguous, the orchestrator MUST remain waiting and re-ask
+rather than launch `change-implementor`.
+
+**Artifact-change invalidation.** Approval applies only to the artifact set
+that was reviewed in this conversation. If `prd.md`, `design.md`, anything
+under `specs/`, or `tasks.json` changes after a review request (or after
+approval) and before `change-implementor` starts, the gate re-opens:
+re-present the review checkpoint and wait for renewed confirmation.
+
+**Resume semantics.** The gate is prompt-only — there is no persisted
+approval marker. On resume after a session gap, compaction, or new
+conversation, treat approval as absent and re-present the review checkpoint
+for the current artifact set. This is intentionally conservative: re-prompting
+is cheap, the cost of implementing against unreviewed artifacts is not.
+
+If a future change introduces a durable approval marker, the orchestrator MUST
+bind it to the reviewed artifact revision/digest set — not just the change
+name — so stale approval reopens the gate.
+
+**Parent decomposition carve-out.** When `budget > 800` triggers the split
+fork (Semantic fork 1, above), the orchestrator is still in planning. The
+decomposition proposal must not be blocked by the implementation review gate;
+a split manifest is not implementation work. Apply the gate only to the
+`implement` routing point.
 
 ## Semantic fork 1 — split on explorer budget
 
