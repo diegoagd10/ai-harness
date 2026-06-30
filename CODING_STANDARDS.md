@@ -25,6 +25,13 @@
 - **Unit tests**: `uv run pytest` from the repo root.
 - **E2E tests** (`e2e/`): run via `./e2e/docker-test.sh`, only needed when the diff touches install/uninstall paths or `e2e/`. Never run on the host — it provisions an isolated CLI sandbox and otherwise mutates `~/.local/bin`.
 
+  The e2e suite follows a one-file invariant: all behaviour tests live in
+  `e2e/e2e_test.sh` (the canonical suite); helpers live in `e2e/lib.sh`.
+  When adding a test, add a `test_*` function to `e2e/e2e_test.sh` in the
+  appropriate tier section. Tier 1 runs by default; Tier 2 (`RUN_FULL_E2E=1`)
+  covers install/uninstall/set-models lifecycle; Tier 3 (`RUN_BACKUP_TESTS=1`)
+  covers backup/restore.
+
 ## Architecture
 
 - Typer commands: `src/ai_harness/commands/`

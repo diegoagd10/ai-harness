@@ -304,19 +304,19 @@ Unit tests run against the Python source (no Docker needed):
 uv run pytest
 ```
 
-End-to-end tests run the installed `ai-harness` binary inside isolated sandboxes:
+End-to-end tests run inside an isolated Docker container — no host-side effects:
 
 ```bash
-# Run the full e2e suite locally (all sandboxed — zero host-side effects):
-uv run inv test
-
-# Run a single category in isolation:
-uv run inv install
-uv run inv uninstall
-
-# Run inside Docker (fully isolated):
-e2e/docker-test.sh
+./e2e/docker-test.sh                # Tier 1 only (fast, no filesystem writes)
+RUN_FULL_E2E=1 ./e2e/docker-test.sh       # Tier 1 + 2 (install/uninstall lifecycle)
+RUN_BACKUP_TESTS=1 ./e2e/docker-test.sh    # Tier 1 + 3 (backup/restore)
+RUN_FULL_E2E=1 RUN_BACKUP_TESTS=1 ./e2e/docker-test.sh  # All tiers
 ```
+
+The e2e suite is a single canonical file: `e2e/e2e_test.sh`. All behaviour
+tests live in that one file; helpers are in `e2e/lib.sh`. Adding a new test
+means adding a `test_*` function to `e2e/e2e_test.sh` and placing it in the
+appropriate tier section.
 
 ## Commit convention
 

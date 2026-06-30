@@ -1,18 +1,19 @@
-"""Root-level Invoke tasks file — delegates to the e2e suite.
+"""Root-level Invoke tasks file — thin wrapper delegating to the canonical e2e suite.
 
-This exists so ``uv run inv test`` (and per-category variants) work from
-both the repo root and the Docker container without ``-r`` flags.
+Canonical e2e entry: ./e2e/docker-test.sh
+Invoke is a thin shim for backward compatibility only.
 """
 
-from e2e.tasks import (
-    install,
-    test,
-    uninstall,
-)
-from invoke import Collection
+from invoke import Collection, task
 
-ns = Collection(
-    install,
-    uninstall,
-    test,
-)
+
+@task(default=True)
+def test(ctx) -> None:
+    """Run the e2e suite inside an isolated Docker container.
+
+    Equivalent to running ./e2e/docker-test.sh directly.
+    """
+    ctx.run("./e2e/docker-test.sh")
+
+
+ns = Collection(test)
