@@ -1,0 +1,122 @@
+{
+  "tasks": [
+    {
+      "id": "1",
+      "title": "Add human review gate to change-orchestrator prompt",
+      "spec": "review-checkpoint-before-implementation",
+      "phase": "foundation",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "1.1",
+          "title": "Insert review-wait rule between tasks completion and change-implementor launch",
+          "scenario": "Scenario: Complete artifacts trigger review wait; Scenario: Implementor is not launched before review",
+          "status": "done"
+        },
+        {
+          "id": "1.2",
+          "title": "Require explicit human confirmation and name PRD/design/specs/tasks in the review message",
+          "scenario": "Scenario: Human confirms continuation; Scenario: Ambiguous response does not approve; Scenario: Review prompt is actionable",
+          "status": "done"
+        },
+        {
+          "id": "1.3",
+          "title": "Encode prompt-only resume semantics: re-prompt safely on session gap when no durable marker exists",
+          "scenario": "Scenario: Resume after session gap",
+          "status": "done"
+        },
+        {
+          "id": "1.4",
+          "title": "Encode artifact-change invalidation: re-open gate if PRD, design, specs, or tasks change after review",
+          "scenario": "Scenario: Tasks change after review request; Scenario: Design changes after approval; Scenario: Approved artifacts stay stable",
+          "status": "done"
+        },
+        {
+          "id": "1.5",
+          "title": "Carve out parent large-change decomposition so it is not gated as implementation",
+          "scenario": "Scenario: Parent split continues planning flow",
+          "status": "done"
+        },
+        {
+          "id": "1.6",
+          "title": "Preserve earlier-blockers precedence so missing PRD/design/specs/tasks block before the review gate",
+          "scenario": "Scenario: Missing tasks block before review",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "2",
+      "title": "Document human review gate in change-orchestrator design docs",
+      "spec": "documentation-alignment",
+      "phase": "integration",
+      "depends_on": [
+        "1"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "2.1",
+          "title": "Document routing order: artifact prerequisite checks, then human review gate, then change-implementor",
+          "scenario": "Scenario: Maintainer reads flow docs",
+          "status": "done"
+        },
+        {
+          "id": "2.2",
+          "title": "Document resume semantics: prompt-only re-prompts safely on resume; durable marker reserved for future need",
+          "scenario": "Scenario: Prompt-only resume is documented",
+          "status": "done"
+        },
+        {
+          "id": "2.3",
+          "title": "Document schema restraint: no new status token or schema field by default",
+          "scenario": "Scenario: Maintainer evaluates status changes",
+          "status": "done"
+        },
+        {
+          "id": "2.4",
+          "title": "Document parent large-change decomposition nuance so planning flow is not gated as implementation",
+          "scenario": "Scenario: Parent Change flow is maintained",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "3",
+      "title": "Add render contract tests for change-orchestrator gate wording",
+      "spec": "prompt-contract-coverage",
+      "phase": "testing",
+      "depends_on": [
+        "1"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "3.1",
+          "title": "Test rendered orchestrator body contains the human review gate wording",
+          "scenario": "Scenario: Gate wording present",
+          "status": "done"
+        },
+        {
+          "id": "3.2",
+          "title": "Test the gate wording appears before change-implementor and requires explicit human confirmation",
+          "scenario": "Scenario: Confirmation requirement visible",
+          "status": "done"
+        },
+        {
+          "id": "3.3",
+          "title": "Test that removing the gate wording causes at least one render test to fail",
+          "scenario": "Scenario: Gate wording removed",
+          "status": "done"
+        },
+        {
+          "id": "3.4",
+          "title": "Test metadata parity: rendered metadata matches updated source and a body-only gate does not require unrelated metadata changes",
+          "scenario": "Scenario: Body-only gate; Scenario: Metadata changes with prompt semantics",
+          "status": "done"
+        }
+      ]
+    }
+  ]
+}
