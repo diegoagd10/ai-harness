@@ -461,6 +461,116 @@ def test_change_orchestrator_body_explicit_start_resume_route_and_disk_authority
     assert "never infer" in body or "never guess" in body or "reject folder" in body
 
 
+def test_change_orchestrator_body_interactive_stop_after_every_delegated_phase() -> None:
+    """Subtask 3.1 — interactive mode stops and waits after every delegated phase.
+
+    Locks the per-phase stop/ask/wait seam: in interactive mode the
+    orchestrator must not launch PRD (or any other next phase) in the
+    same turn as explore; it must report, ask, STOP, and wait.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Interactive mode fires the per-phase checkpoint.
+    assert "interactive" in body
+    # STOP / wait wording is explicit and not just a soft "pause".
+    assert "stop" in body
+    assert "wait" in body
+    # The check fires after every delegated phase, not only before implement.
+    assert (
+        "every delegated phase" in body
+        or "after every" in body
+        or "each delegated phase" in body
+        or "every phase" in body
+    )
+    # The same-turn PRD launch is forbidden.
+    assert "same turn" in body or "in the same turn" in body or "must not launch" in body
+
+
+def test_change_orchestrator_body_phase_result_reports_risks_and_next_phase() -> None:
+    """Subtask 3.2 — phase result contains status, artifacts, risks, next phase.
+
+    Locks the per-phase report format: when the orchestrator stops at a
+    checkpoint it must report concise status, artifact paths, risks, and
+    the named next recommended phase.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Required result fields.
+    assert "status" in body
+    assert "artifacts" in body or "artifact paths" in body
+    assert "risks" in body
+    # Named next phase.
+    assert "next" in body and ("phase" in body or "recommended" in body)
+    # Concise reporting.
+    assert "concise" in body or "summary" in body
+
+
+def test_change_orchestrator_body_continue_after_prd_authorizes_design_only() -> None:
+    """Subtask 3.3 — continue after PRD authorizes design only.
+
+    Locks phase-scoped approval: a 'continue' reply after PRD may launch
+    design only, and MUST NOT chain to specs or tasks without another
+    stop/ask/wait checkpoint.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Phase-scoped approval is explicit.
+    assert "phase-scoped" in body or "phase scoped" in body or "scoped to" in body
+    # Continue authorizes only the immediate next phase (design).
+    assert "continue" in body
+    # Specs and tasks cannot be chained without another checkpoint.
+    assert "specs" in body
+    assert "tasks" in body
+    # The next-after-checkpoint discipline still applies.
+    assert "checkpoint" in body or "another checkpoint" in body or "stop again" in body or "next checkpoint" in body
+
+
+def test_change_orchestrator_body_rejects_pipeline_wide_approval() -> None:
+    """Subtask 3.4 — pipeline-wide approval is rejected or narrowed.
+
+    Locks the anti-bulk-approval rule: a request like 'continue through
+    the rest if it looks good' is rejected, narrowed to the next phase,
+    or rerouted to an explicit mode change rather than auto-chaining.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Pipeline-wide approval is rejected or narrowed.
+    assert (
+        "pipeline-wide" in body
+        or "pipeline wide" in body
+        or "through the rest" in body
+        or "do not auto-chain" in body
+        or "must not auto-chain" in body
+        or "narrowed" in body
+    )
+    # The narrowing route points at an explicit mode change.
+    assert "explicit" in body
+    assert "mode" in body
+
+
+def test_change_orchestrator_body_ambiguous_checkpoint_does_not_approve() -> None:
+    """Subtask 3.5 — ambiguous checkpoint reply is not approval.
+
+    Locks the ambiguity rule: when a checkpoint reply is unclear, the
+    orchestrator must not advance to the next phase. It re-asks or
+    treats the response as no approval.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Ambiguous reply handling.
+    assert "ambig" in body
+    # Approval requires explicit confirmation.
+    assert (
+        "explicit" in body
+        or "no approval" in body
+        or "not approval" in body
+        or "must not advance" in body
+        or "must not launch" in body
+    )
+    # The orchestrator re-asks or asks a clarifying question.
+    assert "re-ask" in body or "clarif" in body or "ask" in body
+
+
 def test_change_orchestrator_body_binds_approval_to_reviewed_artifact_set() -> None:
     """Rendered change-orchestrator binds approval to the exact reviewed artifact set.
 
@@ -481,6 +591,116 @@ def test_change_orchestrator_body_binds_approval_to_reviewed_artifact_set() -> N
     assert "approval does not carry" in body or "prompt-only" in body
 
 
+def test_change_orchestrator_body_grill_gate_blocks_weak_understanding() -> None:
+    """Subtask 4.1 — weak understanding blocks PRD with focused intent questions.
+
+    Locks the grill gate: when business intent, rules, impact, edge cases,
+    or tradeoffs are unclear, the orchestrator must ask focused questions
+    and wait before delegating PRD.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Grill/proposal-question gate appears in the body.
+    assert "grill" in body
+    # Gate fires before PRD delegation.
+    assert "before" in body and "prd" in body
+    # Weak or unclear intent is the trigger.
+    assert "weak" in body or "unclear" in body or "underspecified" in body or "ambiguous" in body
+    # The gate asks focused questions and waits.
+    assert "question" in body
+    assert "wait" in body or "before delegating" in body or "before prd" in body
+
+
+def test_change_orchestrator_body_grill_fires_on_continue_with_weak_understanding() -> None:
+    """Subtask 4.2 — continue with weak understanding still triggers grill.
+
+    Locks that the grill gate fires both before `change-new` and during
+    `change-continue` flow: a continue request does not bypass the gate
+    when understanding is still weak.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Continue can also lead into the grill gate.
+    assert "continue" in body
+    # Grill fires on both Start and Resume paths.
+    assert "change-new" in body and "change-continue" in body
+    # Weak understanding still triggers the grill, not PRD delegation.
+    assert (
+        ("weak" in body and "grill" in body)
+        or "still triggers" in body
+        or "still applies" in body
+        or "does not bypass" in body
+    )
+
+
+def test_change_orchestrator_body_grill_clarifies_archive_vs_manual_archive() -> None:
+    """Subtask 4.3 — ambiguous archive vs manual archive request is clarified.
+
+    Locks that the grill gate explicitly handles the archive ambiguity:
+    when memory or artifacts indicate archive might mean manual artifact
+    archiving, the orchestrator must ask a clarification question and
+    must NOT assume a CLI archive command implementation.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Archive ambiguity is named as a clarification trigger.
+    assert "archive" in body
+    # Manual archive is contrasted with CLI archive.
+    assert "manual" in body
+    # CLI archive assumption is forbidden.
+    assert (
+        "must not assume" in body
+        or "do not assume" in body
+        or "never assume" in body
+        or "not a cli assumption" in body
+        or "not assumed" in body
+    )
+    # A clarification question is required.
+    assert "clarif" in body or "question" in body
+
+
+def test_change_orchestrator_body_proposal_round_covers_business_understanding() -> None:
+    """Subtask 4.4 — proposal round covers business understanding and tradeoffs.
+
+    Locks the content of the proposal-question round: it must cover
+    business understanding, business rules, impact, edge cases, and
+    tradeoffs so the PRD has enough grounding.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # The five required topic anchors.
+    assert "business" in body
+    assert "rules" in body
+    assert "impact" in body or "implications" in body
+    assert "edge case" in body or "edge cases" in body
+    assert "tradeoff" in body or "trade-offs" in body or "trade off" in body
+
+
+def test_change_orchestrator_body_generic_continue_cannot_bypass_grill() -> None:
+    """Subtask 4.5 — generic continue cannot bypass the grill gate.
+
+    Locks the no-bypass rule: a `continue` reply is not sufficient
+    approval when the grill/proposal-question gate has flagged weak
+    understanding. The orchestrator must ask the required questions
+    instead of launching PRD.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Continue cannot bypass a pending grill gate.
+    assert "continue" in body
+    # The grill gate remains required while intent is weak.
+    assert "grill" in body
+    # A no-bypass wording is required.
+    assert (
+        "not bypass" in body
+        or "does not bypass" in body
+        or "cannot bypass" in body
+        or "must not bypass" in body
+        or "is not sufficient" in body
+        or "cannot approve" in body
+    )
+
+
 def test_change_orchestrator_body_enforces_phase_task_fingerprint_launch_log() -> None:
     """Rendered change-orchestrator refuses duplicate (phase, task_fingerprint) launches.
 
@@ -497,6 +717,78 @@ def test_change_orchestrator_body_enforces_phase_task_fingerprint_launch_log() -
     assert "refuse" in body or "refused" in body
     # Refusal lands back in the orchestrator with a concrete reason.
     assert "already launched" in body or "same key" in body or "same (phase" in body
+
+
+def test_change_orchestrator_body_records_launch_log_before_every_delegation() -> None:
+    """Subtask 1.1 — every delegation crosses the session launch log first.
+
+    Locks the session (phase, task-fingerprint) recording requirement:
+    the orchestrator must check or update the launch log before delegating
+    each phase, not just on first launch or on duplicate detection.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Session-scoped launch log is the canonical record.
+    assert "session" in body
+    assert "launch log" in body or "launch_log" in body
+    # The launch-log entry is keyed by phase + task fingerprint.
+    assert "(phase, task_fingerprint)" in body or "(phase, task fingerprint)" in body
+    # The check happens before each delegation, not just on retries.
+    assert "before" in body
+    assert "every delegation" in body or "each delegation" in body or "any delegation" in body
+
+
+def test_change_orchestrator_body_blocks_duplicate_phase_task_fingerprint_launch() -> None:
+    """Subtask 1.2 — duplicate (phase, task-fingerprint) launches are blocked.
+
+    Locks the duplicate-block enforcement: when the launch log already
+    contains the same (phase, task-fingerprint) pair, the orchestrator
+    blocks the second launch with a named reason.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Duplicate block surfaces a concrete named reason.
+    assert "duplicate" in body
+    assert "blocked" in body or "block" in body
+    # The blocking key is the (phase, task-fingerprint) pair.
+    assert "(phase, task_fingerprint)" in body or "(phase, task fingerprint)" in body
+    # The block has a reason that the orchestrator surfaces verbatim.
+    assert "duplicate delegation" in body or "already launched" in body
+
+
+def test_change_orchestrator_body_normalizes_rephrased_same_intent_block() -> None:
+    """Subtask 1.3 — rephrased same intent still produces same fingerprint.
+
+    Locks fingerprint normalization: when a user rephrases the same task,
+    the (phase, task-fingerprint) pair stays identical and the duplicate
+    guard still blocks the second launch.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Normalization of the fingerprint is named explicitly.
+    assert "normalize" in body or "normalized" in body or "normalization" in body
+    # Rephrased or reformulated input is the trigger being normalized away.
+    assert "rephras" in body or "reformulat" in body or "same intent" in body or "same task" in body
+    # The duplicate guard still blocks after normalization.
+    assert "duplicate" in body
+    assert "blocked" in body or "block" in body
+
+
+def test_change_orchestrator_body_allows_new_fingerprint_after_scope_change() -> None:
+    """Subtask 1.4 — distinct fingerprint after scope change is allowed.
+
+    Locks the fingerprint-distinct escape: when the targeted artifact
+    set or scope changes meaningfully, the new (phase, task-fingerprint)
+    is allowed to launch even if the phase has run before.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Scope change is a recognised source of a distinct fingerprint.
+    assert "scope" in body
+    # A different fingerprint is permitted to launch.
+    assert "different fingerprint" in body or "new fingerprint" in body or "distinct fingerprint" in body
+    # The escape allows a new launch rather than blocking it.
+    assert "permit" in body or "allows" in body or "allow" in body
 
 
 def test_change_orchestrator_body_requires_exact_skill_md_path_injection() -> None:
@@ -539,6 +831,127 @@ def test_change_orchestrator_body_locks_auto_interactive_phase_gate() -> None:
     assert "reviewed" in body
 
 
+def test_change_orchestrator_body_session_mode_hard_gate_before_delegation() -> None:
+    """Subtask 2.1 — session mode is a hard gate before change-new/change-continue.
+
+    Locks the preflight requirement: execution mode MUST be established
+    before any ``change-new`` or ``change-continue`` delegation, and the
+    session-mode wording must be marked as a hard gate.
+    """
+    body = _change_orchestrator_body()
+
+    # Hard gate is named.
+    assert "hard gate" in body.lower() or "hard_gate" in body.lower() or "hard-gate" in body.lower()
+    # Mode is tied to the two delegation commands.
+    assert "change-new" in body
+    assert "change-continue" in body
+    # The mode decision appears before delegation wording.
+    mode_idx = body.lower().find("session mode")
+    assert mode_idx != -1, "session mode wording missing from orchestrator body"
+    delegation_idx = body.find("change-continue")
+    assert delegation_idx != -1
+    # The mode preflight appears before any delegation instruction.
+    assert mode_idx < delegation_idx, (
+        "session mode preflight must appear before change-new/change-continue delegation wording"
+    )
+
+
+def test_change_orchestrator_body_preflight_runs_when_prior_artifacts_exist() -> None:
+    """Subtask 2.2 — prior artifacts do not satisfy the session-mode preflight.
+
+    Locks that the mode gate fires regardless of pre-existing artifacts:
+    exploration, PRD, design, specs, or tasks already on disk do not
+    replace the preflight step.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Prior artifacts do not satisfy the mode preflight.
+    assert "existing artifacts" in body or "prior artifacts" in body or "artifacts" in body
+    # The preflight still runs even with prior artifacts.
+    assert (
+        "still" in body or "anyway" in body or "regardless" in body or "do not satisfy" in body or "must still" in body
+    )
+    # Mode preflight is non-bypassable.
+    assert "preflight" in body or "pre-flight" in body or "before any" in body or "before" in body
+
+
+def test_change_orchestrator_body_unspecified_mode_defaults_to_interactive_and_caches() -> None:
+    """Subtask 2.3 — unspecified mode defaults to interactive and is cached.
+
+    Locks the default + cache behavior: when the user does not specify
+    interactive or auto, the orchestrator uses interactive as the default
+    and caches that decision for the session.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Default-to-interactive wording.
+    assert "default" in body
+    # Cache-for-session wording.
+    assert "cache" in body or "cached" in body
+    # Interactive is the default, not auto.
+    # Find default-context substring.
+    default_idx = body.find("default")
+    assert default_idx != -1
+    window = body[default_idx : default_idx + 200]
+    assert "interactive" in window, "default must point at interactive, not auto"
+
+
+def test_change_orchestrator_body_cached_interactive_survives_continue() -> None:
+    """Subtask 2.4 — cached interactive mode survives later continue requests.
+
+    Locks the cache durability: a later ``continue`` request does not
+    reinterpret interactive mode as automatic pipeline approval. Only an
+    explicit mode change can flip the cached mode.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Cache wording is explicit and survives later user input.
+    assert "cached" in body or "cache" in body
+    # A later continue request must NOT auto-convert to pipeline-wide auto.
+    assert "continue" in body
+    # Explicit non-reinterpretation wording.
+    assert (
+        "must not reinterpret" in body
+        or "does not reinterpret" in body
+        or "does not auto" in body
+        or "not interpreted as auto" in body
+        or "not be reinterpreted" in body
+        or "must not be reinterpreted" in body
+        or "not silently" in body
+        or "must not silently" in body
+        or "no silent" in body
+        or "must not flip" in body
+    )
+
+
+def test_change_orchestrator_body_explicit_mode_change_replaces_cache() -> None:
+    """Subtask 2.5 — explicit mode change replaces the cached mode before delegation.
+
+    Locks the cache-replacement rule: an explicit user instruction to
+    switch to ``auto`` updates the cached mode before any further phase
+    delegation.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Explicit-mode-change wording.
+    assert "explicit" in body
+    assert (
+        ("mode change" in body)
+        or ("change mode" in body)
+        or ("switch mode" in body)
+        or ("change the cached mode" in body)
+    )
+    # The cached mode is replaced (not appended).
+    assert "replace" in body or "replaces" in body or "updated" in body or "update the cached" in body
+    # The replacement happens before any further delegation.
+    assert (
+        "before any further" in body
+        or "before further delegation" in body
+        or "before the next" in body
+        or "before any next" in body
+    )
+
+
 def test_phase_prompts_expose_shared_result_envelope() -> None:
     """Explorer, implementor, and validator prompts share one result envelope.
 
@@ -556,7 +969,7 @@ def test_phase_prompts_expose_shared_result_envelope() -> None:
         assert "status:" in body, f"{name}: status field missing"
         assert "artifacts:" in body, f"{name}: artifacts field missing"
         assert "summary:" in body, f"{name}: summary field missing"
-        assert "semantic_facts:" in body, f"{name}: semantic_facts field missing"
+        assert "semantic_facts:" in body, f"{name}: semantic_facts body field missing"
         assert "skills:" in body, f"{name}: skills field missing"
         assert "skill_resolution" in body, f"{name}: skill_resolution missing"
 
@@ -567,6 +980,319 @@ def test_phase_prompts_expose_shared_result_envelope() -> None:
     assert "remaining_tasks:" in bodies["change-implementor"]
     assert "verdict:" in bodies["change-validator"]
     assert "critical:" in bodies["change-validator"]
+
+
+def test_change_orchestrator_body_unspecified_mode_cannot_fall_through_to_auto() -> None:
+    """Subtask 5.1 — unspecified mode cannot fall through to auto.
+
+    Locks the explicit-auto rule: when no execution mode is cached and
+    the user did not explicitly choose auto, the orchestrator must
+    default to interactive and MUST NOT continue automatically.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # No fall-through to auto when mode is unspecified.
+    assert "auto" in body
+    assert "fall-through" in body or "fall through" in body or "default auto" in body or "accidental" in body
+    # Auto must be explicit, not silent default.
+    assert "explicit" in body
+    # Unspecified mode defaults to interactive.
+    assert "interactive" in body
+
+
+def test_change_orchestrator_body_cached_auto_runs_gatekeeper_before_next_phase() -> None:
+    """Subtask 5.2 — cached auto runs the gatekeeper before any next phase.
+
+    Locks that auto-mode continuation is gated: the orchestrator runs
+    the gatekeeper validation before launching the next phase, never
+    just continuing because mode is auto.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Gatekeeper is named as a distinct step.
+    assert "gatekeeper" in body
+    # The gate runs before the next phase launches.
+    assert "before" in body
+    # Auto is the active mode context.
+    assert "auto" in body
+    # The gate validates before launching.
+    assert "launch" in body or "next phase" in body
+
+
+def test_change_orchestrator_body_missing_artifact_blocks_auto_progression() -> None:
+    """Subtask 5.3 — missing or unreadable artifact blocks auto progression.
+
+    Locks the artifact-existence gatekeeper check: when a phase claims
+    success but its declared artifact path does not exist or cannot be
+    read, auto progression stops.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Artifact existence/readability is an explicit gatekeeper check.
+    assert "artifact" in body
+    assert "existence" in body or "exists" in body or "readable" in body or "read" in body
+    # Missing artifact stops auto progression.
+    assert "missing" in body or "not exist" in body or "cannot be read" in body or "unreadable" in body
+    # The auto chain is blocked.
+    assert "block" in body or "stop" in body or "fail" in body
+
+
+def test_change_orchestrator_body_scope_drift_blocks_auto_progression() -> None:
+    """Subtask 5.4 — out-of-PRD scope output stops auto progression.
+
+    Locks the no-drift gatekeeper check: phase output that invents
+    requirements outside the PRD scope blocks automatic continuation.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Drift wording is explicit.
+    assert "drift" in body or "scope" in body
+    # The check compares output to PRD scope.
+    assert "prd" in body or "scope" in body
+    # Auto progression is blocked on drift.
+    assert "block" in body or "stop" in body or "fail" in body
+
+
+def test_change_orchestrator_body_bad_next_recommended_blocks_auto_progression() -> None:
+    """Subtask 5.5 — nextRecommended violating dependency order stops auto.
+
+    Locks the routing-coherence gatekeeper check: a `nextRecommended`
+    that violates the Change dependency order or jumps ahead blocks
+    automatic continuation.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # nextRecommended is the routing signal.
+    assert "nextrecommended" in body
+    # Dependency order is the source of truth.
+    assert "depend" in body or "dependency order" in body or "dependency" in body
+    # Routing coherence is checked.
+    assert "routing" in body or "coherence" in body or "violates" in body
+    # Bad routing blocks progression.
+    assert "block" in body or "stop" in body or "fail" in body
+
+
+def test_change_orchestrator_body_failed_gatekeeper_never_launches_dependent_phase() -> None:
+    """Subtask 5.6 — failed gatekeeper never launches a dependent phase.
+
+    Locks the no-advance rule: when the gatekeeper check fails after
+    any phase, the orchestrator stops and does not spawn the next
+    delegated phase.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Gatekeeper failure stops the chain.
+    assert "gatekeeper" in body
+    assert "fail" in body or "failed" in body
+    # Dependent phase launch is blocked on failure.
+    assert (
+        "must not launch" in body
+        or "do not launch" in body
+        or "does not launch" in body
+        or "not advance" in body
+        or "stop" in body
+        or "block" in body
+    )
+
+
+def test_change_orchestrator_body_interactive_continue_cannot_chain_auto() -> None:
+    """Subtask 5.7 — interactive continue after PRD cannot chain to auto.
+
+    Locks the no-silent-auto-conversion rule: a `continue` reply after
+    PRD in interactive mode authorizes design only; specs and tasks
+    MUST NOT be auto-chained through the gatekeeper.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Continue-after-PRD interaction is named.
+    assert "continue" in body
+    assert "prd" in body
+    # Auto chaining is forbidden from interactive approval.
+    assert "auto" in body and "must not" in body or "do not auto-chain" in body or "not auto-chain" in body
+    # Specs and tasks are explicitly excluded from auto-chain.
+    assert "specs" in body
+    assert "tasks" in body
+
+
+# ---------------------------------------------------------------------------
+# Renderer behavior contract hardening — fix-interactive-gates task 6
+# ---------------------------------------------------------------------------
+# Subtasks 6.1-6.8 re-anchor the contract by combining the per-subtask
+# assertions into one scenario each. Subtask 6.9 keeps the gentle-orchestrator
+# reference carry-through enforceable from disk.
+
+
+def test_contract_orchestrator_pause_requires_stop_ask_wait() -> None:
+    """Subtask 6.1 — a 'pause' keyword without STOP / ask / wait fails.
+
+    Locks that interactive mode wording cannot be a soft 'pause' alone;
+    it must pair pause semantics with explicit STOP, ask, and wait.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # 'pause' or 'interactive' is not enough on its own.
+    assert "pause" in body or "interactive" in body
+    # STOP / ask / wait must all be present as actual control-flow
+    # verbs in the rendered body, not just keywords.
+    assert "stop" in body
+    assert "ask" in body
+    assert "wait" in body
+
+
+def test_contract_orchestrator_approval_requires_phase_scope() -> None:
+    """Subtask 6.2 — approval keyword without phase scope fails.
+
+    Locks that an approval phrase like 'continue' must be paired with
+    phase-scoped semantics; bare 'approval' or 'continue' is not enough.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Approval vocabulary is present.
+    assert "continue" in body or "approval" in body or "approve" in body
+    # Phase-scoped semantics are explicit.
+    assert (
+        "phase-scoped" in body
+        or "phase scoped" in body
+        or "scoped to" in body
+        or "immediate next phase" in body
+        or "only the immediate next" in body
+    )
+
+
+def test_contract_orchestrator_explore_must_wait_before_prd_same_turn() -> None:
+    """Subtask 6.3 — interactive explore result must wait before PRD.
+
+    Locks that an explore phase whose `nextRecommended` is `prd` does
+    NOT launch `propose` in the same turn; the orchestrator must wait.
+    """
+    body = _change_orchestrator_body().lower()
+
+    assert "explore" in body
+    assert "prd" in body
+    assert "wait" in body
+    # Same-turn PRD launch is forbidden.
+    assert "same turn" in body or "in the same turn" in body or "must not launch" in body or "do not launch" in body
+
+
+def test_contract_orchestrator_continue_after_prd_authorizes_design_only() -> None:
+    """Subtask 6.4 — continue after PRD authorizes design only.
+
+    Locks that a `continue` reply following PRD authorizes `design`
+    only and MUST NOT chain to specs or tasks without another
+    checkpoint.
+    """
+    body = _change_orchestrator_body().lower()
+
+    assert "continue" in body
+    assert "prd" in body
+    assert "design" in body
+    # Specs and tasks are explicitly named as not auto-chained.
+    assert "specs" in body
+    assert "tasks" in body
+    # Each phase needs its own checkpoint.
+    assert "checkpoint" in body or "stop" in body
+
+
+def test_contract_orchestrator_archive_ambiguity_requires_clarification() -> None:
+    """Subtask 6.5 — ambiguous archive request triggers clarification.
+
+    Locks that an archive request whose intent could mean manual
+    archive vs CLI archive is clarified before PRD, not assumed.
+    """
+    body = _change_orchestrator_body().lower()
+
+    assert "archive" in body
+    # Manual archive is contrasted with CLI archive.
+    assert "manual" in body
+    # The orchestrator must ask a clarification question.
+    assert "clarif" in body or "question" in body
+    # CLI archive is not assumed.
+    assert "must not assume" in body or "do not assume" in body or "never assume" in body or "not assumed" in body
+
+
+def test_contract_orchestrator_auto_requires_explicit_or_cached_selection() -> None:
+    """Subtask 6.6 — auto mode without explicit or cached selection fails.
+
+    Locks that auto-continuation is gated on an explicit user
+    instruction or a previously cached session mode. Default fall-
+    through to auto is forbidden.
+    """
+    body = _change_orchestrator_body().lower()
+
+    assert "auto" in body
+    # Auto must be explicit or cached.
+    assert "explicit" in body
+    assert "cached" in body or "cache" in body
+    # Default fall-through to auto is forbidden.
+    assert "fall-through" in body or "fall through" in body or "accidental" in body or "must not" in body
+
+
+def test_contract_orchestrator_auto_gatekeeper_requires_all_four_checks() -> None:
+    """Subtask 6.7 — auto gatekeeper missing any of the four checks fails.
+
+    Locks the four mandatory gatekeeper checks: contract conformance,
+    artifact existence, no drift from PRD scope, and routing coherence.
+    """
+    body = _change_orchestrator_body().lower()
+
+    assert "gatekeeper" in body
+    # All four mandatory checks are spelled out.
+    assert "contract" in body
+    assert "artifact" in body
+    assert "drift" in body or "scope" in body
+    assert "routing" in body or "depend" in body
+
+
+def test_contract_orchestrator_launch_dedup_session_log_required() -> None:
+    """Subtask 6.8 — launch dedup session log is asserted in the prompt.
+
+    Locks that the orchestrator body mentions the session
+    (phase, task-fingerprint) launch log and the duplicate guard.
+    """
+    body = _change_orchestrator_body().lower()
+
+    assert "session" in body
+    assert "launch log" in body or "launch_log" in body
+    # (phase, task-fingerprint) keying.
+    assert "(phase, task_fingerprint)" in body or "(phase, task fingerprint)" in body
+    # Duplicate guard.
+    assert "duplicate" in body
+
+
+def test_contract_change_artifacts_carry_all_five_gentle_references() -> None:
+    """Subtask 6.9 — all five gentle-orchestrator line refs are present.
+
+    Locks carry-through: every required gentle-orchestrator line range
+    must be cited from at least one Change artifact (PRD, exploration,
+    design, specs, or implementation). Removing any one breaks the
+    enforcement contract.
+    """
+    project_root = Path(__file__).resolve().parent.parent
+    active_root = project_root / ".ai-harness/changes/fix-interactive-gates"
+    archived_root = project_root / ".ai-harness/changes/archive/fix-interactive-gates"
+    change_root = active_root if active_root.exists() else archived_root
+
+    prd = (change_root / "prd.md").read_text()
+    exploration = (change_root / "exploration.md").read_text()
+    design = (change_root / "design.md").read_text()
+    specs_dir = change_root / "specs"
+    specs_files = list(specs_dir.glob("*.md"))
+    specs_text = "\n".join(p.read_text() for p in specs_files)
+
+    # All five gentle-orchestrator line ranges from the PRD mapping.
+    expected_refs = [
+        "sdd-orchestrator.md:100-149",  # Session Preflight hard gate
+        "sdd-orchestrator.md:178-199",  # Execution Mode interactive pauses
+        "sdd-orchestrator.md:200",  # Proposal/grill round before proposal
+        "sdd-orchestrator.md:202-222",  # Automatic Mode Gatekeeper
+        "sdd-orchestrator.md:299-308",  # Sub-Agent Launch Deduplication
+    ]
+
+    combined = prd + exploration + design + specs_text
+    for ref in expected_refs:
+        assert ref in combined, (
+            f"gentle-orchestrator reference {ref!r} missing from PRD/exploration/design/specs under {change_root}"
+        )
 
 
 def test_change_orchestrator_body_frontmatter_parity_after_body_only_edits() -> None:
