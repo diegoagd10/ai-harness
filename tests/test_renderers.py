@@ -497,6 +497,78 @@ def test_change_orchestrator_body_enforces_phase_task_fingerprint_launch_log() -
     assert "already launched" in body or "same key" in body or "same (phase" in body
 
 
+def test_change_orchestrator_body_records_launch_log_before_every_delegation() -> None:
+    """Subtask 1.1 — every delegation crosses the session launch log first.
+
+    Locks the session (phase, task-fingerprint) recording requirement:
+    the orchestrator must check or update the launch log before delegating
+    each phase, not just on first launch or on duplicate detection.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Session-scoped launch log is the canonical record.
+    assert "session" in body
+    assert "launch log" in body or "launch_log" in body
+    # The launch-log entry is keyed by phase + task fingerprint.
+    assert "(phase, task_fingerprint)" in body or "(phase, task fingerprint)" in body
+    # The check happens before each delegation, not just on retries.
+    assert "before" in body
+    assert "every delegation" in body or "each delegation" in body or "any delegation" in body
+
+
+def test_change_orchestrator_body_blocks_duplicate_phase_task_fingerprint_launch() -> None:
+    """Subtask 1.2 — duplicate (phase, task-fingerprint) launches are blocked.
+
+    Locks the duplicate-block enforcement: when the launch log already
+    contains the same (phase, task-fingerprint) pair, the orchestrator
+    blocks the second launch with a named reason.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Duplicate block surfaces a concrete named reason.
+    assert "duplicate" in body
+    assert "blocked" in body or "block" in body
+    # The blocking key is the (phase, task-fingerprint) pair.
+    assert "(phase, task_fingerprint)" in body or "(phase, task fingerprint)" in body
+    # The block has a reason that the orchestrator surfaces verbatim.
+    assert "duplicate delegation" in body or "already launched" in body
+
+
+def test_change_orchestrator_body_normalizes_rephrased_same_intent_block() -> None:
+    """Subtask 1.3 — rephrased same intent still produces same fingerprint.
+
+    Locks fingerprint normalization: when a user rephrases the same task,
+    the (phase, task-fingerprint) pair stays identical and the duplicate
+    guard still blocks the second launch.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Normalization of the fingerprint is named explicitly.
+    assert "normalize" in body or "normalized" in body or "normalization" in body
+    # Rephrased or reformulated input is the trigger being normalized away.
+    assert "rephras" in body or "reformulat" in body or "same intent" in body or "same task" in body
+    # The duplicate guard still blocks after normalization.
+    assert "duplicate" in body
+    assert "blocked" in body or "block" in body
+
+
+def test_change_orchestrator_body_allows_new_fingerprint_after_scope_change() -> None:
+    """Subtask 1.4 — distinct fingerprint after scope change is allowed.
+
+    Locks the fingerprint-distinct escape: when the targeted artifact
+    set or scope changes meaningfully, the new (phase, task-fingerprint)
+    is allowed to launch even if the phase has run before.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Scope change is a recognised source of a distinct fingerprint.
+    assert "scope" in body
+    # A different fingerprint is permitted to launch.
+    assert "different fingerprint" in body or "new fingerprint" in body or "distinct fingerprint" in body
+    # The escape allows a new launch rather than blocking it.
+    assert "permit" in body or "allows" in body or "allow" in body
+
+
 def test_change_orchestrator_body_requires_exact_skill_md_path_injection() -> None:
     """Rendered change-orchestrator requires exact SKILL.md paths and forbids inventing.
 

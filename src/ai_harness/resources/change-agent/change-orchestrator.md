@@ -206,15 +206,20 @@ Rules:
   `skill_resolution` detail when degraded. Silent fallback to a wrong file
   is forbidden — the orchestrator routes on the reported resolution.
 
-## Delegation launch log
+## Delegation launch log (HARD GATE)
 
 The orchestrator keeps a session-scoped launch log keyed by
 `(phase, task_fingerprint)` to refuse duplicate delegation in the same
-session.
+session. The log is checked before every delegation, and updated after each
+launch, so no phase can be spawned twice in one session under the same
+fingerprint.
 
-- Before launching a phase, compute `task_fingerprint` from the phase key
-  plus the targeted artifact set and requested work.
-- Record the launch in the session log.
+- Before each delegation, compute `task_fingerprint` from the phase key
+  plus the targeted artifact set and requested work. Normalize the
+  fingerprint so rephrased or reformulated instructions about the same
+  intent produce the same hash — wording changes must not bypass the
+  duplicate guard.
+- Record the launch in the session log immediately after spawning.
 - A second launch with the **same key** in the same session is refused: do
   not spawn a duplicate subagent. Return `blocked` with reason
   `duplicate delegation: (phase, task_fingerprint) already launched in this
