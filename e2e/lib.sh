@@ -19,13 +19,45 @@ PASSED=0
 FAILED=0
 SKIPPED=0
 
+# Per-tier counters
+TIER1_PASSED=0; TIER1_FAILED=0; TIER1_SKIPPED=0
+TIER2_PASSED=0; TIER2_FAILED=0; TIER2_SKIPPED=0
+TIER3_PASSED=0; TIER3_FAILED=0; TIER3_SKIPPED=0
+
+# Current tier context (set by e2e_test.sh before running each tier)
+CURRENT_TIER="${CURRENT_TIER:-}"
+
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
 log_test()  { printf "${YELLOW}[TEST]${NC}  %s\n" "$1"; }
-log_pass()  { printf "${GREEN}[PASS]${NC}  %s\n" "$1"; PASSED=$((PASSED + 1)); }
-log_fail()  { printf "${RED}[FAIL]${NC}  %s\n" "$1"; FAILED=$((FAILED + 1)); }
-log_skip()  { printf "${BLUE}[SKIP]${NC}  %s\n" "$1"; SKIPPED=$((SKIPPED + 1)); }
+log_pass()  {
+    printf "${GREEN}[PASS]${NC}  %s\n" "$1"
+    PASSED=$((PASSED + 1))
+    case "$CURRENT_TIER" in
+        tier1) TIER1_PASSED=$((TIER1_PASSED + 1)) ;;
+        tier2) TIER2_PASSED=$((TIER2_PASSED + 1)) ;;
+        tier3) TIER3_PASSED=$((TIER3_PASSED + 1)) ;;
+    esac
+}
+log_fail()  {
+    printf "${RED}[FAIL]${NC}  %s\n" "$1"
+    FAILED=$((FAILED + 1))
+    case "$CURRENT_TIER" in
+        tier1) TIER1_FAILED=$((TIER1_FAILED + 1)) ;;
+        tier2) TIER2_FAILED=$((TIER2_FAILED + 1)) ;;
+        tier3) TIER3_FAILED=$((TIER3_FAILED + 1)) ;;
+    esac
+}
+log_skip()  {
+    printf "${BLUE}[SKIP]${NC}  %s\n" "$1"
+    SKIPPED=$((SKIPPED + 1))
+    case "$CURRENT_TIER" in
+        tier1) TIER1_SKIPPED=$((TIER1_SKIPPED + 1)) ;;
+        tier2) TIER2_SKIPPED=$((TIER2_SKIPPED + 1)) ;;
+        tier3) TIER3_SKIPPED=$((TIER3_SKIPPED + 1)) ;;
+    esac
+}
 log_info()  { printf "${BLUE}[INFO]${NC}  %s\n" "$1"; }
 
 # ---------------------------------------------------------------------------
@@ -251,14 +283,23 @@ print_summary() {
     local tier_label="${1:-}"
     echo ""
     echo "========================================"
-    if [ -n "$tier_label" ]; then
-        echo "  Tier: $tier_label"
-        echo "========================================"
-    fi
-    printf "  ${GREEN}PASSED${NC}: %d\n" "$PASSED"
-    printf "  ${RED}FAILED${NC}: %d\n" "$FAILED"
-    printf "  ${BLUE}SKIPPED${NC}: %d\n" "$SKIPPED"
-    echo "  TOTAL : $((PASSED + FAILED + SKIPPED))"
+    echo "  E2E Test Summary"
+    echo "  pattern: /home/diegoagd10/Projects/gentle-ai/e2e/e2e_test.sh"
+    echo "========================================"
+    echo "  --- Tier 1 (basic binary + routing) ---"
+    printf "  ${GREEN}PASSED${NC}: %d  ${RED}FAILED${NC}: %d  ${BLUE}SKIPPED${NC}: %d\n" \
+        "$TIER1_PASSED" "$TIER1_FAILED" "$TIER1_SKIPPED"
+    echo "  --- Tier 2 (full lifecycle) ---"
+    printf "  ${GREEN}PASSED${NC}: %d  ${RED}FAILED${NC}: %d  ${BLUE}SKIPPED${NC}: %d\n" \
+        "$TIER2_PASSED" "$TIER2_FAILED" "$TIER2_SKIPPED"
+    echo "  --- Tier 3 (backup/restore) ---"
+    printf "  ${GREEN}PASSED${NC}: %d  ${RED}FAILED${NC}: %d  ${BLUE}SKIPPED${NC}: %d\n" \
+        "$TIER3_PASSED" "$TIER3_FAILED" "$TIER3_SKIPPED"
+    echo "  ========================================"
+    echo "  OVERALL"
+    printf "  ${GREEN}PASSED${NC}: %d  ${RED}FAILED${NC}: %d  ${BLUE}SKIPPED${NC}: %d\n" \
+        "$PASSED" "$FAILED" "$SKIPPED"
+    printf "  TOTAL : %d\n" "$((PASSED + FAILED + SKIPPED))"
     echo "========================================"
 
     if [ "$FAILED" -gt 0 ]; then
