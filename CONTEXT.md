@@ -139,3 +139,14 @@ engineering skills. The harness documents how to install them but never provisio
 them at *install* time nor removes them at uninstall, because they are user-scoped
 and shared across every repository on the machine.
 _Avoid_: dependency, plugin (when you mean the documented external requirement)
+
+## E2E Testing
+
+The end-to-end suite validates the install/uninstall/set-models lifecycle through
+the public CLI interface, inside an isolated Docker container (`./e2e/docker-test.sh`).
+The suite follows a one-file invariant: all behaviour tests live in
+`e2e/e2e_test.sh`; helpers are in `e2e/lib.sh`. Tier 1 (default) covers binary
+basics and command routing. Tier 2 (`RUN_FULL_E2E=1`) covers the full
+install/uninstall/set-models lifecycle. Tier 3 (`RUN_BACKUP_TESTS=1`) covers
+backup/restore. Adding a test means adding a `test_*` function to `e2e/e2e_test.sh`
+in the appropriate tier.
