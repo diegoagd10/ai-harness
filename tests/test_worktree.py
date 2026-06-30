@@ -39,7 +39,17 @@ def _make_git_repo(tmp_path: Path, branch: str = "main") -> Path:
     """Create a real git repo at *tmp_path* with one empty commit on *branch*."""
     subprocess.check_call(["git", "init", "-q", "-b", branch], cwd=str(tmp_path))
     subprocess.check_call(
-        ["git", "commit", "-m", "empty root", "--allow-empty"],
+        [
+            "git",
+            "-c",
+            "user.name=AI Harness Tests",
+            "-c",
+            "user.email=ai-harness-tests@example.invalid",
+            "commit",
+            "-m",
+            "empty root",
+            "--allow-empty",
+        ],
         cwd=str(tmp_path),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -51,7 +61,17 @@ def _make_git_repo_with_branch(tmp_path: Path, branch: str) -> Path:
     """Create a real git repo on an arbitrary branch (not main)."""
     subprocess.check_call(["git", "init", "-q", "-b", branch], cwd=str(tmp_path))
     subprocess.check_call(
-        ["git", "commit", "-m", "empty root", "--allow-empty"],
+        [
+            "git",
+            "-c",
+            "user.name=AI Harness Tests",
+            "-c",
+            "user.email=ai-harness-tests@example.invalid",
+            "commit",
+            "-m",
+            "empty root",
+            "--allow-empty",
+        ],
         cwd=str(tmp_path),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,

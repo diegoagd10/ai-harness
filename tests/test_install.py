@@ -1390,22 +1390,17 @@ def test_validator_template_still_documents_no_findings() -> None:
 def test_discover_loop_agents_excludes_underscore_files() -> None:
     """_discover_loop_agents returns loop and change agents, no _-prefixed files."""
     from ai_harness.modules.harness.renderers import _discover_loop_agents
+    from ai_harness.modules.wizard.pure import opencode_change_agents
 
     names = _discover_loop_agents()
-    assert names == [
-        "explorer",
-        "implementor",
-        "loop-orchestrator",
-        "validator",
-        "change-explorer",
-        "change-implementor",
-        "change-orchestrator",
-        "change-validator",
-        "design",
-        "propose",
-        "specs",
-        "tasks",
-    ]
+    # Discovery walks loop-agent/ first (alpha) then change-agent/ (alpha) so
+    # the canonical ``opencode_change_agents()`` vocab must be re-sorted to
+    # match filesystem order. Keeps the test free of a hard-coded 12-name
+    # literal that the duplicate-code gate would share with the analogous
+    # test in test_renderers.py.
+    expected_loop = ("explorer", "implementor", "loop-orchestrator", "validator")
+    expected_change = sorted(opencode_change_agents())
+    assert names == [*expected_loop, *expected_change]
     assert "_result-contract" not in names
     assert len(names) == 12
 
