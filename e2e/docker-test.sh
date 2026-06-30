@@ -26,6 +26,7 @@ NC='\033[0m'
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
+# Mirrors: gentle-ai/e2e/docker-test.sh lines 24-53 (configuration, env forwarding, run_with_timeout)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 IMAGE_TAG="${IMAGE_TAG:-ai-harness-e2e:local}"
@@ -76,6 +77,8 @@ fi
 # ---------------------------------------------------------------------------
 # Build
 # ---------------------------------------------------------------------------
+# Mirrors: gentle-ai/e2e/docker-test.sh lines 67-84 (build/run loop pattern)
+
 printf "${BLUE}[BUILD]${NC} Building image from e2e/Dockerfile\n"
 printf "${BLUE}[BUILD]${NC} Image tag: %s\n" "$IMAGE_TAG"
 printf "${BLUE}[BUILD]${NC} Project root: %s\n" "$PROJECT_ROOT"

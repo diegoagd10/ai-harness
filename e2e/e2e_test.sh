@@ -60,9 +60,12 @@ fi
 # ===========================================================================
 # TIER 1 — Basic binary + command routing (always run)
 # ===========================================================================
-# Mirrors: gentle-ai/e2e/e2e_test.sh lines 37-39
+# Mirrors: gentle-ai/e2e/e2e_test.sh lines 37-39 (tier header) and 43-77 (binary basics)
+# Invocation order mirrors lines 2154-2159.
 
 # --- Category 1a: Binary basics ---
+# Mirrors gentle-ai lines 43-77 (test_binary_exists, test_binary_runs, test_version_command)
+# Invoked at gentle-ai lines 2156-2159.
 
 test_binary_exists() {
     log_test "Binary is on PATH and executable"
@@ -92,6 +95,8 @@ test_version_command() {
 }
 
 # --- Category 1b: Subcommand routing ---
+# Mirrors gentle-ai lines 81-115 (dry-run output) — adapted: ai-harness has no --dry-run,
+# so this section validates subcommand --help routing and no-install idempotency instead.
 
 test_install_help() {
     log_test "install subcommand --help works"
@@ -140,7 +145,10 @@ test_uninstall_nothing_installed_is_idempotent() {
 # ===========================================================================
 # TIER 2 — Full install/uninstall/set-models lifecycle (RUN_FULL_E2E=1)
 # ===========================================================================
-# Mirrors: gentle-ai/e2e/e2e_test.sh lines 473-475
+# Mirrors: gentle-ai/e2e/e2e_test.sh lines 473-475 (tier header)
+# Install tests mirror lines 479-1096 (full filesystem/injection coverage).
+# Idempotency tests mirror lines 1195-1603 (content/idempotency/edge coverage).
+# Tier 2 invocation mirrors lines 2210-2276.
 
 if [ "${RUN_FULL_E2E:-0}" = "1" ]; then
     log_info "========================================"
@@ -366,7 +374,10 @@ fi
 # ===========================================================================
 # TIER 3 — Backup/restore (RUN_BACKUP_TESTS=1)
 # ===========================================================================
-# Mirrors: gentle-ai/e2e/e2e_test.sh lines 2027-2029
+# Mirrors: gentle-ai/e2e/e2e_test.sh lines 2027-2029 (tier header)
+# Backup tests mirror gentle-ai lines 2031-2148 (test_backup_created_on_install,
+# test_backup_manifest_exists, test_backup_idempotent_install).
+# Tier 3 invocation mirrors lines 2316-2324.
 
 if [ "${RUN_BACKUP_TESTS:-0}" = "1" ]; then
     log_info "========================================"
