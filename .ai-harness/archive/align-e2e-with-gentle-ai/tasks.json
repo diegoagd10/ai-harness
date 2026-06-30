@@ -1,0 +1,472 @@
+{
+  "tasks": [
+    {
+      "id": "1",
+      "title": "probe",
+      "spec": "single-file-e2e-suite",
+      "phase": "foundation",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": []
+    },
+    {
+      "id": "2",
+      "title": "Scaffold e2e/lib.sh shared helpers",
+      "spec": "single-file-e2e-suite",
+      "phase": "foundation",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "2.1",
+          "title": "Implement logging helpers (log_test, log_pass, log_fail, log_skip, log_info) and counters (PASSED, FAILED, SKIPPED)",
+          "scenario": "no duplicated helpers",
+          "status": "done"
+        },
+        {
+          "id": "2.2",
+          "title": "Implement assertion helpers (assert_file_exists, assert_file_not_exists, assert_file_contains, assert_file_not_contains, assert_dir_exists, assert_file_size_min, assert_valid_json, assert_output_contains, assert_output_not_contains, assert_md5_match)",
+          "scenario": "no duplicated helpers",
+          "status": "done"
+        },
+        {
+          "id": "2.3",
+          "title": "Implement environment helpers (cleanup_test_env, resolve_binary, setup_fake_* helpers for fake binaries and fixtures)",
+          "scenario": "helpers used for cleanup",
+          "status": "done"
+        },
+        {
+          "id": "2.4",
+          "title": "Implement print_summary helper",
+          "scenario": "lib sourced",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "3",
+      "title": "Scaffold e2e/e2e_test.sh canonical suite with tier-1 behavior tests",
+      "spec": "single-file-e2e-suite",
+      "phase": "foundation",
+      "depends_on": [
+        "2"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "3.1",
+          "title": "Create canonical file with #!/usr/bin/env bash shebang, source e2e/lib.sh, and section-header comment markers",
+          "scenario": "file exists and is executable",
+          "status": "done"
+        },
+        {
+          "id": "3.2",
+          "title": "Add tier-1 test_* functions for binary basics (test_binary_exists, test_binary_runs, test_version_command)",
+          "scenario": "every test is a function",
+          "status": "done"
+        },
+        {
+          "id": "3.3",
+          "title": "Add tier-1 test_* functions for dry-run output format and platform detection",
+          "scenario": "sections are present",
+          "status": "done"
+        },
+        {
+          "id": "3.4",
+          "title": "Add bottom-of-file invocation block grouping tier-1 tests under tier-1 comment",
+          "scenario": "invocation block presence",
+          "status": "done"
+        },
+        {
+          "id": "3.5",
+          "title": "Verify no sibling behavior files define test_* functions under e2e/",
+          "scenario": "no sibling behavior files",
+          "status": "done"
+        },
+        {
+          "id": "3.6",
+          "title": "Verify lib.sh is sourced and no helper re-implementations exist in e2e_test.sh",
+          "scenario": "lib sourced",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "4",
+      "title": "Scaffold e2e/Dockerfile isolated test image",
+      "spec": "stable-isolated-runner",
+      "phase": "foundation",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "4.1",
+          "title": "Choose Ubuntu base image and install bash, uv, jq, and required system packages",
+          "scenario": "command succeeds and exits cleanly",
+          "status": "done"
+        },
+        {
+          "id": "4.2",
+          "title": "COPY e2e_test.sh and lib.sh to canonical paths and ensure executable bit",
+          "scenario": "command succeeds and exits cleanly",
+          "status": "done"
+        },
+        {
+          "id": "4.3",
+          "title": "Ensure HOME is writable so sandboxed uv tool install stays inside the container",
+          "scenario": "home dir not mutated on success",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "5",
+      "title": "Scaffold e2e/docker-test.sh outer isolated runner",
+      "spec": "stable-isolated-runner",
+      "phase": "core",
+      "depends_on": [
+        "3",
+        "4"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "5.1",
+          "title": "Add usage block documenting zero-argument default behavior",
+          "scenario": "no-arg default",
+          "status": "done"
+        },
+        {
+          "id": "5.2",
+          "title": "Accept at most one optional positional argument reserved as a future platform slot",
+          "scenario": "future-platform-slot accepted",
+          "status": "done"
+        },
+        {
+          "id": "5.3",
+          "title": "Invoke docker build against e2e/Dockerfile with computed tag",
+          "scenario": "command succeeds and exits cleanly",
+          "status": "done"
+        },
+        {
+          "id": "5.4",
+          "title": "Invoke docker run with e2e/e2e_test.sh as entry and propagate exit code",
+          "scenario": "failure propagation",
+          "status": "done"
+        },
+        {
+          "id": "5.5",
+          "title": "Wrap container invocation in run_with_timeout so a hung test cannot block CI indefinitely",
+          "scenario": "hung test terminates",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "6",
+      "title": "Add RUN_FULL_E2E / RUN_BACKUP_TESTS tier gating to e2e_test.sh and env forwarding through docker-test.sh",
+      "spec": "tiered-execution",
+      "phase": "core",
+      "depends_on": [
+        "3",
+        "5"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "6.1",
+          "title": "Gate the tier-2 invocation block on RUN_FULL_E2E and report SKIPPED with a clear tier-gate message when unset",
+          "scenario": "tier-2 skipped by default",
+          "status": "done"
+        },
+        {
+          "id": "6.2",
+          "title": "Gate the tier-3 invocation block on RUN_BACKUP_TESTS and report SKIPPED with a clear tier-gate message when unset",
+          "scenario": "tier-3 skipped by default",
+          "status": "done"
+        },
+        {
+          "id": "6.3",
+          "title": "Extend print_summary to print per-tier PASSED/FAILED/SKIPPED counts and tier grouping",
+          "scenario": "summary shows tier grouping",
+          "status": "done"
+        },
+        {
+          "id": "6.4",
+          "title": "Forward RUN_FULL_E2E and RUN_BACKUP_TESTS from host into the container invocation in docker-test.sh",
+          "scenario": "env forwarded into container",
+          "status": "done"
+        },
+        {
+          "id": "6.5",
+          "title": "Forward GITHUB_TOKEN into the container only when set on the host",
+          "scenario": "github token forwarded when set",
+          "status": "done"
+        },
+        {
+          "id": "6.6",
+          "title": "Verify unset env vars are not passed into the container (or passed empty) and tier-2/tier-3 tests report SKIPPED",
+          "scenario": "unset env not forwarded",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "7",
+      "title": "Port install/uninstall/set-models/idempotency/override lifecycle tests into tier-2",
+      "spec": "preserved-lifecycle-coverage",
+      "phase": "core",
+      "depends_on": [
+        "2",
+        "6"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "7.1",
+          "title": "Add test_install_creates_expected_files under tier-2 block",
+          "scenario": "install creates expected files",
+          "status": "done"
+        },
+        {
+          "id": "7.2",
+          "title": "Add test_uninstall_removes_files under tier-2 block",
+          "scenario": "uninstall removes files",
+          "status": "done"
+        },
+        {
+          "id": "7.3",
+          "title": "Add test_set_models_updates_config under tier-2 block",
+          "scenario": "set-models updates config",
+          "status": "done"
+        },
+        {
+          "id": "7.4",
+          "title": "Add test_set_models_invalid_input_rejected under tier-2 block",
+          "scenario": "set-models invalid input is rejected",
+          "status": "done"
+        },
+        {
+          "id": "7.5",
+          "title": "Add test_rendered_content_matches_fixture using diff against golden fixtures",
+          "scenario": "rendered content matches fixture",
+          "status": "done"
+        },
+        {
+          "id": "7.6",
+          "title": "Add test_override_preserves_user_edits under tier-2 block",
+          "scenario": "override preserves user edits",
+          "status": "done"
+        },
+        {
+          "id": "7.7",
+          "title": "Add test_override_updates_installer_section under tier-2 block",
+          "scenario": "override updates installer-managed section",
+          "status": "done"
+        },
+        {
+          "id": "7.8",
+          "title": "Add test_idempotent_reinstall (byte- or hash-identical post-tree) under tier-2 block",
+          "scenario": "idempotent reinstall",
+          "status": "done"
+        },
+        {
+          "id": "7.9",
+          "title": "Add test_idempotent_set_models (md5 match) under tier-2 block",
+          "scenario": "idempotent set-models",
+          "status": "done"
+        },
+        {
+          "id": "7.10",
+          "title": "Add test_non_tty_rejection under tier-2 block",
+          "scenario": "non-TTY rejection",
+          "status": "done"
+        },
+        {
+          "id": "7.11",
+          "title": "Verify lifecycle tests are reported SKIPPED with tier-gate message when RUN_FULL_E2E is unset",
+          "scenario": "lifecycle skipped by default",
+          "status": "done"
+        },
+        {
+          "id": "7.12",
+          "title": "Verify lifecycle tests execute and are reported when RUN_FULL_E2E=1",
+          "scenario": "lifecycle runs when enabled",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "8",
+      "title": "Add gentle-ai traceability references across e2e_test.sh, lib.sh, and docker-test.sh",
+      "spec": "gentle-ai-traceability",
+      "phase": "integration",
+      "depends_on": [
+        "3",
+        "5"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "8.1",
+          "title": "Add # mirrors gentle-ai e2e/e2e_test.sh lines X-Y comments to each category section header in e2e_test.sh",
+          "scenario": "section comments visible",
+          "status": "done"
+        },
+        {
+          "id": "8.2",
+          "title": "Audit lib.sh helper names against /home/diegoagd10/Projects/gentle-ai/e2e/lib.sh so each name in the canonical suite is also defined there",
+          "scenario": "helper-name overlap",
+          "status": "done"
+        },
+        {
+          "id": "8.3",
+          "title": "Verify every category section header cites the corresponding gentle-ai line range",
+          "scenario": "every behavior section cites a range",
+          "status": "done"
+        },
+        {
+          "id": "8.4",
+          "title": "Add structural-parity comments to docker-test.sh (usage block, forwarded env vars, build/run loop, exit-code propagation)",
+          "scenario": "structural parity at the seams",
+          "status": "done"
+        },
+        {
+          "id": "8.5",
+          "title": "Extend print_summary to emit a one-line reference: # pattern: /home/diegoagd10/Projects/gentle-ai/e2e/e2e_test.sh",
+          "scenario": "reference in summary",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "9",
+      "title": "Add backup/restore behavior tests gated by RUN_BACKUP_TESTS in tier-3",
+      "spec": "preserved-lifecycle-coverage",
+      "phase": "integration",
+      "depends_on": [
+        "2",
+        "6"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "9.1",
+          "title": "Add test_backup_created_on_install under tier-3 block",
+          "scenario": "tier-3 runs when env set",
+          "status": "done"
+        },
+        {
+          "id": "9.2",
+          "title": "Add test_backup_manifest_exists under tier-3 block",
+          "scenario": "tier-3 runs when env set",
+          "status": "done"
+        },
+        {
+          "id": "9.3",
+          "title": "Add test_backup_idempotent_install under tier-3 block",
+          "scenario": "tier-3 runs when env set",
+          "status": "done"
+        },
+        {
+          "id": "9.4",
+          "title": "Verify tier-3 tests are reported SKIPPED with tier-gate message when RUN_BACKUP_TESTS is unset",
+          "scenario": "tier-3 skipped by default",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "10",
+      "title": "Run end-to-end verification across all tiers, host isolation, exit-code propagation, and platform slot",
+      "spec": "stable-isolated-runner",
+      "phase": "testing",
+      "depends_on": [
+        "5",
+        "7",
+        "9"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "10.1",
+          "title": "Run ./e2e/docker-test.sh with no env vars and confirm tier-1 tests pass while tier-2/tier-3 are reported SKIPPED",
+          "scenario": "tier-1 runs by default",
+          "status": "done"
+        },
+        {
+          "id": "10.2",
+          "title": "Run with RUN_FULL_E2E=1 and confirm tier-2 lifecycle tests execute and pass",
+          "scenario": "tier-2 runs when env set",
+          "status": "done"
+        },
+        {
+          "id": "10.3",
+          "title": "Run with RUN_BACKUP_TESTS=1 and confirm tier-3 backup tests execute",
+          "scenario": "tier-3 runs when env set",
+          "status": "done"
+        },
+        {
+          "id": "10.4",
+          "title": "Snapshot host ~/.local and ~/.cache before and after a RUN_FULL_E2E run and confirm no host mutation",
+          "scenario": "home dir not mutated on success",
+          "status": "done"
+        },
+        {
+          "id": "10.5",
+          "title": "Force a tier-1 failure (broken assertion) and confirm docker-test.sh exits non-zero with the container exit code",
+          "scenario": "failure propagation",
+          "status": "done"
+        },
+        {
+          "id": "10.6",
+          "title": "Confirm ./e2e/docker-test.sh exits 0 when all enabled tiers pass",
+          "scenario": "success propagation",
+          "status": "done"
+        },
+        {
+          "id": "10.7",
+          "title": "Confirm ./e2e/docker-test.sh ubuntu is accepted and produces a valid run",
+          "scenario": "future-platform-slot accepted",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "11",
+      "title": "Update docs and task entrypoints so e2e/docker-test.sh is the only advertised e2e command",
+      "spec": "stable-isolated-runner",
+      "phase": "cleanup",
+      "depends_on": [
+        "5"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "11.1",
+          "title": "Replace any e2e run instructions in README.md with a single reference to ./e2e/docker-test.sh",
+          "scenario": "no parallel entry points advertised",
+          "status": "done"
+        },
+        {
+          "id": "11.2",
+          "title": "Update CODING_STANDARDS.md and CONTEXT.md to advertise ./e2e/docker-test.sh as the canonical e2e command and document the one-file invariant",
+          "scenario": "no parallel entry points advertised",
+          "status": "done"
+        },
+        {
+          "id": "11.3",
+          "title": "Wrap or remove obsolete e2e entries in tasks.py and e2e/tasks.py so they delegate to ./e2e/docker-test.sh or disappear",
+          "scenario": "no parallel entry points advertised",
+          "status": "done"
+        },
+        {
+          "id": "11.4",
+          "title": "Drop obsolete e2e-specific Python test dependencies from pyproject.toml that the new shell suite does not need",
+          "scenario": "no parallel entry points advertised",
+          "status": "done"
+        }
+      ]
+    }
+  ]
+}
