@@ -459,6 +459,105 @@ def test_change_orchestrator_body_explicit_start_resume_route_and_disk_authority
     assert "never infer" in body or "never guess" in body or "reject folder" in body
 
 
+def test_change_orchestrator_body_interactive_stop_after_every_delegated_phase() -> None:
+    """Subtask 3.1 — interactive mode stops and waits after every delegated phase.
+
+    Locks the per-phase stop/ask/wait seam: in interactive mode the
+    orchestrator must not launch PRD (or any other next phase) in the
+    same turn as explore; it must report, ask, STOP, and wait.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Interactive mode fires the per-phase checkpoint.
+    assert "interactive" in body
+    # STOP / wait wording is explicit and not just a soft "pause".
+    assert "stop" in body
+    assert "wait" in body
+    # The check fires after every delegated phase, not only before implement.
+    assert "every delegated phase" in body or "after every" in body or "each delegated phase" in body or "every phase" in body
+    # The same-turn PRD launch is forbidden.
+    assert "same turn" in body or "in the same turn" in body or "must not launch" in body
+
+
+def test_change_orchestrator_body_phase_result_reports_risks_and_next_phase() -> None:
+    """Subtask 3.2 — phase result contains status, artifacts, risks, next phase.
+
+    Locks the per-phase report format: when the orchestrator stops at a
+    checkpoint it must report concise status, artifact paths, risks, and
+    the named next recommended phase.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Required result fields.
+    assert "status" in body
+    assert "artifacts" in body or "artifact paths" in body
+    assert "risks" in body
+    # Named next phase.
+    assert "next" in body and ("phase" in body or "recommended" in body)
+    # Concise reporting.
+    assert "concise" in body or "summary" in body
+
+
+def test_change_orchestrator_body_continue_after_prd_authorizes_design_only() -> None:
+    """Subtask 3.3 — continue after PRD authorizes design only.
+
+    Locks phase-scoped approval: a 'continue' reply after PRD may launch
+    design only, and MUST NOT chain to specs or tasks without another
+    stop/ask/wait checkpoint.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Phase-scoped approval is explicit.
+    assert "phase-scoped" in body or "phase scoped" in body or "scoped to" in body
+    # Continue authorizes only the immediate next phase (design).
+    assert "continue" in body
+    # Specs and tasks cannot be chained without another checkpoint.
+    assert "specs" in body
+    assert "tasks" in body
+    # The next-after-checkpoint discipline still applies.
+    assert "checkpoint" in body or "another checkpoint" in body or "stop again" in body or "next checkpoint" in body
+
+
+def test_change_orchestrator_body_rejects_pipeline_wide_approval() -> None:
+    """Subtask 3.4 — pipeline-wide approval is rejected or narrowed.
+
+    Locks the anti-bulk-approval rule: a request like 'continue through
+    the rest if it looks good' is rejected, narrowed to the next phase,
+    or rerouted to an explicit mode change rather than auto-chaining.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Pipeline-wide approval is rejected or narrowed.
+    assert (
+        "pipeline-wide" in body
+        or "pipeline wide" in body
+        or "through the rest" in body
+        or "do not auto-chain" in body
+        or "must not auto-chain" in body
+        or "narrowed" in body
+    )
+    # The narrowing route points at an explicit mode change.
+    assert "explicit" in body
+    assert "mode" in body
+
+
+def test_change_orchestrator_body_ambiguous_checkpoint_does_not_approve() -> None:
+    """Subtask 3.5 — ambiguous checkpoint reply is not approval.
+
+    Locks the ambiguity rule: when a checkpoint reply is unclear, the
+    orchestrator must not advance to the next phase. It re-asks or
+    treats the response as no approval.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Ambiguous reply handling.
+    assert "ambig" in body
+    # Approval requires explicit confirmation.
+    assert "explicit" in body or "no approval" in body or "not approval" in body or "must not advance" in body or "must not launch" in body
+    # The orchestrator re-asks or asks a clarifying question.
+    assert "re-ask" in body or "clarif" in body or "ask" in body
+
+
 def test_change_orchestrator_body_binds_approval_to_reviewed_artifact_set() -> None:
     """Rendered change-orchestrator binds approval to the exact reviewed artifact set.
 

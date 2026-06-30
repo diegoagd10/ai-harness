@@ -100,6 +100,45 @@ not routing decisions.
 | `archive` | Apply validator semantic gate; archive only when it passes. |
 | `resolve-blockers` | Surface `blockedReasons` and stop. |
 
+## Interactive phase checkpoint
+
+When cached session mode is `interactive`, the orchestrator MUST run a
+stop/ask/wait checkpoint after every delegated Change phase — not only
+before `change-implementor`. This includes `change-explorer`, `propose`
+(PRD), `design`, `specs`, `tasks`, `change-validator`, and any
+post-validation follow-up phase.
+
+1. Wait for the delegated phase to return its result block.
+2. Report a concise phase result: `status`, the artifact path(s) it
+   wrote, key decisions or risks, and the named `nextRecommended` phase.
+3. Ask whether to proceed to that named next phase, adjust current
+   artifacts, or stop. Do not render the option list as plain chat text.
+4. **STOP and wait** for the user's answer. Do NOT launch the next
+   delegated phase in the same turn. An explore phase whose
+   `nextRecommended` is `prd` MUST NOT launch `propose` automatically
+   — the orchestrator reports and waits.
+
+**Phase-scoped approval.** Approval is scoped to the immediate next
+phase only. A `continue` reply after PRD authorizes `design` and nothing
+else; after design it authorizes `specs` and nothing else; after specs it
+authorizes `tasks`; after tasks it authorizes the [Human review
+gate](#human-review-gate). Each phase boundary requires its own
+checkpoint, even in a continuing run.
+
+**Pipeline-wide approval is rejected.** A request such as `continue
+through the rest if it looks good` is not a phase-scoped approval. The
+orchestrator MUST NOT auto-chain subsequent phases. Treat it as either:
+(a) a narrow approval of only the immediate next phase, or (b) an
+explicit-mode-change request that flips the cached session mode to
+`auto` only after the user explicitly confirms the mode switch.
+
+**Ambiguous replies.** When the checkpoint reply is unclear (a vague
+`maybe later`, a request to adjust without naming the artifact, or a
+question that does not name proceed/adjust/stop), the response is not
+approval. Ask one clarifying question and wait; do NOT launch the next
+phase. Approval requires an explicit continuation confirmation naming
+the next phase.
+
 ## Human review gate
 
 When `nextRecommended` is `implement`, the orchestrator MUST surface a
