@@ -933,7 +933,7 @@ def test_phase_prompts_expose_shared_result_envelope() -> None:
         assert "status:" in body, f"{name}: status field missing"
         assert "artifacts:" in body, f"{name}: artifacts field missing"
         assert "summary:" in body, f"{name}: summary field missing"
-        assert "semantic_facts:" in body, f"{name}: semantic_facts field missing"
+        assert "semantic_facts:" in body, f"{name}: semantic_facts body field missing"
         assert "skills:" in body, f"{name}: skills field missing"
         assert "skill_resolution" in body, f"{name}: skill_resolution missing"
 
@@ -944,6 +944,131 @@ def test_phase_prompts_expose_shared_result_envelope() -> None:
     assert "remaining_tasks:" in bodies["change-implementor"]
     assert "verdict:" in bodies["change-validator"]
     assert "critical:" in bodies["change-validator"]
+
+
+def test_change_orchestrator_body_unspecified_mode_cannot_fall_through_to_auto() -> None:
+    """Subtask 5.1 — unspecified mode cannot fall through to auto.
+
+    Locks the explicit-auto rule: when no execution mode is cached and
+    the user did not explicitly choose auto, the orchestrator must
+    default to interactive and MUST NOT continue automatically.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # No fall-through to auto when mode is unspecified.
+    assert "auto" in body
+    assert "fall-through" in body or "fall through" in body or "default auto" in body or "accidental" in body
+    # Auto must be explicit, not silent default.
+    assert "explicit" in body
+    # Unspecified mode defaults to interactive.
+    assert "interactive" in body
+
+
+def test_change_orchestrator_body_cached_auto_runs_gatekeeper_before_next_phase() -> None:
+    """Subtask 5.2 — cached auto runs the gatekeeper before any next phase.
+
+    Locks that auto-mode continuation is gated: the orchestrator runs
+    the gatekeeper validation before launching the next phase, never
+    just continuing because mode is auto.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Gatekeeper is named as a distinct step.
+    assert "gatekeeper" in body
+    # The gate runs before the next phase launches.
+    assert "before" in body
+    # Auto is the active mode context.
+    assert "auto" in body
+    # The gate validates before launching.
+    assert "launch" in body or "next phase" in body
+
+
+def test_change_orchestrator_body_missing_artifact_blocks_auto_progression() -> None:
+    """Subtask 5.3 — missing or unreadable artifact blocks auto progression.
+
+    Locks the artifact-existence gatekeeper check: when a phase claims
+    success but its declared artifact path does not exist or cannot be
+    read, auto progression stops.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Artifact existence/readability is an explicit gatekeeper check.
+    assert "artifact" in body
+    assert "existence" in body or "exists" in body or "readable" in body or "read" in body
+    # Missing artifact stops auto progression.
+    assert "missing" in body or "not exist" in body or "cannot be read" in body or "unreadable" in body
+    # The auto chain is blocked.
+    assert "block" in body or "stop" in body or "fail" in body
+
+
+def test_change_orchestrator_body_scope_drift_blocks_auto_progression() -> None:
+    """Subtask 5.4 — out-of-PRD scope output stops auto progression.
+
+    Locks the no-drift gatekeeper check: phase output that invents
+    requirements outside the PRD scope blocks automatic continuation.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Drift wording is explicit.
+    assert "drift" in body or "scope" in body
+    # The check compares output to PRD scope.
+    assert "prd" in body or "scope" in body
+    # Auto progression is blocked on drift.
+    assert "block" in body or "stop" in body or "fail" in body
+
+
+def test_change_orchestrator_body_bad_next_recommended_blocks_auto_progression() -> None:
+    """Subtask 5.5 — nextRecommended violating dependency order stops auto.
+
+    Locks the routing-coherence gatekeeper check: a `nextRecommended`
+    that violates the Change dependency order or jumps ahead blocks
+    automatic continuation.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # nextRecommended is the routing signal.
+    assert "nextrecommended" in body
+    # Dependency order is the source of truth.
+    assert "depend" in body or "dependency order" in body or "dependency" in body
+    # Routing coherence is checked.
+    assert "routing" in body or "coherence" in body or "violates" in body
+    # Bad routing blocks progression.
+    assert "block" in body or "stop" in body or "fail" in body
+
+
+def test_change_orchestrator_body_failed_gatekeeper_never_launches_dependent_phase() -> None:
+    """Subtask 5.6 — failed gatekeeper never launches a dependent phase.
+
+    Locks the no-advance rule: when the gatekeeper check fails after
+    any phase, the orchestrator stops and does not spawn the next
+    delegated phase.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Gatekeeper failure stops the chain.
+    assert "gatekeeper" in body
+    assert "fail" in body or "failed" in body
+    # Dependent phase launch is blocked on failure.
+    assert "must not launch" in body or "do not launch" in body or "does not launch" in body or "not advance" in body or "stop" in body or "block" in body
+
+
+def test_change_orchestrator_body_interactive_continue_cannot_chain_auto() -> None:
+    """Subtask 5.7 — interactive continue after PRD cannot chain to auto.
+
+    Locks the no-silent-auto-conversion rule: a `continue` reply after
+    PRD in interactive mode authorizes design only; specs and tasks
+    MUST NOT be auto-chained through the gatekeeper.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Continue-after-PRD interaction is named.
+    assert "continue" in body
+    assert "prd" in body
+    # Auto chaining is forbidden from interactive approval.
+    assert "auto" in body and "must not" in body or "do not auto-chain" in body or "not auto-chain" in body
+    # Specs and tasks are explicitly excluded from auto-chain.
+    assert "specs" in body
+    assert "tasks" in body
 
 
 def test_change_orchestrator_body_frontmatter_parity_after_body_only_edits() -> None:

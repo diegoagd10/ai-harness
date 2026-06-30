@@ -172,6 +172,45 @@ applies on both `change-new` (Start) and `change-continue` (Resume)
 paths: continue with weak understanding still triggers the grill gate
 before any PRD delegation.
 
+## Explicit auto-mode gatekeeper
+
+Auto mode is an explicit, safety-gated continuation path — never an
+accidental fall-through from unspecified or non-interactive mode. The
+orchestrator only auto-continues when auto mode is explicit or already
+cached for the session. Unspecified mode MUST NOT fall through to auto
+and MUST default to interactive instead.
+
+When cached session mode is `auto`, the orchestrator runs the
+**gatekeeper** between phases. After every delegated phase returns and
+BEFORE launching the next phase, the gatekeeper validates the result
+against four mandatory checks:
+
+1. **Contract conformance** — the phase returned a `status`,
+   `artifacts`, `summary`, `semantic_facts`, `skills`, and
+   `skill_resolution` block, and `status` indicates success (not
+   `partial`, `failed`, `blocked`, or `waiting`).
+2. **Artifact existence** — the declared artifact path actually
+   exists and is readable. A missing or unreadable artifact FAILS the
+   gate and stops auto progression.
+3. **No drift from PRD scope** — phase output is consistent with the
+   Change PRD's scope. Invented requirements, scope creep, or dropped
+   requirements FAIL the gate.
+4. **Routing coherence** — `nextRecommended` follows the Change
+   dependency order (`explore → prd → design → specs → tasks →
+   implement → validate → archive`). A `nextRecommended` that violates
+   dependency order FAILS the gate.
+
+**On gate FAIL.** The orchestrator MUST NOT launch the next delegated
+phase. It stops, surfaces the gatekeeper failure to the user, and waits.
+A failed gate never advances to dependent phases — a bad artifact
+compounds downstream.
+
+**Interactive approval cannot convert to auto.** A `continue` reply in
+interactive mode authorizes only the immediate next phase. The
+gatekeeper MUST NOT auto-chain specs or tasks after an interactive
+`continue` following PRD; that would silently convert a phase-scoped
+approval into automatic continuation.
+
 ## Human review gate
 
 When `nextRecommended` is `implement`, the orchestrator MUST surface a
