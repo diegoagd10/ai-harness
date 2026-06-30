@@ -545,9 +545,7 @@ def test_phase_prompts_expose_shared_result_envelope() -> None:
     shape and its own phase-specific semantic facts.
     """
     bodies = {
-        name: _find_pair(render_agents(AgentCli.OPENCODE), name)[1]
-        .split("---", 2)[2]
-        .removeprefix("\n")
+        name: _find_pair(render_agents(AgentCli.OPENCODE), name)[1].split("---", 2)[2].removeprefix("\n")
         for name in ("change-explorer", "change-implementor", "change-validator")
     }
 
