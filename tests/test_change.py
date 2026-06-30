@@ -241,7 +241,6 @@ def test_change_archive_preflight_rejects_incomplete_tasks(tmp_path: Path) -> No
 def test_change_archive_preflight_rejects_missing_validation_artifact(tmp_path: Path) -> None:
     """Archive rejects a Change whose validation.md is absent."""
     change_new(tmp_path, "demo")
-    change_dir = tmp_path / ".ai-harness" / "changes" / "demo"
     task = task_create(
         tmp_path,
         "demo",
@@ -454,9 +453,7 @@ def test_change_archive_leaves_source_intact_when_specs_move_fails(
 # ---------------------------------------------------------------------------
 
 
-def test_cli_change_archive_success_prints_done_and_exits_zero(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_cli_change_archive_success_prints_done_and_exits_zero(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Successful archive prints exactly 'done' on stdout and exits zero."""
     _build_archiveable_change(tmp_path, "demo")
     monkeypatch.chdir(tmp_path)
@@ -488,9 +485,7 @@ def test_cli_change_archive_failure_prints_json_errors_and_exits_nonzero(
     assert result.stderr == ""
 
 
-def test_cli_change_archive_failure_does_not_emit_done(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_cli_change_archive_failure_does_not_emit_done(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A failed archive never prints the success token 'done'."""
     change_new(tmp_path, "demo")
     monkeypatch.chdir(tmp_path)
@@ -516,9 +511,7 @@ def test_cli_change_archive_success_does_not_emit_change_status_json(
     assert "{" not in result.stdout
 
 
-def test_cli_change_archive_does_not_parse_validation_content(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_cli_change_archive_does_not_parse_validation_content(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The CLI never inspects validation.md prose — only checks existence."""
     _build_archiveable_change(tmp_path, "demo")
     # Validation content is a non-trivial validator verdict; the CLI must

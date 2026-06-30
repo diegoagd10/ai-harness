@@ -236,10 +236,7 @@ def _archive_preflight(root: Path, change: str) -> list[str]:
     try:
         progress = task_progress(root, change)
         if not progress.allComplete:
-            errors.append(
-                f"Cannot archive: tasks are incomplete "
-                f"({progress.completed}/{progress.total} done)"
-            )
+            errors.append(f"Cannot archive: tasks are incomplete ({progress.completed}/{progress.total} done)")
     except TaskStoreError as exc:
         errors.append(f"Cannot read task progress: {exc}")
 
