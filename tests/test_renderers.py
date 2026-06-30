@@ -474,7 +474,12 @@ def test_change_orchestrator_body_interactive_stop_after_every_delegated_phase()
     assert "stop" in body
     assert "wait" in body
     # The check fires after every delegated phase, not only before implement.
-    assert "every delegated phase" in body or "after every" in body or "each delegated phase" in body or "every phase" in body
+    assert (
+        "every delegated phase" in body
+        or "after every" in body
+        or "each delegated phase" in body
+        or "every phase" in body
+    )
     # The same-turn PRD launch is forbidden.
     assert "same turn" in body or "in the same turn" in body or "must not launch" in body
 
@@ -553,7 +558,13 @@ def test_change_orchestrator_body_ambiguous_checkpoint_does_not_approve() -> Non
     # Ambiguous reply handling.
     assert "ambig" in body
     # Approval requires explicit confirmation.
-    assert "explicit" in body or "no approval" in body or "not approval" in body or "must not advance" in body or "must not launch" in body
+    assert (
+        "explicit" in body
+        or "no approval" in body
+        or "not approval" in body
+        or "must not advance" in body
+        or "must not launch" in body
+    )
     # The orchestrator re-asks or asks a clarifying question.
     assert "re-ask" in body or "clarif" in body or "ask" in body
 
@@ -612,7 +623,12 @@ def test_change_orchestrator_body_grill_fires_on_continue_with_weak_understandin
     # Grill fires on both Start and Resume paths.
     assert "change-new" in body and "change-continue" in body
     # Weak understanding still triggers the grill, not PRD delegation.
-    assert ("weak" in body and "grill" in body) or "still triggers" in body or "still applies" in body or "does not bypass" in body
+    assert (
+        ("weak" in body and "grill" in body)
+        or "still triggers" in body
+        or "still applies" in body
+        or "does not bypass" in body
+    )
 
 
 def test_change_orchestrator_body_grill_clarifies_archive_vs_manual_archive() -> None:
@@ -630,7 +646,13 @@ def test_change_orchestrator_body_grill_clarifies_archive_vs_manual_archive() ->
     # Manual archive is contrasted with CLI archive.
     assert "manual" in body
     # CLI archive assumption is forbidden.
-    assert "must not assume" in body or "do not assume" in body or "never assume" in body or "not a cli assumption" in body or "not assumed" in body
+    assert (
+        "must not assume" in body
+        or "do not assume" in body
+        or "never assume" in body
+        or "not a cli assumption" in body
+        or "not assumed" in body
+    )
     # A clarification question is required.
     assert "clarif" in body or "question" in body
 
@@ -844,7 +866,9 @@ def test_change_orchestrator_body_preflight_runs_when_prior_artifacts_exist() ->
     # Prior artifacts do not satisfy the mode preflight.
     assert "existing artifacts" in body or "prior artifacts" in body or "artifacts" in body
     # The preflight still runs even with prior artifacts.
-    assert "still" in body or "anyway" in body or "regardless" in body or "do not satisfy" in body or "must still" in body
+    assert (
+        "still" in body or "anyway" in body or "regardless" in body or "do not satisfy" in body or "must still" in body
+    )
     # Mode preflight is non-bypassable.
     assert "preflight" in body or "pre-flight" in body or "before any" in body or "before" in body
 
@@ -909,11 +933,21 @@ def test_change_orchestrator_body_explicit_mode_change_replaces_cache() -> None:
 
     # Explicit-mode-change wording.
     assert "explicit" in body
-    assert ("mode change" in body) or ("change mode" in body) or ("switch mode" in body) or ("change the cached mode" in body)
+    assert (
+        ("mode change" in body)
+        or ("change mode" in body)
+        or ("switch mode" in body)
+        or ("change the cached mode" in body)
+    )
     # The cached mode is replaced (not appended).
     assert "replace" in body or "replaces" in body or "updated" in body or "update the cached" in body
     # The replacement happens before any further delegation.
-    assert "before any further" in body or "before further delegation" in body or "before the next" in body or "before any next" in body
+    assert (
+        "before any further" in body
+        or "before further delegation" in body
+        or "before the next" in body
+        or "before any next" in body
+    )
 
 
 def test_phase_prompts_expose_shared_result_envelope() -> None:
@@ -1049,7 +1083,14 @@ def test_change_orchestrator_body_failed_gatekeeper_never_launches_dependent_pha
     assert "gatekeeper" in body
     assert "fail" in body or "failed" in body
     # Dependent phase launch is blocked on failure.
-    assert "must not launch" in body or "do not launch" in body or "does not launch" in body or "not advance" in body or "stop" in body or "block" in body
+    assert (
+        "must not launch" in body
+        or "do not launch" in body
+        or "does not launch" in body
+        or "not advance" in body
+        or "stop" in body
+        or "block" in body
+    )
 
 
 def test_change_orchestrator_body_interactive_continue_cannot_chain_auto() -> None:
@@ -1236,7 +1277,7 @@ def test_contract_change_artifacts_carry_all_five_gentle_references() -> None:
     expected_refs = [
         "sdd-orchestrator.md:100-149",  # Session Preflight hard gate
         "sdd-orchestrator.md:178-199",  # Execution Mode interactive pauses
-        "sdd-orchestrator.md:200",      # Proposal/grill round before proposal
+        "sdd-orchestrator.md:200",  # Proposal/grill round before proposal
         "sdd-orchestrator.md:202-222",  # Automatic Mode Gatekeeper
         "sdd-orchestrator.md:299-308",  # Sub-Agent Launch Deduplication
     ]
@@ -1244,8 +1285,7 @@ def test_contract_change_artifacts_carry_all_five_gentle_references() -> None:
     combined = prd + exploration + design + specs_text
     for ref in expected_refs:
         assert ref in combined, (
-            f"gentle-orchestrator reference {ref!r} missing from "
-            f"PRD/exploration/design/specs under {change_root}"
+            f"gentle-orchestrator reference {ref!r} missing from PRD/exploration/design/specs under {change_root}"
         )
 
 
