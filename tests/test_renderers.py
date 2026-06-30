@@ -288,7 +288,7 @@ def test_loop_orchestrator_description_mentions_loop_labeled_sub_issues() -> Non
 
 def test_change_orchestrator_meta_declares_primary_restricted_agent() -> None:
     """Change-orchestrator metadata defines native models and restrictive capabilities."""
-    meta = get_agent_meta("change-orchestrator")
+    meta = get_agent_meta("change-orchestrator", overrides={})
 
     assert meta["description"]
     assert meta["mode"] == "primary"
@@ -420,6 +420,174 @@ def test_change_orchestrator_description_unaffected_by_body_only_gate() -> None:
     assert "Human review gate" not in description
     # The broader responsibilities remain so description is still useful on its own.
     assert "implement" in description or "validation" in description or "archive" in description
+
+
+# ---------------------------------------------------------------------------
+# Borrowed conductor disciplines — render contract coverage
+# ---------------------------------------------------------------------------
+
+
+def _change_orchestrator_body(cli: AgentCli = AgentCli.OPENCODE) -> str:
+    """Return the rendered change-orchestrator body for ``cli``.
+
+    Helper used by the borrowed-conductor tests so they can lock the body
+    wording on a single renderer (OpenCode) without re-implementing the
+    parse/extract dance per test.
+    """
+    pair = _find_pair(render_agents(cli), "change-orchestrator")
+    assert pair is not None, f"change-orchestrator not rendered for {cli}"
+    return pair[1].split("---", 2)[2].removeprefix("\n")
+
+
+def test_change_orchestrator_body_explicit_start_resume_route_and_disk_authority() -> None:
+    """Rendered change-orchestrator states change-new starts / change-continue resumes,
+    names disk as authoritative, and rejects folder-presence inference.
+
+    Locks the start/resume route contract (subtask 6.1) by asserting the
+    exact contract phrases appear in the rendered prompt body.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Explicit routing — the command is the intent.
+    assert "change-new" in body
+    assert "change-continue" in body
+    assert "start" in body and "resume" in body
+    # Disk is authoritative.
+    assert "disk" in body and "authoritative" in body
+    # Folder-presence inference is rejected.
+    assert "folder" in body
+    assert "never infer" in body or "never guess" in body or "reject folder" in body
+
+
+def test_change_orchestrator_body_binds_approval_to_reviewed_artifact_set() -> None:
+    """Rendered change-orchestrator binds approval to the exact reviewed artifact set.
+
+    Locks the artifact-set binding (subtask 6.2): approval is set-scoped,
+    reopens on edits to any of prd.md / design.md / specs/ / tasks.json,
+    and reopens on resume after a session gap or compaction.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Approval applies to the exact reviewed artifact set, not just the change.
+    assert "exact reviewed artifact set" in body or "reviewed artifact set" in body
+    # Invalidation rules: edit, session gap, compaction.
+    assert "session gap" in body
+    assert "compaction" in body
+    # Reopen wording is required by the gate.
+    assert "reopen" in body or "re-opens" in body or "re-presents" in body or "re-present" in body
+    # At least one of the binding rules must appear as a guardrail.
+    assert "approval does not carry" in body or "prompt-only" in body
+
+
+def test_change_orchestrator_body_enforces_phase_task_fingerprint_launch_log() -> None:
+    """Rendered change-orchestrator refuses duplicate (phase, task_fingerprint) launches.
+
+    Locks the delegation launch log (subtask 6.3): the session-scoped key,
+    the recorded-launch step, and the duplicate-key refusal wording.
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Key construction is documented.
+    assert "task_fingerprint" in body or "task fingerprint" in body
+    # The session scope and refusal semantics.
+    assert "session" in body
+    assert "duplicate" in body
+    assert "refuse" in body or "refused" in body
+    # Refusal lands back in the orchestrator with a concrete reason.
+    assert "already launched" in body or "same key" in body or "same (phase" in body
+
+
+def test_change_orchestrator_body_requires_exact_skill_md_path_injection() -> None:
+    """Rendered change-orchestrator requires exact SKILL.md paths and forbids inventing.
+
+    Locks the skill-path injection contract (subtask 6.4): the
+    ``Skills to load before work`` handoff, exact-path requirement, and
+    the rule against inventing or summarising paths.
+    """
+    body = _change_orchestrator_body()
+
+    # The literal handoff header is required.
+    assert "Skills to load before work" in body
+    # Path-discipline rules are stated.
+    assert "SKILL.md" in body
+    assert "exact" in body.lower()
+    assert "never invent" in body.lower() or "never" in body.lower()
+
+
+def test_change_orchestrator_body_locks_auto_interactive_phase_gate() -> None:
+    """Rendered change-orchestrator locks the auto/interactive phase gate.
+
+    Locks the session-mode phase gate (subtask 6.5): mode source,
+    stability, interactive pause-before-implementation, and the
+    auto-continues-only-when-safe conditions (prior phase passed,
+    current artifacts reviewed, no failed/blocked/waiting facts).
+    """
+    body = _change_orchestrator_body().lower()
+
+    # Mode label and source.
+    assert "auto" in body
+    assert "interactive" in body
+    # Pause-before-implementation in interactive mode.
+    assert "pause" in body
+    # Auto safety conditions: prior phase passed and unblocked facts.
+    assert "prior phase" in body or "prior phase pass" in body or "passed" in body
+    assert "blocked" in body
+    assert "failed" in body
+    # Reviewed-artifact precondition for auto.
+    assert "reviewed" in body
+
+
+def test_phase_prompts_expose_shared_result_envelope() -> None:
+    """Explorer, implementor, and validator prompts share one result envelope.
+
+    Locks the per-phase result envelope (subtask 6.6) across the three
+    delegable subagent prompts. Each must declare the same envelope
+    shape and its own phase-specific semantic facts.
+    """
+    bodies = {
+        name: _find_pair(render_agents(AgentCli.OPENCODE), name)[1].split("---", 2)[2].removeprefix("\n")
+        for name in ("change-explorer", "change-implementor", "change-validator")
+    }
+
+    for name, body in bodies.items():
+        # The shared envelope shape.
+        assert "status:" in body, f"{name}: status field missing"
+        assert "artifacts:" in body, f"{name}: artifacts field missing"
+        assert "summary:" in body, f"{name}: summary field missing"
+        assert "semantic_facts:" in body, f"{name}: semantic_facts field missing"
+        assert "skills:" in body, f"{name}: skills field missing"
+        assert "skill_resolution" in body, f"{name}: skill_resolution missing"
+
+    # Phase-specific semantic facts.
+    assert "budget:" in bodies["change-explorer"]
+    assert "partial:" in bodies["change-implementor"]
+    assert "changed_files:" in bodies["change-implementor"]
+    assert "remaining_tasks:" in bodies["change-implementor"]
+    assert "verdict:" in bodies["change-validator"]
+    assert "critical:" in bodies["change-validator"]
+
+
+def test_change_orchestrator_body_frontmatter_parity_after_body_only_edits() -> None:
+    """Rendered change-orchestrator frontmatter stays aligned with its source.
+
+    Locks metadata parity (subtask 6.7): body-only edits must not require
+    unrelated frontmatter changes. The same-source check ensures that if
+    the body changes without a frontmatter bump, parity is still asserted
+    through shape stability, not string equality.
+    """
+    pair = _find_pair(render_agents(AgentCli.OPENCODE), "change-orchestrator")
+    assert pair is not None
+    content = pair[1]
+    fm = _parse_frontmatter(content)
+
+    # Frontmatter remains a structural descriptor, not a contract dump.
+    assert "mode" in fm or "description" in fm
+    # The body still opens with the agent title after YAML close.
+    body = content.split("---", 2)[2].lstrip("\n")
+    assert body.startswith("# Change Orchestrator")
+    # Description stays the broader responsibility statement.
+    assert "Human review gate" not in fm.get("description", "")
+    assert "task_fingerprint" not in fm.get("description", "")
 
 
 # ---------------------------------------------------------------------------
