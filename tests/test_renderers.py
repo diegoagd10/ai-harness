@@ -1265,7 +1265,11 @@ def test_contract_change_artifacts_carry_all_five_gentle_references() -> None:
     design, specs, or implementation). Removing any one breaks the
     enforcement contract.
     """
-    change_root = Path(__file__).resolve().parent.parent / ".ai-harness/changes/fix-interactive-gates"
+    project_root = Path(__file__).resolve().parent.parent
+    active_root = project_root / ".ai-harness/changes/fix-interactive-gates"
+    archived_root = project_root / ".ai-harness/changes/archive/fix-interactive-gates"
+    change_root = active_root if active_root.exists() else archived_root
+
     prd = (change_root / "prd.md").read_text()
     exploration = (change_root / "exploration.md").read_text()
     design = (change_root / "design.md").read_text()
