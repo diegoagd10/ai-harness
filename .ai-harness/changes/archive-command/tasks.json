@@ -1,0 +1,122 @@
+{
+  "tasks": [
+    {
+      "id": "1",
+      "title": "Add explicit archive command contract to change-orchestrator.md",
+      "spec": "archive-command-contract",
+      "phase": "foundation",
+      "depends_on": [],
+      "status": "pending",
+      "subtasks": [
+        {
+          "id": "1.1",
+          "title": "Add a dedicated Archive command contract section with purpose, inputs, allowed states, blocked states, and side-effect boundaries; include the final result block shape (status / artifacts / summary / semantic_facts.waiting / skills) for the archive terminal report",
+          "scenario": "Scenario: Agent reads archive contract; Scenario: Archive completes; Scenario: Archive blocks",
+          "status": "pending"
+        },
+        {
+          "id": "1.2",
+          "title": "Restate CLI route authority inside the archive contract: archive is evaluated only when `ai-harness change-continue {change}` returns `nextRecommended: archive`; the orchestrator MUST NOT infer archive readiness from folder, file presence, or phase guesses",
+          "scenario": "Scenario: CLI recommends archive; Scenario: CLI recommends a different action",
+          "status": "pending"
+        },
+        {
+          "id": "1.3",
+          "title": "Encode the validator semantic gate inside the archive contract: allowed verdicts are `pass` or `pass-with-warnings` with `critical == 0`; `fail` or any `critical > 0` routes back to implement; on resume without in-context facts, read `validation.md` prose for verdict and critical count",
+          "scenario": "Scenario: Validation passes cleanly; Scenario: Validation passes with warnings; Scenario: Context lost but validation artifact exists; Scenario: Semantic facts cannot be recovered",
+          "status": "pending"
+        },
+        {
+          "id": "1.4",
+          "title": "Encode the pending work guard: zero pending tasks is necessary but not sufficient; pending tasks block archive even when validation passed or passed with warnings; orchestrator loops back to implement when task progress reports incomplete work",
+          "scenario": "Scenario: Validation passes but tasks remain; Scenario: Validation passes with warnings but tasks remain; Scenario: No pending work; Scenario: Task progress unavailable",
+          "status": "pending"
+        },
+        {
+          "id": "1.5",
+          "title": "Encode the local archive side-effect boundary: archive is a local filesystem move of change artifacts and specs only and MUST NOT imply git commits, branch operations, pushes, PR creation, issue publishing, or any remote side effects",
+          "scenario": "Scenario: Agent reaches archive phase; Scenario: Archive follows issue-backed planning; Scenario: Prompt documents archive",
+          "status": "pending"
+        },
+        {
+          "id": "1.6",
+          "title": "Update the archive row of the routing table to point to the new command contract and reinforce that CLI/state authority holds for archive too: the CLI is the routing oracle, disk is the state machine, and the prompt owns only orchestration policy",
+          "scenario": "Scenario: CLI recommends archive; Scenario: CLI reports mechanical archive readiness; Scenario: CLI recommends a different action",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "2",
+      "title": "Mirror the archive command contract in docs/design/change-orchestrator.md",
+      "spec": "prompt-design-alignment",
+      "phase": "integration",
+      "depends_on": [
+        "1"
+      ],
+      "status": "pending",
+      "subtasks": [
+        {
+          "id": "2.1",
+          "title": "Mirror the archive eligibility rules in the design doc: allowed only when `nextRecommended: archive` is reported, validator verdict is `pass` or `pass-with-warnings` with `critical == 0`, and no pending tasks remain",
+          "scenario": "Scenario: Prompt defines archive eligibility; Scenario: Validation passes cleanly; Scenario: Validation passes with warnings; Scenario: CLI recommends archive",
+          "status": "pending"
+        },
+        {
+          "id": "2.2",
+          "title": "Mirror the archive blocking cases in the design doc: missing validation, failing validation, any critical finding, pending tasks, or non-archive CLI recommendation must route back to implement or surface a blocked result",
+          "scenario": "Scenario: Design lists blockers; Scenario: Validation passes but tasks remain; Scenario: CLI reports mechanical archive readiness; Scenario: Task progress unavailable; Scenario: Semantic facts cannot be recovered",
+          "status": "pending"
+        },
+        {
+          "id": "2.3",
+          "title": "Mirror the local-only side-effect boundary in the design doc: archive is a local filesystem move of change artifacts and specs only, with explicit exclusion of git commits, branch operations, pushes, PR creation, issue publishing, and remote side effects",
+          "scenario": "Scenario: Prompt excludes remote side effects; Scenario: Agent reaches archive phase; Scenario: Archive follows issue-backed planning",
+          "status": "pending"
+        },
+        {
+          "id": "2.4",
+          "title": "State the alignment invariant in the design doc: the orchestrator prompt is the executable contract and the design is a mirror, not a second runtime authority; if they diverge, the prompt wins and the design must be realigned",
+          "scenario": "Scenario: Prompt and design disagree",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "3",
+      "title": "Add render assertions locking the archive command contract in tests/test_renderers.py",
+      "spec": "render-assertion-coverage",
+      "phase": "testing",
+      "depends_on": [
+        "2"
+      ],
+      "status": "pending",
+      "subtasks": [
+        {
+          "id": "3.1",
+          "title": "Add a render test that asserts the rendered change-orchestrator body exposes a dedicated Archive command section heading across every CLI renderer (OPENCODE, COPILOT, CLAUDE) so removing the heading from the prompt template breaks the test",
+          "scenario": "Scenario: Renderer test covers orchestrator body; Scenario: Archive remains orchestrator prose",
+          "status": "pending"
+        },
+        {
+          "id": "3.2",
+          "title": "Add a render test that asserts the archive section names the allowed states (`pass` / `pass-with-warnings` with `critical == 0`) and the blocked cases (failing validation, critical findings, pending tasks, non-archive CLI recommendation) inside the section body",
+          "scenario": "Scenario: Render test locks allowed and blocked wording; Scenario: Validation passes cleanly; Scenario: Validation passes but tasks remain; Scenario: CLI recommends a different action",
+          "status": "pending"
+        },
+        {
+          "id": "3.3",
+          "title": "Add a render test that asserts the archive section states the local-move boundary and explicitly excludes git commits, branch operations, pushes, PR creation, and issue publishing; assert it does not assert CLI execution mechanics",
+          "scenario": "Scenario: Render test locks local-only boundary; Scenario: Agent reaches archive phase; Scenario: Archive follows issue-backed planning; Scenario: Prompt documents archive",
+          "status": "pending"
+        },
+        {
+          "id": "3.4",
+          "title": "Verify the resource-set expectations in the existing renderer tests do not need to enumerate a new archive prompt file; if a test relies on the orchestrator prompt file list, confirm it stays the single source of archive wording and skip the change otherwise",
+          "scenario": "Scenario: Archive remains orchestrator prose; Scenario: No relevant renderer assertion exists",
+          "status": "pending"
+        }
+      ]
+    }
+  ]
+}
