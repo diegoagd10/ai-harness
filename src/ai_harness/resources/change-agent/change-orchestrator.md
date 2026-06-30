@@ -329,6 +329,14 @@ Rules:
 - The subagent contract requires `skills: loaded | fallback | none` plus
   `skill_resolution` detail when degraded. Silent fallback to a wrong file
   is forbidden — the orchestrator routes on the reported resolution.
+- **`change-implementor` always receives the TDD skill.** Resolve
+  `<repo-root>/.agents/skills/tdd/SKILL.md` to an absolute path and
+  include it in every implementor delegation's `Skills to load before
+  work` block. Implementor's job is implementation; TDD is the default
+  methodology. No opt-out — even docs-only tasks get the skill loaded
+  (overhead is negligible). The implementor prompt itself stays
+  silent on which skills to expect; injection is the orchestrator's
+  sole responsibility.
 
 ## Delegation launch log (HARD GATE)
 
