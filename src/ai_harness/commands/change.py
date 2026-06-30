@@ -10,7 +10,7 @@ from typing import Any
 
 import typer
 
-from ai_harness.modules.harness.change import ChangeStatus, ChangeStoreError, change_continue, change_new
+from ai_harness.modules.harness.change import ChangeStatus, ChangeStoreError, change_archive, change_continue, change_new
 from ai_harness.modules.harness.tasks import (
     SubtaskInput,
     Task,
@@ -37,6 +37,25 @@ def change_continue_cmd(change: str = typer.Argument(..., help="Change name.")) 
         _print_json(change_continue(Path.cwd(), change))
     except ChangeStoreError as exc:
         _exit_error(str(exc))
+
+
+def change_archive_cmd(change: str = typer.Argument(..., help="Change name.")) -> None:
+    """Archive a structurally valid Change.
+
+    Success prints exactly ``done`` to stdout and exits zero. Failure
+    prints JSON shaped as ``{ "errors": [...] }`` to stdout and exits
+    non-zero — every archive error becomes one entry in ``errors`` so
+    agents can detect failure without parsing human prose. Never emits
+    ``ChangeStatus`` JSON: archive is terminal, so post-archive status
+    is meaningless.
+    """
+    try:
+        change_archive(Path.cwd(), change)
+    except ChangeStoreError as exc:
+        errors = list(exc.errors) if exc.errors else [str(exc)]
+        typer.echo(json.dumps({"errors": errors}))
+        raise typer.Exit(code=1) from exc
+    typer.echo("done")
 
 
 def task_create_cmd(

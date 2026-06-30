@@ -10,7 +10,12 @@ import pytest
 from typer.testing import CliRunner
 
 from ai_harness.main import app
-from ai_harness.modules.harness.change import ChangeStoreError, change_continue, change_new
+from ai_harness.modules.harness.change import (
+    ChangeStoreError,
+    change_archive,
+    change_continue,
+    change_new,
+)
 from ai_harness.modules.harness.tasks import SubtaskInput, TaskInput, task_create, task_done
 
 runner = CliRunner()
@@ -155,3 +160,376 @@ def test_cli_change_errors_are_non_zero_and_not_json(tmp_path: Path, monkeypatch
     assert absent.exit_code == 1
     assert "not found" in absent.stderr
     assert absent.stdout == ""
+
+
+# ---------------------------------------------------------------------------
+# Helpers — build a Change folder that passes every archive preflight
+# ---------------------------------------------------------------------------
+
+
+def _build_archiveable_change(tmp_path: Path, name: str) -> Path:
+    """Create a Change folder that satisfies every archive preflight check.
+
+    Returns the change directory path. The fixture has a complete task
+    plus a validation artifact, so the only preflight that could fire
+    in a positive test is the destination-collision check.
+    """
+    change_new(tmp_path, name)
+    change_dir = tmp_path / ".ai-harness" / "changes" / name
+    (change_dir / "exploration.md").write_text("explored\n", encoding="utf-8")
+    (change_dir / "prd.md").write_text("prd\n", encoding="utf-8")
+    (change_dir / "design.md").write_text("design\n", encoding="utf-8")
+    (change_dir / "specs").mkdir()
+    (change_dir / "specs" / "capability.md").write_text("spec\n", encoding="utf-8")
+    task = task_create(
+        tmp_path,
+        name,
+        TaskInput(
+            title="Finish work",
+            spec="specs/capability.md",
+            phase="implement",
+            depends_on=[],
+            subtasks=[SubtaskInput(title="Build")],
+        ),
+    )
+    task_done(tmp_path, name, task.id)
+    (change_dir / "implementation.md").write_text("implemented\n", encoding="utf-8")
+    (change_dir / "validation.md").write_text("verdict: pass\n", encoding="utf-8")
+    return change_dir
+
+
+# ---------------------------------------------------------------------------
+# change_archive — preflight rejection paths
+# ---------------------------------------------------------------------------
+
+
+def test_change_archive_preflight_rejects_missing_change_folder(tmp_path: Path) -> None:
+    """Archive rejects an absent Change folder before touching the filesystem."""
+    with pytest.raises(ChangeStoreError) as excinfo:
+        change_archive(tmp_path, "ghost")
+
+    assert excinfo.value.errors
+    assert any("not found" in err for err in excinfo.value.errors)
+    assert not (tmp_path / ".ai-harness" / "archive").exists()
+
+
+def test_change_archive_preflight_rejects_incomplete_tasks(tmp_path: Path) -> None:
+    """Archive rejects a Change whose tasks are not all complete."""
+    change_new(tmp_path, "demo")
+    change_dir = tmp_path / ".ai-harness" / "changes" / "demo"
+    (change_dir / "validation.md").write_text("verdict: pass\n", encoding="utf-8")
+    task_create(
+        tmp_path,
+        "demo",
+        TaskInput(
+            title="Work",
+            spec="x",
+            phase="implement",
+            depends_on=[],
+            subtasks=[SubtaskInput(title="Build")],
+        ),
+    )
+
+    with pytest.raises(ChangeStoreError) as excinfo:
+        change_archive(tmp_path, "demo")
+
+    assert any("incomplete" in err for err in excinfo.value.errors)
+    # Preflight refused — no archive move happened.
+    assert not (tmp_path / ".ai-harness" / "archive" / "demo").exists()
+
+
+def test_change_archive_preflight_rejects_missing_validation_artifact(tmp_path: Path) -> None:
+    """Archive rejects a Change whose validation.md is absent."""
+    change_new(tmp_path, "demo")
+    change_dir = tmp_path / ".ai-harness" / "changes" / "demo"
+    task = task_create(
+        tmp_path,
+        "demo",
+        TaskInput(
+            title="Work",
+            spec="x",
+            phase="implement",
+            depends_on=[],
+            subtasks=[SubtaskInput(title="Build")],
+        ),
+    )
+    task_done(tmp_path, "demo", task.id)
+
+    with pytest.raises(ChangeStoreError) as excinfo:
+        change_archive(tmp_path, "demo")
+
+    assert any("validation" in err.lower() for err in excinfo.value.errors)
+
+
+def test_change_archive_preflight_rejects_existing_specs_destination(tmp_path: Path) -> None:
+    """Archive refuses when the top-level specs destination already exists."""
+    change_new(tmp_path, "demo")
+    change_dir = tmp_path / ".ai-harness" / "changes" / "demo"
+    (change_dir / "validation.md").write_text("verdict: pass\n", encoding="utf-8")
+    # Pre-create the specs destination collision.
+    (tmp_path / ".ai-harness" / "specs" / "demo").mkdir(parents=True)
+
+    with pytest.raises(ChangeStoreError) as excinfo:
+        change_archive(tmp_path, "demo")
+
+    assert any("specs destination" in err.lower() for err in excinfo.value.errors)
+    # Source untouched — change folder still in place.
+    assert change_dir.is_dir()
+
+
+def test_change_archive_preflight_rejects_existing_archive_destination(tmp_path: Path) -> None:
+    """Archive refuses when the top-level archive destination already exists."""
+    change_new(tmp_path, "demo")
+    change_dir = tmp_path / ".ai-harness" / "changes" / "demo"
+    (change_dir / "validation.md").write_text("verdict: pass\n", encoding="utf-8")
+    (tmp_path / ".ai-harness" / "archive" / "demo").mkdir(parents=True)
+
+    with pytest.raises(ChangeStoreError) as excinfo:
+        change_archive(tmp_path, "demo")
+
+    assert any("archive destination" in err.lower() for err in excinfo.value.errors)
+    assert change_dir.is_dir()
+
+
+def test_change_archive_preflight_collects_multiple_errors(tmp_path: Path) -> None:
+    """Multiple unsafe conditions surface together in a single error list."""
+    change_new(tmp_path, "demo")
+    # Add a pending task so "tasks incomplete" actually fires (empty
+    # task list is reported as all-complete by task_progress).
+    task_create(
+        tmp_path,
+        "demo",
+        TaskInput(
+            title="Work",
+            spec="x",
+            phase="implement",
+            depends_on=[],
+            subtasks=[SubtaskInput(title="Build")],
+        ),
+    )
+    # No validation.md + colliding archive dest.
+    (tmp_path / ".ai-harness" / "archive" / "demo").mkdir(parents=True)
+
+    with pytest.raises(ChangeStoreError) as excinfo:
+        change_archive(tmp_path, "demo")
+
+    errors = excinfo.value.errors
+    assert any("incomplete" in err for err in errors)
+    assert any("validation" in err.lower() for err in errors)
+    assert any("archive destination" in err.lower() for err in errors)
+
+
+def test_change_archive_preflight_does_not_mutate_on_failure(tmp_path: Path) -> None:
+    """A failed preflight leaves the change folder, specs, and archive untouched."""
+    change_new(tmp_path, "demo")
+    change_dir = tmp_path / ".ai-harness" / "changes" / "demo"
+    (change_dir / "specs").mkdir()
+    (change_dir / "specs" / "x.md").write_text("spec\n", encoding="utf-8")
+    # No validation.md → preflight fails.
+    assert (tmp_path / ".ai-harness" / "specs" / "demo").exists() is False
+
+    with pytest.raises(ChangeStoreError):
+        change_archive(tmp_path, "demo")
+
+    # Source specs subtree is still in place.
+    assert (change_dir / "specs" / "x.md").is_file()
+    assert change_dir.is_dir()
+    # No archive destination created.
+    assert not (tmp_path / ".ai-harness" / "archive" / "demo").exists()
+    # No specs destination created.
+    assert not (tmp_path / ".ai-harness" / "specs" / "demo").exists()
+
+
+# ---------------------------------------------------------------------------
+# change_archive — successful transactional move
+# ---------------------------------------------------------------------------
+
+
+def test_change_archive_promotes_specs_and_moves_change_folder(tmp_path: Path) -> None:
+    """Successful archive promotes specs and relocates the remaining change folder."""
+    _build_archiveable_change(tmp_path, "demo")
+    change_dir = tmp_path / ".ai-harness" / "changes" / "demo"
+
+    change_archive(tmp_path, "demo")
+
+    # Specs subtree landed at the top-level specs destination.
+    specs_dest = tmp_path / ".ai-harness" / "specs" / "demo"
+    assert specs_dest.is_dir()
+    assert (specs_dest / "capability.md").is_file()
+    # Remaining change folder landed at the top-level archive destination.
+    archive_dest = tmp_path / ".ai-harness" / "archive" / "demo"
+    assert archive_dest.is_dir()
+    assert (archive_dest / "prd.md").is_file()
+    assert (archive_dest / "design.md").is_file()
+    # Source change folder is gone.
+    assert not change_dir.exists()
+
+
+def test_change_archive_excludes_specs_subtree_from_archived_change(tmp_path: Path) -> None:
+    """Archived change folder MUST NOT carry a duplicate specs/ subtree."""
+    _build_archiveable_change(tmp_path, "demo")
+    change_archive(tmp_path, "demo")
+
+    archive_dest = tmp_path / ".ai-harness" / "archive" / "demo"
+    assert not (archive_dest / "specs").exists()
+    # Specs live at the top-level specs destination instead.
+    assert (tmp_path / ".ai-harness" / "specs" / "demo" / "capability.md").is_file()
+
+
+def test_change_archive_uses_canonical_top_level_layout(tmp_path: Path) -> None:
+    """Archive lands at .ai-harness/archive/{change}, never .ai-harness/changes/archive/{change}."""
+    _build_archiveable_change(tmp_path, "demo")
+    change_archive(tmp_path, "demo")
+
+    assert (tmp_path / ".ai-harness" / "archive" / "demo").is_dir()
+    # The stale `changes/archive/{name}` layout is NOT created.
+    assert not (tmp_path / ".ai-harness" / "changes" / "archive").exists()
+
+
+def test_change_archive_rolls_back_when_change_folder_move_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failure during the change-folder move restores the source tree intact."""
+    _build_archiveable_change(tmp_path, "demo")
+    change_dir = tmp_path / ".ai-harness" / "changes" / "demo"
+    specs_src = change_dir / "specs"
+
+    # First shutil.move (specs promotion) succeeds; the second one (change
+    # folder) is forced to fail. Preflight already passed, so the rollback
+    # contract is what we're testing.
+    real_move = __import__("shutil").move
+    call_count = {"n": 0}
+
+    def failing_move(src: str, dst: str) -> str:
+        call_count["n"] += 1
+        if call_count["n"] == 2:
+            raise OSError("simulated move failure")
+        return real_move(src, dst)
+
+    monkeypatch.setattr("ai_harness.modules.harness.change.shutil.move", failing_move)
+
+    with pytest.raises(ChangeStoreError) as excinfo:
+        change_archive(tmp_path, "demo")
+
+    assert any("simulated move failure" in err for err in excinfo.value.errors)
+    # Source change folder and its specs subtree are restored.
+    assert change_dir.is_dir()
+    assert specs_src.is_dir()
+    assert (specs_src / "capability.md").is_file()
+    # No partial destination was left behind.
+    assert not (tmp_path / ".ai-harness" / "archive" / "demo").exists()
+
+
+def test_change_archive_leaves_source_intact_when_specs_move_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failure during the specs move leaves the change folder and archive untouched."""
+    _build_archiveable_change(tmp_path, "demo")
+    change_dir = tmp_path / ".ai-harness" / "changes" / "demo"
+    specs_src = change_dir / "specs"
+
+    def failing_move(src: str, dst: str) -> str:
+        if src.endswith("/specs") or src.endswith("\\specs"):
+            raise OSError("simulated specs move failure")
+        return __import__("shutil").move(src, dst)
+
+    monkeypatch.setattr("ai_harness.modules.harness.change.shutil.move", failing_move)
+
+    with pytest.raises(ChangeStoreError) as excinfo:
+        change_archive(tmp_path, "demo")
+
+    assert any("specs" in err for err in excinfo.value.errors)
+    # Change folder + specs subtree still in place.
+    assert change_dir.is_dir()
+    assert specs_src.is_dir()
+    # No destination created.
+    assert not (tmp_path / ".ai-harness" / "archive" / "demo").exists()
+    assert not (tmp_path / ".ai-harness" / "specs" / "demo").exists()
+
+
+# ---------------------------------------------------------------------------
+# CLI adapter — output contract
+# ---------------------------------------------------------------------------
+
+
+def test_cli_change_archive_success_prints_done_and_exits_zero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Successful archive prints exactly 'done' on stdout and exits zero."""
+    _build_archiveable_change(tmp_path, "demo")
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["change-archive", "demo"])
+
+    assert result.exit_code == 0, result.stderr
+    assert result.stdout == "done\n"
+    # Side effects of success are visible on disk.
+    assert (tmp_path / ".ai-harness" / "archive" / "demo").is_dir()
+    assert (tmp_path / ".ai-harness" / "specs" / "demo").is_dir()
+
+
+def test_cli_change_archive_failure_prints_json_errors_and_exits_nonzero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Failed archive prints JSON {errors: [...]} on stdout and exits non-zero."""
+    change_new(tmp_path, "demo")
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["change-archive", "demo"])
+
+    assert result.exit_code != 0
+    payload = json.loads(result.stdout)
+    assert "errors" in payload
+    assert isinstance(payload["errors"], list)
+    assert payload["errors"]
+    # Failure is silent on stderr — the JSON shape is the contract.
+    assert result.stderr == ""
+
+
+def test_cli_change_archive_failure_does_not_emit_done(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed archive never prints the success token 'done'."""
+    change_new(tmp_path, "demo")
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["change-archive", "demo"])
+
+    assert "done" not in result.stdout
+    assert "done" not in result.stderr
+
+
+def test_cli_change_archive_success_does_not_emit_change_status_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Successful archive output is 'done', not a ChangeStatus JSON object."""
+    _build_archiveable_change(tmp_path, "demo")
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["change-archive", "demo"])
+
+    # Plain terminal token — no JSON braces, no schemaName field.
+    assert result.stdout == "done\n"
+    assert "schemaName" not in result.stdout
+    assert "{" not in result.stdout
+
+
+def test_cli_change_archive_does_not_parse_validation_content(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The CLI never inspects validation.md prose — only checks existence."""
+    _build_archiveable_change(tmp_path, "demo")
+    # Validation content is a non-trivial validator verdict; the CLI must
+    # not parse it. Archive should still succeed because the preflight
+    # only checks file existence.
+    (tmp_path / ".ai-harness" / "changes" / "demo" / "validation.md").write_text(
+        "verdict: fail\ncritical: 99\n", encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["change-archive", "demo"])
+
+    assert result.exit_code == 0, result.stderr
+    assert result.stdout == "done\n"
