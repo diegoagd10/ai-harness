@@ -1,0 +1,336 @@
+{
+  "tasks": [
+    {
+      "id": "1",
+      "title": "Add tests-prompts/Dockerfile (carrier image)",
+      "spec": "container-csv-runner",
+      "phase": "foundation",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "1.1",
+          "title": "Carries opencode + uv + python3 + jq on ubuntu:24.04",
+          "scenario": null,
+          "status": "done"
+        },
+        {
+          "id": "1.2",
+          "title": "Repository source not COPYd at build time (mount-only)",
+          "scenario": "container-csv-runner:workspace-bootstrap",
+          "status": "done"
+        },
+        {
+          "id": "1.3",
+          "title": "Entrypoint reserved for bash /tests-prompts/run.sh",
+          "scenario": "container-csv-runner:per-row-summary",
+          "status": "done"
+        },
+        {
+          "id": "1.4",
+          "title": "Image builds with tag ai-harness-prompt-tests:local",
+          "scenario": "docker-host-harness:image-build",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "2",
+      "title": "Add tests-prompts/cases.csv (header + hello smoke row)",
+      "spec": "disjoint-count-assertion",
+      "phase": "foundation",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "2.1",
+          "title": "Header matches spec exactly",
+          "scenario": "disjoint-count-assertion:smoke-row-hello",
+          "status": "done"
+        },
+        {
+          "id": "2.2",
+          "title": "First data row is hello,0,0,0",
+          "scenario": "disjoint-count-assertion:smoke-row-hello",
+          "status": "done"
+        },
+        {
+          "id": "2.3",
+          "title": "Parseable with Python csv stdlib",
+          "scenario": "container-csv-runner:csv-parsing",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "3",
+      "title": "Append tests-prompts/logs/ to root .gitignore",
+      "spec": "failure-trace-dump",
+      "phase": "foundation",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "3.1",
+          "title": "tests-prompts/logs/ listed verbatim",
+          "scenario": "failure-trace-dump:gitignore",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "4",
+      "title": "Add tests-prompts/run.sh workspace bootstrap",
+      "spec": "container-csv-runner",
+      "phase": "core",
+      "depends_on": [
+        "1"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "4.1",
+          "title": "Workspace copied writable from /source-ro",
+          "scenario": "container-csv-runner:workspace-bootstrap",
+          "status": "done"
+        },
+        {
+          "id": "4.2",
+          "title": "ai-harness installed via uv tool install .",
+          "scenario": "container-csv-runner:workspace-bootstrap",
+          "status": "done"
+        },
+        {
+          "id": "4.3",
+          "title": "Agent registered via ai-harness install -o opencode before loop",
+          "scenario": "container-csv-runner:agent-registration",
+          "status": "done"
+        },
+        {
+          "id": "4.4",
+          "title": "opencode --version captured before per-row loop",
+          "scenario": "container-csv-runner:version-capture",
+          "status": "done"
+        },
+        {
+          "id": "4.5",
+          "title": "Shell syntax valid (bash -n)",
+          "scenario": null,
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "5",
+      "title": "Add per-row loop + extract_counts helper to run.sh",
+      "spec": "disjoint-count-assertion",
+      "phase": "core",
+      "depends_on": [
+        "2",
+        "4"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "5.1",
+          "title": "extract_counts is the only schema-aware helper in the runner",
+          "scenario": "disjoint-count-assertion:extract-counts-helper",
+          "status": "done"
+        },
+        {
+          "id": "5.2",
+          "title": "Helper tolerates non-JSON chatter silently",
+          "scenario": "disjoint-count-assertion:extract-counts-helper",
+          "status": "done"
+        },
+        {
+          "id": "5.3",
+          "title": "Disjoint buckets by tool name (skill / task / other)",
+          "scenario": "disjoint-count-assertion:disjoint-buckets",
+          "status": "done"
+        },
+        {
+          "id": "5.4",
+          "title": "Skill/task/other bucket rules (text/thinking events ignored)",
+          "scenario": "disjoint-count-assertion:bucket-rules",
+          "status": "done"
+        },
+        {
+          "id": "5.5",
+          "title": "CSV parsed with csv.DictReader (header + comma/newline/quote/blank)",
+          "scenario": "container-csv-runner:csv-parsing",
+          "status": "done"
+        },
+        {
+          "id": "5.6",
+          "title": "Exact opencode run CLI flags per row (model pinned)",
+          "scenario": "container-csv-runner:per-row-invocation",
+          "status": "done"
+        },
+        {
+          "id": "5.7",
+          "title": "One fresh independent opencode run process per row",
+          "scenario": "container-csv-runner:per-row-invocation",
+          "status": "done"
+        },
+        {
+          "id": "5.8",
+          "title": "Model pinned to minimax/minimax-m3",
+          "scenario": "container-csv-runner:pinned-model",
+          "status": "done"
+        },
+        {
+          "id": "5.9",
+          "title": "No per-row timeout configured",
+          "scenario": "container-csv-runner:no-timeout-per-row",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "6",
+      "title": "Add count assertion + dump_failure_trace + per-row summary to run.sh",
+      "spec": "disjoint-count-assertion",
+      "phase": "integration",
+      "depends_on": [
+        "5"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "6.1",
+          "title": "Disjoint-count assertion against CSV columns",
+          "scenario": "disjoint-count-assertion:count-assertion",
+          "status": "done"
+        },
+        {
+          "id": "6.2",
+          "title": "tools / skills / sub_agents mismatch surfaces row FAIL",
+          "scenario": "disjoint-count-assertion:count-assertion",
+          "status": "done"
+        },
+        {
+          "id": "6.3",
+          "title": "Expected counts coerced to int before compare",
+          "scenario": "disjoint-count-assertion:count-assertion",
+          "status": "done"
+        },
+        {
+          "id": "6.4",
+          "title": "hello row passes with zero tool calls",
+          "scenario": "disjoint-count-assertion:smoke-row-hello",
+          "status": "done"
+        },
+        {
+          "id": "6.5",
+          "title": "[CASE n/N] PASS/FAIL per row",
+          "scenario": "container-csv-runner:per-row-summary",
+          "status": "done"
+        },
+        {
+          "id": "6.6",
+          "title": "Aggregate non-zero exit on any failure",
+          "scenario": "container-csv-runner:per-row-summary",
+          "status": "done"
+        },
+        {
+          "id": "6.7",
+          "title": "Failure-only trace dump (passing rows write nothing)",
+          "scenario": "failure-trace-dump:failure-only-dump",
+          "status": "done"
+        },
+        {
+          "id": "6.8",
+          "title": "Trace filename row-index plus slugified prompt (<=64 chars, fs-safe)",
+          "scenario": "failure-trace-dump:trace-filename",
+          "status": "done"
+        },
+        {
+          "id": "6.9",
+          "title": "[FAIL] headline naming row and assertion (greppable)",
+          "scenario": "failure-trace-dump:fail-headline-line",
+          "status": "done"
+        },
+        {
+          "id": "6.10",
+          "title": "Hermetic host writes (only tests-prompts/logs/)",
+          "scenario": "failure-trace-dump:hermetic-host-writes",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "7",
+      "title": "Add tests-prompts/docker-test.sh host harness",
+      "spec": "docker-host-harness",
+      "phase": "integration",
+      "depends_on": [
+        "1",
+        "6"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "7.1",
+          "title": "Auth preflight fail-fast naming expected path",
+          "scenario": "docker-host-harness:auth-preflight",
+          "status": "done"
+        },
+        {
+          "id": "7.2",
+          "title": "Auth preflight passes when file present",
+          "scenario": "docker-host-harness:auth-preflight",
+          "status": "done"
+        },
+        {
+          "id": "7.3",
+          "title": "Default tag plus IMAGE_TAG override",
+          "scenario": "docker-host-harness:image-build",
+          "status": "done"
+        },
+        {
+          "id": "7.4",
+          "title": "Three mounts: repo ro, auth ro, logs rw",
+          "scenario": "docker-host-harness:mount-composition",
+          "status": "done"
+        },
+        {
+          "id": "7.5",
+          "title": "Repo mount is read-only (filesystem-level)",
+          "scenario": "docker-host-harness:mount-composition",
+          "status": "done"
+        },
+        {
+          "id": "7.6",
+          "title": "--network host flag present on docker run",
+          "scenario": "docker-host-harness:network-host",
+          "status": "done"
+        },
+        {
+          "id": "7.7",
+          "title": "Aggregate exit code propagation (no || true masking)",
+          "scenario": "docker-host-harness:aggregate-exit-code",
+          "status": "done"
+        },
+        {
+          "id": "7.8",
+          "title": "[FAIL] headline from container surfaced by host",
+          "scenario": "docker-host-harness:fail-headline",
+          "status": "done"
+        },
+        {
+          "id": "7.9",
+          "title": "Style mirror: SCRIPT_DIR / PROJECT_ROOT / IMAGE_TAG / ENV_FLAGS / run_with_timeout",
+          "scenario": "docker-host-harness:style-mirror-e2e",
+          "status": "done"
+        },
+        {
+          "id": "7.10",
+          "title": "Shell syntax valid (bash -n)",
+          "scenario": null,
+          "status": "done"
+        }
+      ]
+    }
+  ]
+}
