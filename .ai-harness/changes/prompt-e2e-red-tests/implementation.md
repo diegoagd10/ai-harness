@@ -43,4 +43,13 @@ src/ai_harness/resources/change-agent/change-orchestrator.md will close the gap.
 Without PROMPT_E2E_RED set, both tests SKIP cleanly (default CI cost is flat).
 
 ## Remaining
-- none — all 9 tasks complete
+- none — all 9 tasks complete; `ai-harness task-next -c prompt-e2e-red-tests` returns null
+
+## Final state
+- 9 commits on `feature/test-prompts` branch implementing the change
+- 626 passed, 6 skipped in default CI pytest (the 6 are the live RED tests skipping on the PROMPT_E2E_RED gate)
+- 9 passed in tests-prompts/tests/cases_csv.test.py (existing 5-row smoke contract preserved)
+- 7 passed in tests-prompts/tests/cases_e2e_csv.test.py (new 3-row fixture contract)
+- Docker image builds clean and carries all new files in /tests-prompts/
+- bash -n clean on run.sh; ruff format/check clean; pylint 9.99/10 (informational skip-reason dup)
+- 2 of 6 live RED tests are RED on the current prompt (expected — see RED state section); 4 of 6 PASS when gate is on
