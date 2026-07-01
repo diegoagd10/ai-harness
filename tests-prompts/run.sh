@@ -11,13 +11,67 @@
 #
 # Public seam: tests-prompts/run.sh (this file).
 # Internal helpers:
+#   - assert_container_required (inline) — refuses host-side runs that
+#                           would mutate $HOME/.ai-harness, .config/opencode,
+#                           etc. See isolate-host-config-from-test-runs spec.
 #   - extract_counts       (tests-prompts/_extractor.py) — schema lives
 #                           HERE ONLY; everything else consumes the
 #                           returned triple.
 #   - slugify              (inline) — fs-safe prompt prefix
 #   - dump_failure_trace   (inline) — writes failure-only /logs/<row>-<slug>.json
 #   - run_row              (inline) — per-row opencode invocation adapter
+#
+# CSV contract (RFC-4180): prompts containing commas, quotes, or newlines
+# MUST be RFC-4180 quoted in cases.csv. Unquoted commas shift expected-count
+# columns silently — the comparison block either fails opaquely
+# (`bash: integer expression expected`) OR, worse, passes silently when the
+# shifted value happens to be an integer that matches the orchestrator's
+# tool count. The validate-csv-row-shape parser catches the silent-pass
+# class at parse time; this comment is here so the next contributor who
+# edits cases.csv reads the rule before they break it.
 set -uo pipefail
+
+# ---------------------------------------------------------------------------
+# assert_container_required — host-mutation guard.
+#
+# Closes Track B of fix-tests-prompts-assertions at its source: refusing to
+# run on the host altogether means no host path can be mutated, regardless
+# of which one `ai-harness install -o opencode` or cleanup_test_env would
+# have touched. Path-by-path backup/restore was rejected as a shallower
+# alternative in design.md.
+#
+# Container signals (passes if ANY is true, evaluated in order):
+#   1. $CONTAINER_REQUIRED_OK == "1"             — escape hatch for host
+#                                                  development of the runner
+#                                                  itself (docker-test.sh
+#                                                  sets it inside the
+#                                                  container; devs iterating
+#                                                  on run.sh directly can
+#                                                  set it manually).
+#   2. $CONTAINER_RUN_MARKER (default: /run/.containerenv) — Podman / CRI-O.
+#   3. $CONTAINER_DOCKER_MARKER (default: /.dockerenv)   — Docker.
+#   4. $CONTAINER_CGROUP_PATH   (default: /proc/1/cgroup) — cgroup fallback
+#      must be readable AND contain 'docker' or 'containerd'.
+#
+# If none of those signals pass: write [FATAL] to stderr and exit 2.
+#
+# The CONTAINER_*_MARKER and CONTAINER_CGROUP_PATH env vars exist both
+# for testing (we cannot create /.dockerenv without root) and for
+# non-standard runtimes that want to plug their own markers in.
+# ---------------------------------------------------------------------------
+assert_container_required() {
+    [ "${CONTAINER_REQUIRED_OK:-}" = "1" ] && return 0
+    [ -f "${CONTAINER_RUN_MARKER:-/run/.containerenv}" ] && return 0
+    [ -f "${CONTAINER_DOCKER_MARKER:-/.dockerenv}" ] && return 0
+    local cgroup_path="${CONTAINER_CGROUP_PATH:-/proc/1/cgroup}"
+    if [ -r "$cgroup_path" ]; then
+        if grep -qE '(docker|containerd)' "$cgroup_path" 2>/dev/null; then
+            return 0
+        fi
+    fi
+    printf '[FATAL] refusing to run on the host: tests-prompts must be invoked via docker-test.sh\n' >&2
+    exit 2
+}
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -32,6 +86,15 @@ AGENT_NAME="${AGENT_NAME:-change-orchestrator}"
 EXTRACTOR="${EXTRACTOR:-/tests-prompts/_extractor.py}"
 
 mkdir -p "$LOGS_DIR"
+
+# ---------------------------------------------------------------------------
+# Host-mutation guard: this script writes to $HOME paths via
+# `ai-harness install -o opencode` and (transitively) the host-bootstrap
+# helper. Refuse the entire script on a non-container host so no host
+# config is mutated. See assert_container_required() at the top of this
+# file. The guard must pass BEFORE the bootstrap copy below.
+# ---------------------------------------------------------------------------
+assert_container_required
 
 # ---------------------------------------------------------------------------
 # Bootstrap: copy /source-ro -> /workspace, install ai-harness, register agent
