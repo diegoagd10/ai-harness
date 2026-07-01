@@ -24,8 +24,7 @@ from __future__ import annotations
 
 import json
 import sys
-from typing import Iterable, Tuple
-
+from collections.abc import Iterable
 
 # ---------------------------------------------------------------------------
 # Event-shape constants — single source of truth for the opencode schema.
@@ -38,7 +37,7 @@ _TOOL_NAME_SKILL = "skill"
 _TOOL_NAME_TASK = "task"
 
 
-def extract_counts(trace_text: str) -> Tuple[int, int, int]:
+def extract_counts(trace_text: str) -> tuple[int, int, int]:
     """Return (tools, skills, sub_agents) from raw opencode --format json stdout.
 
     Lines that fail JSON parsing are skipped silently. Lines that parse but

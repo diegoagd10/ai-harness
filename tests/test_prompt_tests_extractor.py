@@ -14,7 +14,6 @@ from pathlib import Path
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Load tests-prompts/_extractor.py as a real module (the run.sh script
 # invokes it via `python3 /tests-prompts/_extractor.py` per row).

@@ -20,7 +20,6 @@ from pathlib import Path
 
 import pytest
 
-
 _HARNESS = Path(__file__).resolve().parent.parent / "tests-prompts" / "docker-test.sh"
 _E2E_HARNESS = Path(__file__).resolve().parent.parent / "e2e" / "docker-test.sh"
 
