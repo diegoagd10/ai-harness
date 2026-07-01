@@ -104,8 +104,8 @@ not routing decisions.
 
 When cached session mode is `interactive`, the orchestrator MUST run a
 stop/ask/wait checkpoint after every delegated Change phase — not only
-before `change-implementor`. This includes `change-explorer`, `propose`
-(PRD), `design`, `specs`, `tasks`, `change-validator`, and any
+before `change-implementor`. This includes `change-explorer`, `change-propose`
+(PRD), `change-design`, `change-specs`, `change-tasks`, `change-validator`, and any
 post-validation follow-up phase.
 
 1. Wait for the delegated phase to return its result block.
