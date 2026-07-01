@@ -12,9 +12,11 @@ from ai_harness.modules.harness import init_repo
 
 
 def init() -> None:
-    """Scaffold CODING_STANDARDS.md, the agent-doc labels policy, and GitHub labels at the repo root.
+    """Scaffold CODING_STANDARDS.md and the agent-doc init block at the repo root.
 
-    Idempotent — if an artifact already exists it is left unchanged.
+    Idempotent — if an artifact already exists with the new init markers it is
+    left unchanged; an existing legacy ``ai-harness:start/end`` block is
+    migrated in place. No GitHub label side effects.
     """
     result = init_repo()
 
@@ -23,15 +25,9 @@ def init() -> None:
     else:
         typer.echo("CODING_STANDARDS.md already exists — unchanged.")
 
-    if result.labels_policy_targets:
-        typer.echo(f"Appended labels-policy block to {', '.join(result.labels_policy_targets)}.")
-    elif result.no_agent_doc:
-        typer.echo("No CLAUDE.md or AGENTS.md found — skipping labels-policy block.")
+    if result.wrote_init_block:
+        typer.echo(f"Managed init block on {', '.join(result.init_block_targets)}.")
     else:
-        typer.echo("Labels-policy block already present — unchanged.")
-
-    if result.created_labels:
-        typer.echo(f"Created GitHub labels: {', '.join(result.created_labels)}.")
-    if result.label_warnings:
-        for warning in result.label_warnings:
-            typer.echo(f"Warning: {warning}", err=True)
+        typer.echo(
+            f"Managed init block already present on {', '.join(result.init_block_targets)} — unchanged."
+        )

@@ -14,7 +14,6 @@ import pytest
 from typer.testing import CliRunner
 
 from ai_harness.main import app
-from ai_harness.modules.harness.labels import LabelResult
 
 runner = CliRunner()
 
@@ -22,12 +21,17 @@ CODING_STANDARDS = "CODING_STANDARDS.md"
 CLAUDE_MD = "CLAUDE.md"
 AGENTS_MD = "AGENTS.md"
 
-AI_HARNESS_START = "<!-- ai-harness:start -->"
-AI_HARNESS_END = "<!-- ai-harness:end -->"
+# New init markers — the post-refactor block identity. The legacy
+# `ai-harness:start/end` markers are only referenced by the migration tests
+# that exercise the in-place legacy-block swap.
+INIT_START = "<!-- ai-harness:init:start -->"
+INIT_END = "<!-- ai-harness:init:end -->"
+LEGACY_START = "<!-- ai-harness:start -->"
+LEGACY_END = "<!-- ai-harness:end -->"
 
 
 # ---------------------------------------------------------------------------
-# init_repo — observable behaviour
+# init_repo — CODING_STANDARDS.md (unchanged behaviour)
 # ---------------------------------------------------------------------------
 
 
@@ -98,12 +102,95 @@ def test_init_repo_returns_true_only_when_writes(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# init_repo — CLAUDE.md labels-policy block
+# init_repo — agent docs always created when missing
 # ---------------------------------------------------------------------------
 
 
-def test_init_repo_appends_labels_policy_when_claude_md_exists_and_no_markers(tmp_path: Path) -> None:
-    """Running init_repo on a dir with CLAUDE.md lacking markers appends the labels-policy block."""
+def test_init_repo_creates_both_agent_docs_when_missing(tmp_path: Path) -> None:
+    """A clean directory without CLAUDE.md/AGENTS.md receives both, each carrying the init block."""
+    from ai_harness.modules.harness import init_repo
+
+    assert not (tmp_path / CLAUDE_MD).exists()
+    assert not (tmp_path / AGENTS_MD).exists()
+
+    result = init_repo(tmp_path)
+
+    assert result.wrote_init_block is True
+    assert result.init_block_targets == (CLAUDE_MD, AGENTS_MD)
+
+    claude = (tmp_path / CLAUDE_MD).read_text(encoding="utf-8")
+    agents = (tmp_path / AGENTS_MD).read_text(encoding="utf-8")
+    assert INIT_START in claude
+    assert INIT_END in claude
+    assert INIT_START in agents
+    assert INIT_END in agents
+
+
+def test_init_repo_creates_byte_identical_agent_docs(tmp_path: Path) -> None:
+    """Fresh-init CLAUDE.md and AGENTS.md have matching bytes (same managed body)."""
+    from ai_harness.modules.harness import init_repo
+
+    init_repo(tmp_path)
+
+    claude_bytes = (tmp_path / CLAUDE_MD).read_bytes()
+    agents_bytes = (tmp_path / AGENTS_MD).read_bytes()
+    assert claude_bytes == agents_bytes
+
+
+def test_init_repo_managed_body_references_coding_standards(tmp_path: Path) -> None:
+    """The new init block body explicitly points at CODING_STANDARDS.md so the agent knows what to read."""
+    from ai_harness.modules.harness import init_repo
+
+    init_repo(tmp_path)
+
+    claude = (tmp_path / CLAUDE_MD).read_text(encoding="utf-8")
+    agents = (tmp_path / AGENTS_MD).read_text(encoding="utf-8")
+    assert "CODING_STANDARDS.md" in claude
+    assert "CODING_STANDARDS.md" in agents
+
+
+def test_init_repo_creates_only_missing_agent_doc(tmp_path: Path) -> None:
+    """When AGENTS.md already has the init markers and CLAUDE.md is missing, only CLAUDE.md is created."""
+    from ai_harness.modules.harness import init_repo
+
+    managed = f"{INIT_START}\n\nFollow the repo's `CODING_STANDARDS.md`.\n\n{INIT_END}\n"
+    agents = tmp_path / AGENTS_MD
+    agents.write_text(managed, encoding="utf-8")
+
+    result = init_repo(tmp_path)
+
+    assert result.wrote_init_block is True
+    assert result.init_block_targets == (CLAUDE_MD, AGENTS_MD)
+    # AGENTS.md is left untouched (already at new markers).
+    assert agents.read_text(encoding="utf-8") == managed
+    # CLAUDE.md is created with the managed block.
+    claude = (tmp_path / CLAUDE_MD).read_text(encoding="utf-8")
+    assert INIT_START in claude
+    assert INIT_END in claude
+
+
+def test_init_repo_creates_agent_doc_when_only_other_exists_with_markers(tmp_path: Path) -> None:
+    """If one agent doc already has new init markers and the other is missing, the missing one is created."""
+    from ai_harness.modules.harness import init_repo
+
+    claude = tmp_path / CLAUDE_MD
+    claude.write_text(f"{INIT_START}\n\nManaged body.\n\n{INIT_END}\n", encoding="utf-8")
+
+    result = init_repo(tmp_path)
+
+    # CLAUDE.md is kept (already at new markers), AGENTS.md is created.
+    assert result.wrote_init_block is True
+    assert result.init_block_targets == (CLAUDE_MD, AGENTS_MD)
+    assert INIT_START in (tmp_path / AGENTS_MD).read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# init_repo — append (bare-file case)
+# ---------------------------------------------------------------------------
+
+
+def test_init_repo_appends_init_block_when_no_markers(tmp_path: Path) -> None:
+    """An existing CLAUDE.md without markers receives the init block appended; original content preserved."""
     from ai_harness.modules.harness import init_repo
 
     claude = tmp_path / CLAUDE_MD
@@ -112,163 +199,19 @@ def test_init_repo_appends_labels_policy_when_claude_md_exists_and_no_markers(tm
 
     result = init_repo(tmp_path)
 
-    assert result.wrote_labels_policy is True
-    assert result.labels_policy_targets == (CLAUDE_MD,)
-    assert result.no_agent_doc is False
+    assert result.wrote_init_block is True
+    assert result.init_block_targets == (CLAUDE_MD, AGENTS_MD)
 
     content = claude.read_text(encoding="utf-8")
-    assert AI_HARNESS_START in content
-    assert AI_HARNESS_END in content
-    assert "prd-issue" in content
-    assert "sub-issue" in content
-    assert "`ready-for-agent`" in content
-    assert "`loop`" in content
-    # Original content preserved
+    assert INIT_START in content
+    assert INIT_END in content
+    # Original content preserved at the head.
     assert original in content
-    # Block appears after original content
-    assert content.index(AI_HARNESS_START) > content.index(original.strip())
+    assert content.index(INIT_START) > content.index(original.strip())
 
 
-def test_init_repo_skips_labels_policy_when_markers_present(tmp_path: Path) -> None:
-    """Running init_repo when CLAUDE.md already has markers makes no change."""
-    from ai_harness.modules.harness import init_repo
-
-    claude = tmp_path / CLAUDE_MD
-    original = f"""## Agent skills
-
-Some content.
-
-{AI_HARNESS_START}
-
-## Loop label policy
-
-Already present.
-
-{AI_HARNESS_END}
-"""
-    claude.write_text(original, encoding="utf-8")
-
-    result = init_repo(tmp_path)
-
-    assert result.wrote_labels_policy is False
-    assert result.labels_policy_targets == ()
-    assert result.no_agent_doc is False
-    assert claude.read_text(encoding="utf-8") == original
-
-
-def test_init_repo_skips_labels_policy_when_no_agent_doc(tmp_path: Path) -> None:
-    """init_repo skips the block when neither CLAUDE.md nor AGENTS.md exists, creating neither."""
-    from ai_harness.modules.harness import init_repo
-
-    assert not (tmp_path / CLAUDE_MD).exists()
-    assert not (tmp_path / AGENTS_MD).exists()
-
-    result = init_repo(tmp_path)
-
-    assert result.wrote_labels_policy is False
-    assert result.labels_policy_targets == ()
-    assert result.no_agent_doc is True
-    assert not (tmp_path / CLAUDE_MD).exists()
-    assert not (tmp_path / AGENTS_MD).exists()
-
-
-def test_init_repo_appends_labels_policy_to_agents_md_when_no_claude_md(tmp_path: Path) -> None:
-    """A repo with AGENTS.md but no CLAUDE.md receives the block in AGENTS.md."""
-    from ai_harness.modules.harness import init_repo
-
-    agents = tmp_path / AGENTS_MD
-    original = "# Agent persona\n\nSome content.\n"
-    agents.write_text(original, encoding="utf-8")
-
-    result = init_repo(tmp_path)
-
-    assert result.wrote_labels_policy is True
-    assert result.labels_policy_targets == (AGENTS_MD,)
-    assert result.no_agent_doc is False
-
-    content = agents.read_text(encoding="utf-8")
-    assert AI_HARNESS_START in content
-    assert AI_HARNESS_END in content
-    assert "`loop`" in content
-    assert original in content
-    # CLAUDE.md is never created as a side effect.
-    assert not (tmp_path / CLAUDE_MD).exists()
-
-
-def test_init_repo_appends_labels_policy_to_both_docs_when_both_exist(tmp_path: Path) -> None:
-    """When both CLAUDE.md and AGENTS.md exist, both receive the block, CLAUDE.md first."""
-    from ai_harness.modules.harness import init_repo
-
-    claude = tmp_path / CLAUDE_MD
-    agents = tmp_path / AGENTS_MD
-    claude.write_text("# Claude\n", encoding="utf-8")
-    agents.write_text("# Agents\n", encoding="utf-8")
-
-    result = init_repo(tmp_path)
-
-    assert result.wrote_labels_policy is True
-    assert result.labels_policy_targets == (CLAUDE_MD, AGENTS_MD)
-    assert result.no_agent_doc is False
-    assert AI_HARNESS_START in claude.read_text(encoding="utf-8")
-    assert AI_HARNESS_START in agents.read_text(encoding="utf-8")
-
-
-def test_init_repo_skips_agents_md_when_markers_present(tmp_path: Path) -> None:
-    """AGENTS.md that already carries the markers is left unchanged."""
-    from ai_harness.modules.harness import init_repo
-
-    agents = tmp_path / AGENTS_MD
-    original = f"# Agents\n\n{AI_HARNESS_START}\n\nPresent.\n\n{AI_HARNESS_END}\n"
-    agents.write_text(original, encoding="utf-8")
-
-    result = init_repo(tmp_path)
-
-    assert result.wrote_labels_policy is False
-    assert result.labels_policy_targets == ()
-    assert result.no_agent_doc is False
-    assert agents.read_text(encoding="utf-8") == original
-
-
-def test_init_repo_writes_only_agents_md_when_claude_md_already_marked(tmp_path: Path) -> None:
-    """Both docs exist but only CLAUDE.md has markers: AGENTS.md gets the block, CLAUDE.md untouched."""
-    from ai_harness.modules.harness import init_repo
-
-    claude = tmp_path / CLAUDE_MD
-    agents = tmp_path / AGENTS_MD
-    claude_original = f"# Claude\n\n{AI_HARNESS_START}\n\nPresent.\n\n{AI_HARNESS_END}\n"
-    claude.write_text(claude_original, encoding="utf-8")
-    agents.write_text("# Agents\n", encoding="utf-8")
-
-    result = init_repo(tmp_path)
-
-    assert result.wrote_labels_policy is True
-    assert result.labels_policy_targets == (AGENTS_MD,)
-    assert result.no_agent_doc is False
-    assert claude.read_text(encoding="utf-8") == claude_original
-    assert AI_HARNESS_START in agents.read_text(encoding="utf-8")
-
-
-def test_init_repo_writes_only_claude_md_when_agents_md_already_marked(tmp_path: Path) -> None:
-    """Both docs exist but only AGENTS.md has markers: CLAUDE.md gets the block, AGENTS.md untouched."""
-    from ai_harness.modules.harness import init_repo
-
-    claude = tmp_path / CLAUDE_MD
-    agents = tmp_path / AGENTS_MD
-    claude.write_text("# Claude\n", encoding="utf-8")
-    agents_original = f"# Agents\n\n{AI_HARNESS_START}\n\nPresent.\n\n{AI_HARNESS_END}\n"
-    agents.write_text(agents_original, encoding="utf-8")
-
-    result = init_repo(tmp_path)
-
-    assert result.wrote_labels_policy is True
-    assert result.labels_policy_targets == (CLAUDE_MD,)
-    assert result.no_agent_doc is False
-    assert agents.read_text(encoding="utf-8") == agents_original
-    assert AI_HARNESS_START in claude.read_text(encoding="utf-8")
-
-
-def test_init_repo_appends_labels_policy_to_empty_claude_md(tmp_path: Path) -> None:
-    """Empty CLAUDE.md counts as existing and receives the labels-policy block."""
+def test_init_repo_appends_init_block_to_empty_claude_md(tmp_path: Path) -> None:
+    """Empty CLAUDE.md is treated as a populated file: it receives the init block as the entire body."""
     from ai_harness.modules.harness import init_repo
 
     claude = tmp_path / CLAUDE_MD
@@ -276,13 +219,15 @@ def test_init_repo_appends_labels_policy_to_empty_claude_md(tmp_path: Path) -> N
 
     result = init_repo(tmp_path)
 
-    assert result.wrote_labels_policy is True
+    assert result.wrote_init_block is True
     content = claude.read_text(encoding="utf-8")
-    assert AI_HARNESS_START in content
-    assert AI_HARNESS_END in content
+    assert INIT_START in content
+    assert INIT_END in content
+    # First line is the start marker (no spurious blank line at the top).
+    assert content.splitlines()[0] == INIT_START
 
 
-def test_init_repo_appends_labels_policy_when_claude_md_no_trailing_newline(tmp_path: Path) -> None:
+def test_init_repo_appends_init_block_when_claude_md_no_trailing_newline(tmp_path: Path) -> None:
     """CLAUDE.md without trailing newline still receives cleanly separated block."""
     from ai_harness.modules.harness import init_repo
 
@@ -292,13 +237,170 @@ def test_init_repo_appends_labels_policy_when_claude_md_no_trailing_newline(tmp_
 
     result = init_repo(tmp_path)
 
-    assert result.wrote_labels_policy is True
+    assert result.wrote_init_block is True
     content = claude.read_text(encoding="utf-8")
-    assert AI_HARNESS_START in content
-    # Block starts on a new line, not mashed against original
+    assert INIT_START in content
+    # Block starts on a new line, not mashed against original.
     lines = content.splitlines()
-    start_idx = next(i for i, line in enumerate(lines) if AI_HARNESS_START in line)
+    start_idx = next(i for i, line in enumerate(lines) if INIT_START in line)
     assert lines[start_idx - 1] == ""
+
+
+# ---------------------------------------------------------------------------
+# init_repo — skip (already-present case)
+# ---------------------------------------------------------------------------
+
+
+def test_init_repo_skips_when_new_markers_present(tmp_path: Path) -> None:
+    """CLAUDE.md already at new init markers is left byte-identical; AGENTS.md seeded too so init is a true no-op."""
+    from ai_harness.modules.harness import init_repo
+
+    claude = tmp_path / CLAUDE_MD
+    claude_original = (
+        f"## Agent skills\n\nSome content.\n\n"
+        f"{INIT_START}\n\nFollow the repo's `CODING_STANDARDS.md`.\n\n{INIT_END}\n"
+    )
+    claude.write_text(claude_original, encoding="utf-8")
+    agents_original = f"{INIT_START}\n\nFollow the repo's `CODING_STANDARDS.md`.\n\n{INIT_END}\n"
+    (tmp_path / AGENTS_MD).write_text(agents_original, encoding="utf-8")
+
+    result = init_repo(tmp_path)
+
+    assert result.wrote_init_block is False  # both kept → no modified files
+    assert result.init_block_targets == (CLAUDE_MD, AGENTS_MD)
+    assert claude.read_text(encoding="utf-8") == claude_original
+    assert (tmp_path / AGENTS_MD).read_text(encoding="utf-8") == agents_original
+
+
+def test_init_repo_skips_when_both_have_new_markers(tmp_path: Path) -> None:
+    """Both files at new markers → no rewrite, both listed as kept targets."""
+    from ai_harness.modules.harness import init_repo
+
+    managed = f"{INIT_START}\n\nFollow the repo's `CODING_STANDARDS.md`.\n\n{INIT_END}\n"
+    (tmp_path / CLAUDE_MD).write_text(managed, encoding="utf-8")
+    (tmp_path / AGENTS_MD).write_text(managed, encoding="utf-8")
+
+    result = init_repo(tmp_path)
+
+    assert result.wrote_init_block is False
+    assert result.init_block_targets == (CLAUDE_MD, AGENTS_MD)
+    assert (tmp_path / CLAUDE_MD).read_text(encoding="utf-8") == managed
+    assert (tmp_path / AGENTS_MD).read_text(encoding="utf-8") == managed
+
+
+def test_init_repo_writes_only_missing_when_only_one_has_new_markers(tmp_path: Path) -> None:
+    """CLAUDE.md has new markers, AGENTS.md missing → only AGENTS.md is written (the kept CLAUDE.md still appears in targets)."""
+    from ai_harness.modules.harness import init_repo
+
+    claude_original = f"{INIT_START}\n\nManaged body.\n\n{INIT_END}\n"
+    (tmp_path / CLAUDE_MD).write_text(claude_original, encoding="utf-8")
+
+    result = init_repo(tmp_path)
+
+    assert result.wrote_init_block is True
+    assert result.init_block_targets == (CLAUDE_MD, AGENTS_MD)
+    assert (tmp_path / CLAUDE_MD).read_text(encoding="utf-8") == claude_original
+    assert INIT_START in (tmp_path / AGENTS_MD).read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# init_repo — legacy block migration
+# ---------------------------------------------------------------------------
+
+
+def test_init_repo_migrates_minimal_legacy_block(tmp_path: Path) -> None:
+    """A CLAUDE.md containing only the legacy block is swapped for the new init block."""
+    from ai_harness.modules.harness import init_repo
+
+    claude = tmp_path / CLAUDE_MD
+    legacy_only = (
+        f"{LEGACY_START}\n\n## Loop label policy\n\nOld body.\n\n{LEGACY_END}\n"
+    )
+    claude.write_text(legacy_only, encoding="utf-8")
+
+    result = init_repo(tmp_path)
+
+    assert result.wrote_init_block is True
+    content = claude.read_text(encoding="utf-8")
+    assert INIT_START in content
+    assert INIT_END in content
+    assert LEGACY_START not in content
+    assert LEGACY_END not in content
+    # Body now references CODING_STANDARDS.md (not the old label policy).
+    assert "CODING_STANDARDS.md" in content
+    assert "Loop label policy" not in content
+
+
+def test_init_repo_migration_preserves_user_prefix_and_suffix(tmp_path: Path) -> None:
+    """User content above and below the legacy block survives byte-identical after migration."""
+    from ai_harness.modules.harness import init_repo
+
+    claude = tmp_path / CLAUDE_MD
+    original = (
+        "prefix line\n"
+        f"{LEGACY_START}\n\n## Loop label policy\n\nOld body.\n\n{LEGACY_END}\n"
+        "suffix line\n"
+    )
+    claude.write_text(original, encoding="utf-8")
+
+    result = init_repo(tmp_path)
+
+    assert result.wrote_init_block is True
+    content = claude.read_text(encoding="utf-8")
+    # Prefix and suffix survive byte-identical.
+    assert content.startswith("prefix line\n")
+    assert content.endswith("\nsuffix line\n")
+    # New init markers are present, legacy markers are absent.
+    assert INIT_START in content
+    assert INIT_END in content
+    assert LEGACY_START not in content
+    assert LEGACY_END not in content
+
+
+def test_init_repo_migration_handles_both_files(tmp_path: Path) -> None:
+    """Both files with legacy blocks are migrated independently in deterministic order."""
+    from ai_harness.modules.harness import init_repo
+
+    (tmp_path / CLAUDE_MD).write_text(
+        f"# Claude\n\n{LEGACY_START}\n\nOld.\n\n{LEGACY_END}\n", encoding="utf-8"
+    )
+    (tmp_path / AGENTS_MD).write_text(
+        f"# Agents\n\n{LEGACY_START}\n\nOld.\n\n{LEGACY_END}\n", encoding="utf-8"
+    )
+
+    result = init_repo(tmp_path)
+
+    assert result.wrote_init_block is True
+    assert result.init_block_targets == (CLAUDE_MD, AGENTS_MD)
+    for name in (CLAUDE_MD, AGENTS_MD):
+        c = (tmp_path / name).read_text(encoding="utf-8")
+        assert INIT_START in c
+        assert INIT_END in c
+        assert LEGACY_START not in c
+        assert LEGACY_END not in c
+
+
+def test_init_repo_new_markers_take_precedence_over_legacy(tmp_path: Path) -> None:
+    """If both new and legacy markers happen to coexist, the new-marker skip branch wins."""
+    from ai_harness.modules.harness import init_repo
+
+    claude = tmp_path / CLAUDE_MD
+    original = (
+        f"{INIT_START}\n\nFollow the repo's `CODING_STANDARDS.md`.\n\n{INIT_END}\n"
+        f"\n# A note about {LEGACY_START} appearing in prose.\n"
+    )
+    claude.write_text(original, encoding="utf-8")
+    # Seed AGENTS.md with the new markers so it's also a kept target.
+    agents_original = f"{INIT_START}\n\nFollow the repo's `CODING_STANDARDS.md`.\n\n{INIT_END}\n"
+    (tmp_path / AGENTS_MD).write_text(agents_original, encoding="utf-8")
+
+    result = init_repo(tmp_path)
+
+    # Both kept — file is left exactly as it was.
+    assert result.wrote_init_block is False
+    assert result.init_block_targets == (CLAUDE_MD, AGENTS_MD)
+    assert claude.read_text(encoding="utf-8") == original
+    assert (tmp_path / AGENTS_MD).read_text(encoding="utf-8") == agents_original
 
 
 # ---------------------------------------------------------------------------
@@ -335,8 +437,8 @@ def test_cli_init_skips_when_file_exists(tmp_path: Path, monkeypatch: pytest.Mon
     assert "unchanged" in result.stdout.lower()
 
 
-def test_cli_init_reports_labels_policy_appended(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """``ai-harness init`` reports labels-policy appended when CLAUDE.md exists without markers."""
+def test_cli_init_reports_init_block_appended(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``ai-harness init`` reports the init block landed when CLAUDE.md exists without markers."""
     monkeypatch.chdir(tmp_path)
 
     claude = tmp_path / CLAUDE_MD
@@ -345,20 +447,22 @@ def test_cli_init_reports_labels_policy_appended(tmp_path: Path, monkeypatch: py
     result = runner.invoke(app, ["init"])
 
     assert result.exit_code == 0, result.stderr
-    assert "Appended labels-policy" in result.stdout
+    assert "Managed init block on" in result.stdout
+    assert CLAUDE_MD in result.stdout
     content = claude.read_text(encoding="utf-8")
-    assert AI_HARNESS_START in content
-    assert AI_HARNESS_END in content
+    assert INIT_START in content
+    assert INIT_END in content
 
 
-def test_cli_init_reports_labels_policy_skipped_when_markers_present(
+def test_cli_init_reports_init_block_already_present(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``ai-harness init`` reports unchanged when CLAUDE.md already has markers."""
+    """``ai-harness init`` reports unchanged when both agent docs already have new init markers."""
     monkeypatch.chdir(tmp_path)
 
-    claude = tmp_path / CLAUDE_MD
-    claude.write_text(f"{AI_HARNESS_START}\n\n{AI_HARNESS_END}\n", encoding="utf-8")
+    managed = f"{INIT_START}\n\nFollow the repo's `CODING_STANDARDS.md`.\n\n{INIT_END}\n"
+    (tmp_path / CLAUDE_MD).write_text(managed, encoding="utf-8")
+    (tmp_path / AGENTS_MD).write_text(managed, encoding="utf-8")
 
     result = runner.invoke(app, ["init"])
 
@@ -367,22 +471,10 @@ def test_cli_init_reports_labels_policy_skipped_when_markers_present(
     assert "unchanged" in result.stdout.lower()
 
 
-def test_cli_init_reports_labels_policy_skipped_when_no_agent_doc(
+def test_cli_init_reports_init_block_appended_to_agents_md(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``ai-harness init`` reports skipping when neither CLAUDE.md nor AGENTS.md exists."""
-    monkeypatch.chdir(tmp_path)
-
-    result = runner.invoke(app, ["init"])
-
-    assert result.exit_code == 0, result.stderr
-    assert "No CLAUDE.md or AGENTS.md found" in result.stdout
-    assert not (tmp_path / CLAUDE_MD).exists()
-    assert not (tmp_path / AGENTS_MD).exists()
-
-
-def test_cli_init_reports_labels_policy_appended_to_agents_md(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """``ai-harness init`` names AGENTS.md when it receives the labels-policy block."""
+    """``ai-harness init`` names AGENTS.md when it receives the init block."""
     monkeypatch.chdir(tmp_path)
 
     agents = tmp_path / AGENTS_MD
@@ -391,94 +483,36 @@ def test_cli_init_reports_labels_policy_appended_to_agents_md(tmp_path: Path, mo
     result = runner.invoke(app, ["init"])
 
     assert result.exit_code == 0, result.stderr
-    assert "Appended labels-policy" in result.stdout
+    assert "Managed init block on" in result.stdout
     assert AGENTS_MD in result.stdout
     content = agents.read_text(encoding="utf-8")
-    assert AI_HARNESS_START in content
-    assert AI_HARNESS_END in content
+    assert INIT_START in content
+    assert INIT_END in content
 
 
-# ---------------------------------------------------------------------------
-# init_repo — label creation integration
-# ---------------------------------------------------------------------------
-
-_FAKE_LABEL_RESULT_OK = LabelResult(created=["ready-for-agent", "loop"], warnings=[])
-
-
-def test_init_repo_includes_label_result(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """init_repo populates created_labels and label_warnings from ensure_labels."""
-    from ai_harness.modules.harness import init_repo, operations
-
-    monkeypatch.setattr(operations, "ensure_labels", lambda _root: _FAKE_LABEL_RESULT_OK)
-
-    result = init_repo(tmp_path)
-
-    assert result.created_labels == ("ready-for-agent", "loop")
-    assert result.label_warnings == ()
-
-
-def test_init_repo_label_skips_dont_block_scaffolding(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """When labels are skipped (already exist), scaffolding still completes."""
-    from ai_harness.modules.harness import init_repo, operations
-
-    monkeypatch.setattr(operations, "ensure_labels", lambda _root: LabelResult(created=[], warnings=[]))
-
-    result = init_repo(tmp_path)
-
-    assert result.created_labels == ()
-    assert result.label_warnings == ()
-    assert result.wrote_standards is True  # Scaffolding proceeds normally
-
-
-def test_init_repo_label_warnings_dont_block_scaffolding(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """When label creation warns (gh unavailable), scaffolding still completes."""
-    from ai_harness.modules.harness import init_repo, operations
-
-    warnings = [
-        "Could not create GitHub label 'ready-for-agent' (gh CLI not found). "
-        "Run manually:\n  gh label create ready-for-agent --color 7057ff --description "
-        '"Fully specified, ready for an AFK agent"',
-    ]
-    monkeypatch.setattr(operations, "ensure_labels", lambda _root: LabelResult(created=[], warnings=warnings))
-
-    result = init_repo(tmp_path)
-
-    assert result.created_labels == ()
-    assert len(result.label_warnings) == 1
-    assert "gh CLI not found" in result.label_warnings[0]
-    assert result.wrote_standards is True  # Scaffolding proceeds normally
-
-
-# ---------------------------------------------------------------------------
-# CLI adapter — label output
-# ---------------------------------------------------------------------------
-
-
-def test_cli_init_reports_created_labels(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """``ai-harness init`` reports created GitHub labels."""
-    from ai_harness.modules.harness import operations
-
+def test_cli_init_no_label_or_gh_references_on_fresh_init(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``ai-harness init`` on a clean directory emits no label / GitHub / gh / Warning strings."""
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(operations, "ensure_labels", lambda _root: _FAKE_LABEL_RESULT_OK)
 
     result = runner.invoke(app, ["init"])
 
     assert result.exit_code == 0, result.stderr
-    assert "Created GitHub labels" in result.stdout
-    assert "ready-for-agent" in result.stdout
-    assert "loop" in result.stdout
+    stdout = result.stdout
+    stderr = result.stderr
+    combined = (stdout + "\n" + stderr).lower()
+    for forbidden in ("created github labels", "warning:", "ready-for-agent", "gh cli"):
+        assert forbidden not in combined, f"Found forbidden string {forbidden!r} in output:\n{result.stdout!r}\n{result.stderr!r}"
 
 
-def test_cli_init_reports_label_warnings_to_stderr(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """``ai-harness init`` routes label warnings to stderr."""
-    from ai_harness.modules.harness import operations
-
+def test_cli_init_idempotent_re_run_exits_zero(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``ai-harness init`` exits 0 on an idempotent re-run after the artifacts already exist."""
     monkeypatch.chdir(tmp_path)
-    warnings = ["gh CLI not found — run manually"]
-    monkeypatch.setattr(operations, "ensure_labels", lambda _root: LabelResult(created=[], warnings=warnings))
 
-    result = runner.invoke(app, ["init"])
+    first = runner.invoke(app, ["init"])
+    assert first.exit_code == 0, first.stderr
 
-    assert result.exit_code == 0, result.stderr
-    assert "Warning:" in result.stderr
-    assert "gh CLI not found" in result.stderr
+    second = runner.invoke(app, ["init"])
+    assert second.exit_code == 0, second.stderr
+    assert "already exists" in second.stdout.lower() or "already present" in second.stdout.lower()
