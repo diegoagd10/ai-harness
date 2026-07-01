@@ -1,0 +1,371 @@
+{
+  "tasks": [
+    {
+      "id": "1",
+      "title": "smoke",
+      "spec": "test",
+      "phase": "foundation",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "1.1",
+          "title": "sub1",
+          "scenario": "s1",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "2",
+      "title": "Add tests-prompts/parse_csv.py with row-shape validation",
+      "spec": "validate-csv-row-shape",
+      "phase": "foundation",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "2.1",
+          "title": "parse_csv.py exists and parse_rows is importable",
+          "scenario": "file is on disk and importable",
+          "status": "done"
+        },
+        {
+          "id": "2.2",
+          "title": "CLI emits NUL/TAB records on stdout",
+          "scenario": "CLI emits NUL/TAB records on stdout",
+          "status": "done"
+        },
+        {
+          "id": "2.3",
+          "title": "parse_rows yields tuple iterator for well-formed CSV",
+          "scenario": "well-formed CSV yields tuple iterator",
+          "status": "done"
+        },
+        {
+          "id": "2.4",
+          "title": "parse_rows raises CsvShapeError on malformed row",
+          "scenario": "malformed row raises CsvShapeError",
+          "status": "done"
+        },
+        {
+          "id": "2.5",
+          "title": "CLI catches trailing-field shift",
+          "scenario": "trailing-field shift is caught",
+          "status": "done"
+        },
+        {
+          "id": "2.6",
+          "title": "CLI catches non-integer count column",
+          "scenario": "non-integer count column is caught",
+          "status": "done"
+        },
+        {
+          "id": "2.7",
+          "title": "CLI catches empty prompt",
+          "scenario": "empty prompt is caught",
+          "status": "done"
+        },
+        {
+          "id": "2.8",
+          "title": "CLI fail-fast short-circuits later malformed rows",
+          "scenario": "first malformed row short-circuits later rows",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "3",
+      "title": "Add assert_container_required guard to tests-prompts/run.sh",
+      "spec": "isolate-host-config-from-test-runs",
+      "phase": "foundation",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "3.1",
+          "title": "Host-side invocation of run.sh exits 2 with [FATAL] message",
+          "scenario": "host-side invocation exits 2",
+          "status": "done"
+        },
+        {
+          "id": "3.2",
+          "title": "Container markers pass the guard silently",
+          "scenario": "container markers pass the guard",
+          "status": "done"
+        },
+        {
+          "id": "3.3",
+          "title": "CONTAINER_REQUIRED_OK=1 escape hatch passes the guard",
+          "scenario": "CONTAINER_REQUIRED_OK=1 escape hatch",
+          "status": "done"
+        },
+        {
+          "id": "3.4",
+          "title": "Env-var escape hatch is checked before container markers",
+          "scenario": "env-var escape hatch is checked first",
+          "status": "done"
+        },
+        {
+          "id": "3.5",
+          "title": "Guard exits 2 when no container markers are present",
+          "scenario": "marker checks fall through in order",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "4",
+      "title": "Wire run.sh to delegate to parse_csv.py, add compare_count, document CSV contract",
+      "spec": "guard-bash-numeric-comparison",
+      "phase": "core",
+      "depends_on": [
+        "2"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "4.1",
+          "title": "compare_count helper is defined in run.sh and callable from per-row block",
+          "scenario": "helper is defined and callable from the per-row block",
+          "status": "done"
+        },
+        {
+          "id": "4.2",
+          "title": "compare_count produces labeled fail on non-integer exp without invoking -ne",
+          "scenario": "non-integer exp produces labeled fail, no bash integer-error",
+          "status": "done"
+        },
+        {
+          "id": "4.3",
+          "title": "Per-row stderr no longer contains bash 'integer expression expected' noise",
+          "scenario": "bash integer-error noise is gone",
+          "status": "done"
+        },
+        {
+          "id": "4.4",
+          "title": "compare_count produces labeled fail naming both values on integer-unequal",
+          "scenario": "integer unequal produces labeled fail",
+          "status": "done"
+        },
+        {
+          "id": "4.5",
+          "title": "compare_count returns zero silently when expected equals got",
+          "scenario": "integer equal returns zero silently",
+          "status": "done"
+        },
+        {
+          "id": "4.6",
+          "title": "Per-row block uses compare_count three times (tools, skills, subs)",
+          "scenario": "per-row block contains three compare_count calls",
+          "status": "done"
+        },
+        {
+          "id": "4.7",
+          "title": "Raw [ $got_* -ne $exp_* ] form is removed from the per-row block",
+          "scenario": "per-row block contains compare_count calls",
+          "status": "done"
+        },
+        {
+          "id": "4.8",
+          "title": "run.sh parse_csv delegates to tests-prompts/parse_csv.py CLI",
+          "scenario": "helper is defined and callable from the per-row block",
+          "status": "done"
+        },
+        {
+          "id": "4.9",
+          "title": "run.sh header comment documents the RFC-4180 CSV contract",
+          "scenario": "header comment names the contract",
+          "status": "done"
+        },
+        {
+          "id": "4.10",
+          "title": "run.sh header names the silent-pass and opaque-fail failure modes",
+          "scenario": "header comment names the failure modes",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "5",
+      "title": "Repair tests-prompts/cases.csv with RFC-4180 quoting for rows 2 and 4",
+      "spec": "fix-cases-csv-encoding",
+      "phase": "core",
+      "depends_on": [
+        "2"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "5.1",
+          "title": "Row 2 prompt quoted; csv.DictReader sees single field 'hello, how are you doing?'",
+          "scenario": "row 2 quoted, prompt is single field",
+          "status": "done"
+        },
+        {
+          "id": "5.2",
+          "title": "Row 4 prompt quoted; csv.DictReader sees single field 'Hola!!, como estas?'",
+          "scenario": "row 4 quoted, prompt is single field",
+          "status": "done"
+        },
+        {
+          "id": "5.3",
+          "title": "Counts on rows 2 and 4 remain 0,0,0 (no invented values)",
+          "scenario": "counts on rows 2 and 4 are not invented",
+          "status": "done"
+        },
+        {
+          "id": "5.4",
+          "title": "Row 5 interpretation chosen and recorded in commit message OR row 5 left as TBD pending user confirmation",
+          "scenario": "interpretation A \u2014 prompt is the literal full string",
+          "status": "done"
+        },
+        {
+          "id": "5.5",
+          "title": "Header comment names both failure modes: silent-pass and 'integer expression expected'",
+          "scenario": "header comment names the failure modes",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "6",
+      "title": "Add tests-prompts/tests/parse_csv.test.sh regression verifier",
+      "spec": "add-parse-csv-regression-test",
+      "phase": "testing",
+      "depends_on": [
+        "2",
+        "5"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "6.1",
+          "title": "parse_csv.test.sh exists at tests-prompts/tests/parse_csv.test.sh and is executable",
+          "scenario": "test exists on disk",
+          "status": "done"
+        },
+        {
+          "id": "6.2",
+          "title": "Test exits non-zero against unfixed cases.csv and names failing rows",
+          "scenario": "test goes red on unfixed CSV",
+          "status": "done"
+        },
+        {
+          "id": "6.3",
+          "title": "Test exits zero against fixed cases.csv",
+          "scenario": "test goes green on fixed CSV",
+          "status": "done"
+        },
+        {
+          "id": "6.4",
+          "title": "Row-count assertion fires when parse_csv.py and independent re-parse disagree",
+          "scenario": "row-count assertion fires on mismatch",
+          "status": "done"
+        },
+        {
+          "id": "6.5",
+          "title": "Row-count assertion passes when counts agree",
+          "scenario": "row-count assertion passes when counts agree",
+          "status": "done"
+        },
+        {
+          "id": "6.6",
+          "title": "Byte-equality check catches unquoted-comma truncation on row 2",
+          "scenario": "byte-equality catches unquoted-comma truncation",
+          "status": "done"
+        },
+        {
+          "id": "6.7",
+          "title": "Byte-equality check passes on fixed CSV",
+          "scenario": "byte-equality passes on fixed CSV",
+          "status": "done"
+        },
+        {
+          "id": "6.8",
+          "title": "Integer-shape check fires on a non-integer count field",
+          "scenario": "integer-shape check fires on non-integer",
+          "status": "done"
+        },
+        {
+          "id": "6.9",
+          "title": "Integer-shape check passes on fixed CSV",
+          "scenario": "integer-shape passes on fixed CSV",
+          "status": "done"
+        },
+        {
+          "id": "6.10",
+          "title": "Test does not invoke docker, docker-test.sh, opencode, claude, gpt, llm, or any api",
+          "scenario": "no Docker invocation",
+          "status": "done"
+        },
+        {
+          "id": "6.11",
+          "title": "Test wall-clock time is under 1 second on host",
+          "scenario": "wall-clock under one second on host",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "7",
+      "title": "Add assert_container_required guard to e2e/lib.sh and forward CONTAINER_REQUIRED_OK=1 from e2e/docker-test.sh",
+      "spec": "isolate-host-config-from-test-runs",
+      "phase": "integration",
+      "depends_on": [
+        "3"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "7.1",
+          "title": "Sourcing e2e/lib.sh on host exits 2 with [FATAL] message",
+          "scenario": "e2e/lib.sh host-side sourcing exits 2",
+          "status": "done"
+        },
+        {
+          "id": "7.2",
+          "title": "e2e/docker-test.sh forwards CONTAINER_REQUIRED_OK=1 into the container",
+          "scenario": "e2e/docker-test.sh sets CONTAINER_REQUIRED_OK=1 in container",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "8",
+      "title": "Add host-side smoke test that verifies ~/.ai-harness is unchanged after docker-test.sh",
+      "spec": "isolate-host-config-from-test-runs",
+      "phase": "testing",
+      "depends_on": [
+        "7"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "8.1",
+          "title": "Smoke test exits 0 after a clean docker-test.sh run with byte-identical host paths",
+          "scenario": "smoke test passes after a clean docker-test.sh run",
+          "status": "done"
+        },
+        {
+          "id": "8.2",
+          "title": "Smoke test exits non-zero when assert_container_required is removed (regression detector)",
+          "scenario": "smoke test catches a regression in the guard",
+          "status": "done"
+        },
+        {
+          "id": "8.3",
+          "title": "No per-path backup/restore helpers were added to tests-prompts/ or e2e/",
+          "scenario": "no backup/restore helpers added",
+          "status": "done"
+        },
+        {
+          "id": "8.4",
+          "title": "e2e cleanup_test_env rm -rf lines remain unreachable from a host run",
+          "scenario": "cleanup_test_env rm-rf lines remain unreachable from host",
+          "status": "done"
+        }
+      ]
+    }
+  ]
+}
