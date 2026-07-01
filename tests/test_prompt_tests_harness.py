@@ -34,7 +34,8 @@ def harness_text() -> str:
 def syntax_ok() -> bool:
     result = subprocess.run(
         ["bash", "-n", str(_HARNESS)],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     return result.returncode == 0
 
@@ -77,7 +78,7 @@ class TestAuthPreflight:
 
     def test_preflight_uses_test_f(self, harness_text: str) -> None:
         assert re.search(r"\[\s*!\s*-f\s+\"?\$HOST_AUTH_FILE\"?", harness_text), (
-            "preflight must check [ ! -f \"$HOST_AUTH_FILE\" ]"
+            'preflight must check [ ! -f "$HOST_AUTH_FILE" ]'
         )
 
     def test_preflight_exits_nonzero_before_docker(self, harness_text: str) -> None:
@@ -87,9 +88,7 @@ class TestAuthPreflight:
         exit_idx = harness_text.find("exit 1", preflight_idx)
         docker_build_idx = harness_text.find("docker build")
         assert preflight_idx != -1, "preflight guard missing"
-        assert exit_idx != -1 and exit_idx < docker_build_idx, (
-            "exit 1 must appear between preflight and docker build"
-        )
+        assert exit_idx != -1 and exit_idx < docker_build_idx, "exit 1 must appear between preflight and docker build"
 
     def test_preflight_message_names_path(self, harness_text: str) -> None:
         # The [FAIL] message must include the auth file path so the
@@ -114,21 +113,17 @@ class TestImageBuild:
 class TestMountComposition:
     def test_repo_mount_ro(self, harness_text: str) -> None:
         # The repo mount must be :ro so container writes die with the container.
-        assert re.search(r'PROJECT_ROOT:/source-ro:ro', harness_text), (
-            "repo must mount to /source-ro with :ro"
-        )
+        assert re.search(r"PROJECT_ROOT:/source-ro:ro", harness_text), "repo must mount to /source-ro with :ro"
 
     def test_auth_mount_ro(self, harness_text: str) -> None:
         assert re.search(
-            r'HOST_AUTH_FILE:/root/\.local/share/opencode/auth\.json:ro',
+            r"HOST_AUTH_FILE:/root/\.local/share/opencode/auth\.json:ro",
             harness_text,
         ), "auth must mount read-only to /root/.local/share/opencode/auth.json"
 
     def test_logs_mount_writable(self, harness_text: str) -> None:
         # The logs mount must NOT be :ro — that's where failure traces go.
-        assert re.search(r'SCRIPT_DIR/logs:/logs(?!:ro)', harness_text), (
-            "logs must mount writable (no :ro suffix)"
-        )
+        assert re.search(r"SCRIPT_DIR/logs:/logs(?!:ro)", harness_text), "logs must mount writable (no :ro suffix)"
 
     def test_all_three_mounts_present(self, harness_text: str) -> None:
         assert harness_text.count("-v ") >= 3, "expected at least three -v flags"
@@ -145,9 +140,7 @@ class TestAggregateExitCode:
         for line in harness_text.splitlines():
             stripped = line.strip()
             if "docker run" in stripped:
-                assert "|| true" not in stripped, (
-                    f"docker run line masked with || true: {stripped!r}"
-                )
+                assert "|| true" not in stripped, f"docker run line masked with || true: {stripped!r}"
 
     def test_failure_branch_propagates_exit(self, harness_text: str) -> None:
         # The else branch must exit with the captured rc.
@@ -161,9 +154,7 @@ class TestAggregateExitCode:
             stripped = line.strip()
             if stripped.startswith("#"):
                 continue
-            assert stripped != "set -e", (
-                "harness must not `set -e` (would mask failure path)"
-            )
+            assert stripped != "set -e", "harness must not `set -e` (would mask failure path)"
 
 
 class TestFailHeadline:

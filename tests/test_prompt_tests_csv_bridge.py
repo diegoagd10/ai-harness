@@ -26,10 +26,7 @@ import pytest
 # Test data helpers
 # ---------------------------------------------------------------------------
 
-_HEADER = (
-    "prompt, tools calls (number), "
-    "skills calls (number), sub-agent calls (number)"
-)
+_HEADER = "prompt, tools calls (number), skills calls (number), sub-agent calls (number)"
 
 
 def _rows_to_csv(rows: list[tuple[str, str, str, str]]) -> str:
@@ -42,12 +39,14 @@ def _rows_to_csv(rows: list[tuple[str, str, str, str]]) -> str:
     """
     buf = io.StringIO()
     writer = csv.writer(buf, lineterminator="\n")
-    writer.writerow([
-        "prompt",
-        " tools calls (number)",
-        " skills calls (number)",
-        " sub-agent calls (number)",
-    ])
+    writer.writerow(
+        [
+            "prompt",
+            " tools calls (number)",
+            " skills calls (number)",
+            " sub-agent calls (number)",
+        ]
+    )
     for row in rows:
         writer.writerow(row)
     return buf.getvalue()
@@ -93,10 +92,12 @@ class TestParseCsvMultilineContract:
     def test_multiline_prompt_is_one_record(self, tmp_path: Path) -> None:
         csv_path = _write_csv(
             tmp_path,
-            _rows_to_csv([
-                ("line one\nline two", "1", "0", "0"),
-                ("hello", "0", "0", "0"),
-            ]),
+            _rows_to_csv(
+                [
+                    ("line one\nline two", "1", "0", "0"),
+                    ("hello", "0", "0", "0"),
+                ]
+            ),
         )
         rows = _python_parse(csv_path)
         assert len(rows) == 2, f"expected 2 rows, got {len(rows)}: {rows!r}"
@@ -109,11 +110,13 @@ class TestParseCsvMultilineContract:
     def test_three_multiline_prompts_preserve_newlines(self, tmp_path: Path) -> None:
         csv_path = _write_csv(
             tmp_path,
-            _rows_to_csv([
-                ("alpha\nbeta", "1", "2", "3"),
-                ("gamma\ndelta\nepsilon", "4", "5", "6"),
-                ("zeta\neta", "7", "8", "9"),
-            ]),
+            _rows_to_csv(
+                [
+                    ("alpha\nbeta", "1", "2", "3"),
+                    ("gamma\ndelta\nepsilon", "4", "5", "6"),
+                    ("zeta\neta", "7", "8", "9"),
+                ]
+            ),
         )
         rows = _python_parse(csv_path)
         assert len(rows) == 3, f"expected 3 rows, got {len(rows)}: {rows!r}"
@@ -148,13 +151,7 @@ class TestParseCsvMultilineContract:
 
     def test_blank_line_skipped(self, tmp_path: Path) -> None:
         # One header + a blank line + two data rows.
-        body = (
-            _HEADER + "\n"
-            + "hello,0,0,0"
-            + "\n\n"
-            + "world,0,0,0"
-            + "\n"
-        )
+        body = _HEADER + "\n" + "hello,0,0,0" + "\n\n" + "world,0,0,0" + "\n"
         csv_path = _write_csv(tmp_path, body)
         rows = _python_parse(csv_path)
         assert len(rows) == 2
@@ -163,9 +160,7 @@ class TestParseCsvMultilineContract:
 
     def test_existing_cases_csv_still_parses_to_one_row(self) -> None:
         # The committed cases.csv must continue to produce exactly one row.
-        repo_csv = (
-            Path(__file__).resolve().parent.parent / "tests-prompts" / "cases.csv"
-        )
+        repo_csv = Path(__file__).resolve().parent.parent / "tests-prompts" / "cases.csv"
         rows = _python_parse(repo_csv)
         assert rows == [("hello", "0", "0", "0")]
 
@@ -201,11 +196,11 @@ class TestBashNulDelimitedLoop:
     def _run_bash(self, payload: bytes) -> str:
         result = subprocess.run(
             ["bash", "-c", self.BASH_SNIPPET],
-            input=payload, capture_output=True, timeout=10,
+            input=payload,
+            capture_output=True,
+            timeout=10,
         )
-        assert result.returncode == 0, (
-            f"bash failed:\nstdout={result.stdout!r}\nstderr={result.stderr!r}"
-        )
+        assert result.returncode == 0, f"bash failed:\nstdout={result.stdout!r}\nstderr={result.stderr!r}"
         # Decode bytes -> str (errors='replace' to be safe with any NUL that
         # might leak into printf output; in practice ROW lines are ASCII).
         return result.stdout.decode("utf-8", errors="replace")
@@ -235,10 +230,7 @@ class TestBashNulDelimitedLoop:
     def test_multiline_prompt_is_one_record(self) -> None:
         # Multiline prompt is one field; NUL is the record separator.
         # <line one\nline two>\t<1>\t<0>\t<0>\0<hello>\t<0>\t<0>\t<0>\0
-        payload = (
-            b"line one\nline two\t1\t0\t0\x00"
-            b"hello\t0\t0\t0\x00"
-        )
+        payload = b"line one\nline two\t1\t0\t0\x00hello\t0\t0\t0\x00"
         out = self._run_bash(payload)
         rows = self._data_rows(out)
         assert len(rows) == 2, f"expected 2 records, got {len(rows)}: {rows!r}"
@@ -247,11 +239,7 @@ class TestBashNulDelimitedLoop:
 
     def test_three_multiline_records(self) -> None:
         # Three records, each with a multiline prompt.
-        payload = (
-            b"alpha\nbeta\t1\t2\t3\x00"
-            b"gamma\ndelta\nepsilon\t4\t5\t6\x00"
-            b"zeta\neta\t7\t8\t9\x00"
-        )
+        payload = b"alpha\nbeta\t1\t2\t3\x00gamma\ndelta\nepsilon\t4\t5\t6\x00zeta\neta\t7\t8\t9\x00"
         out = self._run_bash(payload)
         rows = self._data_rows(out)
         assert len(rows) == 3, f"expected 3 records, got {len(rows)}: {rows!r}"
@@ -266,13 +254,13 @@ class TestBashNulDelimitedLoop:
         payload = b"a\t0\t0\t0\x00b\t0\t0\t0\x00c\t0\t0\t0\x00"
         result = subprocess.run(
             ["bash", "-c", "tr -cd '\\0' | wc -c"],
-            input=payload, capture_output=True, timeout=10,
+            input=payload,
+            capture_output=True,
+            timeout=10,
         )
         assert result.returncode == 0, result.stderr.decode("utf-8", "replace")
         out = result.stdout.decode("utf-8", "replace").strip()
-        assert out == "3", (
-            f"expected 3 NULs (3 records), got {out!r}"
-        )
+        assert out == "3", f"expected 3 NULs (3 records), got {out!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -314,11 +302,10 @@ class TestParseCsvWireFormat:
         result = subprocess.run(
             ["python3", "-", str(csv_path)],
             input=self._BRIDGE_BODY.encode("utf-8"),
-            capture_output=True, timeout=10,
+            capture_output=True,
+            timeout=10,
         )
-        assert result.returncode == 0, (
-            f"bridge invocation failed:\nstderr={result.stderr.decode(errors='replace')}"
-        )
+        assert result.returncode == 0, f"bridge invocation failed:\nstderr={result.stderr.decode(errors='replace')}"
         return result.stdout
 
     def test_bridge_emits_nul_as_record_separator(self, tmp_path: Path) -> None:
@@ -333,21 +320,20 @@ class TestParseCsvWireFormat:
         # record has exactly 4 tab-separated fields.
         csv_path = _write_csv(
             tmp_path,
-            _rows_to_csv([
-                ("line one\nline two", "1", "0", "0"),
-                ("hello", "0", "0", "0"),
-            ]),
+            _rows_to_csv(
+                [
+                    ("line one\nline two", "1", "0", "0"),
+                    ("hello", "0", "0", "0"),
+                ]
+            ),
         )
         out = self._invoke_bridge(csv_path)
         records = [r for r in out.split(b"\x00") if r]
-        assert len(records) == 2, (
-            f"expected 2 NUL-delimited records, got {len(records)}: {out!r}"
-        )
+        assert len(records) == 2, f"expected 2 NUL-delimited records, got {len(records)}: {out!r}"
         for i, record in enumerate(records, start=1):
             fields = record.split(b"\t")
             assert len(fields) == 4, (
-                f"record {i} should have 4 tab-separated fields, got "
-                f"{len(fields)}: {record!r} (raw: {out!r})"
+                f"record {i} should have 4 tab-separated fields, got {len(fields)}: {record!r} (raw: {out!r})"
             )
         # The first record's prompt field is the multiline prompt.
         assert records[0].split(b"\t")[0] == b"line one\nline two"
@@ -359,17 +345,17 @@ class TestParseCsvWireFormat:
         # So total NUL count = row count.
         csv_path = _write_csv(
             tmp_path,
-            _rows_to_csv([
-                ("line one\nline two", "1", "0", "0"),
-                ("hello", "0", "0", "0"),
-                ("another\nmulti\nline", "2", "3", "4"),
-            ]),
+            _rows_to_csv(
+                [
+                    ("line one\nline two", "1", "0", "0"),
+                    ("hello", "0", "0", "0"),
+                    ("another\nmulti\nline", "2", "3", "4"),
+                ]
+            ),
         )
         out = self._invoke_bridge(csv_path)
         nul_count = out.count(b"\x00")
-        assert nul_count == 3, (
-            f"expected 3 NULs (3 records), got {nul_count}: {out!r}"
-        )
+        assert nul_count == 3, f"expected 3 NULs (3 records), got {nul_count}: {out!r}"
 
     def test_bridge_preserves_prompt_bytes_verbatim(self, tmp_path: Path) -> None:
         # A prompt with newlines, commas, and quotes must appear verbatim
@@ -381,9 +367,7 @@ class TestParseCsvWireFormat:
         )
         out = self._invoke_bridge(csv_path)
         # The prompt bytes should appear intact in the output.
-        assert prompt.encode("utf-8") in out, (
-            f"prompt not preserved verbatim in bridge output: {out!r}"
-        )
+        assert prompt.encode("utf-8") in out, f"prompt not preserved verbatim in bridge output: {out!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -420,25 +404,24 @@ class TestLiveRunShBridge:
         run_sh_text = _RUN_SH_PATH.read_text()
         body = _extract_parse_csv_body(run_sh_text)
         # Sanity: the body should reference the field names we expect.
-        assert "tools calls (number)" in body, (
-            "parse_csv body is missing the expected header; run.sh changed?"
-        )
+        assert "tools calls (number)" in body, "parse_csv body is missing the expected header; run.sh changed?"
         # Invoke the live parse_csv body and confirm NUL-delimited output.
         csv_path = _write_csv(
             tmp_path,
-            _rows_to_csv([
-                ("line one\nline two", "1", "0", "0"),
-                ("hello", "0", "0", "0"),
-            ]),
+            _rows_to_csv(
+                [
+                    ("line one\nline two", "1", "0", "0"),
+                    ("hello", "0", "0", "0"),
+                ]
+            ),
         )
         result = subprocess.run(
             ["python3", "-", str(csv_path)],
             input=body.encode("utf-8"),
-            capture_output=True, timeout=10,
+            capture_output=True,
+            timeout=10,
         )
-        assert result.returncode == 0, (
-            f"parse_csv failed:\nstderr={result.stderr.decode(errors='replace')}"
-        )
+        assert result.returncode == 0, f"parse_csv failed:\nstderr={result.stderr.decode(errors='replace')}"
         out = result.stdout
         records = [r for r in out.split(b"\x00") if r]
         assert len(records) == 2, (
@@ -449,10 +432,7 @@ class TestLiveRunShBridge:
         # Each record has exactly 4 tab-separated fields.
         for i, record in enumerate(records, start=1):
             fields = record.split(b"\t")
-            assert len(fields) == 4, (
-                f"record {i} has {len(fields)} tab-separated fields "
-                f"(expected 4): {record!r}"
-            )
+            assert len(fields) == 4, f"record {i} has {len(fields)} tab-separated fields (expected 4): {record!r}"
         # The first record's prompt field preserves the embedded newline.
         assert records[0].split(b"\t")[0] == b"line one\nline two"
 

@@ -70,17 +70,20 @@ class TestFilenameSafety:
     def _filename(self, row_index: int, prompt: str) -> str:
         return f"{row_index}-{_slugify(prompt)}.json"
 
-    @pytest.mark.parametrize("prompt", [
-        "hello",
-        "say, hello",
-        'say "hello"!',
-        "a/b",
-        "a b",
-        "---leading---",
-        "unicode é",
-        "x" * 100,
-        "",
-    ])
+    @pytest.mark.parametrize(
+        "prompt",
+        [
+            "hello",
+            "say, hello",
+            'say "hello"!',
+            "a/b",
+            "a b",
+            "---leading---",
+            "unicode é",
+            "x" * 100,
+            "",
+        ],
+    )
     def test_filename_is_safe(self, prompt: str) -> None:
         fname = self._filename(3, prompt)
         assert "/" not in fname
@@ -100,11 +103,10 @@ class TestRunShSyntax:
         # bash -n is the cheapest syntax check we can do without Docker.
         result = subprocess.run(
             ["bash", "-n", str(_RUN_SH)],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
-        assert result.returncode == 0, (
-            f"bash -n failed:\nstdout={result.stdout}\nstderr={result.stderr}"
-        )
+        assert result.returncode == 0, f"bash -n failed:\nstdout={result.stdout}\nstderr={result.stderr}"
 
     def test_run_sh_does_not_set_e(self) -> None:
         """Per-row failures must not abort the loop; set -e must be absent."""
@@ -135,6 +137,4 @@ class TestRunShHasNoPerRowTimeout:
             if in_loop and (line.startswith("parse_csv") or line.startswith("TOTAL=")):
                 in_loop = True
             if in_run_row or in_loop:
-                assert "timeout" not in line, (
-                    f"per-row timeout reference: {line!r}"
-                )
+                assert "timeout" not in line, f"per-row timeout reference: {line!r}"

@@ -34,6 +34,7 @@ extract_counts = _extractor.extract_counts
 # Test data — synthetic opencode --format json streams
 # ---------------------------------------------------------------------------
 
+
 def _event(tool: str) -> str:
     """One realistic tool_use event: top-level type=tool_use, part.type=tool."""
     return (
@@ -43,10 +44,7 @@ def _event(tool: str) -> str:
 
 
 def _text_event(text: str = "hello") -> str:
-    return (
-        '{"type":"text","timestamp":0,"sessionID":"s",'
-        f'"part":{{"type":"text","text":"{text}"}}}}'
-    )
+    return f'{{"type":"text","timestamp":0,"sessionID":"s","part":{{"type":"text","text":"{text}"}}}}'
 
 
 def _step_start() -> str:
@@ -60,6 +58,7 @@ def _step_finish() -> str:
 # ---------------------------------------------------------------------------
 # Scenarios from disjoint-count-assertion spec
 # ---------------------------------------------------------------------------
+
 
 class TestDisjointBuckets:
     def test_skill_call_increments_skills_bucket(self) -> None:
@@ -86,9 +85,17 @@ class TestDisjointBuckets:
 
     def test_three_buckets_disjoint_and_exhaustive(self) -> None:
         # 2 tools, 3 skills, 4 task calls in any order -> union = 9.
-        events = [_event("read"), _event("skill"), _event("bash"),
-                  _event("task"), _event("skill"), _event("task"),
-                  _event("task"), _event("skill"), _event("task")]
+        events = [
+            _event("read"),
+            _event("skill"),
+            _event("bash"),
+            _event("task"),
+            _event("skill"),
+            _event("task"),
+            _event("task"),
+            _event("skill"),
+            _event("task"),
+        ]
         trace = _step_start() + "\n" + "\n".join(events) + "\n" + _step_finish() + "\n"
         tools, skills, sub_agents = extract_counts(trace)
         assert (tools, skills, sub_agents) == (2, 3, 4)
@@ -97,15 +104,17 @@ class TestDisjointBuckets:
 
 class TestNonToolEventsIgnored:
     def test_text_events_dont_move_any_counter(self) -> None:
-        trace = "\n".join([_step_start(), _text_event("hello"),
-                            _step_finish()]) + "\n"
+        trace = "\n".join([_step_start(), _text_event("hello"), _step_finish()]) + "\n"
         tools, skills, sub_agents = extract_counts(trace)
         assert (tools, skills, sub_agents) == (0, 0, 0)
 
     def test_mixed_text_and_tools_only_tools_count(self) -> None:
-        trace = "\n".join([_step_start(), _text_event("thinking..."),
-                            _event("read"), _text_event("answer"),
-                            _step_finish()]) + "\n"
+        trace = (
+            "\n".join(
+                [_step_start(), _text_event("thinking..."), _event("read"), _text_event("answer"), _step_finish()]
+            )
+            + "\n"
+        )
         tools, skills, sub_agents = extract_counts(trace)
         assert (tools, skills, sub_agents) == (1, 0, 0)
 
@@ -113,13 +122,18 @@ class TestNonToolEventsIgnored:
 class TestRobustParsing:
     def test_non_json_lines_skipped_silently(self) -> None:
         # Opencode can sometimes emit warning chatter between events.
-        trace = "\n".join([
-            _step_start(),
-            "WARN: connection pool retry",
-            _event("read"),
-            "DEBUG: model returned 200",
-            _step_finish(),
-        ]) + "\n"
+        trace = (
+            "\n".join(
+                [
+                    _step_start(),
+                    "WARN: connection pool retry",
+                    _event("read"),
+                    "DEBUG: model returned 200",
+                    _step_finish(),
+                ]
+            )
+            + "\n"
+        )
         tools, skills, sub_agents = extract_counts(trace)
         assert (tools, skills, sub_agents) == (1, 0, 0)
 
@@ -131,8 +145,7 @@ class TestRobustParsing:
 
     def test_hello_row_trace_has_zero_tool_calls(self) -> None:
         # Mirrors disjoint-count-assertion:smoke-row-hello scenario.
-        trace = "\n".join([_step_start(), _text_event("Hey!"),
-                            _step_finish()]) + "\n"
+        trace = "\n".join([_step_start(), _text_event("Hey!"), _step_finish()]) + "\n"
         assert extract_counts(trace) == (0, 0, 0)
 
     def test_hello_prompt_live_with_minimax_m3(self) -> None:
@@ -152,17 +165,22 @@ class TestRobustParsing:
         with tempfile.TemporaryDirectory() as tmp:
             result = subprocess.run(
                 [
-                    "opencode", "run",
-                    "--agent", "change-orchestrator",
+                    "opencode",
+                    "run",
+                    "--agent",
+                    "change-orchestrator",
                     "--auto",
-                    "--format", "json",
-                    "--model", "minimax/MiniMax-M3",
-                    "--dir", tmp,
+                    "--format",
+                    "json",
+                    "--model",
+                    "minimax/MiniMax-M3",
+                    "--dir",
+                    tmp,
                     "hello",
                 ],
-                capture_output=True, text=True, timeout=120,
+                capture_output=True,
+                text=True,
+                timeout=120,
             )
             trace = result.stdout
-            assert extract_counts(trace) == (0, 0, 0), (
-                "real change-orchestrator on 'hello' should emit zero tool calls"
-            )
+            assert extract_counts(trace) == (0, 0, 0), "real change-orchestrator on 'hello' should emit zero tool calls"
