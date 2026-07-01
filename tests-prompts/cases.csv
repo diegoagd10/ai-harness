@@ -1,2 +1,6 @@
 prompt, tools calls (number), skills calls (number), sub-agent calls (number)
 hello,0,0,0
+hello, how are you doing?,0,0,0
+Hola,0,0,0
+Hola!!, como estas?,0,0,0
+Create a simple python script for fibonacci,10,0,0
