@@ -1,0 +1,19 @@
+# tests-prompts/cases_e2e.csv — RED regression fixtures for the
+# change-orchestrator prompt. Three fixtures, baseline counts 0,0,0.
+# Routing contract is enforced by tests-prompts/_e2e_assertions.py
+# plus the live pytest drivers (tests/test_prompt_e2e_red*.py).
+#
+# This file is a SIBLING of tests-prompts/cases.csv; the existing
+# five-row smoke contract stays untouched.
+#
+# Fixture identities:
+#   1. fibonacci-ES           (small/concrete)    -> answer directly
+#   2. mario-kart-3d-vague    (ambiguous/large)   -> grill first
+#   3. mario-kart-3d-complete (complete/large)    -> start change flow
+#
+# RFC-4180: prompts containing commas / quotes / newlines MUST
+# be wrapped in double quotes. parse_csv.py owns row-shape.
+prompt, tools calls (number), skills calls (number), sub-agent calls (number)
+Crea fibonnaci en javascript en este directorio para aprender el algoritmo y ver el codigo de manera recursiva,0,0,0
+Crea juego de mario karn en 3d,0,0,0
+"Build a 3D Mario Kart-style racing game using Three.js. Requirements: at least 3 race tracks, a character select screen with 4 drivers, power-ups, AI opponents, and split-screen multiplayer controls. Add a main menu, lap counter, and minimap. Include physics for drifting and item boxes.",0,0,0
