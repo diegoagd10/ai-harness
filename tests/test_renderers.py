@@ -83,7 +83,7 @@ def test_render_agents_opencode_returns_agents_under_agent_dir() -> None:
         ".config/opencode/agent/implementor.md",
         ".config/opencode/agent/loop-orchestrator.md",
         ".config/opencode/agent/validator.md",
-".config/opencode/agent/change-archiver.md",
+        ".config/opencode/agent/change-archiver.md",
         ".config/opencode/agent/change-design.md",
         ".config/opencode/agent/change-explorer.md",
         ".config/opencode/agent/change-implementor.md",
