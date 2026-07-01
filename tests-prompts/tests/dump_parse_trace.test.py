@@ -45,13 +45,9 @@ import unittest
 from pathlib import Path
 
 # tests-prompts/tests/dump_parse_trace.test.py -> tests-prompts/_dump_parse_trace.py
-HELPER_PATH = os.path.normpath(
-    os.path.join(os.path.dirname(__file__), "..", "_dump_parse_trace.py")
-)
+HELPER_PATH = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "_dump_parse_trace.py"))
 # For the integration check we also reach into parse_csv.py.
-PARSER_PATH = os.path.normpath(
-    os.path.join(os.path.dirname(__file__), "..", "parse_csv.py")
-)
+PARSER_PATH = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "parse_csv.py"))
 
 
 def _write_stderr(text: str) -> str:
@@ -103,6 +99,7 @@ class TestHelperInvariants(unittest.TestCase):
 
     def tearDown(self):
         import shutil
+
         try:
             shutil.rmtree(self.logs_dir, ignore_errors=True)
         except Exception:
@@ -123,10 +120,7 @@ class TestHelperInvariants(unittest.TestCase):
 
     def test_helper_exits_zero_on_synthesized_parse_fail_stderr(self):
         """DPT.1 — synthesized parse-fail stderr → exit 0, one artifact."""
-        stderr_text = (
-            "[PARSE-FAIL] row 2 (hello): trailing-field shift "
-            "(extra columns beyond header) — got '0'\n"
-        )
+        stderr_text = "[PARSE-FAIL] row 2 (hello): trailing-field shift (extra columns beyond header) — got '0'\n"
         result = self._run_helper(stderr_text)
         self.assertEqual(
             result.returncode,
@@ -161,10 +155,7 @@ class TestHelperInvariants(unittest.TestCase):
 
     def test_helper_json_document_has_required_keys(self):
         """DPT.4 — JSON document has source/row_index/stderr with expected types."""
-        stderr_text = (
-            "[PARSE-FAIL] row 2 (hello): trailing-field shift "
-            "(extra columns beyond header) — got '0'\n"
-        )
+        stderr_text = "[PARSE-FAIL] row 2 (hello): trailing-field shift (extra columns beyond header) — got '0'\n"
         self._run_helper(stderr_text)
         artifact = next(Path(self.logs_dir).glob("parse-fail-*.json"))
         with open(artifact, "r", encoding="utf-8") as f:
@@ -181,8 +172,7 @@ class TestHelperInvariants(unittest.TestCase):
         """DPT.4-extra — only the row index matters for the filename;
         the full stderr is preserved verbatim."""
         stderr_text = (
-            "[PARSE-FAIL] row 4 (Hola!!): prompt is empty — got ''\n"
-            "[hint] consider quoting fields per RFC-4180\n"
+            "[PARSE-FAIL] row 4 (Hola!!): prompt is empty — got ''\n[hint] consider quoting fields per RFC-4180\n"
         )
         self._run_helper(stderr_text)
         artifacts = sorted(Path(self.logs_dir).glob("parse-fail-*.json"))
@@ -215,6 +205,7 @@ class TestHelperEndToEnd(unittest.TestCase):
 
     def tearDown(self):
         import shutil
+
         for d in [self.logs_dir] + self._tmp_dirs:
             try:
                 shutil.rmtree(d, ignore_errors=True)
@@ -244,9 +235,7 @@ class TestHelperEndToEnd(unittest.TestCase):
             ),
         )
         # Persist stderr so the helper can read it.
-        stderr_fd, stderr_path = tempfile.mkstemp(
-            prefix="dump_parse_trace_real_stderr_", suffix=".txt"
-        )
+        stderr_fd, stderr_path = tempfile.mkstemp(prefix="dump_parse_trace_real_stderr_", suffix=".txt")
         self._tmp_paths.append(stderr_path)
         with os.fdopen(stderr_fd, "wb") as f:
             f.write(parse_proc.stderr)
@@ -290,6 +279,7 @@ class TestHelperRobustness(unittest.TestCase):
 
     def tearDown(self):
         import shutil
+
         try:
             shutil.rmtree(self.logs_dir, ignore_errors=True)
         except Exception:

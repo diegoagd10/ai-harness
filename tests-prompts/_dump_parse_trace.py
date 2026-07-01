@@ -94,8 +94,7 @@ def _emit_trace(logs_dir: str, stderr_text: str) -> int:
     if len(out_path.name) > 64:
         out_path = out_path.with_name(out_path.name[:64])
     out_path.write_text(
-        json.dumps(document, indent=2, sort_keys=True, ensure_ascii=False)
-        + "\n",
+        json.dumps(document, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
     return 0
@@ -104,9 +103,7 @@ def _emit_trace(logs_dir: str, stderr_text: str) -> int:
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if len(argv) != 2:
-        sys.stderr.write(
-            "usage: _dump_parse_trace.py <LOGS_DIR> <STDERR_FILE>\n"
-        )
+        sys.stderr.write("usage: _dump_parse_trace.py <LOGS_DIR> <STDERR_FILE>\n")
         return 2
     logs_dir = argv[0]
     stderr_path = argv[1]

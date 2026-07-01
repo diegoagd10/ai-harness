@@ -211,6 +211,7 @@ class TestParserHandlesMalformedFixture(unittest.TestCase):
 
     def test_cli_rejects_malformed_row_with_comments_present(self):
         import tempfile
+
         # Header row + one well-formed row + one malformed data row →
         # the malformed row is data row 2 → "row 2" in the [PARSE-FAIL].
         bad_csv = (
@@ -220,9 +221,7 @@ class TestParserHandlesMalformedFixture(unittest.TestCase):
             "good,0,0,0\n"
             "hello, how are you doing?,0,0,0\n"
         )
-        with tempfile.NamedTemporaryFile(
-            "w", suffix=".csv", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False) as f:
             f.write(bad_csv)
             path = f.name
         try:

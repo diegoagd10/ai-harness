@@ -74,9 +74,7 @@ class CsvShapeError(Exception):
         self.row_index = row_index
         self.reason = reason
         self.offending_value = offending_value
-        super().__init__(
-            f"row {row_index}: {reason} — got {offending_value!r}"
-        )
+        super().__init__(f"row {row_index}: {reason} — got {offending_value!r}")
 
 
 def _prompt_prefix(prompt) -> str:
@@ -147,28 +145,21 @@ def parse_rows(path: str) -> Iterator[tuple[str, int, int, int]]:
     CSV data row — comments do not count toward that index.
     """
     with open(path, "r", encoding="utf-8") as fh:
-        non_comment = (
-            line for line in fh if not line.lstrip().startswith("#")
-        )
+        non_comment = (line for line in fh if not line.lstrip().startswith("#"))
         in_memory = io.StringIO("".join(non_comment))
         reader = csv.DictReader(in_memory)
         for row_index, row in enumerate(reader, start=1):
             yield _coerce_row(row, row_index)
 
 
-def _emit_cli_error_with_prefix(
-    row_index: int, reason: str, offending_value, prefix_hint: str
-) -> None:
+def _emit_cli_error_with_prefix(row_index: int, reason: str, offending_value, prefix_hint: str) -> None:
     """Write the labeled [PARSE-FAIL] line on stderr.
 
     `prefix_hint` is the unstripped prompt text for the row (used in the
     error so a human can locate the offending row by reading stderr).
     """
     prefix = _prompt_prefix(prefix_hint)
-    sys.stderr.write(
-        f"[PARSE-FAIL] row {row_index} ({prefix}): "
-        f"{reason} — got {offending_value!r}\n"
-    )
+    sys.stderr.write(f"[PARSE-FAIL] row {row_index} ({prefix}): {reason} — got {offending_value!r}\n")
 
 
 def _cli_main(path: str) -> int:
@@ -181,9 +172,7 @@ def _cli_main(path: str) -> int:
     """
     try:
         with open(path, "r", encoding="utf-8") as fh:
-            non_comment = (
-                line for line in fh if not line.lstrip().startswith("#")
-            )
+            non_comment = (line for line in fh if not line.lstrip().startswith("#"))
             in_memory = io.StringIO("".join(non_comment))
             reader = csv.DictReader(in_memory)
             validated: list[tuple[str, int, int, int]] = []
@@ -192,18 +181,14 @@ def _cli_main(path: str) -> int:
                 try:
                     validated.append(_coerce_row(row, row_index))
                 except CsvShapeError as exc:
-                    _emit_cli_error_with_prefix(
-                        row_index, exc.reason, exc.offending_value, raw_prompt
-                    )
+                    _emit_cli_error_with_prefix(row_index, exc.reason, exc.offending_value, raw_prompt)
                     return 1
     except FileNotFoundError:
         sys.stderr.write(f"[PARSE-FAIL] file not found: {path}\n")
         return 1
 
     for prompt, tools, skills, subs in validated:
-        sys.stdout.buffer.write(
-            f"{prompt}\t{tools}\t{skills}\t{subs}\0".encode("utf-8")
-        )
+        sys.stdout.buffer.write(f"{prompt}\t{tools}\t{skills}\t{subs}\0".encode("utf-8"))
     return 0
 
 

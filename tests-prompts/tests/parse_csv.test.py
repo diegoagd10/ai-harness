@@ -25,9 +25,7 @@ import tempfile
 import unittest
 
 # tests-prompts/tests/parse_csv.test.py -> tests-prompts/parse_csv.py
-PARSER_PATH = os.path.normpath(
-    os.path.join(os.path.dirname(__file__), "..", "parse_csv.py")
-)
+PARSER_PATH = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "parse_csv.py"))
 
 
 def _load_module():
@@ -49,10 +47,7 @@ def _write_csv(content: str) -> str:
 
 
 # Header as it appears in tests-prompts/cases.csv (leading spaces preserved).
-HEADER = (
-    "prompt, tools calls (number), skills calls (number), "
-    "sub-agent calls (number)\n"
-)
+HEADER = "prompt, tools calls (number), skills calls (number), sub-agent calls (number)\n"
 
 
 class TestImportable(unittest.TestCase):
@@ -210,11 +205,11 @@ class TestCli(unittest.TestCase):
         """2.8 — fail-fast: first malformed row short-circuits later rows."""
         # Row 2 malformed (trailing-field shift), row 5 malformed (non-integer count).
         body = (
-            "good,0,0,0\n"           # row 1 — clean
-            "hello, extra,0,0,0\n"   # row 2 — trailing-field shift (5 fields)
-            "good,0,0,0\n"           # row 3 — clean
-            "good,0,0,0\n"           # row 4 — clean
-            "good,ten,0,0\n"         # row 5 — non-integer count
+            "good,0,0,0\n"  # row 1 — clean
+            "hello, extra,0,0,0\n"  # row 2 — trailing-field shift (5 fields)
+            "good,0,0,0\n"  # row 3 — clean
+            "good,0,0,0\n"  # row 4 — clean
+            "good,ten,0,0\n"  # row 5 — non-integer count
         )
         path = self._csv(body)
         result = self._run_cli(path)
