@@ -38,7 +38,8 @@ ENV PATH="/root/.opencode/bin:${PATH}"
 # Copy ONLY the runner scripts + CSV; repo source arrives via mount.
 COPY tests-prompts/run.sh /tests-prompts/run.sh
 COPY tests-prompts/cases.csv /tests-prompts/cases.csv
-RUN chmod +x /tests-prompts/run.sh
+COPY tests-prompts/_extractor.py /tests-prompts/_extractor.py
+RUN chmod +x /tests-prompts/run.sh /tests-prompts/_extractor.py
 
 # Default command runs the per-row loop. docker-test.sh may override.
 CMD ["bash", "/tests-prompts/run.sh"]
