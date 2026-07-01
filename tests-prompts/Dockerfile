@@ -36,10 +36,20 @@ RUN curl -fsSL https://opencode.ai/install | bash
 ENV PATH="/root/.opencode/bin:${PATH}"
 
 # Copy ONLY the runner scripts + CSV; repo source arrives via mount.
+# Each Python helper listed here is invoked by run.sh at container
+# runtime via an absolute /tests-prompts/<name>.py path, so any helper
+# that run.sh calls MUST appear in this list or the suite explodes on
+# `parse_csv: command not found` (or equivalent) before row 1 runs.
+# If you add a new helper consumed by run.sh, add the COPY here too.
 COPY tests-prompts/run.sh /tests-prompts/run.sh
 COPY tests-prompts/cases.csv /tests-prompts/cases.csv
 COPY tests-prompts/_extractor.py /tests-prompts/_extractor.py
-RUN chmod +x /tests-prompts/run.sh /tests-prompts/_extractor.py
+COPY tests-prompts/parse_csv.py /tests-prompts/parse_csv.py
+COPY tests-prompts/_dump_parse_trace.py /tests-prompts/_dump_parse_trace.py
+RUN chmod +x /tests-prompts/run.sh \
+    /tests-prompts/_extractor.py \
+    /tests-prompts/parse_csv.py \
+    /tests-prompts/_dump_parse_trace.py
 
 # Default command runs the per-row loop. docker-test.sh may override.
 CMD ["bash", "/tests-prompts/run.sh"]
