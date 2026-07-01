@@ -66,6 +66,40 @@ def extract_counts(trace_text: str) -> tuple[int, int, int]:
     return tools, skills, sub_agents
 
 
+def tool_sequence(events: list[dict]) -> list[str]:
+    """Return the ordered list of tool names extracted from `events`.
+
+    An event contributes its `part.tool` value to the returned list iff it
+    satisfies BOTH:
+      - `event["type"] == "tool_use"`
+      - `event["part"]["type"] == "tool"`
+      - `event["part"]["tool"]` is a string
+
+    All other events (text, assistant_message, step_start, step_finish,
+    malformed, etc.) are filtered out. An empty `events` list returns `[]`
+    (no crash, no `None`).
+
+    Operates on already-parsed `list[dict]`, matching how `_e2e_assertions`
+    consumes events. The schema knowledge that distinguishes a tool_use
+    event stays in THIS module per its docstring promise.
+    """
+    names: list[str] = []
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        if event.get("type") != _TOOL_USE_TOP_TYPE:
+            continue
+        part = event.get("part") or {}
+        if not isinstance(part, dict):
+            continue
+        if part.get("type") != _TOOL_PART_TYPE:
+            continue
+        tool_name = part.get("tool")
+        if isinstance(tool_name, str):
+            names.append(tool_name)
+    return names
+
+
 def _iter_lines(trace_text: str) -> Iterable[str]:
     """Yield non-empty lines from the trace text."""
     for raw in trace_text.splitlines():
