@@ -4,9 +4,9 @@
 persona, skills, and loop agents globally and own a manifest at
 `~/.ai-harness/installed.json`. A consuming repo also needs a few *repo-local*
 artifacts the loop and the engineering-skill flow assume: a `CODING_STANDARDS.md`
-the validator/implementor read from the repo root, a label-policy block in the
-repo's `CLAUDE.md`, and the GitHub labels `ready-for-agent` and `loop`. These
-are per-project and human-edited, so they cannot live in the global, byte-identical
+the validator/implementor read from the repo root, and a managed init block in
+the repo's agent docs (`CLAUDE.md`, `AGENTS.md`) pointing at it. These are
+per-project and human-edited, so they cannot live in the global, byte-identical
 install. We therefore add a distinct `ai-harness init` command, run inside a repo,
 rather than overloading `install` with a repo mode.
 
@@ -21,15 +21,21 @@ rather than overloading `install` with a repo mode.
 ## Consequences
 
 - `init` is **idempotent by per-artifact detection, never by a sentinel file**:
-  `CODING_STANDARDS.md` is written only if absent; the `CLAUDE.md` block is wrapped
-  in `<!-- ai-harness:start -->` / `<!-- ai-harness:end -->` markers and skipped
-  when present; the two GitHub labels are created-or-skipped on every run so a
-  failed first attempt (no remote, `gh` unauthenticated) self-heals on re-run.
-  Existence checks can't drift the way a written "installed" marker can.
+  `CODING_STANDARDS.md` is written only if absent; the `CLAUDE.md` /
+  `AGENTS.md` block is wrapped in
+  `<!-- ai-harness:init:start -->` / `<!-- ai-harness:init:end -->` markers
+  and skipped when present; if a file carries the pre-refactor legacy
+  `<!-- ai-harness:start -->` / `<!-- ai-harness:end -->` block, that block
+  is replaced in place with the new init block (surrounding user content
+  preserved byte-identical). Existence checks can't drift the way a written
+  "installed" marker can.
+- `init` writes **the same managed block** to both `CLAUDE.md` and `AGENTS.md`
+  (in that deterministic order) and **creates either when absent** — a clean
+  repo receives both files carrying the new init block, not zero.
 - Deliberate asymmetry with `install`: `init` **never clobbers** a drifted
   `CODING_STANDARDS.md`, because that file is meant to be filled in by a human —
   unlike the global rendered files, which `install` overwrites byte-identically.
-- `init` owns **only** the loop's two fixed labels (`ready-for-agent`, `loop`).
-  The other four canonical triage labels belong to the `setup-matt-pocock-skills`
-  vocabulary (which the user may rename), and `CONTEXT.md` / `docs/adr/` belong to
-  the doc-grilling skills — `init` writes none of them.
+- `init` is **a pure file-write operation**. It does not shell out to `gh`,
+  does not warn about a missing `gh`, and never references label names in its
+  output — GitHub-side bootstrap is owned by whatever process manages the
+  repo's labels, not by `init`.
