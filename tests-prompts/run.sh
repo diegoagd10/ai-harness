@@ -31,6 +31,12 @@
 # edits cases.csv reads the rule before they break it.
 set -uo pipefail
 
+# Resolve the directory this script lives in. Used by parse_csv() to
+# locate tests-prompts/parse_csv.py regardless of cwd. Works in both the
+# container (SCRIPT_DIR=/tests-prompts) and on the host (SCRIPT_DIR is
+# the absolute tests-prompts path under the repo root).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # ---------------------------------------------------------------------------
 # assert_container_required — host-mutation guard.
 #
@@ -188,35 +194,52 @@ run_row() {
 # parse_csv <path> — streams CSV rows as TAB-fielded, NUL-terminated records
 # on stdout. One record per non-blank data row:
 #   <prompt>\t<tools>\t<skills>\t<subs>\0
-# Uses Python csv.DictReader so commas/newlines/quotes in prompts work.
-# NUL is the record separator (bash `read -d ''` consumes one record at a
-# time) so prompts with embedded newlines survive intact.
+# Delegates to tests-prompts/parse_csv.py (the validate-csv-row-shape seam)
+# which owns row-shape correctness: trailing-field shifts, non-integer
+# counts, empty prompts all produce a labeled [PARSE-FAIL] line on stderr
+# and a non-zero exit. The original bug was a heredoc that quietly
+# `or "0"` defaulted missing cells — the seam exists so that class of
+# failure can't reach the per-row loop.
 parse_csv() {
     local path="$1"
-    python3 - "$path" <<'PYEOF'
-import csv
-import sys
+    python3 "$SCRIPT_DIR/parse_csv.py" "$path"
+}
 
-path = sys.argv[1]
-with open(path, newline="") as f:
-    reader = csv.DictReader(f)
-    field_tools = " tools calls (number)"
-    field_skills = " skills calls (number)"
-    field_subs = " sub-agent calls (number)"
-    for row in reader:
-        prompt = (row.get("prompt") or "").strip()
-        if not prompt:
-            continue
-        tools = (row.get(field_tools) or "0").strip() or "0"
-        skills = (row.get(field_skills) or "0").strip() or "0"
-        subs = (row.get(field_subs) or "0").strip() or "0"
-        # TAB between fields, NUL between records. No trailing newline:
-        # the NUL is the only record terminator, so prompts with embedded
-        # newlines are not mistaken for record boundaries by `read -d ''`.
-        sys.stdout.buffer.write(
-            f"{prompt}\t{tools}\t{skills}\t{subs}\0".encode("utf-8")
-        )
-PYEOF
+# compare_count <label> <got> <exp> <prompt> <row_idx>
+#
+# Integer-guarded assertion helper for one count column in the per-row
+# block. Replaces the bare `[ "$got" -ne "$exp" ]` form which silently
+# swallows `bash: integer expression expected` when the parsed expected
+# value is a non-integer string (the original bug). On success returns
+# 0 silently; on failure returns 1 and writes a labeled [FAIL] line on
+# stderr naming the row, prompt, label, both values, and the reason.
+#
+# Two failure modes:
+#   - non-integer `exp`         → "- non-integer expected: <exp>"
+#     regex check fires BEFORE any arithmetic, so `-ne` is never invoked
+#     on a non-integer — bash's "integer expression expected" noise is
+#     impossible.
+#   - integer but not equal     → "calls expected <exp> got <got>"
+compare_count() {
+    local label="$1"
+    local got="$2"
+    local exp="$3"
+    local prompt="$4"
+    local row_idx="$5"
+
+    if ! [[ "$exp" =~ ^[0-9]+$ ]]; then
+        printf '[FAIL] row %d (%s): %s expected %s got %s — non-integer expected\n' \
+            "$row_idx" "$prompt" "$label" "$exp" "$got" >&2
+        return 1
+    fi
+
+    if [ "$got" -ne "$exp" ]; then
+        printf '[FAIL] row %d (%s): %s expected %s got %s\n' \
+            "$row_idx" "$prompt" "$label" "$exp" "$got" >&2
+        return 1
+    fi
+
+    return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -251,21 +274,9 @@ while IFS=$'\t' read -r -d '' PROMPT EXP_TOOLS EXP_SKILLS EXP_SUBAGENTS; do
     exp_subs=$(printf '%s' "$EXP_SUBAGENTS"  | tr -d '[:space:]'); exp_subs=${exp_subs:-0}
 
     row_rc=0
-    if [ "$got_tools" -ne "$exp_tools" ]; then
-        printf '[FAIL] row %d (%s): tools calls expected %s got %s\n' \
-            "$ROW_INDEX" "$PROMPT" "$exp_tools" "$got_tools" >&2
-        row_rc=1
-    fi
-    if [ "$got_skills" -ne "$exp_skills" ]; then
-        printf '[FAIL] row %d (%s): skills calls expected %s got %s\n' \
-            "$ROW_INDEX" "$PROMPT" "$exp_skills" "$got_skills" >&2
-        row_rc=1
-    fi
-    if [ "$got_subs" -ne "$exp_subs" ]; then
-        printf '[FAIL] row %d (%s): sub-agent calls expected %s got %s\n' \
-            "$ROW_INDEX" "$PROMPT" "$exp_subs" "$got_subs" >&2
-        row_rc=1
-    fi
+    compare_count tools  "$got_tools"  "$exp_tools"  "$PROMPT" "$ROW_INDEX" || row_rc=1
+    compare_count skills "$got_skills" "$exp_skills" "$PROMPT" "$ROW_INDEX" || row_rc=1
+    compare_count subs   "$got_subs"   "$exp_subs"   "$PROMPT" "$ROW_INDEX" || row_rc=1
 
     if [ "$row_rc" -eq 0 ]; then
         printf '[CASE %d/%d] PASS\n' "$ROW_INDEX" "$TOTAL" >&2
