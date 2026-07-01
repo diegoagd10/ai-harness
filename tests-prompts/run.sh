@@ -122,9 +122,12 @@ run_row() {
     return $?
 }
 
-# parse_csv <path> — streams CSV rows as TSV (TAB-separated) on stdout.
-# One TSV line per non-blank data row: <prompt>\t<tools>\t<skills>\t<subs>
+# parse_csv <path> — streams CSV rows as TAB-fielded, NUL-terminated records
+# on stdout. One record per non-blank data row:
+#   <prompt>\t<tools>\t<skills>\t<subs>\0
 # Uses Python csv.DictReader so commas/newlines/quotes in prompts work.
+# NUL is the record separator (bash `read -d ''` consumes one record at a
+# time) so prompts with embedded newlines survive intact.
 parse_csv() {
     local path="$1"
     python3 - "$path" <<'PYEOF'
@@ -144,20 +147,31 @@ with open(path, newline="") as f:
         tools = (row.get(field_tools) or "0").strip() or "0"
         skills = (row.get(field_skills) or "0").strip() or "0"
         subs = (row.get(field_subs) or "0").strip() or "0"
-        sys.stdout.write(f"{prompt}\t{tools}\t{skills}\t{subs}\n")
+        # TAB between fields, NUL between records. No trailing newline:
+        # the NUL is the only record terminator, so prompts with embedded
+        # newlines are not mistaken for record boundaries by `read -d ''`.
+        sys.stdout.buffer.write(
+            f"{prompt}\t{tools}\t{skills}\t{subs}\0".encode("utf-8")
+        )
 PYEOF
 }
 
 # ---------------------------------------------------------------------------
 # Per-row loop
 # ---------------------------------------------------------------------------
-TOTAL=$(parse_csv "$CASES_CSV" | wc -l | tr -d ' ')
+# Total = number of NULs in parse_csv's stdout (one NUL per record).
+# This works for both single-line and multiline prompts because the
+# bridge uses NUL as its sole record terminator.
+TOTAL=$(parse_csv "$CASES_CSV" | tr -cd '\0' | wc -c | tr -d '[:space:]')
 PASSED=0
 FAILED=0
 OVERALL_RC=0
 ROW_INDEX=0
 
-while IFS=$'\t' read -r PROMPT EXP_TOOLS EXP_SKILLS EXP_SUBAGENTS; do
+# `read -d ''` reads up to the next NUL byte (or EOF). With IFS=$'\t' the
+# fields within a record are split on TAB. Each iteration consumes exactly
+# one CSV record even if its prompt contains newlines.
+while IFS=$'\t' read -r -d '' PROMPT EXP_TOOLS EXP_SKILLS EXP_SUBAGENTS; do
     ROW_INDEX=$((ROW_INDEX + 1))
 
     trace_text=$(run_row "$ROW_INDEX" "$PROMPT" || true)
