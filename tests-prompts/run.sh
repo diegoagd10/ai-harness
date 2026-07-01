@@ -11,6 +11,15 @@
 #
 # Public seam: tests-prompts/run.sh (this file).
 # Internal helpers:
+#   - parse_csv            (inline) — row-shape-aware CSV parser; thin
+#                           wrapper around tests-prompts/parse_csv.py
+#                           so the in-container call site is one bash
+#                           line. Defined ABOVE its first invocation
+#                           (validate-cases-csv block) — bash does NOT
+#                           hoist function definitions, so an order
+#                           swap explodes with `parse_csv: command
+#                           not found` before row 1. See
+#                           tests-prompts/tests/run_sh_order.test.sh.
 #   - assert_container_required (inline) — refuses host-side runs that
 #                           would mutate $HOME/.ai-harness, .config/opencode,
 #                           etc. See isolate-host-config-from-test-runs spec.
@@ -101,6 +110,30 @@ mkdir -p "$LOGS_DIR"
 # file. The guard must pass BEFORE the bootstrap copy below.
 # ---------------------------------------------------------------------------
 assert_container_required
+
+# ---------------------------------------------------------------------------
+# parse_csv <path> — streams CSV rows as TAB-fielded, NUL-terminated records
+# on stdout. One record per non-blank data row:
+#   <prompt>\t<tools>\t<skills>\t<subs>\0
+#
+# Defined HERE (above the first invocation below) because bash does NOT
+# hoist function definitions. Earlier fix-loops added this helper at
+# line ~230 of this file while the first call site is at the top of the
+# validate-cases-csv block; the in-container build then exploded with
+# `parse_csv: command not found` before row 1. Pinning the definition
+# next to its first use makes that ordering self-evident.
+#
+# Delegates to tests-prompts/parse_csv.py (the validate-csv-row-shape seam)
+# which owns row-shape correctness: trailing-field shifts, non-integer
+# counts, empty prompts all produce a labeled [PARSE-FAIL] line on stderr
+# and a non-zero exit. The original bug was a heredoc that quietly
+# `or "0"` defaulted missing cells — the seam exists so that class of
+# failure can't reach the per-row loop.
+# ---------------------------------------------------------------------------
+parse_csv() {
+    local path="$1"
+    python3 "$SCRIPT_DIR/parse_csv.py" "$path"
+}
 
 # ---------------------------------------------------------------------------
 # Validate cases.csv BEFORE any expensive bootstrap. The parser
@@ -216,20 +249,6 @@ run_row() {
         --title "prompt-tests-row-${row_index}" \
         "$prompt" 2>/dev/null
     return $?
-}
-
-# parse_csv <path> — streams CSV rows as TAB-fielded, NUL-terminated records
-# on stdout. One record per non-blank data row:
-#   <prompt>\t<tools>\t<skills>\t<subs>\0
-# Delegates to tests-prompts/parse_csv.py (the validate-csv-row-shape seam)
-# which owns row-shape correctness: trailing-field shifts, non-integer
-# counts, empty prompts all produce a labeled [PARSE-FAIL] line on stderr
-# and a non-zero exit. The original bug was a heredoc that quietly
-# `or "0"` defaulted missing cells — the seam exists so that class of
-# failure can't reach the per-row loop.
-parse_csv() {
-    local path="$1"
-    python3 "$SCRIPT_DIR/parse_csv.py" "$path"
 }
 
 # compare_count <label> <got> <exp> <prompt> <row_idx>
