@@ -33,11 +33,8 @@ tests-prompts/tests/*.
 
 from __future__ import annotations
 
-import csv
-import io
 import json
 import os
-import re
 import subprocess
 import sys
 import tempfile
@@ -158,7 +155,7 @@ class TestHelperInvariants(unittest.TestCase):
         stderr_text = "[PARSE-FAIL] row 2 (hello): trailing-field shift (extra columns beyond header) — got '0'\n"
         self._run_helper(stderr_text)
         artifact = next(Path(self.logs_dir).glob("parse-fail-*.json"))
-        with open(artifact, "r", encoding="utf-8") as f:
+        with open(artifact, encoding="utf-8") as f:
             doc = json.load(f)
         self.assertEqual(doc.get("source"), "parse_csv")
         self.assertEqual(doc.get("row_index"), 2)
@@ -178,7 +175,7 @@ class TestHelperInvariants(unittest.TestCase):
         artifacts = sorted(Path(self.logs_dir).glob("parse-fail-*.json"))
         self.assertEqual(len(artifacts), 1)
         self.assertEqual(artifacts[0].name, "parse-fail-4.json")
-        with open(artifacts[0], "r", encoding="utf-8") as f:
+        with open(artifacts[0], encoding="utf-8") as f:
             doc = json.load(f)
         self.assertEqual(doc["row_index"], 4)
         self.assertIn("consider quoting fields", doc["stderr"])
@@ -259,7 +256,7 @@ class TestHelperEndToEnd(unittest.TestCase):
             1,
             msg=f"expected exactly one artifact; got {artifacts!r}",
         )
-        with open(artifacts[0], "r", encoding="utf-8") as f:
+        with open(artifacts[0], encoding="utf-8") as f:
             doc = json.load(f)
         self.assertEqual(doc.get("source"), "parse_csv")
         self.assertEqual(doc.get("row_index"), 2)

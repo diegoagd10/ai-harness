@@ -46,7 +46,7 @@ from __future__ import annotations
 import csv
 import io
 import sys
-from typing import Iterator
+from collections.abc import Iterator
 
 # Header field names — leading spaces are part of the header in cases.csv.
 FIELD_PROMPT = "prompt"
@@ -144,7 +144,7 @@ def parse_rows(path: str) -> Iterator[tuple[str, int, int, int]]:
     The line-number reported in CsvShapeError is the row_index of the
     CSV data row — comments do not count toward that index.
     """
-    with open(path, "r", encoding="utf-8") as fh:
+    with open(path, encoding="utf-8") as fh:
         non_comment = (line for line in fh if not line.lstrip().startswith("#"))
         in_memory = io.StringIO("".join(non_comment))
         reader = csv.DictReader(in_memory)
@@ -171,7 +171,7 @@ def _cli_main(path: str) -> int:
     emitted bytes — the contract is "all or nothing."
     """
     try:
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(path, encoding="utf-8") as fh:
             non_comment = (line for line in fh if not line.lstrip().startswith("#"))
             in_memory = io.StringIO("".join(non_comment))
             reader = csv.DictReader(in_memory)
@@ -188,7 +188,7 @@ def _cli_main(path: str) -> int:
         return 1
 
     for prompt, tools, skills, subs in validated:
-        sys.stdout.buffer.write(f"{prompt}\t{tools}\t{skills}\t{subs}\0".encode("utf-8"))
+        sys.stdout.buffer.write(f"{prompt}\t{tools}\t{skills}\t{subs}\0".encode())
     return 0
 
 

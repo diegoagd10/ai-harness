@@ -32,7 +32,7 @@ PARSER_PY = os.path.normpath(os.path.join(SCRIPT_DIR, "..", "parse_csv.py"))
 
 def _read_csv_lines_skipping_comments(path: str) -> list[str]:
     """Mirror parse_csv.py: lines starting with '#' are skipped."""
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         return [line for line in f if not line.lstrip().startswith("#")]
 
 
@@ -44,7 +44,7 @@ class TestCasesCsvStructure(unittest.TestCase):
             self.skipTest(f"cases.csv not found at {CASES_CSV}")
         # Mirror parse_csv.py: skip comment lines.
         self.raw_lines = _read_csv_lines_skipping_comments(CASES_CSV)
-        with open(CASES_CSV, "r", encoding="utf-8", newline="") as f:
+        with open(CASES_CSV, encoding="utf-8", newline="") as f:
             non_comment = (line for line in f if not line.lstrip().startswith("#"))
             in_memory = io.StringIO("".join(non_comment))
             reader = csv.DictReader(in_memory)
@@ -138,7 +138,7 @@ class TestCasesCsvStructure(unittest.TestCase):
         without traceability'), the row-5 decision is recorded in
         this file's leading # block AND in the commit message.
         """
-        with open(CASES_CSV, "r", encoding="utf-8") as f:
+        with open(CASES_CSV, encoding="utf-8") as f:
             raw = f.read()
         # The CSV carries a non-empty, recognizable interpretation note.
         self.assertIn("#", raw, "cases.csv must contain at least one # line")
