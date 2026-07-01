@@ -507,5 +507,5 @@ def _migrate_legacy_block(content: str) -> str:
         "".join(lines[:start_idx])
         + _INIT_BLOCK
         + ("\n" if lines[end_idx].endswith("\n") else "")
-        + "".join(lines[end_idx + 1:])
+        + "".join(lines[end_idx + 1 :])
     )

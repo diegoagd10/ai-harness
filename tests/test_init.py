@@ -257,8 +257,7 @@ def test_init_repo_skips_when_new_markers_present(tmp_path: Path) -> None:
 
     claude = tmp_path / CLAUDE_MD
     claude_original = (
-        f"## Agent skills\n\nSome content.\n\n"
-        f"{INIT_START}\n\nFollow the repo's `CODING_STANDARDS.md`.\n\n{INIT_END}\n"
+        f"## Agent skills\n\nSome content.\n\n{INIT_START}\n\nFollow the repo's `CODING_STANDARDS.md`.\n\n{INIT_END}\n"
     )
     claude.write_text(claude_original, encoding="utf-8")
     agents_original = f"{INIT_START}\n\nFollow the repo's `CODING_STANDARDS.md`.\n\n{INIT_END}\n"
@@ -289,7 +288,7 @@ def test_init_repo_skips_when_both_have_new_markers(tmp_path: Path) -> None:
 
 
 def test_init_repo_writes_only_missing_when_only_one_has_new_markers(tmp_path: Path) -> None:
-    """CLAUDE.md has new markers, AGENTS.md missing → only AGENTS.md is written (the kept CLAUDE.md still appears in targets)."""
+    """CLAUDE.md has new markers, AGENTS.md missing → only AGENTS.md is written."""
     from ai_harness.modules.harness import init_repo
 
     claude_original = f"{INIT_START}\n\nManaged body.\n\n{INIT_END}\n"
@@ -313,9 +312,7 @@ def test_init_repo_migrates_minimal_legacy_block(tmp_path: Path) -> None:
     from ai_harness.modules.harness import init_repo
 
     claude = tmp_path / CLAUDE_MD
-    legacy_only = (
-        f"{LEGACY_START}\n\n## Loop label policy\n\nOld body.\n\n{LEGACY_END}\n"
-    )
+    legacy_only = f"{LEGACY_START}\n\n## Loop label policy\n\nOld body.\n\n{LEGACY_END}\n"
     claude.write_text(legacy_only, encoding="utf-8")
 
     result = init_repo(tmp_path)
@@ -336,11 +333,7 @@ def test_init_repo_migration_preserves_user_prefix_and_suffix(tmp_path: Path) ->
     from ai_harness.modules.harness import init_repo
 
     claude = tmp_path / CLAUDE_MD
-    original = (
-        "prefix line\n"
-        f"{LEGACY_START}\n\n## Loop label policy\n\nOld body.\n\n{LEGACY_END}\n"
-        "suffix line\n"
-    )
+    original = f"prefix line\n{LEGACY_START}\n\n## Loop label policy\n\nOld body.\n\n{LEGACY_END}\nsuffix line\n"
     claude.write_text(original, encoding="utf-8")
 
     result = init_repo(tmp_path)
@@ -361,12 +354,8 @@ def test_init_repo_migration_handles_both_files(tmp_path: Path) -> None:
     """Both files with legacy blocks are migrated independently in deterministic order."""
     from ai_harness.modules.harness import init_repo
 
-    (tmp_path / CLAUDE_MD).write_text(
-        f"# Claude\n\n{LEGACY_START}\n\nOld.\n\n{LEGACY_END}\n", encoding="utf-8"
-    )
-    (tmp_path / AGENTS_MD).write_text(
-        f"# Agents\n\n{LEGACY_START}\n\nOld.\n\n{LEGACY_END}\n", encoding="utf-8"
-    )
+    (tmp_path / CLAUDE_MD).write_text(f"# Claude\n\n{LEGACY_START}\n\nOld.\n\n{LEGACY_END}\n", encoding="utf-8")
+    (tmp_path / AGENTS_MD).write_text(f"# Agents\n\n{LEGACY_START}\n\nOld.\n\n{LEGACY_END}\n", encoding="utf-8")
 
     result = init_repo(tmp_path)
 
@@ -454,9 +443,7 @@ def test_cli_init_reports_init_block_appended(tmp_path: Path, monkeypatch: pytes
     assert INIT_END in content
 
 
-def test_cli_init_reports_init_block_already_present(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_cli_init_reports_init_block_already_present(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """``ai-harness init`` reports unchanged when both agent docs already have new init markers."""
     monkeypatch.chdir(tmp_path)
 
@@ -471,9 +458,7 @@ def test_cli_init_reports_init_block_already_present(
     assert "unchanged" in result.stdout.lower()
 
 
-def test_cli_init_reports_init_block_appended_to_agents_md(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_cli_init_reports_init_block_appended_to_agents_md(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """``ai-harness init`` names AGENTS.md when it receives the init block."""
     monkeypatch.chdir(tmp_path)
 
@@ -490,9 +475,7 @@ def test_cli_init_reports_init_block_appended_to_agents_md(
     assert INIT_END in content
 
 
-def test_cli_init_no_label_or_gh_references_on_fresh_init(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_cli_init_no_label_or_gh_references_on_fresh_init(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """``ai-harness init`` on a clean directory emits no label / GitHub / gh / Warning strings."""
     monkeypatch.chdir(tmp_path)
 
@@ -503,7 +486,9 @@ def test_cli_init_no_label_or_gh_references_on_fresh_init(
     stderr = result.stderr
     combined = (stdout + "\n" + stderr).lower()
     for forbidden in ("created github labels", "warning:", "ready-for-agent", "gh cli"):
-        assert forbidden not in combined, f"Found forbidden string {forbidden!r} in output:\n{result.stdout!r}\n{result.stderr!r}"
+        assert forbidden not in combined, (
+            f"Found forbidden string {forbidden!r} in output:\n{result.stdout!r}\n{result.stderr!r}"
+        )
 
 
 def test_cli_init_idempotent_re_run_exits_zero(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
