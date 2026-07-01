@@ -279,10 +279,10 @@ _AGENT_META: dict[str, dict] = {
             write=False,
             spawn=(
                 "change-explorer",
-                "propose",
-                "design",
-                "specs",
-                "tasks",
+                "change-propose",
+                "change-design",
+                "change-specs",
+                "change-tasks",
                 "change-implementor",
                 "change-validator",
                 "change-archiver",
@@ -300,7 +300,7 @@ _AGENT_META: dict[str, dict] = {
             "claude": "sonnet",
         },
     },
-    "propose": {
+    "change-propose": {
         "description": "Change PRD author — writes prd.md in the sdd-propose structure without publishing anywhere.",
         "mode": "subagent",
         "model": {
@@ -308,7 +308,7 @@ _AGENT_META: dict[str, dict] = {
             "claude": "sonnet",
         },
     },
-    "design": {
+    "change-design": {
         "description": "Change design author — writes design.md using the to-design deep-module structure.",
         "mode": "subagent",
         "model": {
@@ -316,7 +316,7 @@ _AGENT_META: dict[str, dict] = {
             "claude": "sonnet",
         },
     },
-    "specs": {
+    "change-specs": {
         "description": (
             "Change specs author — writes tracer-bullet specs from prd.md capabilities with RFC 2119 "
             "requirements and GIVEN/WHEN/THEN scenarios."
@@ -327,7 +327,7 @@ _AGENT_META: dict[str, dict] = {
             "claude": "sonnet",
         },
     },
-    "tasks": {
+    "change-tasks": {
         "description": (
             "Change task author — decomposes specs and design, then creates tasks through ai-harness task-create."
         ),
