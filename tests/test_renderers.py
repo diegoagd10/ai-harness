@@ -59,14 +59,14 @@ def test_render_agents_claude_returns_agents_and_skill() -> None:
         ".claude/skills/loop-orchestrator/SKILL.md",
         ".claude/agents/validator.md",
         ".claude/agents/change-archiver.md",
+        ".claude/agents/change-design.md",
         ".claude/agents/change-explorer.md",
         ".claude/agents/change-implementor.md",
         ".claude/skills/change-orchestrator/SKILL.md",
+        ".claude/agents/change-propose.md",
+        ".claude/agents/change-specs.md",
+        ".claude/agents/change-tasks.md",
         ".claude/agents/change-validator.md",
-        ".claude/agents/design.md",
-        ".claude/agents/propose.md",
-        ".claude/agents/specs.md",
-        ".claude/agents/tasks.md",
     ]
     # content is non-empty rendered text
     for _, content in pairs:
@@ -83,15 +83,15 @@ def test_render_agents_opencode_returns_agents_under_agent_dir() -> None:
         ".config/opencode/agent/implementor.md",
         ".config/opencode/agent/loop-orchestrator.md",
         ".config/opencode/agent/validator.md",
-        ".config/opencode/agent/change-archiver.md",
+".config/opencode/agent/change-archiver.md",
+        ".config/opencode/agent/change-design.md",
         ".config/opencode/agent/change-explorer.md",
         ".config/opencode/agent/change-implementor.md",
         ".config/opencode/agent/change-orchestrator.md",
+        ".config/opencode/agent/change-propose.md",
+        ".config/opencode/agent/change-specs.md",
+        ".config/opencode/agent/change-tasks.md",
         ".config/opencode/agent/change-validator.md",
-        ".config/opencode/agent/design.md",
-        ".config/opencode/agent/propose.md",
-        ".config/opencode/agent/specs.md",
-        ".config/opencode/agent/tasks.md",
     ]
     for _, content in pairs:
         assert content.startswith("---\n")
@@ -300,10 +300,10 @@ def test_change_orchestrator_meta_declares_primary_restricted_agent() -> None:
         write=False,
         spawn=(
             "change-explorer",
-            "propose",
-            "design",
-            "specs",
-            "tasks",
+            "change-propose",
+            "change-design",
+            "change-specs",
+            "change-tasks",
             "change-implementor",
             "change-validator",
             "change-archiver",
@@ -1396,10 +1396,10 @@ def test_change_orchestrator_frontmatter_uses_meta() -> None:
         "task": {
             "*": "deny",
             "change-explorer": "allow",
-            "propose": "allow",
-            "design": "allow",
-            "specs": "allow",
-            "tasks": "allow",
+            "change-propose": "allow",
+            "change-design": "allow",
+            "change-specs": "allow",
+            "change-tasks": "allow",
             "change-implementor": "allow",
             "change-validator": "allow",
             "change-archiver": "allow",
@@ -2002,14 +2002,14 @@ def test_render_agents_copilot_returns_agent_files() -> None:
         ".copilot/agents/loop-orchestrator.agent.md",
         ".copilot/agents/validator.agent.md",
         ".copilot/agents/change-archiver.agent.md",
+        ".copilot/agents/change-design.agent.md",
         ".copilot/agents/change-explorer.agent.md",
         ".copilot/agents/change-implementor.agent.md",
         ".copilot/agents/change-orchestrator.agent.md",
+        ".copilot/agents/change-propose.agent.md",
+        ".copilot/agents/change-specs.agent.md",
+        ".copilot/agents/change-tasks.agent.md",
         ".copilot/agents/change-validator.agent.md",
-        ".copilot/agents/design.agent.md",
-        ".copilot/agents/propose.agent.md",
-        ".copilot/agents/specs.agent.md",
-        ".copilot/agents/tasks.agent.md",
     ]
     for _, content in pairs:
         assert content.startswith("---\n")
@@ -2029,10 +2029,10 @@ def test_copilot_frontmatter_has_name_and_description_only() -> None:
         "change-orchestrator",
         "change-validator",
         "change-archiver",
-        "design",
-        "propose",
-        "specs",
-        "tasks",
+        "change-design",
+        "change-propose",
+        "change-specs",
+        "change-tasks",
     ):
         pair = _find_pair(pairs, name)
         assert pair is not None, f"{name} not found in Copilot output"
@@ -2178,14 +2178,14 @@ def test_discover_loop_agents_excludes_underscore_prefixed_files() -> None:
         "loop-orchestrator",
         "validator",
         "change-archiver",
+        "change-design",
         "change-explorer",
         "change-implementor",
         "change-orchestrator",
+        "change-propose",
+        "change-specs",
+        "change-tasks",
         "change-validator",
-        "design",
-        "propose",
-        "specs",
-        "tasks",
     ]
     assert "_result-contract" not in names
     assert len(names) == 13
@@ -2200,19 +2200,19 @@ def test_change_agent_prompt_set_contains_expected_contract_keywords() -> None:
 
     assert sorted(prompts) == [
         "change-archiver.md",
+        "change-design.md",
         "change-explorer.md",
         "change-implementor.md",
         "change-orchestrator.md",
+        "change-propose.md",
+        "change-specs.md",
+        "change-tasks.md",
         "change-validator.md",
-        "design.md",
-        "propose.md",
-        "specs.md",
-        "tasks.md",
     ]
     assert "budget" in prompts["change-explorer.md"]
     assert "nextRecommended" in prompts["change-orchestrator.md"]
     assert "verdict" in prompts["change-validator.md"]
-    assert "task-create" in prompts["tasks.md"]
+    assert "task-create" in prompts["change-tasks.md"]
     assert "task-next" in prompts["change-implementor.md"]
     assert "task-list" in prompts["change-validator.md"]
     assert "ai-harness change-archive" in prompts["change-archiver.md"]

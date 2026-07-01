@@ -154,10 +154,10 @@ OPENCODE_CHANGE_AGENTS: tuple[str, ...] = (
     "change-implementor",
     "change-validator",
     "change-archiver",
-    "propose",
-    "design",
-    "specs",
-    "tasks",
+    "change-propose",
+    "change-design",
+    "change-specs",
+    "change-tasks",
 )
 
 
