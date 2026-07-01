@@ -99,6 +99,11 @@ ENV_FLAGS=""
 [ "${RUN_FULL_E2E:-0}" = "1" ]      && ENV_FLAGS="$ENV_FLAGS -e RUN_FULL_E2E=1"
 [ "${RUN_BACKUP_TESTS:-0}" = "1" ] && ENV_FLAGS="$ENV_FLAGS -e RUN_BACKUP_TESTS=1"
 [ -n "${GITHUB_TOKEN:-}" ]           && ENV_FLAGS="$ENV_FLAGS -e GITHUB_TOKEN=$GITHUB_TOKEN"
+# Forward the host-mutation-guard escape hatch so e2e/lib.sh::assert_container_required
+# passes inside the container even if container markers (/.dockerenv, /run/.containerenv,
+# /proc/1/cgroup) are stripped from the image. Without this, sourcing e2e/lib.sh inside
+# the container would exit 2 and the suite would fail before any test runs.
+ENV_FLAGS="$ENV_FLAGS -e CONTAINER_REQUIRED_OK=1"
 
 # ---------------------------------------------------------------------------
 # Run

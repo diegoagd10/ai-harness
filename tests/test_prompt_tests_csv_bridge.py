@@ -56,15 +56,16 @@ def _write_csv(tmp_path: Path, body: str) -> Path:
 
 
 def _python_parse(path: Path) -> list[tuple[str, str, str, str]]:
-    """Python mirror of the run.sh parse_csv bridge.
+    """Python mirror of the parse_csv.py bridge seam.
 
     Emits one (prompt, tools, skills, subs) tuple per non-blank data row.
-    Multiline prompts are preserved as a single field (no embedded
-    newlines are used as record separators).
+    Comment lines are ignored, matching tests-prompts/parse_csv.py and
+    the committed cases.csv documentation header.
     """
     rows: list[tuple[str, str, str, str]] = []
     with open(path, newline="") as f:
-        reader = csv.DictReader(f)
+        non_comment = (line for line in f if not line.lstrip().startswith("#"))
+        reader = csv.DictReader(io.StringIO("".join(non_comment)))
         for row in reader:
             prompt = (row.get("prompt") or "").strip()
             if not prompt:
@@ -166,7 +167,7 @@ class TestParseCsvMultilineContract:
             ("hello, how are you doing?", "0", "0", "0"),
             ("Hola", "0", "0", "0"),
             ("Hola!!, como estas?", "0", "0", "0"),
-            ("Create a simple python script for fibonacci", "10", "0", "0"),
+            ("Create a simple python script for fibonacci", "0", "0", "0"),
         ]
 
 
@@ -384,6 +385,7 @@ class TestParseCsvWireFormat:
 
 
 _RUN_SH_PATH = Path(__file__).resolve().parent.parent / "tests-prompts" / "run.sh"
+_PARSE_CSV_PATH = Path(__file__).resolve().parent.parent / "tests-prompts" / "parse_csv.py"
 
 
 def _extract_parse_csv_body(run_sh_text: str) -> str:
@@ -407,10 +409,8 @@ class TestLiveRunShBridge:
 
     def test_run_sh_uses_nul_record_separator(self, tmp_path: Path) -> None:
         run_sh_text = _RUN_SH_PATH.read_text()
-        body = _extract_parse_csv_body(run_sh_text)
-        # Sanity: the body should reference the field names we expect.
-        assert "tools calls (number)" in body, "parse_csv body is missing the expected header; run.sh changed?"
-        # Invoke the live parse_csv body and confirm NUL-delimited output.
+        assert 'python3 "$SCRIPT_DIR/parse_csv.py" "$path"' in run_sh_text
+        # Invoke the live parse_csv.py seam used by run.sh and confirm NUL-delimited output.
         csv_path = _write_csv(
             tmp_path,
             _rows_to_csv(
@@ -421,8 +421,7 @@ class TestLiveRunShBridge:
             ),
         )
         result = subprocess.run(
-            ["python3", "-", str(csv_path)],
-            input=body.encode("utf-8"),
+            ["python3", str(_PARSE_CSV_PATH), str(csv_path)],
             capture_output=True,
             timeout=10,
         )

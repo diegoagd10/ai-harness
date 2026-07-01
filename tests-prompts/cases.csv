@@ -1,6 +1,25 @@
+# tests-prompts/cases.csv — prompt-test fixtures.
+#
+# RFC-4180 contract: prompts containing commas, quotes, or newlines MUST
+# be wrapped in double quotes. Unquoted commas inside the prompt shift the
+# expected-count columns leftward — that's the bug class fix-cases-csv-encoding
+# closes. See tests-prompts/run.sh for the runtime-side guardrails.
+#
+# Row 5 (Create a simple python script for fibonacci):
+#   Original (buggy) CSV had 'Create a simple python script for fibonacci,10,0,0'
+#   which a permissive parser would silently absorb into the count columns,
+#   making the row pass whenever the orchestrator happened to emit 10 tool
+#   events. The intent is interpreted as:
+#     interpretation B — "the comma + 10,0,0 was junk"
+#     prompt  = "Create a simple python script for fibonacci"
+#     counts  = 0,0,0 (no expected tool calls; orchestrator emitting any
+#                      tools fails this row LOUDLY, which is the intended
+#                      fix for the silent-pass bug the user reported).
+#   This decision is recorded in the fix-tests-prompts-assertions commit
+#   message and reiterated in tasks.json subtask 5.4.
 prompt, tools calls (number), skills calls (number), sub-agent calls (number)
 hello,0,0,0
 "hello, how are you doing?",0,0,0
 Hola,0,0,0
 "Hola!!, como estas?",0,0,0
-Create a simple python script for fibonacci,10,0,0
+Create a simple python script for fibonacci,0,0,0

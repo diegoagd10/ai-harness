@@ -11,13 +11,82 @@
 #
 # Public seam: tests-prompts/run.sh (this file).
 # Internal helpers:
+#   - parse_csv            (inline) — row-shape-aware CSV parser; thin
+#                           wrapper around tests-prompts/parse_csv.py
+#                           so the in-container call site is one bash
+#                           line. Defined ABOVE its first invocation
+#                           (validate-cases-csv block) — bash does NOT
+#                           hoist function definitions, so an order
+#                           swap explodes with `parse_csv: command
+#                           not found` before row 1. See
+#                           tests-prompts/tests/run_sh_order.test.sh.
+#   - assert_container_required (inline) — refuses host-side runs that
+#                           would mutate $HOME/.ai-harness, .config/opencode,
+#                           etc. See isolate-host-config-from-test-runs spec.
 #   - extract_counts       (tests-prompts/_extractor.py) — schema lives
 #                           HERE ONLY; everything else consumes the
 #                           returned triple.
 #   - slugify              (inline) — fs-safe prompt prefix
 #   - dump_failure_trace   (inline) — writes failure-only /logs/<row>-<slug>.json
 #   - run_row              (inline) — per-row opencode invocation adapter
+#
+# CSV contract (RFC-4180): prompts containing commas, quotes, or newlines
+# MUST be RFC-4180 quoted in cases.csv. Unquoted commas shift expected-count
+# columns silently — the comparison block either fails opaquely
+# (`bash: integer expression expected`) OR, worse, passes silently when the
+# shifted value happens to be an integer that matches the orchestrator's
+# tool count. The validate-csv-row-shape parser catches the silent-pass
+# class at parse time; this comment is here so the next contributor who
+# edits cases.csv reads the rule before they break it.
 set -uo pipefail
+
+# Resolve the directory this script lives in. Used by parse_csv() to
+# locate tests-prompts/parse_csv.py regardless of cwd. Works in both the
+# container (SCRIPT_DIR=/tests-prompts) and on the host (SCRIPT_DIR is
+# the absolute tests-prompts path under the repo root).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# ---------------------------------------------------------------------------
+# assert_container_required — host-mutation guard.
+#
+# Closes Track B of fix-tests-prompts-assertions at its source: refusing to
+# run on the host altogether means no host path can be mutated, regardless
+# of which one `ai-harness install -o opencode` or cleanup_test_env would
+# have touched. Path-by-path backup/restore was rejected as a shallower
+# alternative in design.md.
+#
+# Container signals (passes if ANY is true, evaluated in order):
+#   1. $CONTAINER_REQUIRED_OK == "1"             — escape hatch for host
+#                                                  development of the runner
+#                                                  itself (docker-test.sh
+#                                                  sets it inside the
+#                                                  container; devs iterating
+#                                                  on run.sh directly can
+#                                                  set it manually).
+#   2. $CONTAINER_RUN_MARKER (default: /run/.containerenv) — Podman / CRI-O.
+#   3. $CONTAINER_DOCKER_MARKER (default: /.dockerenv)   — Docker.
+#   4. $CONTAINER_CGROUP_PATH   (default: /proc/1/cgroup) — cgroup fallback
+#      must be readable AND contain 'docker' or 'containerd'.
+#
+# If none of those signals pass: write [FATAL] to stderr and exit 2.
+#
+# The CONTAINER_*_MARKER and CONTAINER_CGROUP_PATH env vars exist both
+# for testing (we cannot create /.dockerenv without root) and for
+# non-standard runtimes that want to plug their own markers in.
+# ---------------------------------------------------------------------------
+assert_container_required() {
+    [ "${CONTAINER_REQUIRED_OK:-}" = "1" ] && return 0
+    [ -f "${CONTAINER_RUN_MARKER:-/run/.containerenv}" ] && return 0
+    [ -f "${CONTAINER_DOCKER_MARKER:-/.dockerenv}" ] && return 0
+    local cgroup_path="${CONTAINER_CGROUP_PATH:-/proc/1/cgroup}"
+    if [ -r "$cgroup_path" ]; then
+        if grep -qE '(docker|containerd)' "$cgroup_path" 2>/dev/null; then
+            return 0
+        fi
+    fi
+    printf '[FATAL] refusing to run on the host: tests-prompts must be invoked via docker-test.sh\n' >&2
+    exit 2
+}
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -32,6 +101,66 @@ AGENT_NAME="${AGENT_NAME:-change-orchestrator}"
 EXTRACTOR="${EXTRACTOR:-/tests-prompts/_extractor.py}"
 
 mkdir -p "$LOGS_DIR"
+
+# ---------------------------------------------------------------------------
+# Host-mutation guard: this script writes to $HOME paths via
+# `ai-harness install -o opencode` and (transitively) the host-bootstrap
+# helper. Refuse the entire script on a non-container host so no host
+# config is mutated. See assert_container_required() at the top of this
+# file. The guard must pass BEFORE the bootstrap copy below.
+# ---------------------------------------------------------------------------
+assert_container_required
+
+# ---------------------------------------------------------------------------
+# parse_csv <path> — streams CSV rows as TAB-fielded, NUL-terminated records
+# on stdout. One record per non-blank data row:
+#   <prompt>\t<tools>\t<skills>\t<subs>\0
+#
+# Defined HERE (above the first invocation below) because bash does NOT
+# hoist function definitions. Earlier fix-loops added this helper at
+# line ~230 of this file while the first call site is at the top of the
+# validate-cases-csv block; the in-container build then exploded with
+# `parse_csv: command not found` before row 1. Pinning the definition
+# next to its first use makes that ordering self-evident.
+#
+# Delegates to tests-prompts/parse_csv.py (the validate-csv-row-shape seam)
+# which owns row-shape correctness: trailing-field shifts, non-integer
+# counts, empty prompts all produce a labeled [PARSE-FAIL] line on stderr
+# and a non-zero exit. The original bug was a heredoc that quietly
+# `or "0"` defaulted missing cells — the seam exists so that class of
+# failure can't reach the per-row loop.
+# ---------------------------------------------------------------------------
+parse_csv() {
+    local path="$1"
+    python3 "$SCRIPT_DIR/parse_csv.py" "$path"
+}
+
+# ---------------------------------------------------------------------------
+# Validate cases.csv BEFORE any expensive bootstrap. The parser
+# (tests-prompts/parse_csv.py) emits [PARSE-FAIL] lines on stderr and
+# exits non-zero on row-shape errors. Catch that exit code here so the
+# suite cannot silently pass on broken data — a row the parser rejects
+# would otherwise produce zero records, the per-row loop would skip
+# silently, and OVERALL_RC would stay 0.
+# ---------------------------------------------------------------------------
+PARSED="$(mktemp)"
+parse_err="$(mktemp)"
+if ! parse_csv "$CASES_CSV" > "$PARSED" 2> "$parse_err"; then
+    cat "$parse_err" >&2
+    # Mirror dump_failure_trace: write a structured JSON artifact into
+    # $LOGS_DIR so CI scrapers and humans see the same artifact shape
+    # whether the failure was a parse-csv rejection or a per-row PASS/FAIL.
+    # Best-effort: a helper failure must NOT mask the existing exit-1
+    # path or the labeled [PARSE-FAIL] line above. See
+    # tests-prompts/_dump_parse_trace.py for the seam.
+    if ! python3 "$SCRIPT_DIR/_dump_parse_trace.py" "$LOGS_DIR" "$parse_err" 2>/dev/null; then
+        printf '[WARN] could not write parse-fail trace to %s\n' "$LOGS_DIR" >&2
+    fi
+    printf '[FAIL] cases.csv rejected by parse_csv — see [PARSE-FAIL] above\n' >&2
+    rm -f "$PARSED" "$parse_err"
+    exit 1
+fi
+rm -f "$parse_err"
 
 # ---------------------------------------------------------------------------
 # Bootstrap: copy /source-ro -> /workspace, install ai-harness, register agent
@@ -122,47 +251,50 @@ run_row() {
     return $?
 }
 
-# parse_csv <path> — streams CSV rows as TAB-fielded, NUL-terminated records
-# on stdout. One record per non-blank data row:
-#   <prompt>\t<tools>\t<skills>\t<subs>\0
-# Uses Python csv.DictReader so commas/newlines/quotes in prompts work.
-# NUL is the record separator (bash `read -d ''` consumes one record at a
-# time) so prompts with embedded newlines survive intact.
-parse_csv() {
-    local path="$1"
-    python3 - "$path" <<'PYEOF'
-import csv
-import sys
+# compare_count <label> <got> <exp> <prompt> <row_idx>
+#
+# Integer-guarded assertion helper for one count column in the per-row
+# block. Replaces the bare `[ "$got" -ne "$exp" ]` form which silently
+# swallows `bash: integer expression expected` when the parsed expected
+# value is a non-integer string (the original bug). On success returns
+# 0 silently; on failure returns 1 and writes a labeled [FAIL] line on
+# stderr naming the row, prompt, label, both values, and the reason.
+#
+# Two failure modes:
+#   - non-integer `exp`         → "- non-integer expected: <exp>"
+#     regex check fires BEFORE any arithmetic, so `-ne` is never invoked
+#     on a non-integer — bash's "integer expression expected" noise is
+#     impossible.
+#   - integer but not equal     → "calls expected <exp> got <got>"
+compare_count() {
+    local label="$1"
+    local got="$2"
+    local exp="$3"
+    local prompt="$4"
+    local row_idx="$5"
 
-path = sys.argv[1]
-with open(path, newline="") as f:
-    reader = csv.DictReader(f)
-    field_tools = " tools calls (number)"
-    field_skills = " skills calls (number)"
-    field_subs = " sub-agent calls (number)"
-    for row in reader:
-        prompt = (row.get("prompt") or "").strip()
-        if not prompt:
-            continue
-        tools = (row.get(field_tools) or "0").strip() or "0"
-        skills = (row.get(field_skills) or "0").strip() or "0"
-        subs = (row.get(field_subs) or "0").strip() or "0"
-        # TAB between fields, NUL between records. No trailing newline:
-        # the NUL is the only record terminator, so prompts with embedded
-        # newlines are not mistaken for record boundaries by `read -d ''`.
-        sys.stdout.buffer.write(
-            f"{prompt}\t{tools}\t{skills}\t{subs}\0".encode("utf-8")
-        )
-PYEOF
+    if ! [[ "$exp" =~ ^[0-9]+$ ]]; then
+        printf '[FAIL] row %d (%s): %s expected %s got %s — non-integer expected\n' \
+            "$row_idx" "$prompt" "$label" "$exp" "$got" >&2
+        return 1
+    fi
+
+    if [ "$got" -ne "$exp" ]; then
+        printf '[FAIL] row %d (%s): %s expected %s got %s\n' \
+            "$row_idx" "$prompt" "$label" "$exp" "$got" >&2
+        return 1
+    fi
+
+    return 0
 }
 
 # ---------------------------------------------------------------------------
 # Per-row loop
 # ---------------------------------------------------------------------------
 # Total = number of NULs in parse_csv's stdout (one NUL per record).
-# This works for both single-line and multiline prompts because the
-# bridge uses NUL as its sole record terminator.
-TOTAL=$(parse_csv "$CASES_CSV" | tr -cd '\0' | wc -c | tr -d '[:space:]')
+# The PARSED file was validated and materialised above; re-use it so we
+# don't re-parse the CSV on every TOTAL/loop call.
+TOTAL=$(tr -cd '\0' < "$PARSED" | wc -c | tr -d '[:space:]')
 PASSED=0
 FAILED=0
 OVERALL_RC=0
@@ -188,21 +320,9 @@ while IFS=$'\t' read -r -d '' PROMPT EXP_TOOLS EXP_SKILLS EXP_SUBAGENTS; do
     exp_subs=$(printf '%s' "$EXP_SUBAGENTS"  | tr -d '[:space:]'); exp_subs=${exp_subs:-0}
 
     row_rc=0
-    if [ "$got_tools" -ne "$exp_tools" ]; then
-        printf '[FAIL] row %d (%s): tools calls expected %s got %s\n' \
-            "$ROW_INDEX" "$PROMPT" "$exp_tools" "$got_tools" >&2
-        row_rc=1
-    fi
-    if [ "$got_skills" -ne "$exp_skills" ]; then
-        printf '[FAIL] row %d (%s): skills calls expected %s got %s\n' \
-            "$ROW_INDEX" "$PROMPT" "$exp_skills" "$got_skills" >&2
-        row_rc=1
-    fi
-    if [ "$got_subs" -ne "$exp_subs" ]; then
-        printf '[FAIL] row %d (%s): sub-agent calls expected %s got %s\n' \
-            "$ROW_INDEX" "$PROMPT" "$exp_subs" "$got_subs" >&2
-        row_rc=1
-    fi
+    compare_count tools  "$got_tools"  "$exp_tools"  "$PROMPT" "$ROW_INDEX" || row_rc=1
+    compare_count skills "$got_skills" "$exp_skills" "$PROMPT" "$ROW_INDEX" || row_rc=1
+    compare_count subs   "$got_subs"   "$exp_subs"   "$PROMPT" "$ROW_INDEX" || row_rc=1
 
     if [ "$row_rc" -eq 0 ]; then
         printf '[CASE %d/%d] PASS\n' "$ROW_INDEX" "$TOTAL" >&2
@@ -213,7 +333,9 @@ while IFS=$'\t' read -r -d '' PROMPT EXP_TOOLS EXP_SKILLS EXP_SUBAGENTS; do
         FAILED=$((FAILED + 1))
         OVERALL_RC=1
     fi
-done < <(parse_csv "$CASES_CSV")
+done < "$PARSED"
+
+rm -f "$PARSED"
 
 printf '[SUMMARY] passed=%d failed=%d total=%d\n' "$PASSED" "$FAILED" "$TOTAL" >&2
 exit "$OVERALL_RC"

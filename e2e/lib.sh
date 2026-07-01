@@ -2,6 +2,55 @@
 # lib.sh — shared test helpers for ai-harness E2E tests
 set -euo pipefail
 
+# ---------------------------------------------------------------------------
+# assert_container_required — host-mutation guard.
+#
+# Closes Track B of fix-tests-prompts-assertions at its source for the
+# e2e suite. Sourcing e2e/lib.sh on the host (without going through
+# e2e/docker-test.sh) means the e2e entrypoint code below runs and may
+# mutate $HOME/.ai-harness / $HOME/.config/opencode / etc. via
+# `cleanup_test_env`. Refusing to source at all on a non-container host
+# closes that bug class at its source.
+#
+# Two copies of this guard exist (this one and tests-prompts/run.sh).
+# The duplication is intentional: e2e_test.sh and tests-prompts run.sh
+# do not share a library; a shared lib for one function would be heavier
+# than the 24 lines it would save.
+#
+# Container signals (passes if ANY is true, evaluated in order):
+#   1. $CONTAINER_REQUIRED_OK == "1"             — escape hatch for host
+#                                                  development of the
+#                                                  e2e suite itself.
+#   2. $CONTAINER_RUN_MARKER (default: /run/.containerenv) — Podman / CRI-O.
+#   3. $CONTAINER_DOCKER_MARKER (default: /.dockerenv)   — Docker.
+#   4. $CONTAINER_CGROUP_PATH   (default: /proc/1/cgroup) — cgroup fallback
+#      must be readable AND contain 'docker' or 'containerd'.
+#
+# If none of those signals pass: write [FATAL] to stderr and exit 2.
+#
+# e2e/docker-test.sh forwards CONTAINER_REQUIRED_OK=1 into the container
+# so the guard passes there even if container markers are stripped.
+# CONTAINER_RUN_MARKER / CONTAINER_DOCKER_MARKER / CONTAINER_CGROUP_PATH
+# redirect the marker checks for testing or for non-standard runtimes.
+# ---------------------------------------------------------------------------
+assert_container_required() {
+    [ "${CONTAINER_REQUIRED_OK:-}" = "1" ] && return 0
+    [ -f "${CONTAINER_RUN_MARKER:-/run/.containerenv}" ] && return 0
+    [ -f "${CONTAINER_DOCKER_MARKER:-/.dockerenv}" ] && return 0
+    local cgroup_path="${CONTAINER_CGROUP_PATH:-/proc/1/cgroup}"
+    if [ -r "$cgroup_path" ]; then
+        if grep -qE '(docker|containerd)' "$cgroup_path" 2>/dev/null; then
+            return 0
+        fi
+    fi
+    printf '[FATAL] refusing to run on the host: e2e must be invoked via e2e/docker-test.sh\n' >&2
+    exit 2
+}
+
+# Guard the entire e2e suite at source-time. After this line, no e2e
+# entrypoint code path is reachable on a non-container host.
+assert_container_required
+
 # Colors
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 
