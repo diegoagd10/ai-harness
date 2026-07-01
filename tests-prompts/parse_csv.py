@@ -44,6 +44,7 @@ small so the next contributor can hold it in their head.
 from __future__ import annotations
 
 import csv
+import io
 import sys
 from typing import Iterator
 
@@ -138,9 +139,19 @@ def parse_rows(path: str) -> Iterator[tuple[str, int, int, int]]:
     Fails fast on the first malformed row by raising CsvShapeError.
     A row whose prompt cell is empty is treated as malformed (the
     original parser silently skipped such rows; we refuse that).
+
+    Lines starting with `#` (after optional leading whitespace) are
+    skipped so the CSV file can carry inline documentation (e.g. a
+    TODO marker for an unresolved user-intent ambiguity on a row).
+    The line-number reported in CsvShapeError is the row_index of the
+    CSV data row — comments do not count toward that index.
     """
-    with open(path, newline="", encoding="utf-8") as fh:
-        reader = csv.DictReader(fh)
+    with open(path, "r", encoding="utf-8") as fh:
+        non_comment = (
+            line for line in fh if not line.lstrip().startswith("#")
+        )
+        in_memory = io.StringIO("".join(non_comment))
+        reader = csv.DictReader(in_memory)
         for row_index, row in enumerate(reader, start=1):
             yield _coerce_row(row, row_index)
 
@@ -169,8 +180,12 @@ def _cli_main(path: str) -> int:
     emitted bytes — the contract is "all or nothing."
     """
     try:
-        with open(path, newline="", encoding="utf-8") as fh:
-            reader = csv.DictReader(fh)
+        with open(path, "r", encoding="utf-8") as fh:
+            non_comment = (
+                line for line in fh if not line.lstrip().startswith("#")
+            )
+            in_memory = io.StringIO("".join(non_comment))
+            reader = csv.DictReader(in_memory)
             validated: list[tuple[str, int, int, int]] = []
             for row_index, row in enumerate(reader, start=1):
                 raw_prompt = row.get(FIELD_PROMPT) or ""

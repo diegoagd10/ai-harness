@@ -103,6 +103,24 @@ mkdir -p "$LOGS_DIR"
 assert_container_required
 
 # ---------------------------------------------------------------------------
+# Validate cases.csv BEFORE any expensive bootstrap. The parser
+# (tests-prompts/parse_csv.py) emits [PARSE-FAIL] lines on stderr and
+# exits non-zero on row-shape errors. Catch that exit code here so the
+# suite cannot silently pass on broken data — a row the parser rejects
+# would otherwise produce zero records, the per-row loop would skip
+# silently, and OVERALL_RC would stay 0.
+# ---------------------------------------------------------------------------
+PARSED="$(mktemp)"
+parse_err="$(mktemp)"
+if ! parse_csv "$CASES_CSV" > "$PARSED" 2> "$parse_err"; then
+    cat "$parse_err" >&2
+    printf '[FAIL] cases.csv rejected by parse_csv — see [PARSE-FAIL] above\n' >&2
+    rm -f "$PARSED" "$parse_err"
+    exit 1
+fi
+rm -f "$parse_err"
+
+# ---------------------------------------------------------------------------
 # Bootstrap: copy /source-ro -> /workspace, install ai-harness, register agent
 # ---------------------------------------------------------------------------
 printf '[BOOTSTRAP] copying %s -> %s\n' "$SOURCE_RO" "$WORKSPACE" >&2
@@ -246,9 +264,9 @@ compare_count() {
 # Per-row loop
 # ---------------------------------------------------------------------------
 # Total = number of NULs in parse_csv's stdout (one NUL per record).
-# This works for both single-line and multiline prompts because the
-# bridge uses NUL as its sole record terminator.
-TOTAL=$(parse_csv "$CASES_CSV" | tr -cd '\0' | wc -c | tr -d '[:space:]')
+# The PARSED file was validated and materialised above; re-use it so we
+# don't re-parse the CSV on every TOTAL/loop call.
+TOTAL=$(tr -cd '\0' < "$PARSED" | wc -c | tr -d '[:space:]')
 PASSED=0
 FAILED=0
 OVERALL_RC=0
@@ -287,7 +305,9 @@ while IFS=$'\t' read -r -d '' PROMPT EXP_TOOLS EXP_SKILLS EXP_SUBAGENTS; do
         FAILED=$((FAILED + 1))
         OVERALL_RC=1
     fi
-done < <(parse_csv "$CASES_CSV")
+done < "$PARSED"
+
+rm -f "$PARSED"
 
 printf '[SUMMARY] passed=%d failed=%d total=%d\n' "$PASSED" "$FAILED" "$TOTAL" >&2
 exit "$OVERALL_RC"
