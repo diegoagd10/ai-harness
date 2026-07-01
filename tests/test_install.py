@@ -318,10 +318,10 @@ _CHANGE_SUBAGENT_NAMES = (
     "change-implementor",
     "change-validator",
     "change-archiver",
-    "design",
-    "propose",
-    "specs",
-    "tasks",
+    "change-design",
+    "change-propose",
+    "change-specs",
+    "change-tasks",
 )
 _CHANGE_AGENT_NAME = "change-orchestrator"
 _NATIVE_AGENT_NAMES = (
@@ -331,10 +331,10 @@ _NATIVE_AGENT_NAMES = (
     _CHANGE_AGENT_NAME,
     "change-validator",
     "change-archiver",
-    "design",
-    "propose",
-    "specs",
-    "tasks",
+    "change-design",
+    "change-propose",
+    "change-specs",
+    "change-tasks",
 )
 
 

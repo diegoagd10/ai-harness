@@ -146,10 +146,10 @@ def test_opencode_change_agents_returns_eight_change_agents() -> None:
         "change-implementor",
         "change-validator",
         "change-archiver",
-        "propose",
-        "design",
-        "specs",
-        "tasks",
+        "change-propose",
+        "change-design",
+        "change-specs",
+        "change-tasks",
     )
 
 
