@@ -48,6 +48,35 @@
   passing (parse_csv.test.py 12/12, parse_csv.test.sh 9/9,
   dump_parse_trace.test.py 7/7, compare_count, assert_container_required,
   cases_csv.test.py 9/9, host_smoke, e2e_lib_guard).
+- c5a5437 — fix-loop-3 (validator finding: critical — even with the
+  rebuilt carrier image, docker-test.sh still exploded at run.sh:115
+  with `parse_csv: command not found` because the `parse_csv` function
+  was defined at line 230 of run.sh while the runner called it at
+  line 115). Bash does NOT hoist function definitions, so the
+  definition must precede the call site at the source level. Root
+  cause: 9b796a1 added `parse_csv()` to the bottom "Helpers" section
+  of run.sh while the validate-cases-csv block already invoked it
+  earlier; 157c804 fixed the Dockerfile COPY omission but not this
+  source-ordering regression. Fix: move the `parse_csv()` definition
+  (with its docblock) from line ~230 to right after
+  assert_container_required's invocation, immediately above the
+  validate-cases-csv block. Also add `parse_csv` to the header's
+  Internal-helpers list and a comment naming the bash-no-hoist rule
+  so the next contributor who edits this section reads the rule
+  before breaking it. Plus a regression detector at
+  tests-prompts/tests/run_sh_order.test.sh (3 sub-scenarios: L1
+  parse_csv definition line < invocation line; L2 same invariant for
+  assert_container_required; L3 behavioral — source the function
+  extracted from run.sh and invoke it on a minimal CSV). Verified
+  the detector goes red on a simulated regression (parse_csv
+  temporarily moved back to line 338) and green on the fix. Also
+  verified docker-test.sh end-to-end: rebuilt
+  ai-harness-prompt-tests:local-fixloop-3 and the runner reaches
+  the per-row loop (no more `parse_csv: command not found`), plus an
+  in-container seam check that proves parse_csv is now defined at
+  line 133, called at line 148, and returns rc=0 with the correct
+  12-byte hello\t0\t0\t0\0 record. All 9 host-side regression
+  suites still pass.
 
 ## Final test inventory
 - python3 tests-prompts/tests/parse_csv.test.py            -> 12/12 OK
@@ -58,6 +87,7 @@
 - bash tests-prompts/tests/e2e_lib_guard.test.sh           -> OK
 - bash tests-prompts/tests/host_smoke.test.sh              -> OK
 - python3 tests-prompts/tests/dump_parse_trace.test.py     -> 7/7 OK (fix-loop)
+- bash tests-prompts/tests/run_sh_order.test.sh            -> 3/3 OK (fix-loop-3)
 
 ## Remaining
 - none (all 8 tasks completed + 2 fix-loops completed)
