@@ -43,11 +43,16 @@ ENV PATH="/root/.opencode/bin:${PATH}"
 # If you add a new helper consumed by run.sh, add the COPY here too.
 COPY tests-prompts/run.sh /tests-prompts/run.sh
 COPY tests-prompts/cases.csv /tests-prompts/cases.csv
+COPY tests-prompts/cases_e2e.csv /tests-prompts/cases_e2e.csv
 COPY tests-prompts/_extractor.py /tests-prompts/_extractor.py
+COPY tests-prompts/_e2e_assertions.py /tests-prompts/_e2e_assertions.py
+COPY tests-prompts/_e2e_runner.py /tests-prompts/_e2e_runner.py
 COPY tests-prompts/parse_csv.py /tests-prompts/parse_csv.py
 COPY tests-prompts/_dump_parse_trace.py /tests-prompts/_dump_parse_trace.py
 RUN chmod +x /tests-prompts/run.sh \
     /tests-prompts/_extractor.py \
+    /tests-prompts/_e2e_assertions.py \
+    /tests-prompts/_e2e_runner.py \
     /tests-prompts/parse_csv.py \
     /tests-prompts/_dump_parse_trace.py
 

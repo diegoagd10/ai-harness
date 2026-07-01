@@ -338,4 +338,102 @@ done < "$PARSED"
 rm -f "$PARSED"
 
 printf '[SUMMARY] passed=%d failed=%d total=%d\n' "$PASSED" "$FAILED" "$TOTAL" >&2
+
+# ---------------------------------------------------------------------------
+# CASES_CSV_E2E second loop — opt-in RED regression surface.
+#
+# Activated only when CASES_CSV_E2E is set and non-empty. For each row
+# in the E2E CSV:
+#   1. Run a fresh `opencode run` (same shape as the first loop).
+#   2. ALWAYS dump the raw trace to $LOGS_DIR/<row>-<slug>.json — the
+#      smoke loop only writes on FAIL, the RED loop writes on PASS too
+#      so the trace is available for debugging regressions.
+#   3. Pipe the trace through tests-prompts/_e2e_runner.py for the
+#      per-fixture routing decision (the three flat predicates from
+#      _e2e_assertions.py are composed per fixture there).
+#   4. Print `[E2E-ASSERT] fixture=<slug> row=<n> pass|fail` and
+#      aggregate pass/fail into E2E_RC. Any E2E failure propagates
+#      OVERALL_RC=1 so CI gates read the difference.
+#
+# The existing first loop (cases.csv smoke) is byte-identical above —
+# this block lives AFTER its [SUMMARY] line and uses different
+# variable names (E2E_*) to avoid collision.
+# ---------------------------------------------------------------------------
+E2E_RC=0
+if [ -n "${CASES_CSV_E2E:-}" ]; then
+    if [ ! -r "$CASES_CSV_E2E" ]; then
+        printf '[FAIL] CASES_CSV_E2E=%s not readable\n' "$CASES_CSV_E2E" >&2
+        E2E_RC=1
+    else
+        E2E_PARSED="$(mktemp)"
+        E2E_PARSE_ERR="$(mktemp)"
+        if ! parse_csv "$CASES_CSV_E2E" > "$E2E_PARSED" 2> "$E2E_PARSE_ERR"; then
+            cat "$E2E_PARSE_ERR" >&2
+            if ! python3 "$SCRIPT_DIR/_dump_parse_trace.py" "$LOGS_DIR" "$E2E_PARSE_ERR" 2>/dev/null; then
+                printf '[WARN] could not write parse-fail trace to %s\n' "$LOGS_DIR" >&2
+            fi
+            printf '[FAIL] %s rejected by parse_csv — see [PARSE-FAIL] above\n' "$CASES_CSV_E2E" >&2
+            rm -f "$E2E_PARSED" "$E2E_PARSE_ERR"
+            E2E_RC=1
+        else
+            rm -f "$E2E_PARSE_ERR"
+            E2E_TOTAL=$(tr -cd '\0' < "$E2E_PARSED" | wc -c | tr -d '[:space:]')
+            E2E_PASSED=0
+            E2E_FAILED=0
+            E2E_ROW=0
+
+            # Read the four fields per record (prompt + 3 counts). We
+            # ignore the count columns; the E2E loop's contract is
+            # routing-shape (not counts) so they stay at baseline 0,0,0.
+            while IFS=$'\t' read -r -d '' E2E_PROMPT E2E_EXP_TOOLS E2E_EXP_SKILLS E2E_EXP_SUBAGENTS; do
+                E2E_ROW=$((E2E_ROW + 1))
+                E2E_SLUG=$(slugify "$E2E_PROMPT")
+
+                trace_text=$(run_row "$E2E_ROW" "$E2E_PROMPT" || true)
+                [ -z "$trace_text" ] && trace_text=""
+
+                # ALWAYS dump the trace (RED surface) — same filename
+                # shape as the smoke loop's dump_failure_trace so RED
+                # traces share the directory convention.
+                E2E_TRACE_FILE="${LOGS_DIR}/${E2E_ROW}-${E2E_SLUG}.json"
+                E2E_TRACE_FILE=$(printf '%s' "$E2E_TRACE_FILE" | tr -c 'A-Za-z0-9._-' '-')
+                [ "${#E2E_TRACE_FILE}" -gt 64 ] && E2E_TRACE_FILE="${E2E_TRACE_FILE:0:64}"
+                printf '%s' "$trace_text" > "$E2E_TRACE_FILE"
+
+                # Per-fixture routing decision via _e2e_runner.py.
+                # stdout -> /dev/null (verdict is the exit code); stderr
+                # -> surface (so REASON lines from a failing row reach
+                # the host harness via 2>&1).
+                e2e_row_rc=0
+                if ! python3 "$SCRIPT_DIR/_e2e_runner.py" \
+                        "$E2E_SLUG" "$E2E_TRACE_FILE" >/dev/null; then
+                    e2e_row_rc=1
+                fi
+
+                if [ "$e2e_row_rc" -eq 0 ]; then
+                    printf '[E2E-ASSERT] fixture=%s row=%d pass\n' \
+                        "$E2E_SLUG" "$E2E_ROW"
+                    E2E_PASSED=$((E2E_PASSED + 1))
+                else
+                    printf '[E2E-ASSERT] fixture=%s row=%d fail\n' \
+                        "$E2E_SLUG" "$E2E_ROW"
+                    E2E_FAILED=$((E2E_FAILED + 1))
+                    E2E_RC=1
+                fi
+            done < "$E2E_PARSED"
+
+            rm -f "$E2E_PARSED"
+
+            printf '[E2E-SUMMARY] passed=%d failed=%d total=%d\n' \
+                "$E2E_PASSED" "$E2E_FAILED" "$E2E_TOTAL" >&2
+        fi
+    fi
+fi
+
+# E2E failures bump OVERALL_RC so the existing smoke-pass result does
+# not mask a RED regression. CI gates read the aggregate exit code.
+if [ "$E2E_RC" -ne 0 ]; then
+    OVERALL_RC=1
+fi
+
 exit "$OVERALL_RC"

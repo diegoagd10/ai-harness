@@ -1,0 +1,366 @@
+{
+  "tasks": [
+    {
+      "id": "1",
+      "title": "Add tool_sequence helper to _extractor.py",
+      "spec": "tool-sequence-helper",
+      "phase": "foundation",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "1.1",
+          "title": "Implement tool_sequence(events) returning ordered list of part.tool values from tool_use events",
+          "scenario": "ordered tool sequence over a mixed stream",
+          "status": "done"
+        },
+        {
+          "id": "1.2",
+          "title": "Filter non-tool events (text, assistant_message, step_start) out of the returned list",
+          "scenario": "non-tool events are filtered out",
+          "status": "done"
+        },
+        {
+          "id": "1.3",
+          "title": "Return [] for empty event list without crashing",
+          "scenario": "empty input yields empty list",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "2",
+      "title": "Create _e2e_assertions.py with three boolean helpers",
+      "spec": "e2e-assertions-helpers",
+      "phase": "foundation",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "2.1",
+          "title": "has_bash_ai_harness_change(events, subcmd) - match bash tool_use whose command contains ai-harness change-<subcmd>",
+          "scenario": "matches a bash tool_use that calls change-new",
+          "status": "done"
+        },
+        {
+          "id": "2.2",
+          "title": "has_task_subagent(events) - match any tool_use with part.tool == task",
+          "scenario": "matches a task tool_use",
+          "status": "done"
+        },
+        {
+          "id": "2.3",
+          "title": "final_assistant_text_contains(events, needle) - match LAST text event payload",
+          "scenario": "matches the LAST text event, not the first",
+          "status": "done"
+        },
+        {
+          "id": "2.4",
+          "title": "Return False on empty event list for every helper without crashing",
+          "scenario": "returns False for an empty event list",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "3",
+      "title": "Add cases_e2e.csv fixture + structural parse test",
+      "spec": "cases-e2e-fixture-csv",
+      "phase": "foundation",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "3.1",
+          "title": "Write tests-prompts/cases_e2e.csv with three fixture rows holding baseline 0,0,0 counts in the existing 4-field wire format",
+          "scenario": "baseline counts are 0,0,0 for every fixture",
+          "status": "done"
+        },
+        {
+          "id": "3.2",
+          "title": "Fixture rows cover fibonacci-ES (small), mario-kart-3d-vague (ambiguous), mario-kart-3d-complete (complete)",
+          "scenario": "every fixture is named and unique",
+          "status": "done"
+        },
+        {
+          "id": "3.3",
+          "title": "Add tests-prompts/tests/cases_e2e_csv.test.py validating CSV parses through parse_csv.py and carries the three expected fixtures",
+          "scenario": "structural test runs unconditionally",
+          "status": "done"
+        },
+        {
+          "id": "3.4",
+          "title": "Existing tests-prompts/tests/cases_csv.test.py::test_file_has_five_data_rows stays untouched",
+          "scenario": "existing five-row smoke contract stays green",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "4",
+      "title": "Add unconditional unit suite for _e2e_assertions and tool_sequence",
+      "spec": "e2e-assertions-helpers",
+      "phase": "foundation",
+      "depends_on": [
+        "1",
+        "2"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "4.1",
+          "title": "Cover has_bash_ai_harness_change positive (change-new, change-continue) and negative (other bash) paths",
+          "scenario": "matches every ai-harness subcmd without code changes",
+          "status": "done"
+        },
+        {
+          "id": "4.2",
+          "title": "Cover has_task_subagent positive and negative (bash-only) paths",
+          "scenario": "ignores bash and other tool_uses",
+          "status": "done"
+        },
+        {
+          "id": "4.3",
+          "title": "Cover final_assistant_text_contains ordering (LAST, not first), negative needle, and no-text-events path",
+          "scenario": "matches the LAST text event, not the first",
+          "status": "done"
+        },
+        {
+          "id": "4.4",
+          "title": "Cover tool_sequence ordered output, non-tool filtering, empty input",
+          "scenario": "helper accepts the same parsed event shape as _e2e_assertions",
+          "status": "done"
+        },
+        {
+          "id": "4.5",
+          "title": "Lock the tool_sequence vs has_task_subagent parity contract in one test",
+          "scenario": "helper's parity with _e2e_assertions is locked",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "5",
+      "title": "Extend tests-prompts/Dockerfile with COPYs for new files",
+      "spec": "cases-e2e-fixture-csv",
+      "phase": "integration",
+      "depends_on": [
+        "2",
+        "3"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "5.1",
+          "title": "Add COPY cases_e2e.csv . next to the existing COPY cases.csv .",
+          "scenario": "in-container run.sh sees the new CSV",
+          "status": "done"
+        },
+        {
+          "id": "5.2",
+          "title": "Add COPY _e2e_assertions.py . next to the existing COPY _extractor.py",
+          "scenario": "in-container run.sh sees the new helper",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "6",
+      "title": "Add CASES_CSV_E2E second loop to tests-prompts/run.sh",
+      "spec": "runsh-e2e-group",
+      "phase": "integration",
+      "depends_on": [
+        "2",
+        "3"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "6.1",
+          "title": "Drive second loop from CASES_CSV_E2E env var; skip when unset",
+          "scenario": "unset env var makes the second loop dormant",
+          "status": "done"
+        },
+        {
+          "id": "6.2",
+          "title": "ALWAYS dump raw per-row opencode JSON stream to $LOGS_DIR/<row>-<slug>.json for E2E rows",
+          "scenario": "every E2E row writes a per-row trace, on PASS or FAIL",
+          "status": "done"
+        },
+        {
+          "id": "6.3",
+          "title": "Route each captured trace through _e2e_assertions and print [E2E-ASSERT] fixture=<slug> row=<n> pass|fail",
+          "scenario": "per-fixture routing verdict printed",
+          "status": "done"
+        },
+        {
+          "id": "6.4",
+          "title": "Aggregate per-row pass/fail and exit non-zero if any E2E row fails",
+          "scenario": "at least one failing RED row returns non-zero",
+          "status": "done"
+        },
+        {
+          "id": "6.5",
+          "title": "Preserve existing first loop body, run_row function, dump_failure_trace shape, and set -uo pipefail header",
+          "scenario": "existing smoke loop is unchanged",
+          "status": "done"
+        },
+        {
+          "id": "6.6",
+          "title": "Keep bash -n discipline so tests/test_prompt_tests_slugs.py::TestRunShSyntax passes unchanged",
+          "scenario": "bash -n stays clean",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "7",
+      "title": "Create tests/test_prompt_e2e_red.py env-gated RED surface",
+      "spec": "red-pytest-fixture-suite",
+      "phase": "core",
+      "depends_on": [
+        "1",
+        "2",
+        "3"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "7.1",
+          "title": "Top-of-file markdown contract table mapping fixture id -> expected bash change-* presence, task subagent presence, final-text characteristics",
+          "scenario": "the table is the first thing a reader sees",
+          "status": "done"
+        },
+        {
+          "id": "7.2",
+          "title": "test_fibonacci_es_routes_to_answer_directly - assert no bash change-new, no bash change-continue, no task subagent",
+          "scenario": "vague fixture conjunctive assertion holds",
+          "status": "done"
+        },
+        {
+          "id": "7.3",
+          "title": "test_mario_kart_3d_vague_grills_first - assert no bash change-new, no task, final text contains ?, no change-new substring in final text",
+          "scenario": "vague fixture regression dumps the offending trace",
+          "status": "done"
+        },
+        {
+          "id": "7.4",
+          "title": "test_mario_kart_3d_complete_starts_change_flow - assert bash change-new OR task fired",
+          "scenario": "complete fixture OR-fence holds",
+          "status": "done"
+        },
+        {
+          "id": "7.5",
+          "title": "Module-level pytest.mark.skipif gated on PROMPT_E2E_RED == 1 AND shutil.which(opencode) is non-None",
+          "scenario": "gate off -> all tests skip cleanly",
+          "status": "done"
+        },
+        {
+          "id": "7.6",
+          "title": "Per-test tmp_path via --dir <tmp_path> so any .ai-harness/changes/<name>/ dies with the test",
+          "scenario": "model pin matches existing seams",
+          "status": "done"
+        },
+        {
+          "id": "7.7",
+          "title": "Failure path dumps full captured event list to pytest report naming which clause tripped",
+          "scenario": "vague fixture regression dumps the offending trace",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "8",
+      "title": "Create tests/test_prompt_e2e_red_dispatch.py host dispatch driver",
+      "spec": "host-dispatch-driver",
+      "phase": "core",
+      "depends_on": [
+        "1",
+        "2",
+        "3"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "8.1",
+          "title": "Per-fixture subprocess.run invoking opencode run --agent change-orchestrator --auto --format json --model minimax/MiniMax-M3 --dir <tmp_path> <prompt> mirroring tests/test_prompt_tests_extractor.py::test_hello_prompt_live_with_minimax_m3",
+          "scenario": "subprocess invocation matches the extractor live test's shape",
+          "status": "done"
+        },
+        {
+          "id": "8.2",
+          "title": "Three test functions asserting the same per-fixture contract as tests/test_prompt_e2e_red.py via the shared _e2e_assertions helpers",
+          "scenario": "contract parity with the Docker-side RED suite",
+          "status": "done"
+        },
+        {
+          "id": "8.3",
+          "title": "Module-level pytest.mark.skipif matching tests/test_prompt_e2e_red.py (PROMPT_E2E_RED == 1 AND opencode on PATH)",
+          "scenario": "defaults match red-pytest-fixture-suite",
+          "status": "done"
+        },
+        {
+          "id": "8.4",
+          "title": "Import graph free of docker, Dockerfile, or in-container run.sh",
+          "scenario": "import graph is Docker-free",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "9",
+      "title": "Verify quality gates pass on all new and modified files",
+      "spec": "red-pytest-fixture-suite",
+      "phase": "testing",
+      "depends_on": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "9.1",
+          "title": "ruff format --check . is clean on the new files",
+          "scenario": "static tests always pass",
+          "status": "done"
+        },
+        {
+          "id": "9.2",
+          "title": "ruff check . is clean on the new files",
+          "scenario": "static tests always pass",
+          "status": "done"
+        },
+        {
+          "id": "9.3",
+          "title": "pylint duplicate-code is clean (no schema knowledge duplicated outside _extractor / _e2e_assertions)",
+          "scenario": "static tests always pass",
+          "status": "done"
+        },
+        {
+          "id": "9.4",
+          "title": "pytest tests/test_prompt_e2e_assertions_unit.py and tests-prompts/tests/cases_e2e_csv.test.py green in default CI",
+          "scenario": "unit tests pass on default CI",
+          "status": "done"
+        },
+        {
+          "id": "9.5",
+          "title": "bash -n tests-prompts/run.sh clean (tests/test_prompt_tests_slugs.py::TestRunShSyntax unchanged)",
+          "scenario": "bash -n stays clean",
+          "status": "done"
+        },
+        {
+          "id": "9.6",
+          "title": "pytest tests/test_prompt_e2e_red.py and tests/test_prompt_e2e_red_dispatch.py report SKIPPED (not ERROR) with PROMPT_E2E_RED unset",
+          "scenario": "gate off -> all tests skip cleanly",
+          "status": "done"
+        }
+      ]
+    }
+  ]
+}
