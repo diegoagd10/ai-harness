@@ -114,6 +114,15 @@ PARSED="$(mktemp)"
 parse_err="$(mktemp)"
 if ! parse_csv "$CASES_CSV" > "$PARSED" 2> "$parse_err"; then
     cat "$parse_err" >&2
+    # Mirror dump_failure_trace: write a structured JSON artifact into
+    # $LOGS_DIR so CI scrapers and humans see the same artifact shape
+    # whether the failure was a parse-csv rejection or a per-row PASS/FAIL.
+    # Best-effort: a helper failure must NOT mask the existing exit-1
+    # path or the labeled [PARSE-FAIL] line above. See
+    # tests-prompts/_dump_parse_trace.py for the seam.
+    if ! python3 "$SCRIPT_DIR/_dump_parse_trace.py" "$LOGS_DIR" "$parse_err" 2>/dev/null; then
+        printf '[WARN] could not write parse-fail trace to %s\n' "$LOGS_DIR" >&2
+    fi
     printf '[FAIL] cases.csv rejected by parse_csv — see [PARSE-FAIL] above\n' >&2
     rm -f "$PARSED" "$parse_err"
     exit 1
