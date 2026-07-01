@@ -155,11 +155,19 @@ class TestParseCsvMultilineContract:
         assert rows[0][0] == "hello"
         assert rows[1][0] == "world"
 
-    def test_existing_cases_csv_still_parses_to_one_row(self) -> None:
-        # The committed cases.csv must continue to produce exactly one row.
+    def test_existing_cases_csv_still_parses_to_expected_rows(self) -> None:
+        # The committed cases.csv must continue to parse to the expected
+        # set of rows. Each row preserves the prompt verbatim and falls
+        # back to "0" when a counter column is missing or blank.
         repo_csv = Path(__file__).resolve().parent.parent / "tests-prompts" / "cases.csv"
         rows = _python_parse(repo_csv)
-        assert rows == [("hello", "0", "0", "0")]
+        assert rows == [
+            ("hello", "0", "0", "0"),
+            ("hello, how are you doing?", "0", "0", "0"),
+            ("Hola", "0", "0", "0"),
+            ("Hola!!, como estas?", "0", "0", "0"),
+            ("Create a simple python script for fibonacci", "10", "0", "0"),
+        ]
 
 
 # ---------------------------------------------------------------------------
