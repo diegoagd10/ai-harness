@@ -32,6 +32,22 @@
   host) + run.sh parse-fail block wired to call the helper before exit 1
   (best-effort: helper failure logs a [WARN] and preserves the existing
   labeled [PARSE-FAIL] stderr path).
+- 157c804 — fix-loop-2 (validator finding: critical — built carrier image
+  was missing /tests-prompts/parse_csv.py and /tests-prompts/_dump_parse_trace.py
+  so docker-test.sh exploded at run.sh:115 with `parse_csv: command not
+  found` before row 1). Root cause: task 8 (5d26d0e) sealed the
+  Dockerfile's runner-helper COPY list before the validate-csv-row-shape
+  and parse-trace fix-loops added those two helpers. Fix: extend the
+  Dockerfile COPY block to include both helpers and the chmod pass to
+  cover them, plus a comment naming the rule. Verified by rebuilding
+  ai-harness-prompt-tests:local-fixloop and running the validator's
+  exact reproduction (both `test -f` checks now pass), in-container
+  smoke of parse_csv.py streaming TAB/NUL records and
+  _dump_parse_trace.py writing parse-fail-N.json for a real
+  [PARSE-FAIL] row N signal, plus all host-side regression tests still
+  passing (parse_csv.test.py 12/12, parse_csv.test.sh 9/9,
+  dump_parse_trace.test.py 7/7, compare_count, assert_container_required,
+  cases_csv.test.py 9/9, host_smoke, e2e_lib_guard).
 
 ## Final test inventory
 - python3 tests-prompts/tests/parse_csv.test.py            -> 12/12 OK
@@ -44,4 +60,4 @@
 - python3 tests-prompts/tests/dump_parse_trace.test.py     -> 7/7 OK (fix-loop)
 
 ## Remaining
-- none (all 8 tasks completed + fix-loop completed)
+- none (all 8 tasks completed + 2 fix-loops completed)
