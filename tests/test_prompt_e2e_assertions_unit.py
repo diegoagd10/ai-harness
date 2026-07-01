@@ -301,5 +301,89 @@ class TestEmptyEventListContract:
         assert e2e.final_assistant_text_contains([], "?") is False
 
 
+# ---------------------------------------------------------------------------
+# Parity contract — locks tool_sequence() vs has_task_subagent() symmetry.
+#
+# Per spec tool-sequence-helper.md:
+#   "tool_sequence(...) contains 'task'" must agree with
+#   "has_task_subagent(...) is True" across the SAME parsed event list.
+#
+# If a future schema rename breaks one helper but not the other, the
+# parity test fails immediately and points at the contract gap.
+# ---------------------------------------------------------------------------
+
+
+class TestToolSequenceParityWithTaskSubagent:
+    """`_extractor.tool_sequence(events)` and
+    `_e2e_assertions.has_task_subagent(events)` MUST agree on whether a
+    `task` tool_use event appears in the same parsed event list.
+    """
+
+    @pytest.mark.parametrize(
+        "events,expected_task",
+        [
+            # Pure task stream.
+            ([_tool_event("task")], True),
+            # Mixed: bash + task + read — task present.
+            (
+                [
+                    _tool_event("bash"),
+                    _tool_event("task"),
+                    _tool_event("read"),
+                ],
+                True,
+            ),
+            # Bash-only — no task.
+            ([_tool_event("bash"), _tool_event("read")], False),
+            # Empty stream.
+            ([], False),
+            # Non-tool events only — no task.
+            (
+                [
+                    _step_start_event(),
+                    _text_event_with_payload("hello", event_type="text"),
+                ],
+                False,
+            ),
+            # task_use with non-tool wrapper event — should not be counted.
+            (
+                [
+                    {
+                        "type": "tool_use",
+                        "part": {"type": "text", "text": "not a real task"},
+                    },
+                ],
+                False,
+            ),
+            # Multiple tasks interleaved with other tools.
+            (
+                [
+                    _tool_event("bash"),
+                    _tool_event("task"),
+                    _tool_event("read"),
+                    _tool_event("task"),
+                ],
+                True,
+            ),
+        ],
+    )
+    def test_task_in_sequence_iff_has_task_subagent(self, events: list[dict], expected_task: bool, e2e) -> None:
+        seq = _extractor.tool_sequence(events)
+        # tool_sequence reports "task" present
+        assert ("task" in seq) is expected_task, (
+            f"tool_sequence result {seq!r} disagrees with expected {expected_task} on events {events!r}"
+        )
+        # _e2e_assertions.has_task_subagent agrees
+        assert e2e.has_task_subagent(events) is expected_task, (
+            f"has_task_subagent disagrees with expected {expected_task} on events {events!r}"
+        )
+        # And the two helpers MUST agree with each other.
+        assert ("task" in seq) == e2e.has_task_subagent(events), (
+            f"PARITY BREAK: tool_sequence says task-in={('task' in seq)} but "
+            f"has_task_subagent says {e2e.has_task_subagent(events)} on "
+            f"events {events!r}"
+        )
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))
