@@ -1,0 +1,158 @@
+{
+  "tasks": [
+    {
+      "id": "1",
+      "title": "Refactor ai-harness init module, CLI, and tests for new init-only contract",
+      "spec": "skip-when-init-block-present",
+      "phase": "core",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "1.1",
+          "title": "operations.py: replace _AI_HARNESS_START/END constants with _AI_HARNESS_INIT_START/_AI_HARNESS_INIT_END; keep _AI_HARNESS_START/END as private legacy-detection markers; replace _LABELS_POLICY_BLOCK with _INIT_BLOCK whose body is a single line pointing at CODING_STANDARDS.md; rename _LABELS_POLICY_DOCS to _INIT_BLOCK_DOCS",
+          "scenario": "n/a",
+          "status": "done"
+        },
+        {
+          "id": "1.2",
+          "title": "operations.py: slim InitResult (remove created_labels, label_warnings, no_agent_doc, wrote_labels_policy, labels_policy_targets; add wrote_init_block and init_block_targets); delete WriteLabelsResult",
+          "scenario": "n/a",
+          "status": "done"
+        },
+        {
+          "id": "1.3",
+          "title": "operations.py: add private helpers _write_init_block, _apply_init_block, _migrate_legacy_block per design.md migration-behaviour algorithm; rewrite init_repo to call _write_coding_standards and _write_init_block and drop the ensure_labels import/call; update module and function docstrings",
+          "scenario": "Scenario: minimal legacy block swapped; Scenario: prefix and suffix preserved; Scenario: empty CLAUDE.md receives the block; Scenario: missing trailing newline handled cleanly; Scenario: nothing-to-do on a saturated repo; Scenario: clean directory receives both files",
+          "status": "done"
+        },
+        {
+          "id": "1.4",
+          "title": "commands/init.py: drop the created_labels and label_warnings echo branches; drop the unreachable 'No CLAUDE.md or AGENTS.md found' branch; rewrite the agent-doc branch to read result.wrote_init_block and result.init_block_targets; reword echoes ('labels-policy block' -> 'managed init block'); update the function docstring",
+          "scenario": "Scenario: skeleton's echo reflects write vs skip; Scenario: targets echoed on written block; Scenario: already-present state echoed; Scenario: clean stdout / stderr on a fresh init; Scenario: zero exit on idempotent re-run",
+          "status": "done"
+        },
+        {
+          "id": "1.5",
+          "title": "tests/test_init.py: drop LabelResult import and _FAKE_LABEL_RESULT_OK helper; drop every test touching ensure_labels / created_labels / label_warnings / gh CLI strings; rename AI_HARNESS_START/END constants to the new init markers and update every assertion; rename wrote_labels_policy -> wrote_init_block and labels_policy_targets -> init_block_targets; drop no_agent_doc assertions; add new scenarios (both files created when missing, identical managed body, body references CODING_STANDARDS.md, legacy block migrated to new markers, user content outside markers preserved on append and migrate, empty file and missing-trailing-newline handling, CLI echoes contain no Created GitHub labels / Warning: / ready-for-agent / loop)",
+          "scenario": "Scenario: clean directory receives both files; Scenario: created files have matching bytes; Scenario: body points at CODING_STANDARDS.md; Scenario: minimal legacy block swapped; Scenario: prefix and suffix preserved; Scenario: missing trailing newline handled cleanly; Scenario: empty CLAUDE.md receives the block",
+          "status": "done"
+        },
+        {
+          "id": "1.6",
+          "title": "Verification: uv run pytest tests/test_init.py passes; uv run ai-harness init in a throwaway repo creates CODING_STANDARDS.md + CLAUDE.md + AGENTS.md with new markers, both agent docs byte-identical, no Created GitHub labels / Warning: / ready-for-agent strings anywhere in stdout; CLAUDE.md and AGENTS.md contain the literal CODING_STANDARDS.md; legacy fixtures migrate cleanly",
+          "scenario": "n/a",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "2",
+      "title": "Delete label infrastructure (labels.py, test_labels.py, __init__.py re-exports)",
+      "spec": "delete-label-infrastructure",
+      "phase": "cleanup",
+      "depends_on": [
+        "1"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "2.1",
+          "title": "Delete src/ai_harness/modules/harness/labels.py and tests/test_labels.py in the same commit so the file removal and any straggler re-exports stay atomic",
+          "scenario": "Scenario: files no longer exist",
+          "status": "done"
+        },
+        {
+          "id": "2.2",
+          "title": "Clean src/ai_harness/modules/harness/__init__.py: drop the `from ai_harness.modules.harness.labels import LabelResult, ensure_labels` import line; remove LabelResult and ensure_labels from __all__",
+          "scenario": "Scenario: package surface is honest",
+          "status": "done"
+        },
+        {
+          "id": "2.3",
+          "title": "Verification: python -c \"from ai_harness.modules.harness import LabelResult\" raises ImportError; python -c \"from ai_harness.modules.harness import InitResult, init_repo\" succeeds; uv run pytest passes; rg over the repo for `LabelResult|ensure_labels|_AI_HARNESS_START|_AI_HARNESS_END|wrote_labels_policy|labels_policy_targets|created_labels|label_warnings|no_agent_doc|_LABELS_POLICY_BLOCK|_LABELS_POLICY_DOCS` returns no matches (the deletion targets themselves are gone)",
+          "scenario": "Scenario: post-merge search is empty; Scenario: operations module is label-free",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "3",
+      "title": "Update ADR 0005 to reflect the new init-only contract",
+      "spec": "update-adr-0005",
+      "phase": "cleanup",
+      "depends_on": [
+        "1"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "3.1",
+          "title": "docs/adr/0005-init-repo-local-scaffolding.md: drop the bullet that claims init owns the loop's two GitHub labels (ready-for-agent, loop); replace the legacy marker names in the idempotency bullet with the new init markers (ai-harness:init:start / ai-harness:init:end); add a new bullet stating init writes the same managed block to both CLAUDE.md and AGENTS.md, creating either when absent",
+          "scenario": "Scenario: ADR is honest about labels; Scenario: idempotency bullet reflects new markers; Scenario: ADR describes both files",
+          "status": "done"
+        },
+        {
+          "id": "3.2",
+          "title": "Verification: rg docs/adr/0005-init-repo-local-scaffolding.md for 'ready-for-agent', 'loop' (as a label name), and the legacy 'ai-harness:start' / 'ai-harness:end' tokens returns no matches for the outdated claims; the new init markers appear in the idempotency bullet",
+          "scenario": "n/a",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "4",
+      "title": "Update CONTEXT.md Init entry to match the new init contract",
+      "spec": "update-adr-0005",
+      "phase": "cleanup",
+      "depends_on": [
+        "1"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "4.1",
+          "title": "CONTEXT.md Init entry: remove the 'label-policy block' and 'loop's GitHub labels' phrases; describe the new contract (three repo-local artifacts -- CODING_STANDARDS.md, CLAUDE.md, AGENTS.md -- the two agent docs carry the same managed block under the new init markers, idempotent by per-artifact detection); keep the _Avoid_ line clean",
+          "scenario": "Scenario: CONTEXT.md Init entry is consistent",
+          "status": "done"
+        },
+        {
+          "id": "4.2",
+          "title": "Verification: rg CONTEXT.md for 'label-policy block', 'loop's GitHub labels', and the legacy marker tokens 'ai-harness:start' / 'ai-harness:end' returns no matches for outdated claims; the new init marker names are present",
+          "scenario": "n/a",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "5",
+      "title": "Add seven Tier-1 init e2e scenarios to e2e/e2e_test.sh",
+      "spec": "cover-init-with-e2e",
+      "phase": "testing",
+      "depends_on": [
+        "1"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "5.1",
+          "title": "Implement in e2e/e2e_test.sh: add seven shell functions (test_init_creates_three_files_in_empty_repo, test_init_creates_byte_identical_agent_docs, test_init_idempotent_re_run_preserves_mtimes, test_init_migrates_legacy_block_byte_identically, test_init_appends_block_without_disturbing_user_content, test_init_stdout_has_no_label_or_gh_references, test_init_exit_zero_on_success_and_no_op) under Tier 1; each one invokes the real ai-harness binary as a subprocess in a throwaway cwd and asserts on observable effects (disk content via cat, mtimes via stat -c %Y, md5sum via md5sum, stdout via shell substitution, stderr via 2>&1, exit code via $?); reuse e2e/lib.sh helpers (assert_file_exists, assert_file_contains, assert_md5_match, cleanup_test_env)",
+          "scenario": "Scenario: empty temp repo receives all three files; Scenario: both agent docs read back with the new init markers; Scenario: created files are byte-for-byte equal on disk; Scenario: second invocation leaves file mtimes unchanged; Scenario: user-authored notes above and below the legacy block survive; Scenario: user-authored notes in a populated CLAUDE.md survive; Scenario: stdout and stderr are free of label / GitHub / gh / Warning references; Scenario: zero exit on both a fresh and a saturated run",
+          "status": "done"
+        },
+        {
+          "id": "5.2",
+          "title": "Wire the seven new test_init_* functions into TIER1_TESTS in e2e/e2e_test.sh so they run by default on every CI run with no RUN_FULL_E2E gating",
+          "scenario": "n/a",
+          "status": "done"
+        },
+        {
+          "id": "5.3",
+          "title": "Verification: bash e2e/e2e_test.sh runs all seven new init tests and they pass; the existing Tier 1 tests still pass; no RUN_FULL_E2E env var is required for the new init scenarios to run",
+          "scenario": "n/a",
+          "status": "done"
+        }
+      ]
+    }
+  ]
+}

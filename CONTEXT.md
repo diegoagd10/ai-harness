@@ -126,9 +126,12 @@ _Avoid_: customization, setting, config
 The repo-local scaffolding step, run once inside a consuming repository. Distinct
 from *install*, which distributes the harness globally into each *Agent CLI*'s
 `$HOME` config: `init` writes only the per-project artifacts the loop and skill
-flow assume at a repo root — a `CODING_STANDARDS.md` skeleton, a label-policy
-block in the repo's agent doc, and the loop's GitHub labels. It is idempotent by
-per-artifact detection and never clobbers human-edited content.
+flow assume at a repo root — three files, namely `CODING_STANDARDS.md`,
+`CLAUDE.md`, and `AGENTS.md`. The two agent docs receive the same managed block
+(wrapped in `<!-- ai-harness:init:start -->` / `<!-- ai-harness:init:end -->`
+markers and pointing at `CODING_STANDARDS.md`), and either is created when
+absent. It is idempotent by per-artifact detection and never clobbers
+human-edited content.
 _Avoid_: setup, bootstrap, scaffold (as a noun)
 
 ## Prerequisite

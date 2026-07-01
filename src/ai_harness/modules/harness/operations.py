@@ -17,11 +17,10 @@ Public surface (re-exported from the package)
 ---------------------------------------------
 InstallManifest            The exact record uninstall_for_agent_clis consumes.
 InitResult                 Observable outcome of init_repo.
-WriteLabelsResult          Outcome of _write_labels_policy.
 install_for_agent_clis     Map bundled resources to agent CLI paths, write, record manifest.
 re_render_for_agent_clis   Re-write rendered loop agents without touching the install manifest.
 uninstall_for_agent_clis   Remove files recorded in the manifest.
-init_repo                  Scaffold CODING_STANDARDS.md skeleton and agent-doc labels-policy block.
+init_repo                  Scaffold CODING_STANDARDS.md and the agent-doc init block.
 """
 
 from __future__ import annotations
@@ -33,16 +32,13 @@ from dataclasses import dataclass
 from functools import partial
 from importlib.resources import files
 from pathlib import Path
-from typing import NamedTuple
 
-from ai_harness.modules.harness.labels import ensure_labels
 from ai_harness.modules.harness.models import AgentCli
 from ai_harness.modules.harness.renderers import render_agents
 
 __all__ = [
     "InitResult",
     "InstallManifest",
-    "WriteLabelsResult",
     "init_repo",
     "install_for_agent_clis",
     "re_render_for_agent_clis",
@@ -82,24 +78,31 @@ _CODING_STANDARDS_SKELETON = """\
 ## Quality gates
 """
 
-_LABELS_POLICY_BLOCK = """\
-<!-- ai-harness:start -->
+# New init markers — the managed block identity. Replaces the pre-refactor
+# generic `ai-harness:start/end` markers so the block's owner is unambiguous
+# at a glance.
+_AI_HARNESS_INIT_START = "<!-- ai-harness:init:start -->"
+_AI_HARNESS_INIT_END = "<!-- ai-harness:init:end -->"
 
-## Loop label policy
-
-- A **prd-issue** carries `ready-for-agent` only — never `loop`.
-- A **sub-issue** carries `ready-for-agent` + `loop`.
-
-<!-- ai-harness:end -->
-"""
-
+# Legacy markers — kept as private constants for the legacy-detection
+# branch in `_apply_init_block` / `_migrate_legacy_block`. Never re-exported;
+# never appear in any user-facing string post-refactor.
 _AI_HARNESS_START = "<!-- ai-harness:start -->"
 _AI_HARNESS_END = "<!-- ai-harness:end -->"
 
-# Agent docs that receive the labels-policy block, in deterministic write order.
+_INIT_BLOCK = f"""\
+{_AI_HARNESS_INIT_START}
+
+Follow the repo's `CODING_STANDARDS.md`.
+
+{_AI_HARNESS_INIT_END}
+"""
+
+# Agent docs that receive the init block, in deterministic write order.
 # CLAUDE.md is Claude Code's persona; AGENTS.md is the OpenCode/generic persona.
-# A repo may have either, both, or neither.
-_LABELS_POLICY_DOCS = ("CLAUDE.md", "AGENTS.md")
+# Post-refactor both files are *always* created when absent — a clean repo
+# receives both rather than zero.
+_INIT_BLOCK_DOCS = ("CLAUDE.md", "AGENTS.md")
 
 
 # --- public types -----------------------------------------------------------
@@ -121,31 +124,15 @@ class InitResult:
     """Observable outcome of ``init_repo``.
 
     Each field reports whether the corresponding artifact was written.
-    ``wrote_labels_policy`` is ``True`` when the block reached at least one agent
-    doc; ``labels_policy_targets`` names those docs. ``no_agent_doc`` is ``True``
-    only when neither ``CLAUDE.md`` nor ``AGENTS.md`` exists, distinguishing
-    "nothing to write to" from "all targets already had the block".
+    ``wrote_init_block`` is ``True`` when at least one agent doc was
+    freshly written, appended, or migrated; ``init_block_targets`` lists
+    every agent doc that ended up with the new init markers — including
+    ones that were already at the new markers and were kept unchanged.
     """
 
     wrote_standards: bool
-    wrote_labels_policy: bool
-    labels_policy_targets: tuple[str, ...] = ()
-    no_agent_doc: bool = False
-    created_labels: tuple[str, ...] = ()
-    label_warnings: tuple[str, ...] = ()
-
-
-class WriteLabelsResult(NamedTuple):
-    """Outcome of ``_write_labels_policy``: which agent docs got the block, and whether any existed.
-
-    ``written`` lists the agent docs (``CLAUDE.md``/``AGENTS.md``, in write
-    order) that received the labels-policy block — empty when none did.
-    ``no_agent_doc`` is ``True`` only when neither candidate doc exists, which
-    distinguishes "nothing to write to" from "all targets already had markers".
-    """
-
-    written: tuple[str, ...]
-    no_agent_doc: bool
+    wrote_init_block: bool
+    init_block_targets: tuple[str, ...] = ()
 
 
 # --- public operations ----------------------------------------------------
@@ -254,14 +241,18 @@ def init_repo(
     """Scaffold repo-local artifacts at *repo_root*.
 
     Writes a titles-only ``CODING_STANDARDS.md`` if it does not exist, and
-    appends a labels-policy block to each agent doc present (``CLAUDE.md`` and/or
-    ``AGENTS.md``) whose ``<!-- ai-harness:start -->`` / ``<!-- ai-harness:end -->``
-    markers are not already present. Creates the ``ready-for-agent`` and ``loop``
-    GitHub labels via ``gh label create`` (skips those that already exist).
+    lands an identical init block on both ``CLAUDE.md`` and ``AGENTS.md``
+    (creating either when absent). The block is wrapped in
+    ``<!-- ai-harness:init:start -->`` / ``<!-- ai-harness:end -->`` and
+    points at ``CODING_STANDARDS.md``. If either agent doc already carries
+    the new init markers, it is left unchanged. If either carries the
+    pre-refactor legacy ``<!-- ai-harness:start -->`` /
+    ``<!-- ai-harness:end -->`` block, that block is replaced **in place**
+    with the new init block (user content outside the markers survives
+    byte-identical).
 
     Idempotent by per-artifact detection — no sentinel file. Returns an
-    ``InitResult`` describing which artifacts were written and which labels were
-    created.
+    ``InitResult`` describing which artifacts were written.
 
     *repo_root* defaults to the current working directory so tests can drive
     the operation against a temporary directory.
@@ -269,16 +260,12 @@ def init_repo(
     root = repo_root if repo_root is not None else Path.cwd()
 
     wrote_standards = _write_coding_standards(root)
-    labels_result = _write_labels_policy(root)
-    label_result = ensure_labels(root)
+    wrote_init_block, init_block_targets = _write_init_block(root)
 
     return InitResult(
         wrote_standards=wrote_standards,
-        wrote_labels_policy=bool(labels_result.written),
-        labels_policy_targets=labels_result.written,
-        no_agent_doc=labels_result.no_agent_doc,
-        created_labels=tuple(label_result.created),
-        label_warnings=tuple(label_result.warnings),
+        wrote_init_block=wrote_init_block,
+        init_block_targets=init_block_targets,
     )
 
 
@@ -418,31 +405,107 @@ def _write_coding_standards(root: Path) -> bool:
     return True
 
 
-def _write_labels_policy(root: Path) -> WriteLabelsResult:
-    """Append the labels-policy block to each agent doc present at *root*.
+def _write_init_block(root: Path) -> tuple[bool, tuple[str, ...]]:
+    """Drive the per-target init-block loop at *root*.
 
-    Targets ``CLAUDE.md`` and ``AGENTS.md`` (in that order). Each one that exists
-    and lacks the ``ai-harness`` markers receives the block; existing files with
-    the markers, and absent files, are skipped. The block is never created from
-    scratch — a repo opts in by having an agent doc.
+    For each candidate in ``_INIT_BLOCK_DOCS`` (deterministic order), dispatches
+    to :func:`_apply_init_block` for the four-case decision (create / keep /
+    migrate-legacy / bare-append). Every visited target is recorded in the
+    returned tuple — including "kept" targets — so the CLI can echo per-target
+    outcomes with a single loop.
 
-    Returns a :class:`WriteLabelsResult` whose ``written`` names the docs that
-    received the block (deterministic order) and whose ``no_agent_doc`` is
-    ``True`` only when neither candidate exists.
+    Returns ``(modified_any, targets)`` where *modified_any* is ``True`` when
+    at least one target's bytes were changed by this call, and *targets* is the
+    ordered tuple of agent docs that ended up carrying the new init markers.
     """
-    written: list[str] = []
-    found_agent_doc = False
-    for name in _LABELS_POLICY_DOCS:
+    targets: list[str] = []
+    modified_any = False
+    for name in _INIT_BLOCK_DOCS:
         path = root / name
-        if not path.exists():
-            continue
-        found_agent_doc = True
-        content = path.read_text(encoding="utf-8")
-        if _AI_HARNESS_START in content or _AI_HARNESS_END in content:
-            continue
-        if not content.endswith("\n"):
-            content += "\n"
-        content += "\n" + _LABELS_POLICY_BLOCK + "\n"
-        path.write_text(content, encoding="utf-8")
-        written.append(name)
-    return WriteLabelsResult(tuple(written), not found_agent_doc)
+        targets.append(name)
+        if _apply_init_block(path):
+            modified_any = True
+    return modified_any, tuple(targets)
+
+
+def _apply_init_block(path: Path) -> bool:
+    """Apply the init-block action appropriate to *path*'s current state.
+
+    The four-case table (mutually exclusive, checked in this order):
+
+    1. **Missing** — ``not path.exists()``: create the file with ``_INIT_BLOCK``
+       verbatim (no leading blank).
+    2. **New markers present** — both ``_AI_HARNESS_INIT_START`` and
+       ``_AI_HARNESS_INIT_END`` are substrings of the file: no-op.
+    3. **Legacy markers present** — ``_AI_HARNESS_START`` or ``_AI_HARNESS_END``
+       is a substring: replace the legacy block in place via
+       :func:`_migrate_legacy_block` and write the result.
+    4. **Bare file** — none of the above: ensure trailing newline, prepend a
+       blank line, then append ``_INIT_BLOCK``.
+
+    Returns ``True`` when the file's bytes were modified by this call
+    (cases 1, 3, 4) and ``False`` when it was left untouched (case 2).
+    """
+    if not path.exists():
+        # Case 1: missing — create with the managed block verbatim.
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_INIT_BLOCK, encoding="utf-8")
+        return True
+
+    content = path.read_text(encoding="utf-8")
+
+    if content == "":
+        # Empty file is treated as "no content yet" — write the managed block
+        # verbatim so the start marker lands on the first line with no leading
+        # blank. See spec scenario "empty CLAUDE.md receives the block".
+        path.write_text(_INIT_BLOCK, encoding="utf-8")
+        return True
+
+    if _AI_HARNESS_INIT_START in content and _AI_HARNESS_INIT_END in content:
+        # Case 2: new markers already present — keep unchanged.
+        return False
+
+    if _AI_HARNESS_START in content or _AI_HARNESS_END in content:
+        # Case 3: legacy markers — surgical in-place migration.
+        migrated = _migrate_legacy_block(content)
+        path.write_text(migrated, encoding="utf-8")
+        return True
+
+    # Case 4: bare file — append with a separating blank line.
+    if not content.endswith("\n"):
+        content += "\n"
+    content += "\n" + _INIT_BLOCK
+    path.write_text(content, encoding="utf-8")
+    return True
+
+
+def _migrate_legacy_block(content: str) -> str:
+    """Swap the legacy ``ai-harness:start``/``ai-harness:end`` block for ``_INIT_BLOCK``.
+
+    The legacy block is the unique substring from the start-of-line containing
+    ``<!-- ai-harness:start -->`` through the end-of-line containing
+    ``<!-- ai-harness:end -->``, inclusive of both newline characters. It is
+    replaced by ``_INIT_BLOCK`` (followed by a single ``\\n`` if the original
+    ended with one; otherwise no trailing newline is added). Every byte before
+    the start-of-line and every byte after the end-of-line newline is preserved
+    unchanged — this is the user-content byte-preservation invariant.
+    """
+    lines = content.splitlines(keepends=True)
+    start_idx = end_idx = None
+    for i, line in enumerate(lines):
+        if _AI_HARNESS_START in line:
+            start_idx = i
+        if _AI_HARNESS_END in line:
+            end_idx = i
+            break
+    if start_idx is None or end_idx is None or end_idx < start_idx:
+        # Defensive: caller has already classified this as legacy, so reaching
+        # here indicates a degenerate file (start without end or vice versa).
+        # Preserve the bytes verbatim — do not silently rewrite a half-state.
+        return content
+    return (
+        "".join(lines[:start_idx])
+        + _INIT_BLOCK
+        + ("\n" if lines[end_idx].endswith("\n") else "")
+        + "".join(lines[end_idx + 1:])
+    )
