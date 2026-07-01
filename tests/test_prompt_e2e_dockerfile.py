@@ -57,6 +57,19 @@ class TestDockerfileCopiesNewFiles:
             "_extractor.py COPY"
         )
 
+    def test_copy_e2e_runner_present(self, dockerfile_text: str) -> None:
+        # _e2e_runner.py is the per-fixture orchestrator routing decision
+        # helper used by the CASES_CSV_E2E second loop (task 6).
+        pattern = (
+            r"^\s*COPY\s+tests-prompts/_e2e_runner\.py"
+            r"\s+/tests-prompts/_e2e_runner\.py\s*$"
+        )
+        assert re.search(pattern, dockerfile_text, re.MULTILINE), (
+            "Dockerfile must COPY tests-prompts/_e2e_runner.py to "
+            "/tests-prompts/_e2e_runner.py so run.sh's CASES_CSV_E2E "
+            "second loop can call it"
+        )
+
     def test_source_files_referenced_by_copy_exist(self) -> None:
         # The COPY paths reference real files on disk — a typo here would
         # surface as "file not found" at docker build time, but checking
@@ -65,6 +78,7 @@ class TestDockerfileCopiesNewFiles:
         for rel in (
             "tests-prompts/cases_e2e.csv",
             "tests-prompts/_e2e_assertions.py",
+            "tests-prompts/_e2e_runner.py",
         ):
             assert (repo / rel).is_file(), f"{rel} missing on host"
 
@@ -81,6 +95,9 @@ class TestDockerfileCopiesNewFiles:
         chmod_body = chmod_match.group(1)
         assert "_e2e_assertions.py" in chmod_body, (
             "_e2e_assertions.py must be added to the RUN chmod +x block so it is executable in the container"
+        )
+        assert "_e2e_runner.py" in chmod_body, (
+            "_e2e_runner.py must be added to the RUN chmod +x block so it is executable in the container"
         )
 
 
