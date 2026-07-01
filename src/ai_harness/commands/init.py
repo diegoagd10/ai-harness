@@ -28,6 +28,4 @@ def init() -> None:
     if result.wrote_init_block:
         typer.echo(f"Managed init block on {', '.join(result.init_block_targets)}.")
     else:
-        typer.echo(
-            f"Managed init block already present on {', '.join(result.init_block_targets)} — unchanged."
-        )
+        typer.echo(f"Managed init block already present on {', '.join(result.init_block_targets)} — unchanged.")

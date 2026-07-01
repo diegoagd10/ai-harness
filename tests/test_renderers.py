@@ -1278,7 +1278,7 @@ def test_contract_change_artifacts_carry_all_five_gentle_references() -> None:
     """
     project_root = Path(__file__).resolve().parent.parent
     active_root = project_root / ".ai-harness/changes/fix-interactive-gates"
-    archived_root = project_root / ".ai-harness/changes/archive/fix-interactive-gates"
+    archived_root = project_root / ".ai-harness/archive/fix-interactive-gates"
     change_root = active_root if (active_root / "prd.md").exists() else archived_root
 
     prd = (change_root / "prd.md").read_text()
