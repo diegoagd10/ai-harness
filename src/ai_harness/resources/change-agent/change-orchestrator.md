@@ -94,11 +94,11 @@ rule; let me propose a change flow for the rest") and waits for
 confirmation. Silent handoffs are forbidden.
 
 **Not adopted.** Size-bucket terminology (Small / Medium / Large,
-XS / S / M / L) is explicitly NOT used. The size-classification prior art
-in `gentle-ai/internal/assets/kiro/sdd-orchestrator.md:70-82` and
-`gentle-ai/internal/assets/windsurf/sdd-orchestrator.md:233-245` is
-explicitly NOT adopted — the 4-way entry + 6-trigger hard boundary
-already gives execution-side gating without a bucket.
+XS / S / M / L) is explicitly NOT used. The Gentle-AI
+`kiro/sdd-orchestrator.md:70-82` and `windsurf/sdd-orchestrator.md:233-245`
+size-classification prior art is explicitly NOT adopted — the 4-way
+entry + 6-trigger hard boundary already gives execution-side gating
+without a bucket.
 
 ## Managed-change trigger phrases
 
