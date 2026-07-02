@@ -44,6 +44,7 @@ from ai_harness.modules.wizard.pure import (
     claude_efforts,
     claude_models,
     claude_wizard_agents,
+    format_selection_label,
     join_opencode_catalog,
     opencode_change_agents,
     opencode_efforts,
@@ -1748,6 +1749,94 @@ def test_build_confirmation_rows_includes_model_and_effort() -> None:
     assert "high" in by_value["implementor"]
     # None effort renders as a placeholder
     assert "sonnet" in by_value["validator"]
+
+
+def test_build_confirmation_rows_unset_effort_renders_unset_placeholder() -> None:
+    """Confirm panel: a ``None`` effort renders the literal ``"(unset)"`` placeholder, not ``"(NA)"``.
+
+    Locks in the contract that the confirm panel routes ``None`` effort
+    through the ``(unset)`` branch. The ``has_effort_support=True``
+    constant at this call site is the load-bearing suppression of the
+    ``(NA)`` branch — confirmed by spec ``effort-phase-label-formatter``.
+    """
+    rows = build_confirmation_rows({"change-implementor": ModelSelection("opus", None)})
+
+    assert len(rows) == 1
+    assert rows[0].label == "change-implementor: opus / (unset)"
+
+
+def test_build_confirmation_rows_set_effort_renders_effort_value() -> None:
+    """Confirm panel: a set effort renders the effort value as-is."""
+    rows = build_confirmation_rows({"change-implementor": ModelSelection("opus", "high")})
+
+    assert len(rows) == 1
+    assert rows[0].label == "change-implementor: opus / high"
+
+
+def test_build_confirmation_rows_never_renders_na_on_confirm_panel() -> None:
+    """Confirm panel NEVER renders ``"(NA)"`` — even for non-reasoning-looking models.
+
+    The model-switch reset (task 2) keeps any non-reasoning model from
+    carrying a stale effort by the time the user reaches the confirm
+    screen. ``build_confirmation_rows`` encodes that invariant by
+    passing ``has_effort_support=True`` as a CONSTANT — so a ``None``
+    effort routes to ``"(unset)"`` here, never to ``"(NA)"``.
+    """
+    rows = build_confirmation_rows(
+        {"change-implementor": ModelSelection("minimax/non-reasoning", None)},
+    )
+
+    assert len(rows) == 1
+    assert "(NA)" not in rows[0].label
+    assert "(unset)" in rows[0].label
+
+
+# ---------------------------------------------------------------------------
+# format_selection_label — pure helper: the single source of truth for the
+# ``agent: model / <state>`` display used by both the effort phase and the
+# confirm panel.
+# ---------------------------------------------------------------------------
+
+
+def test_format_selection_label_supported_model_with_effort() -> None:
+    """Supported model + set effort → ``agent: model / effort`` (exact branch assertion)."""
+    label = format_selection_label("change-implementor", "opus", "high", True)
+    assert label == "change-implementor: opus / high"
+
+
+def test_format_selection_label_supported_model_no_effort_emits_unset() -> None:
+    """Supported model + ``None`` effort → ``agent: model / (unset)`` branch."""
+    label = format_selection_label("change-implementor", "opus", None, True)
+    assert label == "change-implementor: opus / (unset)"
+
+
+def test_format_selection_label_unsupported_model_no_effort_emits_na() -> None:
+    """Unsupported model + ``None`` effort → ``agent: model / (NA)`` branch."""
+    label = format_selection_label("change-implementor", "minimax/non-reasoning", None, False)
+    assert label == "change-implementor: minimax/non-reasoning / (NA)"
+
+
+def test_format_selection_label_unsupported_model_ignores_effort_value() -> None:
+    """Unsupported model + effort value → effort is ignored, ``(NA)`` still emitted.
+
+    Spec: ``has_effort_support=False`` always routes to the ``(NA)``
+    branch — the effort value must NOT appear in the rendered string.
+    """
+    label = format_selection_label("change-implementor", "minimax/non-reasoning", "high", False)
+    assert label == "change-implementor: minimax/non-reasoning / (NA)"
+    assert "high" not in label
+
+
+def test_format_selection_label_defensive_empty_model_does_not_raise() -> None:
+    """Defensive empty-model edge: ``model=""`` must not crash; ``(unset)`` still renders.
+
+    Locks in the contract that the formatter does not raise on an empty
+    model string — useful as a regression guard for any future code
+    path that feeds an uninitialised model value into the helper.
+    """
+    label = format_selection_label("change-implementor", "", None, True)
+    assert label.startswith("change-implementor: ")
+    assert "(unset)" in label
 
 
 # ---------------------------------------------------------------------------
