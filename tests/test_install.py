@@ -23,6 +23,7 @@ from ai_harness.modules.harness.renderers import (
     _opencode_permission,
     get_agent_meta,
 )
+from ai_harness.modules.wizard.pure import opencode_change_agents
 
 EXPECTED_SKILLS = ("branch-pr", "grill-me-one-by-one", "judgment-day")
 MANIFEST_REL = ".ai-harness/installed.json"
@@ -309,21 +310,9 @@ def test_cli_uninstall_invalid_agent_cli_errors(isolated_home: Path) -> None:
 # OpenCode agent install — observable behaviour
 # ---------------------------------------------------------------------------
 
-_CHANGE_SUBAGENT_NAMES = (
-    "change-explorer",
-    "change-implementor",
-    "change-validator",
-    "change-archiver",
-    "change-design",
-    "change-propose",
-    "change-specs",
-    "change-tasks",
-)
 _CHANGE_AGENT_NAME = "change-orchestrator"
-_NATIVE_AGENT_NAMES = (
-    *_CHANGE_SUBAGENT_NAMES,
-    _CHANGE_AGENT_NAME,
-)
+_CHANGE_SUBAGENT_NAMES = tuple(name for name in opencode_change_agents() if name != _CHANGE_AGENT_NAME)
+_NATIVE_AGENT_NAMES = (*_CHANGE_SUBAGENT_NAMES, _CHANGE_AGENT_NAME)
 
 
 def _assert_opencode_agent_written(base: Path, name: str) -> Path:

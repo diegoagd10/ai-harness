@@ -1,0 +1,363 @@
+{
+  "tasks": [
+    {
+      "id": "1",
+      "title": "Insert Entry classification (4-way) section with inline-vs-change-flow hard boundary",
+      "spec": "entry-class-classification",
+      "phase": "core",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "1.1",
+          "title": "Insert ## Entry classification (4-way) heading before ## Session mode \u2014 auto vs interactive (HARD GATE)",
+          "scenario": "section-ordering-preserved",
+          "status": "done"
+        },
+        {
+          "id": "1.2",
+          "title": "Declare the four entry classes in order with one-line definitions and execution behavior: Conversational, Small inline, Recommend change flow, Explicit change flow",
+          "scenario": "four-classes-named-in-order",
+          "status": "done"
+        },
+        {
+          "id": "1.3",
+          "title": "Insert explicit boundary statement between class 2 (Small inline) and class 3 (Recommend change flow) so the classifier does not collapse the two classes",
+          "scenario": "explicit-boundary-between-class-2-and-class-3",
+          "status": "done"
+        },
+        {
+          "id": "1.4",
+          "title": "Add ## Inline vs change-flow hard boundary subsection inside Entry classification",
+          "scenario": "every-trigger-label-present",
+          "status": "done"
+        },
+        {
+          "id": "1.5",
+          "title": "List the six hard triggers with action and target: 4-file, multi-file write, heavy test/build, risky/uncertain scope, long-session (~20 tool calls), incident (fresh-audit halt)",
+          "scenario": "each-trigger-has-action-and-target",
+          "status": "done"
+        },
+        {
+          "id": "1.6",
+          "title": "State that the boundary constrains execution, not conversation (status reads, comparisons, clarifications stay conversational regardless of size)",
+          "scenario": "large-status-read-stays-conversational",
+          "status": "done"
+        },
+        {
+          "id": "1.7",
+          "title": "Allow inline\u2192change-flow handoff mid-execution and require the handoff to be surfaced to the user (no silent handoffs)",
+          "scenario": "inline-crosses-4-file-rule-mid-execution",
+          "status": "done"
+        },
+        {
+          "id": "1.8",
+          "title": "Cite Gentle-AI line ranges in the subsection body: gentle-ai/internal/assets/opencode/sdd-orchestrator.md:18-64, gentle-ai/internal/assets/antigravity/sdd-orchestrator.md:36-76, gentle-ai/README.md:51-64",
+          "scenario": "gentle-ai-markers-present-in-subsection",
+          "status": "done"
+        },
+        {
+          "id": "1.9",
+          "title": "Reject size-bucket classifier terminology (no Small/Medium/Large, no XS/S/M/L); kiro:70-82 and windsurf:233-245 are explicitly NOT adopted",
+          "scenario": "no-bucket-terms-introduced",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "2",
+      "title": "Add Managed-change trigger phrases reference subsection inside Entry classification",
+      "spec": "managed-change-trigger-phrase-list",
+      "phase": "core",
+      "depends_on": [
+        "1"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "2.1",
+          "title": "Insert ## Managed-change trigger phrases reference subsection inside ## Entry classification (4-way), after the hard boundary subsection",
+          "scenario": "phrases-intact-in-all-three-renderers",
+          "status": "done"
+        },
+        {
+          "id": "2.2",
+          "title": "List the canonical English phrases verbatim: do this as a change, implement this as a change, use change flow, use the change pipeline, run this through change",
+          "scenario": "every-canonical-english-phrase-present",
+          "status": "done"
+        },
+        {
+          "id": "2.3",
+          "title": "List the canonical Spanish phrases verbatim (neutral professional Spanish): hazlo con change flow, implementalo como un change, us\u00e1 change flow",
+          "scenario": "every-canonical-spanish-phrase-present",
+          "status": "done"
+        },
+        {
+          "id": "2.4",
+          "title": "Add explicit bare-flow exclusion statement paired with NOT (bare flow alone is NOT a trigger unless context clearly means managed change)",
+          "scenario": "bare-flow-exclusion-asserted",
+          "status": "done"
+        },
+        {
+          "id": "2.5",
+          "title": "Add status-read exclusion so 'how's the auth change going?' type messages stay in entry class 1 and do NOT trip similarity check",
+          "scenario": "status-read-with-the-word-change-stays-conversational",
+          "status": "done"
+        },
+        {
+          "id": "2.6",
+          "title": "Present the phrase list as a static reference table for the orchestrator thread \u2014 no regex engine, tokenizer, or CLI flag",
+          "scenario": "no-parser-dependency-added",
+          "status": "done"
+        },
+        {
+          "id": "2.7",
+          "title": "Cite Gentle-AI source for the bilingual phrase-list pattern: gentle-ai/internal/assets/opencode/sdd-orchestrator.md:100-160 (use SDD / hazlo con SDD precedent)",
+          "scenario": "gentle-ai-markers-present-in-subsection",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "3",
+      "title": "Extend Session mode section with per-change-flow-entry preflight rules",
+      "spec": "mode-preflight-per-change-flow-entry",
+      "phase": "core",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "3.1",
+          "title": "Add bullet: ask the interactive/auto question on every change-flow entry (entry class 3 or 4 only) \u2014 do NOT carry cached mode from a prior change in the same session",
+          "scenario": "new-change-in-same-session-re-asks-the-mode",
+          "status": "done"
+        },
+        {
+          "id": "3.2",
+          "title": "Add bullet: skip the question when the same message contains interactive or auto verbatim (exact substring match, not fuzzy intent)",
+          "scenario": "user-includes-interactive-in-the-same-message",
+          "status": "done"
+        },
+        {
+          "id": "3.3",
+          "title": "Add bullet: do NOT ask the mode question for entry class 1 (Conversational) or entry class 2 (Small inline) \u2014 unless inline crosses the hard boundary mid-execution and routes to class 3",
+          "scenario": "conversational-question-does-not-ask-the-mode",
+          "status": "done"
+        },
+        {
+          "id": "3.4",
+          "title": "Add bullet: when the user answers, the next phase starts immediately in the answered mode (similarity check, Start/Resume classify loop, or pipeline delegation) \u2014 do NOT re-ask per phase",
+          "scenario": "answer-starts-similarity-check-immediately",
+          "status": "done"
+        },
+        {
+          "id": "3.5",
+          "title": "Add bullet: cache key is the change-flow run (change name), not the session. A user who answered auto for change A must be re-asked for change B in the same session",
+          "scenario": "per-change-flow-cache-key",
+          "status": "done"
+        },
+        {
+          "id": "3.6",
+          "title": "Add bullet: phase-scoped approval preserved \u2014 auto mode applies to phase transitions, but the human review gate and interactive checkpoint still pause for approval",
+          "scenario": "phase-scoped-approval-preserved",
+          "status": "done"
+        },
+        {
+          "id": "3.7",
+          "title": "Cite Gentle-AI line ranges in the section body: gentle-ai/internal/assets/opencode/sdd-orchestrator.md:100-160 (SDD Session Preflight + Entry Routing) and :178-200 (Execution Mode + interactive checkpoint)",
+          "scenario": "gentle-ai-markers-present-in-the-section",
+          "status": "done"
+        },
+        {
+          "id": "3.8",
+          "title": "Preserve the ## Session mode \u2014 auto vs interactive (HARD GATE) heading unchanged \u2014 downstream interactive checkpoint and auto gatekeeper anchor on it",
+          "scenario": "hard-gate-heading-preserved",
+          "status": "done"
+        },
+        {
+          "id": "3.9",
+          "title": "Confirm zero new CLI flags, zero new status tokens, zero new ai-harness.change-status.* envelope fields",
+          "scenario": "no-new-cli-surface",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "4",
+      "title": "Rewire Modes \u2014 start vs resume section and embed Similarity check before change-new subsection",
+      "spec": "similarity-check-before-change-new",
+      "phase": "core",
+      "depends_on": [
+        "1"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "4.1",
+          "title": "Strip Conversational from the route contract list (moved to entry class 1) and strip the duplicate Grill line (grill gate lives in its own section)",
+          "scenario": "existing-heading-preserved",
+          "status": "done"
+        },
+        {
+          "id": "4.2",
+          "title": "Keep Start and Resume as the only two commands issued from entry class 4 \u2014 preserve every existing constraint: CLI errors on collision, CLI errors on missing, Engram discovery index after start, route on nextRecommended, lean conversational when in doubt, never infer from folder presence",
+          "scenario": "cli-tests-pass-without-edits",
+          "status": "done"
+        },
+        {
+          "id": "4.3",
+          "title": "Add ## Similarity check before change-new subsection inside the rewired ## Modes \u2014 start vs resume section, before the Start/Resume commands",
+          "scenario": "similarity-check-tokens-present-in-every-renderer",
+          "status": "done"
+        },
+        {
+          "id": "4.4",
+          "title": "State the search order: Engram first (mem_search project-scoped with intent keywords), then .ai-harness/changes/*, then .ai-harness/archive/*",
+          "scenario": "search-order-is-engram-then-disk",
+          "status": "done"
+        },
+        {
+          "id": "4.5",
+          "title": "Document the four outcomes: active folder \u2192 recommend change-continue (stay conversational, no auto-resume); archived \u2192 default stop (user may request {name}.next or fresh name); stale Engram \u2192 ignore and create new; no match \u2192 create new",
+          "scenario": "three-branch-contract",
+          "status": "done"
+        },
+        {
+          "id": "4.6",
+          "title": "Document the CLI-is-source-of-truth rule: use change-continue (which errors on missing) as the existence oracle, NOT raw ls on .ai-harness/changes/*",
+          "scenario": "cli-used-instead-of-raw-ls",
+          "status": "done"
+        },
+        {
+          "id": "4.7",
+          "title": "Document orchestrator-recommends-never-auto-routes: surface the recommendation, then wait for explicit user confirmation before invoking change-continue, {name}.next, or change-new",
+          "scenario": "similarity-check-surfaces-and-waits",
+          "status": "done"
+        },
+        {
+          "id": "4.8",
+          "title": "Document Engram is read-only: similarity check uses mem_search and (when needed) mem_context; it MUST NOT create new Engram topics (Engram writes remain owned by individual phases)",
+          "scenario": "similarity-check-does-not-write-engram",
+          "status": "done"
+        },
+        {
+          "id": "4.9",
+          "title": "Gate the similarity check to entry classes 3 and 4 only \u2014 entry classes 1 and 2 (including status reads mentioning a change name) MUST NOT fire it",
+          "scenario": "status-read-does-not-fire-similarity-check",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "5",
+      "title": "Strengthen tests/test_renderers.py with behavioral assertions across Claude, OpenCode, and Copilot renderers",
+      "spec": "renderer-test-lockdown",
+      "phase": "testing",
+      "depends_on": [
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "5.1",
+          "title": "Add a parametrized test class across the same renderer set used by existing change_orchestrator tests (Claude, OpenCode, Copilot) so a missing marker in any renderer fails with renderer + marker named",
+          "scenario": "missing-marker-in-any-renderer-fails-the-test",
+          "status": "done"
+        },
+        {
+          "id": "5.2",
+          "title": "Assert the four entry classes appear in canonical order (Conversational \u2192 Small inline \u2192 Recommend change flow \u2192 Explicit change flow) in document order",
+          "scenario": "class-ordering-asserted",
+          "status": "done"
+        },
+        {
+          "id": "5.3",
+          "title": "Assert an explicit boundary statement between class 2 (Small inline) and class 3 (Recommend change flow)",
+          "scenario": "boundary-statement-asserted",
+          "status": "done"
+        },
+        {
+          "id": "5.4",
+          "title": "Assert all six hard trigger labels appear: 4-file, multi-file write, heavy test/build, risky/uncertain scope, long-session, incident",
+          "scenario": "all-six-trigger-labels-present",
+          "status": "done"
+        },
+        {
+          "id": "5.5",
+          "title": "Assert canonical English trigger phrases present: do this as a change, implement this as a change, use change flow",
+          "scenario": "every-canonical-english-phrase-asserted",
+          "status": "done"
+        },
+        {
+          "id": "5.6",
+          "title": "Assert canonical Spanish trigger phrases present: hazlo con change flow, implementalo como un change, us\u00e1 change flow",
+          "scenario": "every-canonical-spanish-phrase-asserted",
+          "status": "done"
+        },
+        {
+          "id": "5.7",
+          "title": "Assert bare-flow exclusion statement appears in the body, paired with NOT (or equivalent negative-language token)",
+          "scenario": "bare-flow-exclusion-asserted",
+          "status": "done"
+        },
+        {
+          "id": "5.8",
+          "title": "Assert mode preflight tokens in the Session mode section: ask on every change-flow entry, skip if the user provided interactive or auto (or equivalent skip-when-explicit language)",
+          "scenario": "per-change-flow-entry-token-asserted",
+          "status": "done"
+        },
+        {
+          "id": "5.9",
+          "title": "Assert similarity-check tokens in the Similarity check subsection: Engram, .ai-harness/changes/, .ai-harness/archive/, active, archived, stale",
+          "scenario": "similarity-check-tokens-asserted",
+          "status": "done"
+        },
+        {
+          "id": "5.10",
+          "title": "Assert the five pinned Gentle-AI line references are present and reject any invented gentle-ai/ paths: README.md:51-64, opencode/sdd-orchestrator.md:18-64, :100-160, :178-200, antigravity/sdd-orchestrator.md:36-76",
+          "scenario": "every-gentle-ai-marker-asserted",
+          "status": "done"
+        },
+        {
+          "id": "5.11",
+          "title": "Assert the ## Session mode \u2014 auto vs interactive (HARD GATE) heading is preserved as a ##-level heading (downstream interactive checkpoint and auto gatekeeper anchor on it)",
+          "scenario": "hard-gate-heading-preserved",
+          "status": "done"
+        },
+        {
+          "id": "5.12",
+          "title": "Assert no new CLI commands, flags, or status tokens \u2014 compare rendered body against a frozen pre-change snapshot of CLI markers; renames or additions fail the test",
+          "scenario": "no-new-commands-or-flags-introduced",
+          "status": "done"
+        },
+        {
+          "id": "5.13",
+          "title": "Preserve every pre-existing keyword-presence assertion currently in tests/test_renderers.py \u2014 new assertions are additive, not substitutive",
+          "scenario": "pre-existing-assertions-still-pass",
+          "status": "done"
+        },
+        {
+          "id": "5.14",
+          "title": "Run uv run pytest tests/test_renderers.py -k change_orchestrator and confirm all renderer assertions pass",
+          "scenario": "renderer-keyword-gate",
+          "status": "done"
+        },
+        {
+          "id": "5.15",
+          "title": "Run uv run pytest tests/test_change.py and confirm CLI surface tests pass without edits to tests/test_change.py",
+          "scenario": "cli-tests-pass-without-edits",
+          "status": "done"
+        },
+        {
+          "id": "5.16",
+          "title": "Run uv run pytest tests/test_renderers.py -k 'opencode or claude or copilot' render parity sweep \u2014 fails if any renderer silently drops a heading or mangles a marker",
+          "scenario": "parity-sweep-detects-renderer-drift",
+          "status": "done"
+        }
+      ]
+    }
+  ]
+}

@@ -50,6 +50,7 @@ from ai_harness.modules.wizard.pure import (
     build_opencode_override_payload,
     build_override_payload,
     claude_wizard_agents,
+    format_selection_label,
     join_opencode_catalog,
     opencode_change_agents,
     opencode_model_is_reasoning,
@@ -526,6 +527,24 @@ def _ask_continue_or_agent(
     Pressing Esc behaves like "← Back" on every phase except the first
     ("model"), which has no predecessor to return to — there Esc is a
     no-op and re-shows the same screen (#55).
+
+    The shape of ``selections[agent]`` depends on ``phase`` — callers must
+    follow the per-phase contract, otherwise effort-phase rows duplicate
+    the agent prefix:
+
+    - ``phase == "model"``: caller passes a bare Claude model alias
+      (e.g. ``"opus"``, ``"sonnet"``); the prompt function composes
+      ``title = f"{agent} - {selections[agent]}"``. Missing entries
+      default to ``"sonnet"``.
+    - ``phase == "effort"``: caller passes a pre-rendered
+      ``"agent: model / <state>"`` line (typically produced by
+      :func:`format_selection_label`); the prompt function uses the
+      value **verbatim** — the ``agent: `` prefix is already present,
+      so adding another ``"{agent} - "`` would render
+      ``"{agent} - {agent}: model / <state>"`` (the bug this contract
+      pins against). Missing entries fall back to ``"(unset)"`` as
+      defensive dead code — the real effort-phase call site fills the
+      dict for every agent in scope.
     """
     next_phase = {
         "model": "effort",
@@ -539,9 +558,15 @@ def _ask_continue_or_agent(
     if phase != "model":
         choices.append(questionary.Choice(title="← Back", value=Nav.BACK))
         choices.append(questionary.Separator())
+    # Per-phase title assembly — see the docstring for the
+    # ``selections[agent]`` shape contract.
     choices.extend(
         questionary.Choice(
-            title=f"{agent} - {selections.get(agent, 'sonnet')}",
+            title=(
+                selections.get(agent, "(unset)")
+                if phase == "effort"
+                else f"{agent} - {selections.get(agent, 'sonnet')}"
+            ),
             value=agent,
         )
         for agent in agent_list
@@ -660,14 +685,27 @@ def run_claude_wizard(*, home: Path, agent_mode: AgentMode = AgentMode.CHANGE) -
             if new_model == Nav.BACK:
                 continue
             models[pick] = new_model
+            # Clear any previously selected effort — the model switch
+            # invalidates the prior effort choice. Unconditional: same-model
+            # picks still reset, so the user re-affirms effort on the next
+            # pass. Per-pick: only this agent's effort is touched.
+            efforts[pick] = None
 
     def run_effort_phase() -> str:
         """Drive the effort phase loop; return '__continue__', '__back__', or '__cancel__'."""
         while True:
             _print_header("set-models · claude — effort")
             _console.print("")
-            # Show current effort alongside (placeholder if unset)
-            display = {agent: (efforts[agent] or "(unset)") for agent in efforts}
+            # Render per-agent rows with ``agent: model / <state>`` — the
+            # same format the confirm panel uses. Claude models are
+            # always effort-supporting, so has_effort_support=True keeps
+            # the ``(NA)`` branch unreachable here. The display dict is
+            # then passed unchanged to ``_ask_continue_or_agent`` (no
+            # signature ripple).
+            display = {
+                agent: format_selection_label(agent, models[agent], efforts[agent], has_effort_support=True)
+                for agent in efforts
+            }
             pick = _ask_continue_or_agent("effort", display)
             if pick is None:
                 return Nav.CANCEL
@@ -806,6 +844,25 @@ def _ask_opencode_continue_or_agent(
     Pressing Esc behaves like "← Back" on every phase except the first
     ("model"), which has no predecessor to return to — there Esc is a
     no-op and re-shows the same screen (#55).
+
+    The shape of ``selections[agent]`` depends on ``phase`` — callers must
+    follow the per-phase contract, otherwise effort-phase rows duplicate
+    the agent prefix:
+
+    - ``phase == "model"``: caller passes a bare ``provider/model`` id
+      (e.g. ``"openai/gpt-5.5"``); the prompt function composes
+      ``title = f"{agent} - {selections[agent]}"``. Missing entries
+      default to ``"(unset)"``.
+    - ``phase == "effort"``: caller passes a pre-rendered
+      ``"agent: model / <state>"`` line (typically produced by
+      :func:`format_selection_label`); the prompt function uses the
+      value **verbatim** — the ``agent: `` prefix is already present,
+      so adding another ``"{agent} - "`` would render
+      ``"{agent} - {agent}: model / <state>"`` (the bug this contract
+      pins against). Missing entries fall back to ``"(unset)"`` as
+      defensive dead code — the real effort-phase call site fills the
+      dict for every agent in scope, covering all three effort states
+      (``high`` / ``(unset)`` / ``(NA)``).
     """
     next_phase = {
         "model": "effort",
@@ -819,9 +876,15 @@ def _ask_opencode_continue_or_agent(
     if phase != "model":
         choices.append(questionary.Choice(title="← Back", value=Nav.BACK))
         choices.append(questionary.Separator())
+    # Per-phase title assembly — see the docstring for the
+    # ``selections[agent]`` shape contract.
     choices.extend(
         questionary.Choice(
-            title=f"{agent} - {selections.get(agent, '(unset)')}",
+            title=(
+                selections.get(agent, "(unset)")
+                if phase == "effort"
+                else f"{agent} - {selections.get(agent, '(unset)')}"
+            ),
             value=agent,
         )
         for agent in agent_list
@@ -920,6 +983,12 @@ def run_opencode_wizard(
             if new_model == Nav.BACK:
                 continue
             models[pick] = new_model
+            # Clear any previously selected effort — the model switch
+            # invalidates the prior effort choice. Unconditional: applies
+            # even when new_model == models[pick] pre-pick, even when the
+            # new model is non-reasoning. Per-pick: only this agent's
+            # effort is touched; siblings survive untouched.
+            efforts[pick] = None
 
     def run_effort_phase() -> str:
         """Drive the effort phase loop; return '__continue__', '__back__', or '__cancel__'.
@@ -934,8 +1003,21 @@ def run_opencode_wizard(
         while True:
             _print_header("set-models · opencode — effort")
             _console.print("")
-            # Show the current effort alongside (placeholder if unset)
-            display = {agent: (efforts[agent] or "(unset)") for agent in efforts}
+            # Render per-agent rows with ``agent: model / <state>`` — the
+            # same format the confirm panel uses. ``has_effort_support``
+            # is resolved PER AGENT (not wizard-wide) so reasoning-capable
+            # agents render ``(unset)``/``high`` while non-reasoning ones
+            # render ``(NA)``. The display dict is then passed unchanged
+            # to ``_ask_opencode_continue_or_agent`` (no signature ripple).
+            display = {
+                agent: format_selection_label(
+                    agent,
+                    models[agent],
+                    efforts[agent],
+                    has_effort_support=opencode_model_is_reasoning(models[agent], catalog),
+                )
+                for agent in efforts
+            }
             pick = _ask_opencode_continue_or_agent("effort", display, agents)
             if pick is None:
                 return Nav.CANCEL
