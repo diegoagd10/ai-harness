@@ -1,0 +1,244 @@
+{
+  "tasks": [
+    {
+      "id": "1",
+      "title": "Add CLI contracts section to change-orchestrator.md",
+      "spec": "orchestrator-cli-contract",
+      "phase": "core",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "1.1",
+          "title": "Insert ## CLI contracts between ## Inputs and imperative ## Work block",
+          "scenario": "section exists in the orchestrator prompt",
+          "status": "done"
+        },
+        {
+          "id": "1.2",
+          "title": "Document change-new entry with ChangeStatus JSON including nextRecommended",
+          "scenario": "change-new entry carries expected success response",
+          "status": "done"
+        },
+        {
+          "id": "1.3",
+          "title": "Document change-continue entry with the same ChangeStatus JSON shape",
+          "scenario": "change-continue entry carries the same JSON shape",
+          "status": "done"
+        },
+        {
+          "id": "1.4",
+          "title": "Add the orchestrator-only unknown ai-harness/workflow command rule",
+          "scenario": "orchestrator carries the unknown-command rule once",
+          "status": "done"
+        },
+        {
+          "id": "1.5",
+          "title": "Preserve existing nextRecommended and budget substrings",
+          "scenario": "existing renderer substring gate keeps passing",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "2",
+      "title": "Add CLI contracts section to change-tasks.md and fix dependsOn to depends_on",
+      "spec": "tasks-cli-contract",
+      "phase": "core",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "2.1",
+          "title": "Insert ## CLI contracts between ## Inputs and ## Work block in change-tasks.md",
+          "scenario": "section exists in the tasks prompt",
+          "status": "done"
+        },
+        {
+          "id": "2.2",
+          "title": "Document task-create entry with TaskInput using depends_on (snake_case)",
+          "scenario": "task-create input example uses snake_case depends_on",
+          "status": "done"
+        },
+        {
+          "id": "2.3",
+          "title": "Show task-create expected success response with persisted Task JSON shape",
+          "scenario": "task-create expected-success response mirrors persisted shape",
+          "status": "done"
+        },
+        {
+          "id": "2.4",
+          "title": "Fix the pre-existing dependsOn example in the Task JSON shape to depends_on",
+          "scenario": "no dependsOn camelCase survives anywhere in change-tasks.md",
+          "status": "done"
+        },
+        {
+          "id": "2.5",
+          "title": "Preserve task-create substring in unchanged prose",
+          "scenario": "task-create substring remains present in unchanged prose",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "3",
+      "title": "Add CLI contracts section to change-implementor.md",
+      "spec": "implementor-cli-contract",
+      "phase": "core",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "3.1",
+          "title": "Insert ## CLI contracts between ## Inputs and ## Loop block in change-implementor.md",
+          "scenario": "section exists in the implementor prompt",
+          "status": "done"
+        },
+        {
+          "id": "3.2",
+          "title": "Document task-next entry with pending Task JSON and the null outcome",
+          "scenario": "task-next entry shows the pending-task JSON shape",
+          "status": "done"
+        },
+        {
+          "id": "3.3",
+          "title": "Show the null outcome example in the task-next entry",
+          "scenario": "task-next entry also shows the null outcome",
+          "status": "done"
+        },
+        {
+          "id": "3.4",
+          "title": "Document task-done entry with containing Task JSON and parent/subtask id boundary",
+          "scenario": "task-done entry shows the containing Task JSON",
+          "status": "done"
+        },
+        {
+          "id": "3.5",
+          "title": "Preserve task-next substring and negative change start/change ready checks",
+          "scenario": "task-next substring remains present in unchanged prose",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "4",
+      "title": "Add CLI contracts section to change-validator.md",
+      "spec": "validator-cli-contract",
+      "phase": "core",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "4.1",
+          "title": "Insert ## CLI contracts between ## Inputs and ## Work block in change-validator.md",
+          "scenario": "section exists in the validator prompt",
+          "status": "done"
+        },
+        {
+          "id": "4.2",
+          "title": "Document task-list entry with full snake_case Task tree JSON shape",
+          "scenario": "task-list example uses the full snake_case shape",
+          "status": "done"
+        },
+        {
+          "id": "4.3",
+          "title": "Show task-list example with two or more tasks and non-empty subtasks",
+          "scenario": "task-list example carries more than one task",
+          "status": "done"
+        },
+        {
+          "id": "4.4",
+          "title": "Preserve task-list and verdict substrings",
+          "scenario": "task-list substring remains present in unchanged prose",
+          "status": "done"
+        },
+        {
+          "id": "4.5",
+          "title": "Confirm negative change start/change ready substrings stay absent",
+          "scenario": "negative substring checks stay absent",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "5",
+      "title": "Add CLI contracts section to change-archiver.md",
+      "spec": "archiver-cli-contract",
+      "phase": "core",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "5.1",
+          "title": "Insert ## CLI contracts between ## Inputs and ## Loop block in change-archiver.md",
+          "scenario": "section exists in the archiver prompt",
+          "status": "done"
+        },
+        {
+          "id": "5.2",
+          "title": "Document change-archive entry with the bare done token success response",
+          "scenario": "change-archive entry shows the bare done token",
+          "status": "done"
+        },
+        {
+          "id": "5.3",
+          "title": "Distinguish success done token from failure JSON { errors: [...] } in prose",
+          "scenario": "change-archive entry distinguishes success from failure",
+          "status": "done"
+        },
+        {
+          "id": "5.4",
+          "title": "Preserve ai-harness change-archive and docs: archive substrings",
+          "scenario": "change-archive substring remains present in unchanged prose",
+          "status": "done"
+        },
+        {
+          "id": "5.5",
+          "title": "Confirm negative change start/change ready substrings stay absent",
+          "scenario": "negative substring checks stay absent",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "6",
+      "title": "Verify existing renderer substring gate and CLI parser tests pass without edits",
+      "spec": "archiver-cli-contract",
+      "phase": "testing",
+      "depends_on": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "6.1",
+          "title": "Run tests/test_renderers.py::test_change_agent_prompt_set_contains_expected_contract_keywords and confirm every asserted substring stays present",
+          "scenario": "existing renderer substring gate keeps passing",
+          "status": "done"
+        },
+        {
+          "id": "6.2",
+          "title": "Run tests/test_renderers.py::test_change_agent_prompt_set_contains_no_stale_terms and confirm change start / change ready stay absent",
+          "scenario": "negative substring checks stay absent",
+          "status": "done"
+        },
+        {
+          "id": "6.3",
+          "title": "Run tests/test_tasks.py including test_cli_task_create_parses_input_and_outputs_json after the dependsOn fix",
+          "scenario": "pre-existing snake_case parser tests keep passing",
+          "status": "done"
+        },
+        {
+          "id": "6.4",
+          "title": "Run tests/test_change.py, tests/test_install.py, tests/test_set_models.py without any test edits",
+          "scenario": "pre-existing snake_case parser tests keep passing",
+          "status": "done"
+        }
+      ]
+    }
+  ]
+}
