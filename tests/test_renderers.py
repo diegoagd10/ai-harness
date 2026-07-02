@@ -9,6 +9,7 @@ for each agent CLI that supports native agents.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from unittest.mock import patch
 
@@ -2505,8 +2506,6 @@ def test_change_orchestrator_body_no_invented_gentle_ai_paths(cli: AgentCli) -> 
     Any path matching the gentle-ai/ prefix must be one of the five
     pinned references above. New paths break the test.
     """
-    import re
-
     body = _native_change_orchestrator_body(cli)
     pinned = {
         "gentle-ai/README.md:51-64",
