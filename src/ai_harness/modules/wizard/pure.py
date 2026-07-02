@@ -387,22 +387,61 @@ def build_opencode_model_picker_rows(
     return rows
 
 
+def format_selection_label(
+    agent: str,
+    model: str,
+    effort: str | None,
+    has_effort_support: bool,
+) -> str:
+    """Format one row of the ``agent: model / <state>`` display used by both phases.
+
+    Single source of truth for the wording shown in the effort phase
+    picker and the confirm panel — both call sites consume this helper
+    so the labels can never drift. The ``has_effort_support`` flag
+    carries the OpenCode reasoning decision across the seam; Claude
+    callers pass ``True`` unconditionally (Claude models are always
+    effort-supporting).
+
+    The three branches:
+
+    - ``has_effort_support=True`` and ``effort`` is set →
+      ``f"{agent}: {model} / {effort}"``
+    - ``has_effort_support=True`` and ``effort is None`` →
+      ``f"{agent}: {model} / (unset)"``
+    - ``has_effort_support=False`` (OpenCode non-reasoning model) →
+      ``f"{agent}: {model} / (NA)"``; the *effort* value is ignored.
+
+    Pure: no I/O, no globals, no catalog lookup. The caller resolves
+    *has_effort_support* (Claude passes ``True``; OpenCode passes
+    ``opencode_model_is_reasoning(model, catalog)``).
+    """
+    if not has_effort_support:
+        return f"{agent}: {model} / (NA)"
+    if effort is None:
+        return f"{agent}: {model} / (unset)"
+    return f"{agent}: {model} / {effort}"
+
+
 def build_confirmation_rows(
     selections: dict[str, ModelSelection],
 ) -> list[PickerRow]:
     """Build the confirmation rows: one per agent with model and effort.
 
-    *selections* maps ``agent -> ModelSelection(model, effort)``. ``None``
-    effort (the user never picked one) renders as ``"(unset)"`` so the user
-    notices the gap on the confirmation screen before pressing enter.
+    *selections* maps ``agent -> ModelSelection(model, effort)``. Each
+    row's label is assembled by :func:`format_selection_label` with
+    ``has_effort_support=True`` — the constant is load-bearing: the
+    ``(NA)`` branch is unreachable from the confirm panel because the
+    model-switch reset (issue #63) has already cleared any effort for
+    non-reasoning models by the time the user reaches confirm. A
+    ``None`` effort here therefore always renders as ``"(unset)"``.
     """
     rows: list[PickerRow] = []
     for agent, selection in selections.items():
-        effort_str = selection.effort if selection.effort is not None else "(unset)"
+        label = format_selection_label(agent, selection.model, selection.effort, has_effort_support=True)
         rows.append(
             PickerRow(
                 value=agent,
-                label=f"{agent}: {selection.model} / {effort_str}",
+                label=label,
                 is_current=False,
             )
         )
