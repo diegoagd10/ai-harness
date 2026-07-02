@@ -158,16 +158,56 @@ mode preflight when prior artifacts exist.
   stop and surface the reason.
 
 **Default + cache.** When the user does not specify a mode, default to
-`interactive` (never auto) and cache that decision for the session. The
-cached mode is reused for every later phase routing in the same session
-unless the user explicitly changes it. A later `continue` request MUST NOT
-reinterpret cached interactive mode as automatic pipeline approval — only
-an explicit mode change can flip the cached mode.
+`interactive` (never auto) and cache that decision **per change-flow run**
+(keyed by `{change-name}`, not by session). The cached mode is reused
+across phases of the same change-flow run, but a new change-flow entry
+in the same session MUST re-ask. A later `continue` request for the
+same change-flow run MUST NOT reinterpret cached interactive mode as
+automatic pipeline approval — only an explicit mode change can flip
+the cached mode.
 
 **Explicit mode change.** If the user explicitly switches mode
 (`auto` ↔ `interactive`), update the cached mode before any further
 phase delegation. The replacement is a swap, not an append; the most
 recent explicit instruction wins.
+
+**Per-change-flow-entry rules.** The preflight fires on every
+change-flow entry (entry class 3 — Recommend, and entry class 4 —
+Explicit). Pattern adapted from
+`gentle-ai/internal/assets/opencode/sdd-orchestrator.md:100-160`
+(SDD Session Preflight + Entry Routing) and
+`gentle-ai/internal/assets/opencode/sdd-orchestrator.md:178-200`
+(Execution Mode + interactive checkpoint):
+
+- **Ask on every change-flow entry.** Entry class 3 and entry class 4
+  re-ask the interactive / auto question. The orchestrator MUST NOT
+  carry the cached mode from a prior change-flow run in the same
+  session — a user who answered `auto` for change A MUST be re-asked
+  when starting change B in the same session.
+- **Skip when the user provided the mode verbatim in the same message.**
+  If the same user message contains the literal token `interactive` or
+  `auto`, the orchestrator MUST NOT ask the mode question and MUST use
+  that token as the answered mode for this change-flow run. The match
+  is exact-substring, not fuzzy intent — "automation" does NOT count
+  for `auto`.
+- **Skip for entry classes 1 and 2.** The mode preflight is gated to
+  change-flow entries only. Entry class 1 (Conversational) and entry
+  class 2 (Small inline) MUST NOT ask the mode question unless the
+  inline-vs-change-flow hard boundary fires mid-execution and routes
+  the work into entry class 3.
+- **When the user answers, start the next phase immediately.** A
+  resolved mode answer begins the similarity check, the Start / Resume
+  classify loop, or the next phase delegation immediately in the
+  answered mode. The orchestrator MUST NOT re-ask the mode question
+  per phase within the same change-flow run.
+- **Cache key is the change-flow run (`{change-name}`), not the
+  session.** Two different change-flow runs in the same session each
+  carry their own cached mode. A re-entry into the same change-flow
+  run after a topic change MUST also re-ask.
+- **Phase-scoped approval preserved.** Auto mode applies to phase
+  transitions, but the human review gate and the interactive phase
+  checkpoint still pause for approval. Auto mode does NOT silently
+  chain phase-scoped approvals.
 
 ## Modes — start vs resume (route contract)
 
