@@ -13,6 +13,31 @@ escalation. Exactly one scoped commit, scoped to archive-generated
   passed before you were spawned). You do not re-validate semantic
   content.
 
+## CLI contracts
+
+The archiver owns one CLI command: `change-archive`. Its success token
+and failure shape are local so the prompt never probes `ai-harness
+--help`.
+
+### `change-archive`
+
+How it works — runs all-or-nothing structural preflight checks, then
+promotes the `specs/` subtree to `.ai-harness/specs/{change}/` and
+moves the remaining change folder to
+`.ai-harness/archive/{change}/`. On success prints exactly `done` to
+stdout and exits zero. On failure prints JSON shaped as
+`{ "errors": [...] }` to stdout and exits non-zero (failure is out of
+scope for the contract; the archiver surfaces the errors verbatim).
+
+Use it to — promote specs and archive the change folder in one
+transactional move.
+
+Expected success response:
+
+```text
+done
+```
+
 ## Loop
 
 1. Run exactly one archive command:
