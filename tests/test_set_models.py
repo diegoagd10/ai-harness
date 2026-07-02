@@ -4540,6 +4540,203 @@ def test_run_claude_wizard_repeated_identical_model_picks_keep_effort_none(
 
 
 # ---------------------------------------------------------------------------
+# Regression contracts — preserved OpenCode gate, selective-write semantics,
+# renderer backstop.
+#
+# These tests lock in the contracts from specs
+# ``unsupported-effort-agent-handling-preserved`` and
+# ``selective-write-semantics-preserved``. The OpenCode non-reasoning
+# gate stays as a defensive safety net even though the model-switch
+# reset owns the invariant; the selective-write contract
+# (``selection.<field> != base.<field>``) is unchanged; the renderer's
+# ``omits_effort_when_unset`` contract is the load-bearing backstop.
+# ---------------------------------------------------------------------------
+
+
+def test_run_opencode_wizard_non_reasoning_gate_idempotent_when_effort_already_none(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OpenCode: gate running on a non-reasoning agent with effort already ``None`` is idempotent.
+
+    With the model-switch reset in place, every agent that comes through
+    the model phase has ``efforts[pick] = None`` by the time the effort
+    phase starts. The non-reasoning gate still runs as a safety net —
+    it re-sets ``efforts[pick] = None`` (no observable change) and
+    emits the skip message instead of prompting for effort.
+    """
+    from ai_harness.modules.wizard import tui
+
+    # Seed: change-implementor is already on a non-reasoning model with no effort.
+    _override_file(tmp_path).parent.mkdir(parents=True, exist_ok=True)
+    _override_file(tmp_path).write_text(
+        json.dumps({"change-implementor": {"model": {"opencode": "openai/gpt-5.5-mini"}}}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(tui, "_resolve_opencode_binary", lambda: "/fake/opencode")
+
+    def fake_loader(home: Path, *, runner=None) -> tuple[list[str], dict]:
+        return ["openai/gpt-5.5-mini"], {
+            "alpha": {
+                "models": {
+                    "openai/gpt-5.5-mini": {"reasoning": False, "cost": {"input": 0.1, "output": 0.2}},
+                },
+            },
+        }
+
+    monkeypatch.setattr(tui, "_load_opencode_catalog", fake_loader)
+    monkeypatch.setattr(tui.questionary, "select", _ScriptedSelect)
+    monkeypatch.setattr(tui.questionary, "confirm", _ScriptedConfirm)
+    _ScriptedSelect.instances = []
+    _ScriptedConfirm.instances = []
+
+    printed: list[str] = []
+    monkeypatch.setattr(tui._console, "print", lambda *a, **kw: printed.append(str(a[0])))
+
+    scripted = _ScriptedSelect()
+    # Skip the model phase (no agent picked -> no model change), then in
+    # the effort phase pick change-implementor. The gate should fire
+    # with effort already None and skip the effort prompt.
+    scripted.queue("__continue__", "change-implementor", "__continue__")
+    monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
+    confirm = _ScriptedConfirm().queue(True)
+    monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
+
+    wrote = tui.run_opencode_wizard(home=tmp_path, agents=opencode_change_agents())
+
+    assert wrote is True
+    # The skip message is still emitted by the safety-net gate.
+    assert any("Skipping effort" in msg and "not a reasoning model" in msg for msg in printed), (
+        "the non-reasoning gate must still emit the skip message even when effort was already None"
+    )
+    # No override entry for effort — the idempotent clear left selection.effort == baseline.effort.
+    overrides = json.loads(_override_file(tmp_path).read_text(encoding="utf-8"))
+    assert "effort" not in overrides["change-implementor"]
+
+
+def test_run_opencode_wizard_effort_only_change_writes_only_effort(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OpenCode: effort change without model change writes only the effort key.
+
+    Companion to ``test_run_claude_wizard_effort_change_from_unset_writes_only_effort``
+    — same selective-write contract, OpenCode side. User keeps the
+    reasoning model and only sets an effort; the override payload
+    surfaces ``{"effort": {"opencode": <value>}}`` with no model entry.
+    """
+    from ai_harness.modules.wizard import tui
+
+    # Seed: change-implementor on a reasoning model (so the effort-phase
+    # gate doesn't fire), no prior effort. We do NOT touch the model in
+    # the wizard, so the model-switch reset never fires.
+    _override_file(tmp_path).parent.mkdir(parents=True, exist_ok=True)
+    _override_file(tmp_path).write_text(
+        json.dumps({"change-implementor": {"model": {"opencode": "openai/gpt-5.5"}}}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(tui, "_resolve_opencode_binary", lambda: "/fake/opencode")
+
+    def fake_loader(home: Path, *, runner=None) -> tuple[list[str], dict]:
+        return ["openai/gpt-5.5"], {
+            "alpha": {
+                "models": {
+                    "openai/gpt-5.5": {"reasoning": True, "cost": {"input": 3, "output": 15}},
+                },
+            },
+        }
+
+    monkeypatch.setattr(tui, "_load_opencode_catalog", fake_loader)
+    monkeypatch.setattr(tui.questionary, "select", _ScriptedSelect)
+    monkeypatch.setattr(tui.questionary, "confirm", _ScriptedConfirm)
+    _ScriptedSelect.instances = []
+    _ScriptedConfirm.instances = []
+
+    # Phase 1 (model): continue (no model change — change-implementor stays on openai/gpt-5.5).
+    # Phase 2 (effort): pick change-implementor -> "high" -> continue.
+    # Confirm.
+    scripted = _ScriptedSelect()
+    scripted.queue("__continue__", "change-implementor", "high", "__continue__")
+    monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
+    confirm = _ScriptedConfirm().queue(True)
+    monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
+
+    wrote = tui.run_opencode_wizard(home=tmp_path, agents=opencode_change_agents())
+
+    assert wrote is True
+    overrides = json.loads(_override_file(tmp_path).read_text(encoding="utf-8"))
+    # Only the effort key — the model stayed the same, so deep-merge
+    # preserves the existing model entry unchanged.
+    assert overrides["change-implementor"]["effort"] == {"opencode": "high"}
+    assert overrides["change-implementor"]["model"] == {"opencode": "openai/gpt-5.5"}
+
+
+def test_run_opencode_wizard_model_only_change_writes_only_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OpenCode: model change without effort change writes only the model key.
+
+    Mirrors ``test_run_claude_wizard_model_change_writes_only_changed_agent``
+    — same selective-write contract, OpenCode side. User switches to a
+    different reasoning model but skips the effort prompt; the override
+    payload surfaces only ``{"model": {"opencode": <value>}}``.
+    """
+    from ai_harness.modules.wizard import tui
+
+    # Seed: change-implementor on a reasoning model with no prior effort.
+    _override_file(tmp_path).parent.mkdir(parents=True, exist_ok=True)
+    _override_file(tmp_path).write_text(
+        json.dumps({"change-implementor": {"model": {"opencode": "openai/gpt-5.5"}}}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(tui, "_resolve_opencode_binary", lambda: "/fake/opencode")
+
+    def fake_loader(home: Path, *, runner=None) -> tuple[list[str], dict]:
+        return ["openai/gpt-5.5", "openai/gpt-5.5-pro"], {
+            "alpha": {
+                "models": {
+                    "openai/gpt-5.5": {"reasoning": True, "cost": {"input": 3, "output": 15}},
+                    "openai/gpt-5.5-pro": {"reasoning": True, "cost": {"input": 6, "output": 30}},
+                },
+            },
+        }
+
+    monkeypatch.setattr(tui, "_load_opencode_catalog", fake_loader)
+    monkeypatch.setattr(tui.questionary, "select", _ScriptedSelect)
+    monkeypatch.setattr(tui.questionary, "confirm", _ScriptedConfirm)
+    _ScriptedSelect.instances = []
+    _ScriptedConfirm.instances = []
+
+    # Phase 1 (model): pick change-implementor -> openai/gpt-5.5-pro (different reasoning model).
+    # Phase 2 (effort): continue (user skips effort — selection.effort stays None, baseline.effort was None).
+    # Confirm.
+    scripted = _ScriptedSelect()
+    scripted.queue(
+        "change-implementor",
+        "openai/gpt-5.5-pro",
+        "__continue__",
+        "__continue__",
+    )
+    monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
+    confirm = _ScriptedConfirm().queue(True)
+    monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
+
+    wrote = tui.run_opencode_wizard(home=tmp_path, agents=opencode_change_agents())
+
+    assert wrote is True
+    overrides = json.loads(_override_file(tmp_path).read_text(encoding="utf-8"))
+    # Only the model key — selection.effort (None) matches baseline.effort (None).
+    # The existing override already had the original model — deep-merge preserves it
+    # only when the value matches; here it differs, so the new model replaces it.
+    assert overrides["change-implementor"]["model"] == {"opencode": "openai/gpt-5.5-pro"}
+    assert "effort" not in overrides["change-implementor"]
+
+
+# ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
