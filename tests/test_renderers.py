@@ -2718,3 +2718,67 @@ def test_change_implementor_body_blocks_on_unknown_placeholder(cli: AgentCli) ->
     )
     # The defensive block returns the shared blocked envelope.
     assert "status: blocked" in body, f"{cli}: blocked envelope missing from implementor body"
+
+
+# ---------------------------------------------------------------------------
+# implementor-reads-commit-format — renderer parity across Claude / OpenCode /
+# Copilot (subtasks 4.1, 4.2, 4.3, 4.4)
+# ---------------------------------------------------------------------------
+#
+# Locks the cross-renderer parity contract for the new commit-format
+# directive: the source-of-truth prompt edits must reach every rendered
+# body, not just the one rendered for the implementation's primary CLI.
+
+
+_NATIVE_RENDERERS_PARITY = (AgentCli.OPENCODE, AgentCli.CLAUDE, AgentCli.COPILOT)
+
+
+@pytest.mark.parametrize("cli", _NATIVE_RENDERERS_PARITY)
+def test_renderer_parity_change_orchestrator_has_commit_format_directive(cli: AgentCli) -> None:
+    """Subtasks 4.1 + 4.2 — the rendered change-orchestrator body carries the new delegation
+    directive on every native renderer (OpenCode, Claude, Copilot).
+
+    Locks the cross-renderer parity contract: removing the directive
+    from the source prompt, or letting any renderer drop it, breaks at
+    least one parametrized case. The two OpenCode/Claude rows from the
+    task list are asserted here as part of a wider sweep that also
+    covers Copilot.
+    """
+    body = _native_change_orchestrator_body(cli)
+
+    assert "Data injected for this delegation:" in body, (
+        f"{cli}: change-orchestrator body missing the 'Data injected for this delegation:' header"
+    )
+    assert "commit-format:" in body, f"{cli}: change-orchestrator body missing the 'commit-format:' directive label"
+
+
+@pytest.mark.parametrize("cli", _NATIVE_RENDERERS_PARITY)
+def test_renderer_parity_change_implementor_has_substitution_rule(cli: AgentCli) -> None:
+    """Subtask 4.3 — the rendered change-implementor body carries the loop step-6
+    substitution rule on every native renderer, naming all three documented tokens.
+
+    Locks the substitution rule wording: the rendered body must name
+    ``{change_name}``, ``{task_id}``, and ``{slug}`` so the implementor
+    subagent sees the substitution contract on every CLI.
+    """
+    body = _native_change_implementor_body(cli)
+
+    assert "{change_name}" in body, f"{cli}: change-implementor body missing {{change_name}} in substitution rule"
+    assert "{task_id}" in body, f"{cli}: change-implementor body missing {{task_id}} in substitution rule"
+    assert "{slug}" in body, f"{cli}: change-implementor body missing {{slug}} in substitution rule"
+
+
+@pytest.mark.parametrize("cli", _NATIVE_RENDERERS_PARITY)
+def test_renderer_parity_change_implementor_has_missing_directive_error(cli: AgentCli) -> None:
+    """Subtask 4.4 — the rendered change-implementor body carries the canonical
+    missing-directive error string on every native renderer.
+
+    Locks the defensive block wording: the canonical error string
+    ``commit-format directive missing from delegation`` must reach every
+    rendered body so the implementor can produce it verbatim.
+    """
+    body = _native_change_implementor_body(cli)
+
+    assert "commit-format directive missing from delegation" in body, (
+        f"{cli}: change-implementor body missing the 'commit-format directive missing from delegation' error string"
+    )
