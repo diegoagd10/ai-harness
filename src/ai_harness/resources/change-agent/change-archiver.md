@@ -26,7 +26,7 @@ promotes the `specs/` subtree to `.ai-harness/specs/{change}/` and
 moves the remaining change folder to
 `.ai-harness/archive/{change}/`. On success prints exactly `done` to
 stdout and exits zero. On failure prints JSON shaped as
-`{ "errors": [...] }` to stdout and exits non-zero (failure is out of
+{ "errors": [...] } to stdout and exits non-zero (failure is out of
 scope for the contract; the archiver surfaces the errors verbatim).
 
 Use it to — promote specs and archive the change folder in one
@@ -47,27 +47,51 @@ done
    ```
 
    The CLI prints `done` on success and exits zero. On failure it
-   prints JSON shaped as `{ "errors": [...] }` and exits non-zero.
+   prints JSON shaped as { "errors": [...] } and exits non-zero.
 
 2. Inspect `git status --short` from the repo root. The successful
    command moves files inside `.ai-harness/` only:
    - `.ai-harness/specs/{change}/` (promoted specs subtree).
    - `.ai-harness/archive/{change}/` (the remaining planning artifacts).
 
-3. Stage ONLY the archive-generated `.ai-harness` paths. Do NOT stage:
-   - Files outside `.ai-harness/`. Unrelated product dirtiness is
-     out of scope — never commit it as part of an archive commit.
-   - The pre-existing `.ai-harness/changes/{change}/` folder contents;
-     they have already moved and are no longer relevant.
+3. Stage the archive-generated `.ai-harness` paths in one command.
+   This captures BOTH the new archive/spec paths AND the deletions
+   of the moved-away tree under `.ai-harness/changes/{change}/`:
 
-4. Create one scoped commit. Use a `docs:` prefix so the archive
+   ```bash
+   git add -A .ai-harness/
+   ```
+
+4. Pre-commit verification. Read the staged summary and confirm it
+   contains ONLY archive-generated paths — new files under
+   `.ai-harness/archive/{change}/` and `.ai-harness/specs/{change}/`,
+   plus deletions under `.ai-harness/changes/{change}/`. If anything
+   else is staged, abort the commit, return `status: blocked`, and
+   surface the unexpected paths to the human:
+
+   ```bash
+   git diff --cached --stat
+   ```
+
+5. Create one scoped commit. Use a `docs:` prefix so the archive
    commit is easy to spot in history:
 
    ```text
    docs: archive {change}
    ```
 
-5. Report success. Your result envelope references the archive commit
+6. Post-commit verification. Run `git status --short` from the repo
+   root. The working tree must be clean for archive-generated paths
+   (no leftover under `.ai-harness/changes/{change}/`, no unstaged
+   archive files). If anything archive-related remains, return
+   `status: blocked` with the leftover paths; otherwise report
+   success:
+
+   ```bash
+   git status --short
+   ```
+
+7. Report success. Your result envelope references the archive commit
    SHA and the archived artifact paths.
 
 ## Failure
@@ -78,6 +102,15 @@ When `ai-harness change-archive {change}` exits non-zero:
    safe to commit.
 2. Surface the failure to the human with the original `errors` array
    so they can decide how to proceed. Do not guess or retry blindly.
+
+When the archive command succeeded but pre-commit verification finds
+unexpected staged paths, OR post-commit verification finds leftover
+archive-related paths:
+
+1. Do NOT amend the commit. Surface the unexpected paths to the
+   human with a clear summary of where verification failed.
+2. Return `status: blocked` with the relevant paths in the result
+   envelope so the user can decide how to proceed.
 
 ## Result
 
@@ -95,18 +128,25 @@ skills:           loaded | fallback | none
 skill_resolution: ok | degraded: <reason>  (only when degraded)
 ```
 
-- `status: done` — archive command succeeded and the single scoped
-  commit was created.
-- `status: blocked` — archive command failed; ask the human for
-  intervention. The `errors` field carries the CLI's failure messages
-  verbatim so the user sees what the CLI saw.
+- `status: done` — archive command succeeded, pre-commit verification
+  passed, the single scoped commit was created, and post-commit
+  verification confirmed a clean working tree for archive-generated
+  paths.
+- `status: blocked` — either the archive command failed, pre-commit
+  verification found unexpected staged paths, or post-commit
+  verification found leftover archive-related paths. Ask the human
+  for intervention. The `errors` field carries the relevant
+  diagnostics so the user sees what the archiver saw.
 
 ## Constraints
 
 - One archive commit per Change. Do not amend, re-stage, or create a
   second archive commit for the same Change.
-- Unrelated product dirtiness does NOT block archive completion.
-  It is silently ignored at the staging step.
+- Unrelated product dirtiness OUTSIDE `.ai-harness/` does NOT block
+  archive completion — the `git add -A .ai-harness/` scope ignores
+  it. Dirtiness INSIDE `.ai-harness/` that is not archive-generated
+  (sibling Change folders, experimental specs edits) IS caught by
+  pre-commit verification and triggers `status: blocked`.
 - You do not parse `validation.md` prose. The orchestrator's semantic
   gate is upstream of your spawn; by the time you run, it has already
   decided the Change is semantically ready.

@@ -2170,15 +2170,24 @@ def test_change_archiver_prompt_runs_cli_command_and_commits_once() -> None:
 
 
 def test_change_archiver_body_ignores_unrelated_product_dirtiness() -> None:
-    """The archiver must NOT block on unrelated product dirtiness — scope is .ai-harness only."""
+    """The archiver must NOT commit unrelated product dirtiness — scope is .ai-harness only.
+
+    The new architecture enforces the boundary via path-scoped staging
+    (`git add -A .ai-harness/`) plus a pre-commit verification gate
+    (`git diff --cached --stat`). Out-of-scope dirtiness can't be
+    staged because the git command itself won't touch it; in-scope
+    non-archive dirtiness is caught by the verification gate.
+    """
     from importlib.resources import files
 
     body = (files("ai_harness.resources") / "change-agent" / "change-archiver.md").read_text(encoding="utf-8")
 
     body_lower = body.lower()
+    # The intent is still documented in the prompt.
     assert "unrelated product dirtiness" in body_lower or "unrelated" in body_lower
-    # The "do not commit" rule for non-.ai-harness files is explicit.
-    assert "do not stage" in body_lower or "never commit" in body_lower
+    # The new enforcement mechanism: path-scoped staging + pre-commit verification.
+    assert "git add -a .ai-harness/" in body_lower
+    assert "git diff --cached --stat" in body_lower
 
 
 def test_change_archiver_result_envelope_includes_archive_commit_and_blocked_errors() -> None:
