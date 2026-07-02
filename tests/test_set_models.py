@@ -3906,9 +3906,7 @@ def test_run_claude_wizard_effort_phase_never_shows_na(
     for _, choices in effort_captures:
         titles = [c.title for c in choices if isinstance(c, questionary.Choice)]
         for title in titles:
-            assert "(NA)" not in title, (
-                f"Claude effort phase must never render (NA); saw title {title!r}"
-            )
+            assert "(NA)" not in title, f"Claude effort phase must never render (NA); saw title {title!r}"
 
 
 def test_run_opencode_wizard_effort_phase_shows_unset_for_reasoning_model(
@@ -4130,13 +4128,11 @@ def test_ask_continue_or_agent_effort_phase_no_agent_dash_agent_substring(
     for agent, label in effort_pairs:
         forbidden = f"{agent} - {agent}:"
         assert forbidden not in titles, (
-            f"Claude effort phase must never duplicate the agent prefix; "
-            f"saw {forbidden!r} in titles {titles!r}"
+            f"Claude effort phase must never duplicate the agent prefix; saw {forbidden!r} in titles {titles!r}"
         )
         # And the label the caller passed in must be present verbatim.
         assert label in titles, (
-            f"Claude effort phase must consume selections[{agent!r}] verbatim; "
-            f"saw titles {titles!r}"
+            f"Claude effort phase must consume selections[{agent!r}] verbatim; saw titles {titles!r}"
         )
 
 
@@ -4185,13 +4181,11 @@ def test_ask_opencode_continue_or_agent_effort_phase_no_agent_dash_agent_substri
     for agent, label in effort_pairs:
         forbidden = f"{agent} - {agent}:"
         assert forbidden not in titles, (
-            f"OpenCode effort phase must never duplicate the agent prefix; "
-            f"saw {forbidden!r} in titles {titles!r}"
+            f"OpenCode effort phase must never duplicate the agent prefix; saw {forbidden!r} in titles {titles!r}"
         )
         # And the label the caller passed in must be present verbatim.
         assert label in titles, (
-            f"OpenCode effort phase must consume selections[{agent!r}] verbatim; "
-            f"saw titles {titles!r}"
+            f"OpenCode effort phase must consume selections[{agent!r}] verbatim; saw titles {titles!r}"
         )
 
 
