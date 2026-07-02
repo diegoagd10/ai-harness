@@ -124,11 +124,145 @@ critical: <int>
 
 ## Gates
 - command: result
+
+## TDD Evidence Audit
+
+| Check           | Result | Details                                          |
+|-----------------|--------|--------------------------------------------------|
+| section-present | pass   | section present                                  |
+| cross-ref       | pass   | every row's `(Task, Commit)` matches `## Commits`|
+| no-duplicate    | pass   | no duplicate `(Task, Commit)` pairs              |
+| no-extra        | pass   | no rows for `pending` tasks                      |
+| grammar-red     | pass   | `RED == "written"`                               |
+| grammar-green   | pass   | `GREEN == "passed"`                              |
+| safety-net      | pass   | rows match safety-net regex with `0 ≤ N ≤ M`     |
+| test-coverage   | pass   | no behavior-without-test rows                    |
+| layer           | pass   | `Layer` in `{unit, integration, e2e, mixed, N/A}`|
+| refactor        | pass   | `Refactor` in `{clean, none needed}`             |
+| gate-ownership  | pass   | gate failures classified by row ownership        |
+| cell-count      | pass   | every row splits to ten cells                    |
+
+### Self-checklist
+- [ ] section-present
+- [ ] cross-ref
+- [ ] no-duplicate
+- [ ] no-extra
+- [ ] grammar-red
+- [ ] grammar-green
+- [ ] safety-net
+- [ ] test-coverage
+- [ ] layer
+- [ ] refactor
+- [ ] gate-ownership
+- [ ] cell-count
 ```
 
 `verdict` and `critical` are the canonical prose form of
 `semantic_facts.verdict` and `semantic_facts.critical`. Keep the two
 aligned so resume can recover them from disk.
+
+## TDD evidence audit
+
+Append `## TDD Evidence Audit` AFTER `## Gates` in `validation.md`.
+The audit is **textual** against `implementation.md` only. Never `git
+rev-parse`, `git log`, `git cat-file`, `git diff`, or `git show`. Never
+open, parse, or evaluate any test file. Never re-run an
+implementor-reported test command verbatim — the authoritative gates
+come from the target repo's `CODING_STANDARDS.md` exactly as written,
+in order, with conditional language respected.
+
+The implementor prompt (`change-implementor.md`) is the **grammar
+source of truth** for every column. This prompt mirrors each
+regex/equality rule inline so the audit can run without re-reading
+the implementor prompt. A future contributor editing one prompt's
+grammar MUST mirror in the other.
+
+Skill injection is the orchestrator's job. The implementor prompt
+stays silent on skill loading; do not flag a missing skill-load line
+in the implementor prompt as a finding.
+
+### Column grammar (mirrored from `change-implementor.md`)
+
+- `Task` — task id from `ai-harness task-list`.
+- `Commit` — full SHA from the commit just made.
+- `Non-test files` — comma-separated paths, single line, no `|`.
+- `Test files` — same shape; `N/A` allowed only when `Non-test files` is empty.
+- `Layer ∈ {unit, integration, e2e, mixed, N/A}`.
+- `Safety net ∈ {(passed: N/M with 0 ≤ N ≤ M) | N/A: new files | N/A: <reason>}`.
+- `RED == "written"` (literal).
+- `GREEN == "passed"` (literal).
+- `Triangulation ∈ {(N cases) | Single | N/A: <reason>}`.
+- `Refactor ∈ {clean, none needed}`. `deferred` and any other value are off-grammar and a WARNING.
+
+No `|` inside any cell — pipes break Markdown table parsing. A row that
+splits to anything other than ten cells fails `cell-count` as CRITICAL.
+
+### Severity mapping (policy authority)
+
+CRITICAL (mirrored as `fail` rows; blocks archive when `critical > 0`):
+
+- `RED` cell not equal to `written`.
+- `GREEN` cell not equal to `passed`.
+- `Safety net` cell fails the regex or violates `N ≤ M`.
+- `Test files == "N/A"` while `Non-test files` is non-empty on the same
+  row (behavior change without a test).
+- Missing `## TDD Evidence` row for a `task-list` `completed` task.
+- Duplicate `## TDD Evidence` row (same `(Task, Commit)` pair).
+- `## TDD Evidence` row referencing a task `task-list` reports as
+  `pending` (extra row).
+- Row's `Commit` cell not present in any `## Commits` line.
+- Row's `Task` cell not in `ai-harness task-list` at all.
+- `## TDD Evidence Audit` section missing from `validation.md`.
+- Gate failure on a file listed in any row's `Non-test files ∪ Test files`.
+
+WARNING (mirrored as `warn` rows; verdict stays `pass-with-warnings`):
+
+- `Refactor` empty or off-grammar (any value other than `clean` or
+  `none needed`, including `deferred`, blank, `in-progress`, etc.).
+- `Layer` outside the enum `{unit, integration, e2e, mixed, N/A}`.
+- Gate failure on a file NOT listed in any row's `Non-test files` or
+  `Test files` (pre-existing / unrelated).
+
+A WARN-only audit is allowed: `critical: 0` keeps archive on
+`pass-with-warnings`. Routing still keys off `verdict` / `critical`
+from `## Verdict`; the audit does not introduce a parallel path.
+
+### Cross-consistency
+
+When parsing `## Commits`, read only the prefix
+`- <sha> — task <id>: <summary>`. Any trailing prose (including a
+legacy `; tests: <commands>` segment or a parenthetical) is harmless
+suffix noise and is ignored.
+
+- `section-present` — `## TDD Evidence Audit` exists in `validation.md`.
+- `cross-ref` — every `task-list` `completed` task id has both a
+  `## Commits` line and a `## TDD Evidence` row whose `(Task, Commit)`
+  pair matches that line.
+- `no-duplicate` — no `(Task, Commit)` pair appears more than once.
+- `no-extra` — no row references a task `task-list` reports as `pending`.
+- `cell-count` — every row splits on `|` into exactly ten cells; a
+  stray pipe inside a cell surfaces here.
+
+### Mirroring into `## Findings`
+
+Every `fail` row mirrors into `## Findings` under `### CRITICAL`; every
+`warn` row mirrors under `### WARNING`. Pass rows are NOT mirrored.
+`Details` carries the row index or task id, the cell name for
+cell-scoped checks, and the file path for file-scoped checks.
+
+### Gate-failure ownership classifier
+
+Build the deduped union of every row's `Non-test files` and `Test
+files` cells. Gate failure on a file in the union → CRITICAL under
+`gate-ownership` (row claims ownership). Gate failure on a file
+outside the union → WARNING (pre-existing / unrelated). One finding per
+file, not one finding per row.
+
+### Gates are literal, not hardcoded
+
+Do not hardcode any command in this prompt (no `ruff`, `pylint`,
+`pytest`, `mypy`, etc., as a fixed list). Read `CODING_STANDARDS.md`
+and run each declared gate as written.
 
 ## Result
 
