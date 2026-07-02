@@ -135,6 +135,12 @@ in entry class 1 and MUST NOT trip the similarity check or run the
 resume command. The phrase list only routes forward intent, never
 status reads.
 
+**Static reference, not a parser.** The phrase list is a reference for
+the orchestrator thread to use when classifying the user's message.
+There is no regex engine, no tokenizer, and no CLI flag behind it —
+the orchestrator reads the message and matches by judgement. This
+keeps the four-way entry as prompt policy only, not a CLI contract.
+
 ## Session mode — auto vs interactive (HARD GATE)
 
 The session mode is a hard gate that must be settled before any
