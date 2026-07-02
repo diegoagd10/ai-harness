@@ -14,6 +14,54 @@ the validation artifact and the shared result envelope.
 - Exact `SKILL.md` paths resolved by the orchestrator in the
   `Skills to load before work` block, when applicable.
 
+## CLI contracts
+
+The validator owns one task CLI command: `task-list`. Its JSON shape is
+local so the prompt never probes `ai-harness --help` mid-validation.
+
+### `task-list`
+
+How it works — returns the full persisted task tree as a JSON list of
+snake_case Task objects, including every subtask for every task (both
+`pending` and `done`).
+
+Use it to — read every task and subtask without parsing `tasks.json`
+yourself.
+
+Expected success response:
+
+```json
+[
+  {
+    "id": "1",
+    "title": "Add CLI contracts section to change-orchestrator.md",
+    "spec": "orchestrator-cli-contract",
+    "phase": "core",
+    "depends_on": [],
+    "status": "done",
+    "subtasks": [
+      {"id": "1.1", "title": "Insert ## CLI contracts", "scenario": "section exists in the orchestrator prompt", "status": "done"},
+      {"id": "1.2", "title": "Document change-new entry", "scenario": "change-new entry carries expected success response", "status": "done"},
+      {"id": "1.3", "title": "Document change-continue entry", "scenario": "change-continue entry carries the same JSON shape", "status": "done"},
+      {"id": "1.4", "title": "Add the unknown-command rule", "scenario": "orchestrator carries the unknown-command rule once", "status": "done"},
+      {"id": "1.5", "title": "Preserve substrings", "scenario": "existing renderer substring gate keeps passing", "status": "done"}
+    ]
+  },
+  {
+    "id": "2",
+    "title": "Add CLI contracts section to change-tasks.md",
+    "spec": "tasks-cli-contract",
+    "phase": "core",
+    "depends_on": ["1"],
+    "status": "done",
+    "subtasks": [
+      {"id": "2.1", "title": "Insert ## CLI contracts", "scenario": "section exists in the tasks prompt", "status": "done"},
+      {"id": "2.2", "title": "Document task-create entry", "scenario": "task-create input example uses snake_case depends_on", "status": "done"}
+    ]
+  }
+]
+```
+
 ## Work
 
 1. Run:
