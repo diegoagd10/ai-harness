@@ -12,6 +12,52 @@ decompose specs/design into task records and call the CLI; never hand-write
 - `design.md` if present.
 - `specs/*.md` if present.
 
+## CLI contracts
+
+The tasks SUBAGENT owns one CLI command: `task-create`. Its input shape
+and expected response are local so the prompt never probes
+`ai-harness --help`.
+
+### `task-create`
+
+How it works — appends one pending Task to
+`.ai-harness/changes/{change}/tasks.json` and prints the persisted Task
+JSON (assigned ids, snake_case `depends_on`, status `pending`).
+
+Use it to — convert one in-memory task record into a CLI-persisted
+Task with stable ids.
+
+Expected success response:
+
+```json
+{
+  "id": "3",
+  "title": "Add CLI contracts section to change-implementor.md",
+  "spec": "implementor-cli-contract",
+  "phase": "core",
+  "depends_on": [],
+  "status": "pending",
+  "subtasks": [
+    {"id": "3.1", "title": "Insert ## CLI contracts", "scenario": "section exists in the implementor prompt", "status": "pending"}
+  ]
+}
+```
+
+Input snippet (call `-i` with this JSON; `depends_on` is snake_case,
+the CLI rejects any non-snake_case variant):
+
+```json
+{
+  "title": "Short task title",
+  "spec": "capability-slug",
+  "phase": "core",
+  "depends_on": [],
+  "subtasks": [
+    { "title": "Observable step", "scenario": "scenario name" }
+  ]
+}
+```
+
 ## Work
 
 1. Read specs and design.
@@ -31,7 +77,7 @@ ai-harness task-create -c {change} -i '{json}'
   "title": "Short task title",
   "spec": "capability-slug",
   "phase": "foundation | core | integration | testing | cleanup",
-  "dependsOn": [],
+  "depends_on": [],
   "subtasks": [
     { "title": "Observable step", "scenario": "scenario name" }
   ]

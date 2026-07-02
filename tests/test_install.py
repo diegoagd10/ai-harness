@@ -314,6 +314,7 @@ _CHANGE_SUBAGENT_NAMES = (
     "change-implementor",
     "change-validator",
     "change-archiver",
+) + (
     "change-design",
     "change-propose",
     "change-specs",
