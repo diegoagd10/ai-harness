@@ -441,6 +441,90 @@ folder has moved to `.ai-harness/archive/{change}/` — do NOT spawn
 `change-archiver` again, do NOT call `change-continue`. Treat the
 flow as already terminal and return `status: done`.
 
+## CLI contracts
+
+The orchestrator owns the change-lifecycle routing surface. Two
+commands suffice; their JSON shapes are local so the orchestrator never
+probes `ai-harness --help` at runtime.
+
+### Unknown `ai-harness` / workflow commands
+
+The orchestrator is the user-facing surface for command authority. If
+the user names an `ai-harness` or workflow command that is not in the
+local contract below, do NOT invent it and do NOT reflexively run
+`ai-harness --help`. If the user named a concrete command, verify it
+exists (e.g. `ai-harness {cmd} --help` or by checking the known command
+surface), report the absence, and either route through an authorized
+mechanism or propose adding the CLI contract / command. This rule
+lives only in the orchestrator; subagents stay narrow on purpose.
+
+### `change-new`
+
+How it works — creates `.ai-harness/changes/{name}/` and prints the
+derived `ChangeStatus` JSON so the orchestrator can pick the first
+phase from `nextRecommended`.
+
+Use it to — start a new Change.
+
+Expected success response — same shape as `change-continue`; example:
+
+```json
+{
+  "schemaName": "ai-harness.change-status",
+  "schemaVersion": 1,
+  "changeName": "agent-cli-contracts",
+  "changeRoot": ".ai-harness/changes/agent-cli-contracts",
+  "artifactPaths": {
+    "exploration": [".ai-harness/changes/agent-cli-contracts/exploration.md"],
+    "prd": [],
+    "design": [],
+    "specs": [],
+    "tasks": [],
+    "implementation": [],
+    "validation": []
+  },
+  "artifacts": {
+    "explore": "missing",
+    "prd": "missing",
+    "design": "missing",
+    "specs": "missing",
+    "tasks": "missing",
+    "implement": "missing",
+    "validate": "missing",
+    "archive": "missing"
+  },
+  "taskProgress": {"total": 0, "completed": 0, "pending": 0, "allComplete": true},
+  "dependencies": {
+    "explore": "ready",
+    "prd": "blocked",
+    "design": "blocked",
+    "specs": "blocked",
+    "tasks": "blocked",
+    "implement": "blocked",
+    "validate": "blocked",
+    "archive": "blocked"
+  },
+  "relationships": {"parent": null, "siblings": [], "children": []},
+  "phaseInstructions": null,
+  "nextRecommended": "explore",
+  "blockedReasons": []
+}
+```
+
+### `change-continue`
+
+How it works — derives fresh status for an existing change folder and
+prints the same `ChangeStatus` JSON shape. Hard-errors when the folder
+is absent (Resume-mode typo); never silently creates an empty folder.
+
+Use it to — resume a known Change or read fresh routing state after a
+phase lands.
+
+Expected success response — same `ChangeStatus` JSON shape as
+`change-new`. The `nextRecommended` field names the next routing phase
+(`explore`, `prd`, `design`, `specs`, `tasks`, `implement`, `validate`,
+`archive`, or `resolve-blockers`).
+
 ## Work rules
 
 - Work on the current worktree and current branch. No branch switches, no
