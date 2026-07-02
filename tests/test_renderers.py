@@ -2472,44 +2472,24 @@ def test_change_orchestrator_body_similarity_check_tokens(cli: AgentCli) -> None
 
 
 @pytest.mark.parametrize("cli", NATIVE_RENDERERS)
-def test_change_orchestrator_body_five_pinned_gentle_ai_markers(cli: AgentCli) -> None:
-    """Subtask 5.10 — every pinned Gentle-AI line reference is present in every renderer.
+def test_change_orchestrator_body_is_self_contained_without_gentle_ai_dependency(cli: AgentCli) -> None:
+    """Rendered orchestrator must not require external prior-art repos.
 
-    No invented gentle-ai/ paths. The five pinned references are:
-    gentle-ai/README.md:51-64, opencode/sdd-orchestrator.md:18-64,
-    :100-160, :178-200, antigravity/sdd-orchestrator.md:36-76.
+    The planning artifacts may cite prior art, but the installed prompt must
+    be self-contained so users without that repository get the full policy.
     """
     body = _native_change_orchestrator_body(cli)
+    lower_body = body.lower()
 
-    refs = (
-        "gentle-ai/README.md:51-64",
-        "gentle-ai/internal/assets/opencode/sdd-orchestrator.md:18-64",
-        "gentle-ai/internal/assets/opencode/sdd-orchestrator.md:100-160",
-        "gentle-ai/internal/assets/opencode/sdd-orchestrator.md:178-200",
-        "gentle-ai/internal/assets/antigravity/sdd-orchestrator.md:36-76",
-    )
-    for ref in refs:
-        assert ref in body, f"{cli}: missing pinned Gentle-AI reference {ref!r}"
+    assert "gentle-ai/" not in body, f"{cli}: rendered prompt leaks gentle-ai path references"
+    assert "self-contained" in lower_body, f"{cli}: rendered prompt does not state self-contained policy"
 
 
 @pytest.mark.parametrize("cli", NATIVE_RENDERERS)
-def test_change_orchestrator_body_no_invented_gentle_ai_paths(cli: AgentCli) -> None:
-    """Subtask 5.10 — no invented gentle-ai/ paths in the rendered body.
-
-    Any path matching the gentle-ai/ prefix must be one of the five
-    pinned references above. New paths break the test.
-    """
+def test_change_orchestrator_body_no_external_prior_art_paths(cli: AgentCli) -> None:
+    """No external prior-art paths should appear in the rendered body."""
     body = _native_change_orchestrator_body(cli)
-    pinned = {
-        "gentle-ai/README.md:51-64",
-        "gentle-ai/internal/assets/opencode/sdd-orchestrator.md:18-64",
-        "gentle-ai/internal/assets/opencode/sdd-orchestrator.md:100-160",
-        "gentle-ai/internal/assets/opencode/sdd-orchestrator.md:178-200",
-        "gentle-ai/internal/assets/antigravity/sdd-orchestrator.md:36-76",
-    }
-    found = set(re.findall(r"gentle-ai/[\w./\-:]+", body))
-    extra = found - pinned
-    assert not extra, f"{cli}: invented gentle-ai/ paths found: {sorted(extra)}"
+    assert not re.search(r"gentle-ai/[\w./\-:]+", body), f"{cli}: external gentle-ai path leaked"
 
 
 @pytest.mark.parametrize("cli", NATIVE_RENDERERS)
