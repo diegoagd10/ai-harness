@@ -15,6 +15,68 @@ commit.
 - Exact `SKILL.md` paths resolved by the orchestrator in the
   `Skills to load before work` block, when applicable.
 
+## CLI contracts
+
+The implementor owns two task CLI commands: `task-next` and `task-done`.
+Their JSON shapes live here so the prompt never probes `ai-harness
+--help` mid-loop.
+
+### `task-next`
+
+How it works — returns the lowest-id pending Task whose dependencies
+are all done, with only its *undone* subtasks listed (already-done
+subtasks are filtered out). Prints the Task JSON, or prints `null`
+when nothing is pending.
+
+Use it to — pick the next slice of work without re-reading
+`tasks.json` yourself.
+
+Expected success response — pending Task, or `null`:
+
+```json
+{
+  "id": "2",
+  "title": "Add CLI contracts section to change-tasks.md",
+  "spec": "tasks-cli-contract",
+  "phase": "core",
+  "depends_on": ["1"],
+  "status": "pending",
+  "subtasks": [
+    {"id": "2.1", "title": "Insert ## CLI contracts", "scenario": "section exists in the tasks prompt", "status": "pending"}
+  ]
+}
+```
+
+```json
+null
+```
+
+### `task-done`
+
+How it works — marks one task or subtask done and prints the
+*containing* Task JSON. Pass a top-level id (`"3"`) to mark the whole
+task done; pass a dotted subtask id (`"3.2"`) to mark only that
+subtask. When the last undone subtask of a parent completes, the parent
+is auto-marked done.
+
+Use it to — close out a task or subtask after the commit lands.
+
+Expected success response:
+
+```json
+{
+  "id": "3",
+  "title": "Add CLI contracts section to change-validator.md",
+  "spec": "validator-cli-contract",
+  "phase": "core",
+  "depends_on": ["1", "2"],
+  "status": "pending",
+  "subtasks": [
+    {"id": "3.1", "title": "Insert ## CLI contracts", "scenario": "section exists in the validator prompt", "status": "done"}
+  ]
+}
+```
+
 ## Loop
 
 1. Run:
