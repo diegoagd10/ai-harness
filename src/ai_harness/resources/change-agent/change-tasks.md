@@ -44,7 +44,7 @@ Expected success response:
 ```
 
 Input snippet (call `-i` with this JSON; `depends_on` is snake_case,
-the CLI rejects `dependsOn`):
+the CLI rejects any non-snake_case variant):
 
 ```json
 {
