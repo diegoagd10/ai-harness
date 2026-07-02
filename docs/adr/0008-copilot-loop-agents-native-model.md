@@ -1,3 +1,6 @@
+> **Superseded** — the loop agent set was removed in the `deprecate-loop` change.
+> This ADR is retained as a historical decision record.
+
 # Copilot loop agents render name+description only; model stays native
 
 The Copilot loop agent renderer writes only `name` and `description` into each

@@ -8,7 +8,7 @@ this file is a thin adapter that:
 2. Walks the user through the agent → model → effort → confirm flow.
 3. Seeds each picker with the value currently in the override store.
 4. Writes the chosen overrides atomically and re-renders Claude's installed
-   loop agents when the user confirms.
+   change agents when the user confirms.
 5. Translates questionary's ``KeyboardInterrupt`` (Ctrl+C) into a no-op
    cancel that returns without writing.
 
@@ -53,7 +53,6 @@ from ai_harness.modules.wizard.pure import (
     join_opencode_catalog,
     opencode_change_agents,
     opencode_model_is_reasoning,
-    opencode_wizard_agents,
 )
 
 if TYPE_CHECKING:
@@ -616,21 +615,20 @@ def _drive_phases(phases: list[Callable[[], str]]) -> bool:
     return True
 
 
-def run_claude_wizard(*, home: Path, agent_mode: AgentMode = AgentMode.LOOP) -> bool:
+def run_claude_wizard(*, home: Path, agent_mode: AgentMode = AgentMode.CHANGE) -> bool:
     """Run the full Claude wizard; return True if overrides were written, False on cancel.
 
     *agent_mode* is accepted for signature symmetry with
     :func:`run_opencode_wizard` but is intentionally IGNORED here —
-    Claude only configures one agent set (the three subagents), so the
-    ``-a/--agent`` flag has no semantic on this branch. The dispatcher
-    :func:`run_wizard` does not even thread the parameter into the
-    claude branch in :func:`run_wizard`; the parameter exists only so
-    every wizard entry-point carries the same kw-only surface and the
-    CLI adapter's call site stays uniform. No notice is printed when
-    ``-a change`` is paired with ``-o claude`` — silent by design.
+    Claude always configures the change agent set regardless of the flag,
+    so the ``-a/--agent`` flag has no semantic on this branch. The
+    parameter exists only so every wizard entry-point carries the same
+    kw-only surface and the CLI adapter's call site stays uniform. No
+    notice is printed when ``-a change`` is paired with ``-o claude`` —
+    silent by design.
 
     On success: writes the override store and re-renders Claude's installed
-    loop agents (generic is NOT reinstalled — that would touch files
+    change agents (generic is NOT reinstalled — that would touch files
     outside the wizard's scope).
     """
     # Phase 1: model pass — snapshot the baseline so Phase 3 can tell what
@@ -718,14 +716,14 @@ def run_claude_wizard(*, home: Path, agent_mode: AgentMode = AgentMode.LOOP) -> 
         return True
     write_override_store(home, payload)
 
-    # Re-render Claude's installed loop agents with the fresh overrides.
+    # Re-render Claude's installed change agents with the fresh overrides.
     # ``re_render_for_agent_clis`` writes only the rendered-agent files and
     # leaves ``~/.ai-harness/installed.json`` untouched — unlike
     # ``install_for_agent_clis`` with a single CLI, which would rewrite the
     # manifest to only contain Claude and silently drop entries for any
     # other installed CLIs (generic, copilot, opencode). Generic is
     # intentionally a no-op: set-models is a scoped operation that
-    # re-emits only the loop-agent files whose override state just changed.
+    # re-emits only the change-agent files whose override state just changed.
     try:
         re_render_for_agent_clis([AgentCli.CLAUDE], home=home)
     except (OSError, ValueError) as exc:
@@ -799,11 +797,11 @@ def _ask_opencode_continue_or_agent(
     "← Back" choice returning ``Nav.BACK`` so the user can return to the
     previous phase.
 
-    *agents* is the opencode agent set the wizard was launched for
-    (loop vs change). The dispatcher (``run_wizard``) selects it from
-    :func:`opencode_wizard_agents` / :func:`opencode_change_agents` and
-    threads it through; this prompt must NOT re-derive the set — the
-    parameter is the single source of truth (``req:wizard-opencode-agent-set-003``).
+    *agents* is the opencode agent set the wizard was launched for.
+    The dispatcher (``run_wizard``) resolves it via
+    :func:`opencode_change_agents` and threads it through; this prompt
+    must NOT re-derive the set — the parameter is the single source of
+    truth (``req:wizard-opencode-agent-set-003``).
 
     Pressing Esc behaves like "← Back" on every phase except the first
     ("model"), which has no predecessor to return to — there Esc is a
@@ -852,10 +850,9 @@ def run_opencode_wizard(
 ) -> bool:
     """Run the full OpenCode wizard for *agents*; return True if overrides were written, False on cancel.
 
-    *agents* is the agent set the wizard will configure — chosen by the
-    dispatcher (:func:`run_wizard`) from :func:`opencode_wizard_agents`
-    or :func:`opencode_change_agents` per the ``-a/--agent`` flag. The
-    wizard body MUST NOT call those accessors directly; *agents* is the
+    *agents* is the agent set the wizard will configure — resolved by the
+    dispatcher (:func:`run_wizard`) via :func:`opencode_change_agents`.
+    The wizard body MUST NOT call those accessors directly; *agents* is the
     single source of truth inside this body
     (``req:wizard-opencode-agent-set-003``).
 
@@ -898,7 +895,7 @@ def run_opencode_wizard(
     # the user actually changed. Seeding `models` from the baseline also
     # means "continue without picking an agent" leaves that agent at its
     # baseline value (no implicit default overwrite). The `agents`
-    # parameter (not opencode_wizard_agents()) is the source of truth
+    # parameter (not opencode_change_agents()) is the source of truth
     # for which agents belong to this wizard session.
     baseline_models: dict[str, str] = {agent: (_current_opencode_model(agent, home) or "") for agent in agents}
     baseline_efforts: dict[str, str | None] = {agent: _current_opencode_effort(agent, home) for agent in agents}
@@ -991,14 +988,12 @@ def run_opencode_wizard(
         return True
     write_override_store(home, payload)
 
-    # Re-render OpenCode's installed loop agents with the fresh overrides.
+    # Re-render OpenCode's installed change agents with the fresh overrides.
     # ``re_render_for_agent_clis`` writes only the rendered-agent files and
     # leaves ``~/.ai-harness/installed.json`` untouched — same scoped
-    # refresh as the Claude path uses. _discover_loop_agents() walks
-    # BOTH loop-agent/ AND change-agent/ resource dirs so all 12
-    # .config/opencode/agent/*.md files are re-emitted on every
-    # confirm, regardless of which agent set was just configured
-    # (req:re-render-scope-001).
+    # refresh as the Claude path uses. _discover_agents() walks the
+    # change-agent/ resource dir so all 9 .config/opencode/agent/*.md
+    # files are re-emitted on every confirm (req:re-render-scope-001).
     try:
         re_render_for_agent_clis([AgentCli.OPENCODE], home=home)
     except (OSError, ValueError) as exc:
@@ -1009,19 +1004,18 @@ def run_opencode_wizard(
     return True
 
 
-def run_wizard(cli: AgentCli, *, home: Path, agent_mode: AgentMode = AgentMode.LOOP) -> bool:
+def run_wizard(cli: AgentCli, *, home: Path, agent_mode: AgentMode = AgentMode.CHANGE) -> bool:
     """Run the set-models wizard for *cli*; return True if overrides were written.
 
     Supports Claude and OpenCode. Generic and Copilot are not wizard
     targets at all (the wizard command rejects them up front).
 
-    *agent_mode* selects which agent set the opencode wizard targets
-    (``LOOP`` for the four loop agents, ``CHANGE`` for the eight change
-    agents). This dispatcher resolves the agent tuple HERE — never
-    inside the wizard body — and passes it down as a single ``agents``
-    parameter (req:wizard-opencode-agent-set-002). The Claude branch
-    ignores the flag (one agent set only) so it does not participate
-    in the selection.
+    *agent_mode* is accepted for forward compatibility but currently has
+    only one valid value (``CHANGE``). This dispatcher resolves the agent
+    tuple HERE — never inside the wizard body — and passes it down as a
+    single ``agents`` parameter (req:wizard-opencode-agent-set-002). The
+    Claude branch ignores the flag (one agent set only) so it does not
+    participate in the selection.
     """
     if _console.is_terminal:
         _console.clear()
@@ -1031,8 +1025,7 @@ def run_wizard(cli: AgentCli, *, home: Path, agent_mode: AgentMode = AgentMode.L
         # preserves any future logging hook without changing the seam.
         return run_claude_wizard(home=home, agent_mode=agent_mode)
     if cli == AgentCli.OPENCODE:
-        agents = opencode_change_agents() if agent_mode == AgentMode.CHANGE else opencode_wizard_agents()
-        return run_opencode_wizard(home=home, agents=agents)
+        return run_opencode_wizard(home=home, agents=opencode_change_agents())
     raise NotImplementedError(
         f"set-models for {cli.value!r} is not implemented in this slice",
     )
@@ -1043,7 +1036,7 @@ def run_wizard(cli: AgentCli, *, home: Path, agent_mode: AgentMode = AgentMode.L
 # ---------------------------------------------------------------------------
 
 
-def run_wizard_or_bail(cli: AgentCli, *, home: Path, agent_mode: AgentMode = AgentMode.LOOP) -> bool:
+def run_wizard_or_bail(cli: AgentCli, *, home: Path, agent_mode: AgentMode = AgentMode.CHANGE) -> bool:
     """Run the wizard, but bail with a clear error if the prerequisites are missing.
 
     Two distinct pre-flight checks fire BEFORE the wizard itself:
@@ -1064,7 +1057,7 @@ def run_wizard_or_bail(cli: AgentCli, *, home: Path, agent_mode: AgentMode = Age
        error rather than hang waiting for stdin that will never come.
 
     *agent_mode* is the ``-a/--agent`` flag's parsed value (defaults to
-    :data:`AgentMode.LOOP`). The opencode branch consumes it; the
+    :data:`AgentMode.CHANGE`). The opencode branch consumes it; the
     claude branch accepts it for signature symmetry and ignores it.
     """
     if cli == AgentCli.OPENCODE:

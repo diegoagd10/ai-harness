@@ -9,7 +9,7 @@ layout to destination-only paths when unused targets were dropped;
 see docs/adr/0001-collapse-agent-cli-paths.md for rationale.
 
 Agent CLIs that support agents as a native concept (OpenCode) get the
-loop agent templates rendered into their agent directory instead of the
+change agent templates rendered into their agent directory instead of the
 persona+skills pair. Each CLI's render is handled by a provider-specific
 function in ``renderers.py``.
 
@@ -18,7 +18,7 @@ Public surface (re-exported from the package)
 InstallManifest            The exact record uninstall_for_agent_clis consumes.
 InitResult                 Observable outcome of init_repo.
 install_for_agent_clis     Map bundled resources to agent CLI paths, write, record manifest.
-re_render_for_agent_clis   Re-write rendered loop agents without touching the install manifest.
+re_render_for_agent_clis   Re-write rendered change agents without touching the install manifest.
 uninstall_for_agent_clis   Remove files recorded in the manifest.
 init_repo                  Scaffold CODING_STANDARDS.md and the agent-doc init block.
 """
@@ -145,7 +145,7 @@ def install_for_agent_clis(agent_clis: list[AgentCli], *, home: Path | None = No
     Generic is always included in *agent_clis* — callers must prepend it.
 
     Each agent CLI's artifacts are described by ``_INSTALL_PLAN``: the persona
-    file + skills tree, the rendered loop agents, or both. An agent CLI absent
+    file + skills tree, the rendered change agents, or both. An agent CLI absent
     from the plan writes nothing.
     """
     home = home if home is not None else Path.home()
@@ -167,10 +167,10 @@ def install_for_agent_clis(agent_clis: list[AgentCli], *, home: Path | None = No
 
 
 def re_render_for_agent_clis(agent_clis: list[AgentCli], *, home: Path | None = None) -> list[Path]:
-    """Re-write the rendered loop agents for *agent_clis* without touching the install manifest.
+    """Re-write the rendered change agents for *agent_clis* without touching the install manifest.
 
     Use this for scoped refreshes — e.g. the ``set-models`` wizard editing
-    ``overrides.json`` and re-emitting Claude's loop agents — where calling
+    ``overrides.json`` and re-emitting Claude's change agents — where calling
     ``install_for_agent_clis`` with a single CLI would clobber the entries
     for other installed CLIs in ``~/.ai-harness/installed.json``.
 
@@ -180,7 +180,7 @@ def re_render_for_agent_clis(agent_clis: list[AgentCli], *, home: Path | None = 
       install-time artifacts that do not depend on override state and are
       intentionally left alone. Re-running them would re-copy the static
       template tree and add nothing.
-    - CLIs without native loop-agent support (GENERIC) are no-ops
+    - CLIs without native change-agent support (GENERIC) are no-ops
       — they have an empty entry in ``_RENDER_PLAN``.
     - The install manifest is **never read or written**. The re-render path
       stays orthogonal to install bookkeeping; if a manifest exists, it is
@@ -283,7 +283,18 @@ def _walk_files(root: Path) -> list[Path]:
 
 
 def _write_persona_and_skills(home: Path, *, config_dest_rel: str, tree_dest_rel: str) -> list[Path]:
-    """Copy the persona file + skills tree into *home*; return absolute paths written."""
+    """Copy the persona file + skills tree into *home*; return absolute paths written.
+
+    The returned paths enumerate what this call copied, not what was already
+    on disk under the destination tree. Walking the destination tree after
+    ``shutil.copytree`` would include leftover files from prior installs
+    (e.g. a renderer-written skill at ``<tree_dest>/<name>/SKILL.md``), which
+    breaks idempotent-reinstall manifests: the second install would record
+    those leftovers under the persona+skills writer's entry, double-counting
+    paths the renderer already records, and the install manifest's md5
+    would change between reinstalls. See regression test
+    ``test_install_claude_manifest_is_byte_identical_on_reinstall``.
+    """
     resources = _resources_root()
     written: list[Path] = []
 
@@ -292,15 +303,21 @@ def _write_persona_and_skills(home: Path, *, config_dest_rel: str, tree_dest_rel
     shutil.copy2(resources / _CONFIG_SOURCE, config_dest)
     written.append(config_dest)
 
+    source_tree = resources / _TREE_SOURCE
     tree_dest = home / tree_dest_rel
-    shutil.copytree(resources / _TREE_SOURCE, tree_dest, dirs_exist_ok=True)
-    written.extend(_walk_files(tree_dest))
+    shutil.copytree(source_tree, tree_dest, dirs_exist_ok=True)
+    # Walk the SOURCE tree to know what this call copied; translate each
+    # source path to its dest path so the manifest records destination-side
+    # rel paths consistently with the renderer-writer output.
+    for src in _walk_files(source_tree):
+        rel = src.relative_to(source_tree).as_posix()
+        written.append(tree_dest / rel)
 
     return written
 
 
 def _write_rendered_agents(home: Path, *, cli: AgentCli) -> list[Path]:
-    """Render the loop agents for *cli* into *home*; return absolute paths written.
+    """Render the change agents for *cli* into *home*; return absolute paths written.
 
     Delegates override-store loading to ``render_agents`` (which reads
     ``~/.ai-harness/overrides.json`` itself), so a missing file is a no-op

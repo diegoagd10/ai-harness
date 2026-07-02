@@ -1,3 +1,6 @@
+> **Superseded** — the loop agent set was removed in the `deprecate-loop` change.
+> This ADR is retained as a historical decision record.
+
 # Loop session-PR contract and prd-issue linking
 
 ## Context

@@ -9,7 +9,7 @@ Public surface
 --------------
 AgentCaps              What an agent may do, in CLI-neutral terms.
 RenderedFile           One rendered agent file: a home-relative path and the file's full content.
-render_agents          Render loop agents for a CLI as home-relative ``RenderedFile`` records.
+render_agents          Render change agents for a CLI as home-relative ``RenderedFile`` records.
 get_agent_meta         Return the metadata dict for a named agent.
 write_override_store   Deep-merge into the per-agent override store at ``~/.ai-harness/overrides.json``.
 
@@ -44,7 +44,7 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 _AGENT_PACKAGE = "ai_harness.resources"
-_AGENT_RESOURCE_DIRS: tuple[str | Traversable, ...] = ("loop-agent", "change-agent")
+_AGENT_RESOURCE_DIRS: tuple[str | Traversable, ...] = ("change-agent",)
 
 _OVERRIDES_REL = ".ai-harness/overrides.json"
 
@@ -100,14 +100,14 @@ def render_agents(
     *,
     home: Path | None = None,
 ) -> list[RenderedFile]:
-    """Render the loop agents for *cli* as home-relative ``RenderedFile`` records.
+    """Render the change agents for *cli* as home-relative ``RenderedFile`` records.
 
     The sole public agent-render entry. Owns skill-vs-agent mode dispatch,
     destination directory layout, and filename. Returns POSIX home-relative
     paths in discovery (sorted) order so output is byte-identical to the prior
     inline emission.
 
-    *names* defaults to the discovered loop agents; pass an explicit list to
+    *names* defaults to the discovered change agents; pass an explicit list to
     render a subset. *overrides* is an optional per-agent partial overlay
     deep-merged over the template defaults; ``None`` loads the override
     store from ``home/.ai-harness/overrides.json`` (default
@@ -115,7 +115,7 @@ def render_agents(
     agent support return an empty list.
     """
     if names is None:
-        names = _discover_loop_agents()
+        names = _discover_agents()
 
     if overrides is None:
         overrides = _load_override_store(home if home is not None else Path.home())
@@ -210,61 +210,6 @@ def _claude_tools(caps: AgentCaps) -> list[str]:
 
 
 _AGENT_META: dict[str, dict] = {
-    "explorer": {
-        "description": (
-            "Read-only investigator. Given a GitHub issue, returns a focused plan "
-            "(affected files, steps, edge cases, test surface, risks) before implementation begins."
-        ),
-        "mode": "subagent",
-        "model": {
-            "opencode": "opencode-go/kimi-k2.7-code",
-            "claude": "sonnet",
-        },
-        "caps": AgentCaps(write=False),
-    },
-    "implementor": {
-        "description": (
-            "Implements one GitHub issue on the worktree's current branch. TDD, quality gates, "
-            "ONE commit whose format follows CODING_STANDARDS.md ## Commits; the "
-            "issue number must appear in the commit. Never closes the issue itself "
-            "— the orchestrator closes it right after a clean validator pass. "
-            "Reports BLOCKED if the issue cannot be resolved."
-        ),
-        "mode": "subagent",
-        "model": {
-            "opencode": "opencode-go/deepseek-v4-pro",
-            "claude": "sonnet",
-        },
-    },
-    "validator": {
-        "description": (
-            "Read-only reviewer. Audits the diff for correctness, edge cases, type safety, "
-            "and quality-gate compliance. Verifies the implementation covers the user stories "
-            "from the parent PRD. Emits BLOCKER | CRITICAL | WARNING | SUGGESTION findings."
-        ),
-        "mode": "subagent",
-        "model": {
-            "opencode": "openai/gpt-5.4-mini",
-            "claude": "sonnet",
-        },
-        "caps": AgentCaps(write=False),
-    },
-    "loop-orchestrator": {
-        "description": (
-            "Loop orchestrator — drains loop-labeled sub-issues onto the worktree's current "
-            "branch via explorer → implementor → validator subagents, looping "
-            "implementor↔validator on any finding until clean, then opens ONE PR for "
-            "the whole session. Never creates branches or touches main directly; closes each "
-            "issue itself right after its validator pass is clean."
-        ),
-        "mode": "primary",
-        "color": "error",
-        "model": {
-            "opencode": "openai/gpt-5.5",
-            "claude": "sonnet",
-        },
-        "caps": AgentCaps(write=False, spawn=("explorer", "implementor", "validator")),
-    },
     "change-orchestrator": {
         "description": (
             "Change orchestrator — coordinates file-backed change sets through explore, planning, "
@@ -439,11 +384,11 @@ def _get_agent_mode(
     return get_agent_meta(name, overrides=overrides, home=home).get("mode", "subagent")
 
 
-def _discover_loop_agents() -> list[str]:
+def _discover_agents() -> list[str]:
     """Return list of agent template names (without .md extension) in resource-set order.
 
-    Files whose name starts with ``_`` (e.g. ``_result-contract.md``) are
-    excluded — they are bundled resources, not agents.
+    Files whose name starts with ``_`` are excluded — they are bundled
+    resources, not agents.
     """
     names: list[str] = []
     seen: dict[str, str] = {}
@@ -496,7 +441,7 @@ def _yaml_dump_frontmatter(data: dict[str, object]) -> str:
 
 
 def _render_opencode_agent(name: str, overrides: dict | None = None) -> RenderedFile:
-    """Render a loop agent template into an OpenCode agent file.
+    """Render a change agent template into an OpenCode agent file.
 
     Returns a :class:`RenderedFile` whose ``filename`` is ``<name>.md`` and
     whose ``content`` is the full rendered frontmatter + body.
@@ -544,7 +489,7 @@ def _render_opencode_agent(name: str, overrides: dict | None = None) -> Rendered
 
 
 def _render_claude_agent(name: str, overrides: dict | None = None) -> RenderedFile:
-    """Render a loop agent template into a Claude Code agent file.
+    """Render a change agent template into a Claude Code agent file.
 
     Returns a :class:`RenderedFile` whose ``filename`` is ``<name>.md`` and
     whose ``content`` is the full rendered frontmatter + body.
@@ -590,7 +535,7 @@ def _render_claude_agent(name: str, overrides: dict | None = None) -> RenderedFi
 
 
 def _render_claude_skill(name: str, overrides: dict | None = None) -> RenderedFile:
-    """Render the primary loop agent template into a Claude Code skill file.
+    """Render the primary change agent template into a Claude Code skill file.
 
     Returns a :class:`RenderedFile` whose ``filename`` is ``SKILL.md`` and
     whose ``content`` is the full rendered frontmatter + body.
@@ -664,7 +609,7 @@ def _render_claude(
     *,
     home: Path | None = None,
 ) -> RenderedFile:
-    """Render one Claude loop agent as a home-relative ``RenderedFile`` record.
+    """Render one Claude change agent as a home-relative ``RenderedFile`` record.
 
     Primary agents become the orchestrator skill; all others become subagents.
     """
@@ -676,13 +621,13 @@ def _render_claude(
 
 
 def _render_opencode(name: str, overrides: dict | None = None) -> RenderedFile:
-    """Render one OpenCode loop agent as a home-relative ``RenderedFile`` record."""
+    """Render one OpenCode change agent as a home-relative ``RenderedFile`` record."""
     rendered = _render_opencode_agent(name, overrides=overrides)
     return RenderedFile(f"{_OPENCODE_AGENT_DIR}/{rendered.filename}", rendered.content)
 
 
 def _render_copilot_agent(name: str, overrides: dict | None = None) -> RenderedFile:
-    """Render a loop agent template into a Copilot agent file.
+    """Render a change agent template into a Copilot agent file.
 
     Returns a :class:`RenderedFile` whose ``filename`` is ``<name>.agent.md``
     and whose ``content`` is the full rendered frontmatter + body.
@@ -713,6 +658,6 @@ def _render_copilot(
     *,
     home: Path | None = None,
 ) -> RenderedFile:
-    """Render one Copilot loop agent as a home-relative ``RenderedFile`` record."""
+    """Render one Copilot change agent as a home-relative ``RenderedFile`` record."""
     rendered = _render_copilot_agent(name, overrides=overrides)
     return RenderedFile(f"{_COPILOT_AGENT_DIR}/{rendered.filename}", rendered.content)

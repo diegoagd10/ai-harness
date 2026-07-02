@@ -1,4 +1,4 @@
-"""Git worktree isolation command for the loop workflow.
+"""Git worktree isolation command for the change workflow.
 
 Creates a worktree on a new branch under ``.ai-harness/worktrees/``,
 based on the current branch's HEAD, and lazily writes a nested

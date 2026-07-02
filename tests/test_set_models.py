@@ -48,7 +48,6 @@ from ai_harness.modules.wizard.pure import (
     opencode_change_agents,
     opencode_efforts,
     opencode_model_is_reasoning,
-    opencode_wizard_agents,
     parse_agent_mode,
 )
 
@@ -101,24 +100,24 @@ def test_claude_efforts_is_the_fixed_set() -> None:
     assert claude_efforts() == ("low", "medium", "high", "xhigh", "max")
 
 
-def test_claude_wizard_agents_excludes_orchestrator() -> None:
-    """The Claude wizard configures the three subagents; the orchestrator skill is fixed."""
-    assert claude_wizard_agents() == ("explorer", "implementor", "validator")
+def test_claude_wizard_agents_includes_all_nine() -> None:
+    """The Claude wizard presents all 9 change agents including the orchestrator."""
+    assert claude_wizard_agents() == (
+        "change-orchestrator",
+        "change-explorer",
+        "change-implementor",
+        "change-validator",
+        "change-archiver",
+        "change-design",
+        "change-propose",
+        "change-specs",
+        "change-tasks",
+    )
 
 
 # ---------------------------------------------------------------------------
 # Fixed OpenCode vocabulary — the wizard's vocabulary lives in the pure module
 # ---------------------------------------------------------------------------
-
-
-def test_opencode_wizard_agents_includes_orchestrator_first() -> None:
-    """The OpenCode wizard configures all four loop agents, orchestrator on top.
-
-    Acceptance criterion: ``set-models -o opencode`` lists all four loop
-    agents with the orchestrator on top. The orchestrator is a primary
-    OpenCode agent (not a skill) so it carries a model and is configurable.
-    """
-    assert opencode_wizard_agents() == ("loop-orchestrator", "explorer", "implementor", "validator")
 
 
 def test_opencode_efforts_is_the_reasoning_effort_set() -> None:
@@ -134,7 +133,7 @@ def test_opencode_efforts_is_the_reasoning_effort_set() -> None:
 def test_opencode_change_agents_returns_eight_change_agents() -> None:
     """The change-agent set is exactly the eight named agents, orchestrator first.
 
-    Mirrors ``test_opencode_wizard_agents_includes_orchestrator_first``:
+    Mirrors ``test_claude_wizard_agents_includes_all_nine``:
     the orchestrator leads because on OpenCode it is a primary agent
     carrying a model and effort (not a skill). Order is intentional and
     pinned — a future rename / re-order is a deliberate design change,
@@ -163,13 +162,21 @@ def test_opencode_change_agents_returns_same_tuple_object_each_call() -> None:
     assert opencode_change_agents() is opencode_change_agents()
 
 
-def test_parse_agent_mode_accepts_loop_and_change() -> None:
-    """``parse_agent_mode`` round-trips both valid lowercase values."""
-    assert parse_agent_mode("loop") == AgentMode.LOOP
+def test_parse_agent_mode_accepts_change() -> None:
+    """``parse_agent_mode`` round-trips the only valid lowercase value."""
     assert parse_agent_mode("change") == AgentMode.CHANGE
     # StrEnum values compare equal to raw strings — keeps downstream == / Choice(value=...) working.
-    assert parse_agent_mode("loop") == "loop"
     assert parse_agent_mode("change") == "change"
+
+
+def test_parse_agent_mode_rejects_loop() -> None:
+    """``"loop"`` is no longer a valid value and raises ValueError."""
+    with pytest.raises(ValueError) as excinfo:
+        parse_agent_mode("loop")
+
+    message = str(excinfo.value).lower()
+    assert "change" in message
+    assert "loop" in message  # the rejected value is in the message so the user sees what was wrong
 
 
 def test_parse_agent_mode_rejects_unknown_value() -> None:
@@ -178,7 +185,6 @@ def test_parse_agent_mode_rejects_unknown_value() -> None:
         parse_agent_mode("bogus")
 
     message = str(excinfo.value).lower()
-    assert "loop" in message
     assert "change" in message
     assert "bogus" in message  # the rejected value is in the message so the user sees what was wrong
 
@@ -187,13 +193,12 @@ def test_parse_agent_mode_rejects_uppercase_strict_lowercase() -> None:
     """Uppercase / mixed-case variants are rejected — strict-lowercase vocabulary.
 
     Matches the existing lowercase vocabulary in ``CLAUDE_MODELS`` and
-    ``OPENCODE_REASONING_EFFORTS``. ``"LOOP"`` and ``"Loop"`` are NOT
+    ``OPENCODE_REASONING_EFFORTS``. ``"CHANGE"`` and ``"cHaNgE"`` are NOT
     normalised; both raise with the valid-set hint.
     """
-    for raw in ("LOOP", "Loop", "CHANGE", "cHaNgE"):
+    for raw in ("CHANGE", "cHaNgE"):
         with pytest.raises(ValueError) as excinfo:
             parse_agent_mode(raw)
-        assert "loop" in str(excinfo.value).lower()
         assert "change" in str(excinfo.value).lower()
 
 
@@ -725,7 +730,7 @@ def test_run_opencode_wizard_no_changes_does_not_create_override_file(
     confirm = _ScriptedConfirm().queue(True)
     monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
 
-    wrote = tui.run_opencode_wizard(home=tmp_path, agents=opencode_wizard_agents())
+    wrote = tui.run_opencode_wizard(home=tmp_path, agents=opencode_change_agents())
 
     assert wrote is True
     assert not _override_file(tmp_path).exists(), (
@@ -771,7 +776,7 @@ def test_run_opencode_wizard_non_reasoning_model_skips_effort_prompt(
     # Phase 2: continue (the wizard's gating skips effort for non-reasoning)
     # Phase 3: confirm
     scripted.queue(
-        "implementor",  # pick agent
+        "change-implementor",  # pick agent
         "openai/gpt-5.5-mini",  # pick model
         "__continue__",  # continue past model phase
         "__continue__",  # continue past effort phase (no effort was asked)
@@ -780,16 +785,16 @@ def test_run_opencode_wizard_non_reasoning_model_skips_effort_prompt(
     confirm = _ScriptedConfirm().queue(True)
     monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
 
-    wrote = tui.run_opencode_wizard(home=tmp_path, agents=opencode_wizard_agents())
+    wrote = tui.run_opencode_wizard(home=tmp_path, agents=opencode_change_agents())
 
     assert wrote is True
     overrides = json.loads(_override_file(tmp_path).read_text(encoding="utf-8"))
     # Only the model changed; effort was never asked (and the baseline had None).
     assert overrides == {
-        "implementor": {"model": {"opencode": "openai/gpt-5.5-mini"}},
+        "change-implementor": {"model": {"opencode": "openai/gpt-5.5-mini"}},
     }
     # No effort entry was written for this agent.
-    assert "effort" not in overrides["implementor"]
+    assert "effort" not in overrides["change-implementor"]
 
 
 def test_run_opencode_wizard_reasoning_model_prompts_for_effort(
@@ -823,10 +828,10 @@ def test_run_opencode_wizard_reasoning_model_prompts_for_effort(
 
     scripted = _ScriptedSelect()
     scripted.queue(
-        "implementor",  # model phase: pick agent
+        "change-implementor",  # model phase: pick agent
         "openai/gpt-5.5",  # pick reasoning model
         "__continue__",  # continue past model phase
-        "implementor",  # effort phase: pick agent
+        "change-implementor",  # effort phase: pick agent
         "high",  # pick effort
         "__continue__",  # continue past effort phase
     )
@@ -834,12 +839,12 @@ def test_run_opencode_wizard_reasoning_model_prompts_for_effort(
     confirm = _ScriptedConfirm().queue(True)
     monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
 
-    wrote = tui.run_opencode_wizard(home=tmp_path, agents=opencode_wizard_agents())
+    wrote = tui.run_opencode_wizard(home=tmp_path, agents=opencode_change_agents())
 
     assert wrote is True
     overrides = json.loads(_override_file(tmp_path).read_text(encoding="utf-8"))
     assert overrides == {
-        "implementor": {
+        "change-implementor": {
             "model": {"opencode": "openai/gpt-5.5"},
             "effort": {"opencode": "high"},
         },
@@ -861,7 +866,7 @@ def test_run_opencode_wizard_opencode_absent_returns_false_with_guidance(
     monkeypatch.setattr(tui, "_resolve_opencode_binary", lambda: None)
     monkeypatch.setattr(tui, "_load_opencode_catalog", lambda *a, **kw: pytest.fail("should not be called"))
 
-    wrote = tui.run_opencode_wizard(home=tmp_path, agents=opencode_wizard_agents())
+    wrote = tui.run_opencode_wizard(home=tmp_path, agents=opencode_change_agents())
 
     assert wrote is False
     assert not _override_file(tmp_path).exists()
@@ -907,10 +912,10 @@ def test_run_opencode_wizard_preserves_existing_install_manifest(
     _ScriptedSelect.instances = []
     _ScriptedConfirm.instances = []
 
-    # Edit implementor's model (non-reasoning → skip effort) then confirm.
+    # Edit change-implementor's model (non-reasoning → skip effort) then confirm.
     scripted = _ScriptedSelect()
     scripted.queue(
-        "implementor",
+        "change-implementor",
         "openai/gpt-5.5-mini",
         "__continue__",
         "__continue__",
@@ -919,11 +924,11 @@ def test_run_opencode_wizard_preserves_existing_install_manifest(
     confirm = _ScriptedConfirm().queue(True)
     monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
 
-    wrote = tui.run_opencode_wizard(home=tmp_path, agents=opencode_wizard_agents())
+    wrote = tui.run_opencode_wizard(home=tmp_path, agents=opencode_change_agents())
 
     assert wrote is True
     after = json.loads(manifest_path.read_text(encoding="utf-8"))
-    # All three CLIs survive — the re-render is scoped to OpenCode loop agents only.
+    # All three CLIs survive — the re-render is scoped to OpenCode change agents only.
     assert set(after["agent_clis"]) == {"generic", "claude", "opencode"}
     assert set(after["files_by_agent_cli"]) == {"generic", "claude", "opencode"}
 
@@ -959,7 +964,7 @@ def test_run_opencode_wizard_ctrl_c_at_model_phase_writes_nothing(
 
     monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: _CtrlC())
 
-    wrote = tui.run_opencode_wizard(home=tmp_path, agents=opencode_wizard_agents())
+    wrote = tui.run_opencode_wizard(home=tmp_path, agents=opencode_change_agents())
 
     assert wrote is False
     assert not _override_file(tmp_path).exists()
@@ -995,7 +1000,7 @@ def test_run_opencode_wizard_back_from_model_picker_returns_to_agent_choice(
 
     scripted = _ScriptedSelect()
     scripted.queue(
-        "implementor",
+        "change-implementor",
         "__back__",
         "__continue__",
         "__continue__",
@@ -1004,7 +1009,7 @@ def test_run_opencode_wizard_back_from_model_picker_returns_to_agent_choice(
     confirm = _ScriptedConfirm().queue(True)
     monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
 
-    wrote = tui.run_opencode_wizard(home=tmp_path, agents=opencode_wizard_agents())
+    wrote = tui.run_opencode_wizard(home=tmp_path, agents=opencode_change_agents())
 
     assert wrote is True
     assert not _override_file(tmp_path).exists(), (
@@ -1040,14 +1045,14 @@ def test_run_opencode_wizard_back_from_effort_picker_returns_to_agent_choice(
     _ScriptedSelect.instances = []
     _ScriptedConfirm.instances = []
 
-    # Phase 1: pick implementor -> reasoning model -> continue.
-    # Phase 2: pick implementor -> back out of effort picker -> continue.
+    # Phase 1: pick change-implementor -> reasoning model -> continue.
+    # Phase 2: pick change-implementor -> back out of effort picker -> continue.
     scripted = _ScriptedSelect()
     scripted.queue(
-        "implementor",
+        "change-implementor",
         "openai/gpt-5.5",
         "__continue__",
-        "implementor",
+        "change-implementor",
         "__back__",
         "__continue__",
     )
@@ -1055,12 +1060,12 @@ def test_run_opencode_wizard_back_from_effort_picker_returns_to_agent_choice(
     confirm = _ScriptedConfirm().queue(True)
     monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
 
-    wrote = tui.run_opencode_wizard(home=tmp_path, agents=opencode_wizard_agents())
+    wrote = tui.run_opencode_wizard(home=tmp_path, agents=opencode_change_agents())
 
     assert wrote is True
     overrides = json.loads(_override_file(tmp_path).read_text(encoding="utf-8"))
     # Only the model change survives; no effort entry was ever recorded.
-    assert overrides == {"implementor": {"model": {"opencode": "openai/gpt-5.5"}}}
+    assert overrides == {"change-implementor": {"model": {"opencode": "openai/gpt-5.5"}}}
 
 
 def test_run_opencode_wizard_back_from_effort_phase_returns_to_model_phase(
@@ -1095,13 +1100,13 @@ def test_run_opencode_wizard_back_from_effort_phase_returns_to_model_phase(
     _ScriptedSelect.instances = []
     _ScriptedConfirm.instances = []
 
-    # Phase 1: pick implementor -> reasoning model -> continue.
+    # Phase 1: pick change-implementor -> reasoning model -> continue.
     # Phase 2: back -> re-enters phase 1 (model).
-    # Phase 1 again: continue (implementor stays on the prior model edit).
+    # Phase 1 again: continue (change-implementor stays on the prior model edit).
     # Phase 2 again: continue.
     scripted = _ScriptedSelect()
     scripted.queue(
-        "implementor",
+        "change-implementor",
         "openai/gpt-5.5",
         "__continue__",
         "__back__",
@@ -1112,11 +1117,11 @@ def test_run_opencode_wizard_back_from_effort_phase_returns_to_model_phase(
     confirm = _ScriptedConfirm().queue(True)
     monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
 
-    wrote = tui.run_opencode_wizard(home=tmp_path, agents=opencode_wizard_agents())
+    wrote = tui.run_opencode_wizard(home=tmp_path, agents=opencode_change_agents())
 
     assert wrote is True
     overrides = json.loads(_override_file(tmp_path).read_text(encoding="utf-8"))
-    assert overrides == {"implementor": {"model": {"opencode": "openai/gpt-5.5"}}}
+    assert overrides == {"change-implementor": {"model": {"opencode": "openai/gpt-5.5"}}}
     assert load_calls == [1], "going back into the model phase must not re-run the catalog loader"
 
 
@@ -1138,7 +1143,7 @@ def test_run_opencode_wizard_no_back_choice_in_first_model_phase_agent_chooser(
         return _Q()
 
     monkeypatch.setattr(tui, "_filterable_select", fake_select)
-    tui._ask_opencode_continue_or_agent("model", {}, opencode_wizard_agents())
+    tui._ask_opencode_continue_or_agent("model", {}, opencode_change_agents())
 
     assert captured, "the agent chooser did not call _filterable_select"
     values = [choice.value for choice in captured[0]]
@@ -1170,7 +1175,7 @@ def test_run_opencode_wizard_esc_on_effort_phase_agent_chooser_returns_to_model_
 
     scripted = _ScriptedSelect()
     scripted.queue(
-        "implementor",
+        "change-implementor",
         "openai/gpt-5.5",
         "__continue__",
         tui.Nav.ESC_BACK,
@@ -1181,11 +1186,11 @@ def test_run_opencode_wizard_esc_on_effort_phase_agent_chooser_returns_to_model_
     confirm = _ScriptedConfirm().queue(True)
     monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
 
-    wrote = tui.run_opencode_wizard(home=tmp_path, agents=opencode_wizard_agents())
+    wrote = tui.run_opencode_wizard(home=tmp_path, agents=opencode_change_agents())
 
     assert wrote is True
     overrides = json.loads(_override_file(tmp_path).read_text(encoding="utf-8"))
-    assert overrides == {"implementor": {"model": {"opencode": "openai/gpt-5.5"}}}
+    assert overrides == {"change-implementor": {"model": {"opencode": "openai/gpt-5.5"}}}
 
 
 def test_run_opencode_wizard_esc_at_model_phase_agent_chooser_is_ignored(
@@ -1215,7 +1220,7 @@ def test_run_opencode_wizard_esc_at_model_phase_agent_chooser_is_ignored(
     confirm = _ScriptedConfirm().queue(True)
     monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
 
-    wrote = tui.run_opencode_wizard(home=tmp_path, agents=opencode_wizard_agents())
+    wrote = tui.run_opencode_wizard(home=tmp_path, agents=opencode_change_agents())
 
     assert wrote is True
     assert not _override_file(tmp_path).exists()
@@ -1286,15 +1291,12 @@ def test_run_opencode_wizard_change_agent_set_re_renders_change_agent_files(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``-a change`` re-renders ALL 13 .config/opencode/agent/*.md files (re-render scope locked at 13).
+    """``-a change`` re-renders all 9 .config/opencode/agent/*.md files (re-render scope locked at 9).
 
-    Acceptance criterion ``req:re-render-scope-001``: ``_discover_loop_agents``
-    MUST continue to walk BOTH ``loop-agent/`` and ``change-agent/`` so
-    that every on-disk prompt reflects fresh override state, regardless
-    of which agent set was just configured. After a `-a change` confirm,
-    all 4 loop-agent files AND all 9 change-agent files must be
-    re-emitted. The loop-agent files' frontmatter must NOT regress to
-    a state that ignores any pre-existing override.
+    Acceptance criterion ``req:re-render-scope-001``: ``_discover_agents``
+    walks ``change-agent/`` and re-emits all 9 change-agent files so that
+    every on-disk prompt reflects fresh override state after a ``-a change``
+    confirm.
     """
     from ai_harness.modules.wizard import tui
 
@@ -1327,9 +1329,9 @@ def test_run_opencode_wizard_change_agent_set_re_renders_change_agent_files(
     wrote = tui.run_opencode_wizard(home=tmp_path, agents=tuple(change_agents))
 
     assert wrote is True
-    # The 13 agent files the renderer discovered: 4 loop + 9 change.
-    expected_names = list(opencode_wizard_agents()) + list(opencode_change_agents())
-    assert len(expected_names) == 13, "loop + change must total 13 — discovery sanity"
+    # The 9 change-agent files the renderer discovered.
+    expected_names = list(opencode_change_agents())
+    assert len(expected_names) == 9, "change agents must total 9 — discovery sanity"
 
     agent_dir = tmp_path / ".config" / "opencode" / "agent"
     assert agent_dir.is_dir(), "the wizard must have written the agent dir on re-render"
@@ -1337,7 +1339,7 @@ def test_run_opencode_wizard_change_agent_set_re_renders_change_agent_files(
         path = agent_dir / f"{name}.md"
         assert path.is_file(), f"expected re-rendered file at {path}"
 
-    # The 8 change-agent files must carry the picked model in their frontmatter.
+    # All 9 change-agent files must carry the picked model in their frontmatter.
     for name in change_agents:
         text = (agent_dir / f"{name}.md").read_text(encoding="utf-8")
         # Frontmatter is the YAML block between the first '---' markers; the
@@ -1372,10 +1374,9 @@ def test_cli_set_models_agent_flag_with_claude_is_silently_ignored(
     _ScriptedSelect.instances = []
     _ScriptedConfirm.instances = []
 
-    # Edit one Claude-loop-agent (implementor) → opus, then confirm. This
-    # would normally write implementor's claude override.
+    # Edit one change agent (change-implementor) → opus, then confirm.
     scripted = _ScriptedSelect()
-    scripted.queue("implementor", "opus", "__continue__", "__continue__")
+    scripted.queue("change-implementor", "opus", "__continue__", "__continue__")
     monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
     confirm = _ScriptedConfirm().queue(True)
     monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
@@ -1388,7 +1389,7 @@ def test_cli_set_models_agent_flag_with_claude_is_silently_ignored(
 
     captured_stdout: list[str] = []
 
-    def fake_run_wizard_or_bail(cli, *, home, agent_mode=AgentMode.LOOP):
+    def fake_run_wizard_or_bail(cli, *, home, agent_mode=AgentMode.CHANGE):
         # The Claude wizard must reach the body with no TTY guard firing.
         # Bypass by patching sys.stdin.isatty() via the existing bail code's path:
         # call the wizard directly, bypassing the TTY check.
@@ -1412,18 +1413,15 @@ def test_cli_set_models_agent_flag_with_claude_is_silently_ignored(
     for forbidden in ("ignored", "warning", "note"):
         assert forbidden not in combined, f"silent-ignore contract violated: output mentions {forbidden!r}\n{combined}"
 
-    # Override store must contain ONLY the Claude-loop-agent keys. No
-    # change-agent keys were ever written by the Claude branch.
+    # Override store must NOT contain any loop-agent keys; the Claude wizard
+    # manages change agents exclusively.
     overrides_path = isolated_home / ".ai-harness" / "overrides.json"
     if overrides_path.exists():
         overrides = json.loads(overrides_path.read_text(encoding="utf-8"))
         keys = set(overrides.keys())
-        forbidden_prefixes = ("change-", "propose", "design", "specs", "tasks")
-        polluted = {k for k in keys if any(k.startswith(p) or k == p for p in forbidden_prefixes)}
-        assert not polluted, (
-            f"Claude wizard with -a change must NOT pollute the override store with "
-            f"change-agent keys; polluted: {sorted(polluted)}, all keys: {sorted(keys)}"
-        )
+        loop_agent_keys = {"implementor", "explorer", "validator", "loop-orchestrator"}
+        polluted = {k for k in keys if k in loop_agent_keys}
+        assert not polluted, f"Claude wizard must NOT write loop-agent keys; polluted: {sorted(polluted)}"
 
 
 # ---------------------------------------------------------------------------
@@ -1449,10 +1447,10 @@ def test_ask_continue_or_agent_uses_dash_label_format(monkeypatch: pytest.Monkey
         return _Q()
 
     monkeypatch.setattr(tui, "_filterable_select", fake_select)
-    tui._ask_continue_or_agent("model", {"implementor": "opus"})
+    tui._ask_continue_or_agent("model", {"change-implementor": "opus"})
 
     titles = [choice.title for choice in captured[0] if isinstance(choice, questionary.Choice)]
-    assert "implementor - opus" in titles
+    assert "change-implementor - opus" in titles
     assert not any("(current:" in title for title in titles)
 
 
@@ -1474,10 +1472,10 @@ def test_ask_opencode_continue_or_agent_uses_dash_label_format(monkeypatch: pyte
         return _Q()
 
     monkeypatch.setattr(tui, "_filterable_select", fake_select)
-    tui._ask_opencode_continue_or_agent("model", {"implementor": "openai/gpt-5.5"}, opencode_wizard_agents())
+    tui._ask_opencode_continue_or_agent("model", {"change-implementor": "openai/gpt-5.5"}, opencode_change_agents())
 
     titles = [choice.title for choice in captured[0] if isinstance(choice, questionary.Choice)]
-    assert "implementor - openai/gpt-5.5" in titles
+    assert "change-implementor - openai/gpt-5.5" in titles
     assert not any("(current:" in title for title in titles)
 
 
@@ -1550,7 +1548,7 @@ def test_ask_opencode_continue_or_agent_has_separator_before_continue(monkeypatc
         return _Q()
 
     monkeypatch.setattr(tui, "_filterable_select", fake_select)
-    tui._ask_opencode_continue_or_agent("model", {}, opencode_wizard_agents())
+    tui._ask_opencode_continue_or_agent("model", {}, opencode_change_agents())
 
     choices = captured[0]
     continue_index = next(
@@ -1629,7 +1627,7 @@ def test_ask_opencode_continue_or_agent_has_separator_after_back_on_effort_phase
         return _Q()
 
     monkeypatch.setattr(tui, "_filterable_select", fake_select)
-    tui._ask_opencode_continue_or_agent("effort", {}, opencode_wizard_agents())
+    tui._ask_opencode_continue_or_agent("effort", {}, opencode_change_agents())
 
     choices = captured[0]
     back_index = next(i for i, c in enumerate(choices) if isinstance(c, questionary.Choice) and c.value == "__back__")
@@ -1656,7 +1654,7 @@ def test_ask_opencode_continue_or_agent_model_phase_has_no_leading_separator(
         return _Q()
 
     monkeypatch.setattr(tui, "_filterable_select", fake_select)
-    tui._ask_opencode_continue_or_agent("model", {}, opencode_wizard_agents())
+    tui._ask_opencode_continue_or_agent("model", {}, opencode_change_agents())
 
     choices = captured[0]
     assert not any(c.value == "__back__" for c in choices if isinstance(c, questionary.Choice))
@@ -1721,8 +1719,8 @@ def test_build_agent_list_rows_missing_agent_gets_default_model() -> None:
     """An agent missing from the current map gets the Claude default 'sonnet' (template baseline)."""
     rows = build_agent_list_rows(claude_wizard_agents(), {})
 
-    # All three rows present, all marked
-    assert len(rows) == 3
+    # All nine rows present, all marked
+    assert len(rows) == 9
     assert all(r.is_current for r in rows)
 
 
@@ -2158,17 +2156,16 @@ def test_cli_set_models_help_mentions_only_claude_opencode() -> None:
 
 
 # ---------------------------------------------------------------------------
-# -a/--agent flag — strict-lowercase validation + default-is-loop + help text
+# -a/--agent flag — strict-lowercase validation + default-is-change + help text
 # ---------------------------------------------------------------------------
 
 
-def test_cli_set_models_default_agent_flag_is_loop(isolated_home: Path) -> None:
-    """Omitting ``-a`` defaults to ``loop`` — today's byte-for-byte behavior preserved.
+def test_cli_set_models_default_agent_flag_is_change(isolated_home: Path) -> None:
+    """Omitting ``-a`` defaults to ``change`` — the only valid agent set.
 
     Acceptance scenario 5: ``set-models -o opencode`` (no ``-a``) routes
-    the wizard through the loop-agent branch. With ``-a loop`` added
-    later, the route is identical. Here we verify the flag's *absence*
-    keeps the existing CLI surface intact (a non-zero exit only because
+    the wizard through the change-agent branch. Here we verify the flag's
+    *absence* keeps the CLI surface intact (a non-zero exit only because
     CliRunner has no TTY / no opencode binary — the rejection happens
     AFTER ``-a`` is parsed and defaults).
     """
@@ -2180,7 +2177,7 @@ def test_cli_set_models_default_agent_flag_is_loop(isolated_home: Path) -> None:
 
     captured: dict[str, object] = {}
 
-    def fake_run_wizard_or_bail(cli, *, home, agent_mode=AgentMode.LOOP):
+    def fake_run_wizard_or_bail(cli, *, home, agent_mode=AgentMode.CHANGE):
         captured["cli"] = cli
         captured["agent_mode"] = agent_mode
         return False  # force the command to exit non-zero so we can inspect captured
@@ -2191,45 +2188,58 @@ def test_cli_set_models_default_agent_flag_is_loop(isolated_home: Path) -> None:
         result = runner.invoke(app, ["set-models", "-o", "opencode"])
         assert result.exit_code != 0  # we forced non-zero from the fake
         assert captured.get("cli") == AgentCli.OPENCODE
-        assert captured.get("agent_mode") == AgentMode.LOOP
+        assert captured.get("agent_mode") == AgentMode.CHANGE
     finally:
         monkeypatch.undo()
+
+
+def test_cli_set_models_loop_agent_flag_errors(isolated_home: Path) -> None:
+    """``-a loop`` is rejected — the loop agent set has been removed.
+
+    Acceptance scenario: the rejection message names ``change`` as the
+    only valid value. typer maps ``typer.BadParameter`` to exit code 2.
+    """
+    result = runner.invoke(app, ["set-models", "-o", "opencode", "-a", "loop"])
+
+    assert result.exit_code != 0
+    combined = f"{result.stdout} {result.stderr}".lower()
+    assert "change" in combined
+    # typer exit code 2 for BadParameter; 1 is also acceptable on this CLI surface
+    assert result.exit_code in (1, 2)
 
 
 def test_cli_set_models_unknown_agent_flag_errors(isolated_home: Path) -> None:
     """``-a bogus`` is rejected with a typer error naming the valid set.
 
-    Acceptance scenario 6: the rejection message names both ``loop`` and
-    ``change`` so the user knows which values are accepted. typer maps
+    Acceptance scenario 6: the rejection message names ``change`` so
+    the user knows which value is accepted. typer maps
     ``typer.BadParameter`` to exit code 2.
     """
     result = runner.invoke(app, ["set-models", "-o", "opencode", "-a", "bogus"])
 
     assert result.exit_code != 0
     combined = f"{result.stdout} {result.stderr}".lower()
-    assert "loop" in combined
     assert "change" in combined
     # typer exit code 2 for BadParameter; 1 is also acceptable on this CLI surface
     assert result.exit_code in (1, 2)
 
 
 def test_cli_set_models_uppercase_agent_flag_errors(isolated_home: Path) -> None:
-    """``-a LOOP`` (uppercase) is rejected — strict lowercase vocabulary.
+    """``-a CHANGE`` (uppercase) is rejected — strict lowercase vocabulary.
 
     Acceptance scenario 7: case-insensitive matching is explicitly out
-    of scope. ``-a LOOP`` errors with the same valid-values hint as
+    of scope. ``-a CHANGE`` errors with the same valid-values hint as
     ``-a bogus``. ``typer.BadParameter`` → exit code 2.
     """
-    result = runner.invoke(app, ["set-models", "-o", "opencode", "-a", "LOOP"])
+    result = runner.invoke(app, ["set-models", "-o", "opencode", "-a", "CHANGE"])
 
     assert result.exit_code != 0
     combined = f"{result.stdout} {result.stderr}".lower()
-    assert "loop" in combined
     assert "change" in combined
 
 
 def test_cli_set_models_help_mentions_agent_flag_and_valid_values() -> None:
-    """``--help`` documents the ``-a/--agent`` flag, names both valid values, and states the claude-ignored note.
+    """``--help`` documents the ``-a/--agent`` flag, names the valid value, and states the claude-ignored note.
 
     Acceptance criterion ``req:help-text-honest-001``: future refactors
     must not silently drop the valid-values list or the claude-ignored
@@ -2242,8 +2252,7 @@ def test_cli_set_models_help_mentions_agent_flag_and_valid_values() -> None:
     # Flag is advertised with both short and long forms.
     assert "-a" in lowered
     assert "--agent" in lowered
-    # Both valid values are named explicitly.
-    assert "loop" in lowered
+    # The valid value is named explicitly.
     assert "change" in lowered
     # The claude-ignored note is present so users discover the silent-ignore contract.
     assert "claude" in lowered
@@ -2377,7 +2386,7 @@ def test_model_picker_enables_search_filter(monkeypatch: pytest.MonkeyPatch, tmp
     _SelectSpy.instances = []
     monkeypatch.setattr(tui.questionary, "select", _SelectSpy)
 
-    tui._ask_claude_model("implementor", tmp_path)  # type: ignore[attr-defined]
+    tui._ask_claude_model("change-implementor", tmp_path)  # type: ignore[attr-defined]
 
     assert _SelectSpy.instances, "questionary.select was not called"
     assert _SelectSpy.instances[0].kwargs.get("use_search_filter") is True
@@ -2390,7 +2399,7 @@ def test_effort_picker_enables_search_filter(monkeypatch: pytest.MonkeyPatch, tm
     _SelectSpy.instances = []
     monkeypatch.setattr(tui.questionary, "select", _SelectSpy)
 
-    tui._ask_claude_effort("validator", tmp_path)  # type: ignore[attr-defined]
+    tui._ask_claude_effort("change-validator", tmp_path)  # type: ignore[attr-defined]
 
     assert _SelectSpy.instances, "questionary.select was not called"
     assert _SelectSpy.instances[0].kwargs.get("use_search_filter") is True
@@ -2403,11 +2412,11 @@ def test_claude_effort_picker_capitalizes_display_label_only(monkeypatch: pytest
     _SelectSpy.instances = []
     monkeypatch.setattr(tui.questionary, "select", _SelectSpy)
 
-    tui._ask_claude_effort("validator", tmp_path)  # type: ignore[attr-defined]
+    tui._ask_claude_effort("change-validator", tmp_path)  # type: ignore[attr-defined]
 
     choices = _SelectSpy.instances[0].kwargs["choices"]
     high_choice = next(c for c in choices if c.value == "high")
-    assert high_choice.title == "validator → High"
+    assert high_choice.title == "change-validator → High"
     assert high_choice.value == "high"
 
 
@@ -2418,11 +2427,11 @@ def test_claude_model_picker_does_not_capitalize_label(monkeypatch: pytest.Monke
     _SelectSpy.instances = []
     monkeypatch.setattr(tui.questionary, "select", _SelectSpy)
 
-    tui._ask_claude_model("implementor", tmp_path)  # type: ignore[attr-defined]
+    tui._ask_claude_model("change-implementor", tmp_path)  # type: ignore[attr-defined]
 
     choices = _SelectSpy.instances[0].kwargs["choices"]
     sonnet_choice = next(c for c in choices if c.value == "sonnet")
-    assert sonnet_choice.title == "implementor → sonnet"
+    assert sonnet_choice.title == "change-implementor → sonnet"
 
 
 def test_opencode_effort_picker_capitalizes_display_label_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -2432,11 +2441,11 @@ def test_opencode_effort_picker_capitalizes_display_label_only(monkeypatch: pyte
     _SelectSpy.instances = []
     monkeypatch.setattr(tui.questionary, "select", _SelectSpy)
 
-    tui._ask_opencode_effort("validator", tmp_path)  # type: ignore[attr-defined]
+    tui._ask_opencode_effort("change-validator", tmp_path)  # type: ignore[attr-defined]
 
     choices = _SelectSpy.instances[0].kwargs["choices"]
     high_choice = next(c for c in choices if c.value == "high")
-    assert high_choice.title == "validator → High"
+    assert high_choice.title == "change-validator → High"
     assert high_choice.value == "high"
 
 
@@ -3122,12 +3131,12 @@ def test_run_claude_wizard_model_change_writes_only_changed_agent(
     _ScriptedSelect.instances = []
     _ScriptedConfirm.instances = []
 
-    # Phase 1 (model pass): agent-pick returns "implementor", model-pick
+    # Phase 1 (model pass): agent-pick returns "change-implementor", model-pick
     # returns "opus", then the next agent-pick returns Continue.
     # Phase 2 (effort pass): agent-pick returns Continue immediately.
     # Phase 3 (confirm): yes.
     scripted = _ScriptedSelect()
-    scripted.queue("implementor", "opus", "__continue__", "__continue__")
+    scripted.queue("change-implementor", "opus", "__continue__", "__continue__")
 
     monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
     confirm = _ScriptedConfirm().queue(True)
@@ -3137,7 +3146,7 @@ def test_run_claude_wizard_model_change_writes_only_changed_agent(
 
     assert wrote is True
     overrides = json.loads(_override_file(tmp_path).read_text(encoding="utf-8"))
-    assert overrides == {"implementor": {"model": {"claude": "opus"}}}
+    assert overrides == {"change-implementor": {"model": {"claude": "opus"}}}
 
 
 def test_run_claude_wizard_existing_override_kept_when_user_confirms_as_is(
@@ -3194,9 +3203,9 @@ def test_run_claude_wizard_effort_change_from_unset_writes_only_effort(
     _ScriptedConfirm.instances = []
 
     # Phase 1 (model): continue immediately.
-    # Phase 2 (effort): pick validator, set effort to "high", continue.
+    # Phase 2 (effort): pick change-validator, set effort to "high", continue.
     scripted = _ScriptedSelect()
-    scripted.queue("__continue__", "validator", "high", "__continue__")
+    scripted.queue("__continue__", "change-validator", "high", "__continue__")
     monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
     confirm = _ScriptedConfirm().queue(True)
     monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
@@ -3205,9 +3214,9 @@ def test_run_claude_wizard_effort_change_from_unset_writes_only_effort(
 
     assert wrote is True
     overrides = json.loads(_override_file(tmp_path).read_text(encoding="utf-8"))
-    assert overrides == {"validator": {"effort": {"claude": "high"}}}
+    assert overrides == {"change-validator": {"effort": {"claude": "high"}}}
     # No model entry leaked in — that would be the default-pollution bug.
-    assert "model" not in overrides["validator"]
+    assert "model" not in overrides["change-validator"]
 
 
 def test_run_claude_wizard_back_from_model_picker_returns_to_agent_choice(
@@ -3229,12 +3238,12 @@ def test_run_claude_wizard_back_from_model_picker_returns_to_agent_choice(
     _ScriptedSelect.instances = []
     _ScriptedConfirm.instances = []
 
-    # Phase 1 (model): pick implementor -> back out of its model picker ->
+    # Phase 1 (model): pick change-implementor -> back out of its model picker ->
     # continue (no agent edited in this phase).
     # Phase 2 (effort): continue immediately.
     scripted = _ScriptedSelect()
     scripted.queue(
-        "implementor",
+        "change-implementor",
         "__back__",
         "__continue__",
         "__continue__",
@@ -3269,11 +3278,11 @@ def test_run_claude_wizard_back_from_effort_picker_returns_to_agent_choice(
     _ScriptedConfirm.instances = []
 
     # Phase 1 (model): continue immediately.
-    # Phase 2 (effort): pick validator -> back out of effort picker -> continue.
+    # Phase 2 (effort): pick change-validator -> back out of effort picker -> continue.
     scripted = _ScriptedSelect()
     scripted.queue(
         "__continue__",
-        "validator",
+        "change-validator",
         "__back__",
         "__continue__",
     )
@@ -3307,13 +3316,13 @@ def test_run_claude_wizard_back_from_effort_phase_returns_to_model_phase(
     _ScriptedSelect.instances = []
     _ScriptedConfirm.instances = []
 
-    # Phase 1 (model): pick implementor -> opus -> continue.
+    # Phase 1 (model): pick change-implementor -> opus -> continue.
     # Phase 2 (effort): back -> re-enters phase 1 (model).
-    # Phase 1 again: continue (implementor stays "opus", the prior edit).
+    # Phase 1 again: continue (change-implementor stays "opus", the prior edit).
     # Phase 2 again: continue.
     scripted = _ScriptedSelect()
     scripted.queue(
-        "implementor",
+        "change-implementor",
         "opus",
         "__continue__",
         "__back__",
@@ -3328,7 +3337,7 @@ def test_run_claude_wizard_back_from_effort_phase_returns_to_model_phase(
 
     assert wrote is True
     overrides = json.loads(_override_file(tmp_path).read_text(encoding="utf-8"))
-    assert overrides == {"implementor": {"model": {"claude": "opus"}}}
+    assert overrides == {"change-implementor": {"model": {"claude": "opus"}}}
 
 
 def test_run_claude_wizard_no_back_choice_in_first_model_phase_agent_chooser(
@@ -3395,7 +3404,7 @@ def test_ask_opencode_continue_or_agent_esc_ignored_on_first_phase(monkeypatch: 
         tui, "_filterable_select", lambda *a, **kw: type("_Q", (), {"ask": lambda self: tui.Nav.ESC_BACK})()
     )
 
-    result = tui._ask_opencode_continue_or_agent("model", {}, opencode_wizard_agents())
+    result = tui._ask_opencode_continue_or_agent("model", {}, opencode_change_agents())
 
     assert result == tui.Nav.ESC_BACK
 
@@ -3442,7 +3451,7 @@ def test_run_claude_wizard_esc_in_model_picker_returns_to_agent_choice(
 
     scripted = _ScriptedSelect()
     scripted.queue(
-        "implementor",
+        "change-implementor",
         tui.Nav.ESC_BACK,
         "__continue__",
         "__continue__",
@@ -3470,13 +3479,13 @@ def test_run_claude_wizard_esc_on_effort_phase_agent_chooser_returns_to_model_ph
     _ScriptedSelect.instances = []
     _ScriptedConfirm.instances = []
 
-    # Phase 1 (model): pick implementor -> opus -> continue.
+    # Phase 1 (model): pick change-implementor -> opus -> continue.
     # Phase 2 (effort): Esc -> re-enters phase 1 (model).
     # Phase 1 again: continue.
     # Phase 2 again: continue.
     scripted = _ScriptedSelect()
     scripted.queue(
-        "implementor",
+        "change-implementor",
         "opus",
         "__continue__",
         tui.Nav.ESC_BACK,
@@ -3491,7 +3500,7 @@ def test_run_claude_wizard_esc_on_effort_phase_agent_chooser_returns_to_model_ph
 
     assert wrote is True
     overrides = json.loads(_override_file(tmp_path).read_text(encoding="utf-8"))
-    assert overrides == {"implementor": {"model": {"claude": "opus"}}}
+    assert overrides == {"change-implementor": {"model": {"claude": "opus"}}}
 
 
 def test_run_claude_wizard_esc_on_confirm_screen_returns_to_effort_phase(
@@ -3662,9 +3671,9 @@ def test_run_claude_wizard_preserves_existing_install_manifest(
     _ScriptedSelect.instances = []
     _ScriptedConfirm.instances = []
 
-    # Edit implementor's model, then confirm.
+    # Edit change-implementor's model, then confirm.
     scripted = _ScriptedSelect()
-    scripted.queue("implementor", "opus", "__continue__", "__continue__")
+    scripted.queue("change-implementor", "opus", "__continue__", "__continue__")
     monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
     confirm = _ScriptedConfirm().queue(True)
     monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
@@ -3673,7 +3682,7 @@ def test_run_claude_wizard_preserves_existing_install_manifest(
 
     assert wrote is True
     after = json.loads(manifest_path.read_text(encoding="utf-8"))
-    # All three CLIs survive — the re-render is scoped to Claude loop agents only.
+    # All three CLIs survive — the re-render is scoped to Claude change agents only.
     assert set(after["agent_clis"]) == {"generic", "claude", "copilot"}
     assert set(after["files_by_agent_cli"]) == {"generic", "claude", "copilot"}
     # Generic and copilot paths are byte-identical to before.

@@ -1,0 +1,174 @@
+{
+  "tasks": [
+    {
+      "id": "1",
+      "title": "Purge loop-agent resources; update renderer registry and discovery rename; fix test_renderers, test_install, test_set_models re-render count, e2e",
+      "spec": "c1-loop-resource-purge",
+      "phase": "foundation",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "1.1",
+          "title": "Delete src/ai_harness/resources/loop-agent/ (5 files: explorer.md, implementor.md, loop-orchestrator.md, validator.md, _result-contract.md)",
+          "scenario": "Directory absent after change",
+          "status": "done"
+        },
+        {
+          "id": "1.2",
+          "title": "Update renderers.py: remove loop-agent from _AGENT_RESOURCE_DIRS, remove 4 loop entries from _AGENT_META (loop-orchestrator, explorer, implementor, validator), rename _discover_loop_agents to _discover_agents and update all internal call sites, update all docstrings that say loop agents to change agents",
+          "scenario": "Loop agent meta lookup raises at runtime",
+          "status": "done"
+        },
+        {
+          "id": "1.3",
+          "title": "Update tests/test_renderers.py: fix _discover_agents import (was _discover_loop_agents at line 22), remove all loop-specific test functions (test_loop_orchestrator_*, loop-orchestrator frontmatter/permission/color/override tests, copilot loop path tests), update expected Claude and OpenCode path lists to remove loop-agent entries",
+          "scenario": "Test module imports the renamed function",
+          "status": "done"
+        },
+        {
+          "id": "1.4",
+          "title": "Update tests/test_install.py: delete _LOOP_AGENT_NAMES constant, update _NATIVE_AGENT_NAMES to 9 change agents only, update _CLAUDE_SUBAGENT_NAMES to 8 change subagents, change _CLAUDE_SKILL_NAME to change-orchestrator, update file-count assertions (Claude 19->15, Copilot 25->21, OpenCode 13->9, CLI output strings updated), rewrite override tests that use implementor to use change-implementor, rename test functions whose names include loop_agents to change_agents",
+          "scenario": "Updated file-count assertions compile and pass",
+          "status": "done"
+        },
+        {
+          "id": "1.5",
+          "title": "Update tests/test_set_models.py: change re-render file-count assertion from 13 to 9 in test_run_opencode_wizard_change_agent_set_re_renders_change_agent_files (only this count; opencode_wizard_agents call sites handled in task 2)",
+          "scenario": "Re-render count assertion uses 9",
+          "status": "done"
+        },
+        {
+          "id": "1.6",
+          "title": "Update e2e/e2e_test.sh: replace bare implementor override key and implementor.md path with change-implementor and change-implementor.md in test_override_updates_installer_section (Tier 2)",
+          "scenario": "e2e test references change-implementor",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "2",
+      "title": "Collapse wizard vocabulary: pure.py (AgentMode, CLAUDE_WIZARD_AGENTS, delete opencode_wizard_agents); tui.py (import, dispatch, defaults); test_set_models.py (call sites, AgentMode tests)",
+      "spec": "c3-set-models-configures-change-agents",
+      "phase": "core",
+      "depends_on": [
+        "1"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "2.1",
+          "title": "Update pure.py: collapse AgentMode to single-member CHANGE (delete LOOP), expand CLAUDE_WIZARD_AGENTS from 3 loop subagents to 9 change agents (8 subagents + change-orchestrator), delete OPENCODE_WIZARD_AGENTS constant and opencode_wizard_agents() function, update parse_agent_mode error message to name only change as valid (derived from AgentMode members)",
+          "scenario": "AgentMode has one member",
+          "status": "done"
+        },
+        {
+          "id": "2.2",
+          "title": "Update tui.py: remove opencode_wizard_agents from imports, simplify run_wizard dispatch to unconditional opencode_change_agents() call (delete loop branch), change agent_mode defaults from AgentMode.LOOP to AgentMode.CHANGE in run_wizard/run_claude_wizard/run_wizard_or_bail, update docstrings and inline comments that reference loop agents",
+          "scenario": "No AgentMode.LOOP default in tui.py",
+          "status": "done"
+        },
+        {
+          "id": "2.3",
+          "title": "Update tests/test_set_models.py: remove opencode_wizard_agents from imports, replace all opencode_wizard_agents() call sites with opencode_change_agents(), remove test_opencode_wizard_agents_includes_orchestrator_first, rename test_parse_agent_mode_accepts_loop_and_change to accept only change and assert loop raises ValueError, remove LOOP/Loop cases from uppercase-rejection test",
+          "scenario": "No opencode_wizard_agents in test file",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "3",
+      "title": "Update set_models.py -a default and help text; clean loop references from operations.py and worktree.py docstrings",
+      "spec": "c4-agent-flag-defaults-change-rejects-loop",
+      "phase": "integration",
+      "depends_on": [
+        "2"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "3.1",
+          "title": "Update set_models.py: change -a/--agent default from 'loop' to 'change', remove all 'loop' references from help text and docstring, ensure existing BadParameter wrapping of parse_agent_mode ValueError handles 'loop' input without additional catch blocks",
+          "scenario": "Default value in source",
+          "status": "done"
+        },
+        {
+          "id": "3.2",
+          "title": "Update operations.py: replace 'rendered loop agents' with 'rendered change agents' in re_render_for_agent_clis and _write_rendered_agents docstrings",
+          "scenario": "Quality gates green",
+          "status": "done"
+        },
+        {
+          "id": "3.3",
+          "title": "Update worktree.py: replace 'loop workflow' with 'change workflow' in the module-level docstring",
+          "scenario": "Quality gates green",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "4",
+      "title": "Add ADR deprecation headers; remove loop prose from README.md, CONTEXT.md, CLAUDE.md",
+      "spec": "c1-loop-resource-purge",
+      "phase": "cleanup",
+      "depends_on": [
+        "3"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "4.1",
+          "title": "Prepend two-line superseded notice above the # NNNN. heading in docs/adr/0003-loop-pr-prd-linking.md, docs/adr/0007-loop-worktree-isolation.md, and docs/adr/0008-copilot-loop-agents-native-model.md; leave all body content unchanged",
+          "scenario": "Deprecation header present in ADR 0003",
+          "status": "done"
+        },
+        {
+          "id": "4.2",
+          "title": "Remove loop-workflow prose from README.md: Running the loop in a worktree section, loop agent install descriptions, Copilot loop agents section, loop entry in workflow diagram, any loop-agent/ path references",
+          "scenario": "Loop vocabulary absent from CONTEXT.md",
+          "status": "done"
+        },
+        {
+          "id": "4.3",
+          "title": "Remove loop vocabulary from CONTEXT.md: Loop agents vocabulary entry, loop-orchestrator -> explorer -> implementor -> validator chain description, loop session description",
+          "scenario": "Loop vocabulary absent from CONTEXT.md",
+          "status": "done"
+        },
+        {
+          "id": "4.4",
+          "title": "Remove loop-label triage instructions from CLAUDE.md: LOOP_LABEL note, sub-issues get loop label rule, loop implementation language in to-prd/to-issues publishing rules",
+          "scenario": "Loop prose absent from CLAUDE.md",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "5",
+      "title": "Fix test_idempotent_reinstall e2e gate: persona+skills writer double-counts change-orchestrator skill on reinstall",
+      "spec": "c1-loop-resource-purge",
+      "phase": "fixup",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "5.1",
+          "title": "Write failing test test_install_claude_manifest_is_byte_identical_on_reinstall asserting the second install's manifest equals the first (TDD red)",
+          "scenario": "Manifest is equal across reinstalls",
+          "status": "done"
+        },
+        {
+          "id": "5.2",
+          "title": "Fix _write_persona_and_skills to walk the source tree instead of the destination tree so the returned paths reflect what this install wrote, not leftover files from prior installs (TDD green)",
+          "scenario": "Second install's claude manifest entry has 15 unique paths, not 16 with a duplicate",
+          "status": "done"
+        },
+        {
+          "id": "5.3",
+          "title": "Run uv run pytest and uv run ruff format/check; verify all tests pass and no lint regressions",
+          "scenario": "Full quality gate green",
+          "status": "done"
+        }
+      ]
+    }
+  ]
+}
