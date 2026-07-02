@@ -2633,3 +2633,88 @@ def test_change_orchestrator_body_inlines_commit_format_directive(cli: AgentCli)
     assert (
         "`" not in body.split("commit-format:")[1].split("\n")[0] or body.count("`", body.find("commit-format:")) < 2
     ), f"{cli}: commit-format value line must not contain surrounding backticks"
+
+
+# ---------------------------------------------------------------------------
+# implementor-reads-commit-format — implementor applies the injected format
+# at loop step 6 (subtasks 3.1, 3.2, 3.3)
+# ---------------------------------------------------------------------------
+
+
+def _native_change_implementor_body(cli: AgentCli) -> str:
+    """Return the rendered change-implementor body for the given native CLI."""
+    pair = _find_pair(render_agents(cli), "change-implementor")
+    assert pair is not None, f"change-implementor not rendered for {cli}"
+    return pair[1].split("---", 2)[2].removeprefix("\n")
+
+
+@pytest.mark.parametrize("cli", (AgentCli.OPENCODE, AgentCli.CLAUDE, AgentCli.COPILOT))
+def test_change_implementor_body_applies_injected_commit_format(cli: AgentCli) -> None:
+    """Subtask 3.1 — loop step 6 substitutes {change_name}, {task_id}, {slug} and passes the
+    result as the single ``-m`` argument to ``git commit``.
+
+    Locks the substitution contract: the three documented tokens must be
+    named in the step-6 prose, and the substituted result must flow
+    directly to ``git commit -m`` (no human-supplied subject, no extra args).
+    """
+    body = _native_change_implementor_body(cli)
+
+    # The three documented tokens appear as named placeholders.
+    assert "{change_name}" in body, f"{cli}: {{change_name}} token missing from implementor body"
+    assert "{task_id}" in body, f"{cli}: {{task_id}} token missing from implementor body"
+    assert "{slug}" in body, f"{cli}: {{slug}} token missing from implementor body"
+    # The result is passed as the single -m argument.
+    assert "-m" in body, f"{cli}: -m argument missing from implementor body"
+    assert "git commit" in body, f"{cli}: git commit invocation missing from implementor body"
+    # Step 6 references the injected commit-format directive (mirrors the
+    # orchestrator's directive block, owned by the implementor here).
+    assert "commit-format" in body, f"{cli}: commit-format directive reference missing from implementor body"
+
+
+@pytest.mark.parametrize("cli", (AgentCli.OPENCODE, AgentCli.CLAUDE, AgentCli.COPILOT))
+def test_change_implementor_body_blocks_on_missing_directive(cli: AgentCli) -> None:
+    """Subtask 3.2 — defensive block on missing directive.
+
+    Locks the safety-net envelope: when the implementor is spawned
+    without a ``commit-format:`` directive, it must return
+    ``status: blocked`` with the canonical error message and MUST NOT
+    attempt ``git commit``. The error string is what the validator greps
+    for downstream, so it must appear verbatim in the rendered prompt.
+    """
+    body = _native_change_implementor_body(cli)
+
+    # The canonical missing-directive error string appears verbatim.
+    assert "commit-format directive missing from delegation" in body, (
+        f"{cli}: missing-directive canonical error string missing from implementor body"
+    )
+    # The defensive block returns the shared blocked envelope.
+    assert "status: blocked" in body, f"{cli}: blocked envelope missing from implementor body"
+
+
+@pytest.mark.parametrize("cli", (AgentCli.OPENCODE, AgentCli.CLAUDE, AgentCli.COPILOT))
+def test_change_implementor_body_blocks_on_unknown_placeholder(cli: AgentCli) -> None:
+    """Subtask 3.3 — unknown-token block after substitution.
+
+    Locks the regex-based unknown-token detection: a typo placeholder
+    (e.g. ``{change}``) that survives the documented substitution step
+    must surface the canonical error and block the commit. The error
+    template ``unknown placeholder {<token>} in commit format`` is what
+    the validator greps for.
+    """
+    body = _native_change_implementor_body(cli)
+
+    # The unknown-token error template appears verbatim.
+    assert "unknown placeholder {" in body and "} in commit format" in body, (
+        f"{cli}: unknown-placeholder canonical error template missing from implementor body"
+    )
+    # The regex shape is referenced (the implementor is told how to scan).
+    # Accept both escaped (`\{[a-z_]+\}`) and unescaped forms — markdown source
+    # may escape the braces to avoid being interpreted as a template token.
+    regex_present = "{[a-z_]+}" in body or r"\{[a-z_]+\}" in body
+    assert regex_present, f"{cli}: unknown-placeholder regex {{[a-z_]+}} missing from implementor body"
+    # The closed set is named (only change_name, task_id, slug are valid).
+    assert "change_name" in body and "task_id" in body and "slug" in body, (
+        f"{cli}: closed placeholder set not named in implementor body"
+    )
+    # The defensive block returns the shared blocked envelope.
+    assert "status: blocked" in body, f"{cli}: blocked envelope missing from implementor body"

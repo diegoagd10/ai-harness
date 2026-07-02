@@ -77,6 +77,29 @@ Expected success response:
 }
 ```
 
+## Commit-format directive (defensive gate)
+
+Before reaching loop step 6, locate the `commit-format:` directive in the
+delegation block above. The orchestrator injects this directive per
+delegation by calling `resolve_commit_format(repo_root)` from
+`ai_harness.modules.commit`; the implementor never reads the standards
+file itself.
+
+- **Missing directive.** If the `commit-format:` directive is absent from
+  the delegation block (an orchestrator-level bug, not the normal flow),
+  return `status: blocked` with
+  `semantic_facts.blocked_reason: commit-format directive missing from delegation`
+  immediately. MUST NOT attempt `git commit`. The Blocking rule envelope
+  below applies.
+- **Unknown placeholder.** After substituting `{change_name}`, `{task_id}`,
+  and `{slug}` in that fixed order, scan the result with the regex
+  `\{[a-z_]+\}`. Any match outside the closed set
+  `{change_name, task_id, slug}` MUST trigger `status: blocked` with
+  the canonical message `unknown placeholder {<token>} in commit format`
+  naming the offending token. MUST NOT attempt `git commit`. Rationale:
+  silent substitution of garbage keeps drift invisible, which is the
+  exact failure this directive exists to fix.
+
 ## Loop
 
 1. Run:
@@ -96,8 +119,21 @@ ai-harness task-next -c {change}
 ai-harness task-done -c {change} -i <id>
 ```
 
-6. Make one commit for the task. Include the task id and Change name
-   in the message. Do not combine multiple tasks into one commit.
+6. Make one commit for the task. **Apply the `commit-format` directive
+   inlined in the delegation block above:** substitute `{change_name}`
+   with the Change name, `{task_id}` with the task id, and `{slug}`
+   with a slugified form of the task title (lowercase, hyphens for
+   whitespace, ASCII-only). Substitution order is fixed:
+   `{change_name}` → `{task_id}` → `{slug}` (slug is generated last
+   so it cannot collide with literal `{change_name}` / `{task_id}`
+   segments). Pass the substituted result as the single `-m`
+   argument to `git commit`. After substitution, scan the result
+   with the regex `\{[a-z_]+\}`; any match outside the closed set
+   `{change_name, task_id, slug}` (for example a typo `{change}` or
+   a future `{phase}`) MUST trigger `status: blocked` with the
+   canonical message `unknown placeholder {<token>} in commit format`
+   and MUST NOT attempt `git commit`. Do not combine multiple tasks
+   into one commit.
 7. Append the canonical `## Commits` line, then one matching
    `## TDD Evidence` row, to
    `.ai-harness/changes/{change}/implementation.md` atomically. The
