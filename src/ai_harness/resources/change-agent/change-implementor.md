@@ -98,8 +98,10 @@ ai-harness task-done -c {change} -i <id>
 
 6. Make one commit for the task. Include the task id and Change name
    in the message. Do not combine multiple tasks into one commit.
-7. Append commit SHA, task id, summary, and tests run to
-   `.ai-harness/changes/{change}/implementation.md` atomically.
+7. Append the canonical `## Commits` line, then one matching
+   `## TDD Evidence` row, to
+   `.ai-harness/changes/{change}/implementation.md` atomically. The
+   row's `(Task, Commit)` cells match the line just written.
 8. Repeat while context and time allow. If tasks remain, return
    `partial`.
 
@@ -109,15 +111,65 @@ ai-harness task-done -c {change} -i <id>
 # Implementation — {change}
 
 ## Commits
-- <sha> — task <id>: <summary>; tests: <commands>
+- <sha> — task <id>: <summary>
+
+## TDD Evidence
+
+| Task | Commit | Non-test files | Test files | Layer | Safety net | RED | GREEN | Triangulation | Refactor |
+|------|--------|----------------|------------|-------|------------|-----|-------|---------------|----------|
+| <id> | <sha>  | <paths>        | <paths>    | unit  | passed: N/M| written | passed | Single     | clean    |
 
 ## Remaining
 - <task id or none>
 ```
 
+`## Commits` lines use the canonical prefix
+`- <sha> — task <id>: <summary>`. A trailing `; tests: <commands>`
+segment on a commit line is harmless suffix noise and is ignored by
+the validator at audit time — do not strip it.
+
+Append exactly one row to `## TDD Evidence` for every `## Commits`
+line, with every cell populated against the per-column grammar below.
+
 `Remaining` is the canonical prose form of `semantic_facts.partial`
 plus `semantic_facts.remaining_tasks`. Keep both aligned so resume can
 recover them from disk.
+
+## TDD evidence
+
+The `## TDD Evidence` table is the **grammar source of truth** for
+both this prompt and `change-validator.md`. The validator mirrors each
+rule inline and references this prompt as authority — future grammar
+edits touch both files.
+
+### Per-column value grammar
+
+- `Task` — task id from `ai-harness task-list`.
+- `Commit` — full SHA from the commit just made.
+- `Non-test files` — comma-separated paths, single line, no `|`.
+- `Test files` — same shape; `N/A` allowed only when `Non-test files`
+  is empty (a row with non-test files and `Test files: N/A` is a
+  CRITICAL behavior-without-test finding on audit).
+- `Layer ∈ {unit, integration, e2e, mixed, N/A}`.
+- `Safety net ∈ {(passed: N/M with 0 ≤ N ≤ M) | N/A: new files | N/A: <reason>}`.
+- `RED == "written"` (literal).
+- `GREEN == "passed"` (literal).
+- `Triangulation ∈ {(N cases) | Single | N/A: <reason>}`.
+- `Refactor ∈ {clean, none needed}`. `deferred` and any other value
+  is off-grammar and a WARNING.
+
+No `|` may appear inside any cell — pipes break Markdown table
+parsing. A row that doesn't split to exactly ten cells fails the
+validator's `cell-count` check as CRITICAL.
+
+### Loop step
+
+Inside the loop, immediately after `ai-harness task-done` + `git
+commit`, append the canonical `## Commits` line, then append one
+matching row to `## TDD Evidence` with all ten cells populated against
+the grammar above, BEFORE advancing to the next task. The row's
+`Task` cell equals the task id from `task-list`; the `Commit` cell
+equals the SHA just produced.
 
 ## Blocking
 
