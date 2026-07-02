@@ -2603,3 +2603,33 @@ def test_change_orchestrator_body_per_change_flow_run_cache_key(cli: AgentCli) -
     assert "re-ask" in body or "re-asks" in body, (
         f"{cli}: missing re-ask language for a new change-flow run in the same session"
     )
+
+
+# ---------------------------------------------------------------------------
+# implementor-reads-commit-format — orchestrator injects the commit-format
+# directive at delegation-build time (subtask 2.2)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("cli", (AgentCli.OPENCODE, AgentCli.CLAUDE, AgentCli.COPILOT))
+def test_change_orchestrator_body_inlines_commit_format_directive(cli: AgentCli) -> None:
+    """Subtask 2.2 — the orchestrator prompt instructs the spawned subagent to call
+    ``resolve_commit_format(repo_root)`` per delegation and inline the returned
+    string verbatim under ``Data injected for this delegation:`` as
+    ``- commit-format: <format>`` (no surrounding backticks, no placeholder rewriting).
+
+    Locks the read side of the orchestrator-injects pattern: every renderer must
+    carry the directive block so the contract is installed on disk.
+    """
+    body = _native_change_orchestrator_body(cli)
+
+    # The labeled block header appears verbatim.
+    assert "Data injected for this delegation:" in body, f"{cli}: directive block header missing"
+    # The directive label appears verbatim.
+    assert "commit-format:" in body, f"{cli}: commit-format directive label missing"
+    # The orchestrator is told to call the resolver per delegation.
+    assert "resolve_commit_format" in body, f"{cli}: resolve_commit_format call instruction missing"
+    # The directive value is the resolved string verbatim — no placeholder rewriting.
+    assert (
+        "`" not in body.split("commit-format:")[1].split("\n")[0] or body.count("`", body.find("commit-format:")) < 2
+    ), f"{cli}: commit-format value line must not contain surrounding backticks"

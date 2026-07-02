@@ -560,6 +560,27 @@ Rules:
   (overhead is negligible). The implementor prompt itself stays
   silent on which skills to expect; injection is the orchestrator's
   sole responsibility.
+- **`change-implementor` always receives the `commit-format` directive.**
+  At delegation-build time, call
+  `resolve_commit_format(repo_root)` (a helper in
+  `ai_harness.modules.commit`) and append a `Data injected for this
+  delegation:` block to the implementor delegation immediately after
+  the `Skills to load before work` list. Inline the returned string
+  verbatim (no surrounding backticks, no placeholder rewriting) as a
+  single bullet:
+
+  ```
+  Data injected for this delegation:
+  - commit-format: <format string returned by resolve_commit_format>
+  ```
+
+  If the resolver raises `CommitFormatError` (missing
+  `CODING_STANDARDS.md`, missing `## Commits` heading, or empty body),
+  surface the error verbatim, return `status: blocked` with the
+  canonical message as `semantic_facts.blocked_reason`, and MUST NOT
+  spawn the implementor. The resolver is the orchestrator's gate —
+  it runs once per delegation, never silently falls back, and is
+  the read side of the orchestrator-injects pattern.
 
 ## Delegation launch log (HARD GATE)
 
