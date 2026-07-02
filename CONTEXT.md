@@ -9,45 +9,34 @@ A target tool that consumes harness configuration in its own native layout:
 and `generic` (the tool-agnostic `~/.agents/` home). `install` writes the
 harness into each selected Agent CLI's native config directory.
 
-## Loop
-
-The cohesive multi-agent workflow that drains ready GitHub issues onto a session
-branch: `loop-orchestrator` drives `explorer` → `implementor` → `validator`,
-looping implementor↔validator until clean. The four agents are one unit, not
-loose parts — they are authored together as the *loop agents* under
-`resources/loop-agent/` and installed as a set.
-
 ## Worktree
 
 An isolated git working tree created by the
 `ai-harness worktree create` command at `.ai-harness/worktrees/<dir>` on a new
 branch based on the current branch's HEAD (`-dn`/`-bn` name the directory and
-branch; both default to a `<Date.now()>` timestamp) and gitignored. It is the
-isolation unit for a *Loop* session (required — the loop refuses `main`) and may
+branch; both default to a `<Date.now()>` timestamp) and gitignored. It may
 optionally host a *Change* session (which is worktree-agnostic — see *Change*).
 Its purpose is isolation: a session running there cannot disturb the host
 repository, so a human can grill / domain-model in the host tree — or run a
-second session — at the same time without either stepping on the other. The human launches their Agent CLI inside it; the
-worktree is the *directory*, distinct from the `loop-run/<ts>` *branch* that
-gets checked out in it.  Cleanup is available via `ai-harness worktree delete`
-(interactive picker) or native `git worktree remove|prune|list`.
+second session — at the same time without either stepping on the other. Cleanup
+is available via `ai-harness worktree delete` (interactive picker) or native
+`git worktree remove|prune|list`.
 _Avoid_: checkout, clone, copy
 
 ## prd-issue
 
 A GitHub issue holding the full context for a unit of product work. It is split
-into *sub-issues* that the loop implements one at a time. A prd-issue is closed
-by a human merging the session PR (via a `Closes` keyword the orchestrator adds
-once every sub-issue is done) — never by the loop itself.
+into *sub-issues* that the change-orchestrator implements one at a time. A
+prd-issue is closed by a human merging the session PR (via a `Closes` keyword
+the orchestrator adds once every sub-issue is done) — never by the orchestrator
+itself.
 _Avoid_: PRD doc, spec, epic (when you mean the GitHub issue)
 
 ## sub-issue
 
 A vertical slice of a *prd-issue*, authored as its own GitHub issue that
-references its parent prd-issue in the body. The loop works and closes
-sub-issues itself; `LOOP_LABEL` marks which ones are ready to work. Whether a
-prd-issue is fully drained is judged by open sub-issues referencing it, not by
-any label.
+references its parent prd-issue in the body. Whether a prd-issue is fully
+drained is judged by open sub-issues referencing it, not by any label.
 _Avoid_: task, subtask, child ticket
 
 ## Change
@@ -89,11 +78,11 @@ _Avoid_: requirement doc, design (when you mean the behavioural spec)
 
 ## Agent template
 
-A CLI-neutral definition of one loop agent (e.g. `validator`,
-`loop-orchestrator`), authored once under `resources/loop-agent/`. It expresses
-the agent's intent — description, model, capabilities, prompt body — without
-committing to any single Agent CLI's frontmatter dialect. Distinct from a
-*rendered agent*, which is the concrete file an Agent CLI actually reads.
+A CLI-neutral definition of one change agent (e.g. `change-implementor`,
+`change-orchestrator`), authored once under `resources/change-agent/`. It
+expresses the agent's intent — description, model, capabilities, prompt body —
+without committing to any single Agent CLI's frontmatter dialect. Distinct from
+a *rendered agent*, which is the concrete file an Agent CLI actually reads.
 
 ## Render
 
@@ -106,7 +95,7 @@ target CLI.
 
 ## Effort
 
-The reasoning-intensity setting on a loop agent, expressed CLI-neutrally and
+The reasoning-intensity setting on a change agent, expressed CLI-neutrally and
 mapped at *render* time onto each Agent CLI's native field: Claude Code's
 `effort` (`low|medium|high|xhigh|max`) and OpenCode's `reasoningEffort` (offered
 only for models that advertise reasoning). Distinct from *model* — it tunes how
@@ -125,8 +114,8 @@ _Avoid_: customization, setting, config
 
 The repo-local scaffolding step, run once inside a consuming repository. Distinct
 from *install*, which distributes the harness globally into each *Agent CLI*'s
-`$HOME` config: `init` writes only the per-project artifacts the loop and skill
-flow assume at a repo root — three files, namely `CODING_STANDARDS.md`,
+`$HOME` config: `init` writes only the per-project artifacts the skill flow
+assumes at a repo root — three files, namely `CODING_STANDARDS.md`,
 `CLAUDE.md`, and `AGENTS.md`. The two agent docs receive the same managed block
 (wrapped in `<!-- ai-harness:init:start -->` / `<!-- ai-harness:init:end -->`
 markers and pointing at `CODING_STANDARDS.md`), and either is created when

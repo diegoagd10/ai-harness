@@ -48,8 +48,7 @@ Engram repository's own instructions.
 
 The [matt-pocock skills](https://github.com/mattpocock/skills) provide the
 engineering workflow skills (`setup-matt-pocock-skills`, `grill-with-docs`,
-`to-prd`, `to-issues`, and the loop agents). Install them once per machine with
-the `skills` CLI:
+`to-prd`, `to-issues`). Install them once per machine with the `skills` CLI:
 
 ```bash
 pnpm dlx skills install
@@ -61,24 +60,24 @@ home, so one install covers both.
 
 ## What this tool does
 
-**ai-harness** is a persona, skills, and loop-agent installer for AI coding
+**ai-harness** is a persona, skills, and change-agent installer for AI coding
 Agent CLIs. It copies a bundled `AGENTS.md` (the persona) and a `skills/`
 directory into each supported Agent CLI's native config directory, and renders
-the loop agents (`loop-agent/`) for CLIs with native agent support (Claude Code
-and OpenCode). You manage one set of files; the tool distributes them everywhere
-they need to go.
+the change agents (`change-agent/`) for CLIs with native agent support (Claude
+Code and OpenCode). You manage one set of files; the tool distributes them
+everywhere they need to go.
 
 Five commands:
 
 - `ai-harness init` — **repo-local** scaffolding. Run inside a consuming
-  repository to create the artifacts the loop and skill flow assume at the repo
-  root: a `CODING_STANDARDS.md` skeleton, a labels-policy block in the repo's
-  agent doc, and the loop's GitHub labels. Idempotent — never clobbers
-  human-edited content. Distinct from `install`, which distributes the harness
-  globally into each Agent CLI's `$HOME` config.
+  repository to create the artifacts the skill flow assumes at the repo root: a
+  `CODING_STANDARDS.md` skeleton and a labels-policy block in the repo's agent
+  doc. Idempotent — never clobbers human-edited content. Distinct from
+  `install`, which distributes the harness globally into each Agent CLI's `$HOME`
+  config.
 
 - `ai-harness install` — **global** distribution. Copies `AGENTS.md` + skills
-  into each Agent CLI's config dir, and renders the loop agents into the native
+  into each Agent CLI's config dir, and renders the change agents into the native
   agent directories of Claude Code and OpenCode. Generic (`~/.agents/`) is always
   installed. The `-o` flag adds specific Agent CLIs on top. Reinstalling is
   byte-identical — running `install` again produces exactly the same files, so
@@ -98,11 +97,11 @@ Five commands:
   HEAD. `-d`/`--directory-name` and `-b`/`--branch-name` set the directory and
   branch; both default to a `<Date.now()>` timestamp when omitted.
   Lazily writes a nested `.gitignore` so throwaway worktrees are never committed.
-  Launch your Agent CLI inside this directory to run the loop without disturbing
-  the host repo — run a grill session or a second loop in parallel. Interactive
-  cleanup is available via `ai-harness worktree delete`; native git works too:
-  `git worktree remove .ai-harness/worktrees/<ts>` / `git worktree prune` /
-  `git worktree list`.
+  Launch your Agent CLI inside this directory to run a change session without
+  disturbing the host repo — run a grill session or a second session in parallel.
+  Interactive cleanup is available via `ai-harness worktree delete`; native git
+  works too: `git worktree remove .ai-harness/worktrees/<ts>` /
+  `git worktree prune` / `git worktree list`.
 
 ## Getting started
 
@@ -122,7 +121,7 @@ If you prefer not to install on PATH, use `uv run` directly:
 uv run ai-harness install
 ```
 
-To scaffold a consuming repository for the loop workflow:
+To scaffold a consuming repository:
 
 ```bash
 cd /path/to/your-project
@@ -144,15 +143,15 @@ Once the Prerequisites are in place, the full workflow for turning a feature ide
 into implemented code is:
 
 ```
-setup-matt-pocock-skills → ai-harness init → grill-with-docs → to-prd → to-design → to-issues → loop
+setup-matt-pocock-skills → ai-harness init → grill-with-docs → to-prd → to-design → to-issues → change-orchestrator
 ```
 
 1. **`setup-matt-pocock-skills`** — one-time skill that configures this repo for
    the engineering skills (sets up the issue tracker, triage labels, and domain
    docs). Run once per repository.
 
-2. **`ai-harness init`** — scaffolds `CODING_STANDARDS.md`, the labels-policy
-   block, and GitHub labels at the repo root. Run once per repository.
+2. **`ai-harness init`** — scaffolds `CODING_STANDARDS.md` and the labels-policy
+   block at the repo root. Run once per repository.
 
 3. **`grill-with-docs`** — interview skill that stress-tests your design while
    producing ADRs and a glossary. Produces a shared understanding before writing
@@ -164,25 +163,24 @@ setup-matt-pocock-skills → ai-harness init → grill-with-docs → to-prd → 
 
 5. **`to-design`** — hardens the prd-issue's light seam sketch into a rigorous
    **deep-module design**, recorded as one ADR in `docs/adr/`. That ADR is the
-   seam contract: `to-issues` slices within these modules and the loop's
-   `validator` audits depth against it. Forward, greenfield design — the inverse
-   of `improve-codebase-architecture` (which remediates existing shallow code).
+   seam contract: `to-issues` slices within these modules and the `change-validator`
+   audits depth against it. Forward, greenfield design — the inverse of
+   `improve-codebase-architecture` (which remediates existing shallow code).
 
 6. **`to-issues`** — breaks the prd-issue into independent, grab-able
    **sub-issues** using tracer-bullet vertical slices, sliced *within* the
-   modules the design ADR defined. Each sub-issue is labeled for the loop to
-   pick up.
+   modules the design ADR defined.
 
-7. **Loop** — the cohesive multi-agent workflow that drains ready sub-issues onto
-   session branches: `explorer` reads the issue and maps the codebase →
-   `implementor` writes the change → `validator` reviews it. The loop iterates
-   implementor ↔ validator until clean, then commits.
+7. **`change-orchestrator`** — the cohesive multi-agent workflow that drives a
+   file-backed *Change* through its pipeline: `change-explorer` maps the codebase
+   → `change-implementor` writes the change → `change-validator` reviews it.
+   Iterates implementor ↔ validator until clean, then archives.
 
-## Running the loop in a worktree
+## Running a change session in a worktree
 
-The loop mutates the working tree (it checks out session branches and runs build
-commands). To keep your host repository undisturbed — so you can grill, model, or
-run a second loop in parallel — create an isolated worktree:
+A change session may mutate the working tree (it checks out session branches and
+runs build commands). To keep your host repository undisturbed — so you can
+grill, model, or run a second session in parallel — create an isolated worktree:
 
 ```bash
 ai-harness worktree create
@@ -191,7 +189,7 @@ ai-harness worktree create
 
 cd .ai-harness/worktrees/1782139126824
 # Launch your Agent CLI here (Claude Code / OpenCode)
-# Start the loop: "drain the backlog" / "start the loop"
+# Start the change-orchestrator session
 ```
 
 Because the Agent CLI's working directory is inherited by every subagent, every
@@ -210,10 +208,8 @@ git worktree prune
 git worktree list
 ```
 
-The command is deliberately thin plumbing: it does not create the `loop-run`
-branch (the orchestrator still owns branch naming).  The `delete` verb provides
-a convenient interactive picker; native `git worktree remove|prune|list` remain
-available for scripting.
+The `delete` verb provides a convenient interactive picker; native
+`git worktree remove|prune|list` remain available for scripting.
 
 ## Supported agent CLIs
 
@@ -230,40 +226,30 @@ configuration directories of every supported Agent CLI:
 Generic is always installed. It provides the persona for any Agent CLI
 that reads from the standard `~/.agents/` directory.
 
-## Copilot loop agents
+## Copilot change agents
 
-`ai-harness install` also renders the four loop agents into
-`~/.copilot/agents/` as Copilot custom agent files
-(`loop-orchestrator.agent.md`, `explorer.agent.md`,
-`implementor.agent.md`, `validator.agent.md`). Each file carries a YAML
+`ai-harness install` also renders the nine change agents into
+`~/.copilot/agents/` as Copilot custom agent files. Each file carries a YAML
 frontmatter with `name` and `description` — the fields Copilot CLI
 honors for custom agents.
 
-### Driving the Loop
+### Driving the change workflow
 
-Start the Loop from within Copilot CLI:
+Start the change-orchestrator from within Copilot CLI:
 
 ```
-/agent loop-orchestrator
+/agent change-orchestrator
 ```
 
-The orchestrator picks up ready sub-issues from the project tracker and
-coordinates the three subagents — explorer (investigate), implementor
-(apply), validator (review) — until the change is clean and committed.
+The orchestrator drives a file-backed *Change* through its pipeline and
+coordinates the subagents — change-explorer (investigate), change-implementor
+(apply), change-validator (review) — until the change is clean and committed.
 
 ### Subagent visibility
 
-All three subagents are visible and directly invocable:
-
-| Agent | Purpose | Invocation |
-|-------|---------|------------|
-| **explorer** | Read-only codebase investigation plan | `/agent explorer` |
-| **implementor** | Applies the implementor workflow to one change | `/agent implementor` |
-| **validator** | Read-only diff audit after implementation | `/agent validator` |
-
-The subagents are intentionally visible so you can invoke one directly
-when you need a targeted investigation or review without running the
-full Loop.
+All change subagents are visible and directly invocable via `/agent <name>`.
+They are intentionally visible so you can invoke one directly when you need
+a targeted investigation or review.
 
 ### Model selection
 
@@ -285,10 +271,12 @@ The project is a uv-managed Python package. The main regions of the tree:
 - `src/ai_harness/` — the CLI package. The harness module owns the install/uninstall
   operations (path mapping, resource enumeration, manifest persistence); the commands
   module is a thin typer adapter over them.
-- `src/ai_harness/resources/` — the bundled artifacts (`AGENTS.md`, `skills/`, and
-  `loop-agent/`) that the installer copies into each Agent CLI's home directory.
-- `src/ai_harness/resources/loop-agent/` — the four loop agents (orchestrator,
-  explorer, implementor, validator) that drive the end-to-end workflow.
+- `src/ai_harness/resources/` — the bundled artifacts (`AGENTS.md`, `skills/`,
+  and `change-agent/`) that the installer copies into each Agent CLI's home
+  directory.
+- `src/ai_harness/resources/change-agent/` — the nine change agents
+  (orchestrator, explorer, implementor, validator, and support agents) that drive
+  the end-to-end change workflow.
 - `tests/` — Python unit tests for the CLI package. Run with `uv run pytest`.
 - `e2e/` — end-to-end test suite and Docker sandbox (`e2e/docker-test.sh`).
 - `docs/adr/` — architecture decision records.
@@ -321,7 +309,7 @@ appropriate tier section.
 ## Commit convention
 
 The commit-message format is owned by
-[`CODING_STANDARDS.md ## Commits`](CODING_STANDARDS.md#commits) — the loop's agents defer
+[`CODING_STANDARDS.md ## Commits`](CODING_STANDARDS.md#commits) — the change agents defer
 to that section instead of hardcoding a convention. The default is Conventional Commits.
 
 Override it by editing the section. For example, to switch to a work-policy format:
