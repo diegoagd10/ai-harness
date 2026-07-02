@@ -40,18 +40,17 @@ class AgentMode(StrEnum):
 
     The string values match the lowercase vocabulary already used by
     ``CLAUDE_MODELS`` and ``OPENCODE_REASONING_EFFORTS`` (strict lowercase,
-    no case folding). Adding a third mode is a one-line enum member plus
+    no case folding). Adding a new mode is a one-line enum member plus
     a parser branch.
     """
 
-    LOOP = "loop"
     CHANGE = "change"
 
 
 def parse_agent_mode(raw: str) -> AgentMode:
     """Parse a raw ``-a/--agent`` string into an :class:`AgentMode`.
 
-    Strict-lowercase: ``"LOOP"`` and ``"Change"`` are rejected — the
+    Strict-lowercase: ``"Change"`` and ``"CHANGE"`` are rejected — the
     wizard's vocabulary is lowercase only. Raises :class:`ValueError` with
     the valid set explicitly named so the CLI adapter can surface it
     verbatim in a ``typer.BadParameter`` message.
@@ -88,10 +87,12 @@ CLAUDE_MODELS: tuple[str, ...] = ("opus", "sonnet", "haiku", "fable", "inherit")
 #: Claude effort values the wizard offers. Order is intentional: low → max.
 CLAUDE_EFFORTS: tuple[str, ...] = ("low", "medium", "high", "xhigh", "max")
 
-#: Agents configurable through the Claude wizard. The change-orchestrator is
-#: excluded because on Claude it renders as a skill (no model/effort).
+#: All agents the Claude wizard presents — the 8 change subagents plus the
+#: change-orchestrator. The orchestrator's model override is ignored by the
+#: skill renderer, but the wizard presents all 9 for a uniform UX.
 #: Kept as a tuple so callers can't mutate the source of truth.
 CLAUDE_WIZARD_AGENTS: tuple[str, ...] = (
+    "change-orchestrator",
     "change-explorer",
     "change-implementor",
     "change-validator",
@@ -114,24 +115,13 @@ def claude_efforts() -> tuple[str, ...]:
 
 
 def claude_wizard_agents() -> tuple[str, ...]:
-    """Return the agents configurable through the Claude wizard (excludes the orchestrator skill)."""
+    """Return the agents the Claude wizard presents (all 9 change agents including the orchestrator)."""
     return CLAUDE_WIZARD_AGENTS
 
 
 # ---------------------------------------------------------------------------
 # Fixed OpenCode vocabulary — the wizard's single source of truth.
 # ---------------------------------------------------------------------------
-
-#: Agents configurable through the OpenCode wizard. The orchestrator is
-#: included (and listed first) because on OpenCode it is a primary agent
-#: carrying a model and effort, not a skill. The remaining three are the
-#: explorer/implementor/validator subagents.
-OPENCODE_WIZARD_AGENTS: tuple[str, ...] = (
-    "loop-orchestrator",
-    "explorer",
-    "implementor",
-    "validator",
-)
 
 #: OpenCode ``reasoningEffort`` values the wizard offers. The set is fixed
 #: per the issue: effort is gated on the model's ``reasoning`` boolean, and
@@ -140,21 +130,13 @@ OPENCODE_WIZARD_AGENTS: tuple[str, ...] = (
 OPENCODE_REASONING_EFFORTS: tuple[str, ...] = ("low", "medium", "high")
 
 
-def opencode_wizard_agents() -> tuple[str, ...]:
-    """Return the agents configurable through the OpenCode wizard (orchestrator on top)."""
-    return OPENCODE_WIZARD_AGENTS
-
-
 # ---------------------------------------------------------------------------
-# Change-agent set — the second half of the OpenCode wizard's vocabulary.
+# Change-agent set — the OpenCode wizard's agent vocabulary.
 #
-# Mirrors ``OPENCODE_WIZARD_AGENTS`` exactly: a frozen tuple and a single
-# accessor that callers consume (the wizard's dispatcher selects between
-# this tuple and ``opencode_wizard_agents()`` based on ``AgentMode``).
-# The eight names mirror the renderer resources under ``change-agent/``
-# (``_discover_loop_agents`` walks that dir on the write path; the wizard
-# does NOT read from the filesystem — pure data is the wizard's source of
-# truth by design).
+# A frozen tuple and a single accessor that callers consume. The nine names
+# mirror the renderer resources under ``change-agent/`` (``_discover_agents``
+# walks that dir on the write path; the wizard does NOT read from the
+# filesystem — pure data is the wizard's source of truth by design).
 # ---------------------------------------------------------------------------
 
 OPENCODE_CHANGE_AGENTS: tuple[str, ...] = (

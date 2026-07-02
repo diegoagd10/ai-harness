@@ -37,11 +37,10 @@ def set_models(
             "--agent",
             help=(
                 "Configure the agent set when targeting opencode "
-                "('loop' for the four loop agents, 'change' for the eight "
-                "change agents). Ignored for claude."
+                "('change' for the nine change agents). Ignored for claude."
             ),
         ),
-    ] = "loop",
+    ] = "change",
 ) -> None:
     """Run the set-models wizard for the given Agent CLI.
 
@@ -53,10 +52,9 @@ def set_models(
     selection. Press Ctrl+C at any prompt to cancel without writing.
 
     ``-a/--agent`` selects which agent set the opencode wizard targets
-    (``loop`` for the four loop agents, ``change`` for the eight
-    change agents). Strict-lowercase; the wizard ignores the flag when
-    ``-o claude`` is selected — claude has only one agent set so the
-    flag is a no-op there.
+    (``change`` for the nine change agents). Strict-lowercase; the wizard
+    ignores the flag when ``-o claude`` is selected — claude has only one
+    agent set so the flag is a no-op there.
     """
     if len(to) > 1:
         valid = ", ".join(a.value for a in _SUPPORTED)

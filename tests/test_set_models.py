@@ -48,7 +48,6 @@ from ai_harness.modules.wizard.pure import (
     opencode_change_agents,
     opencode_efforts,
     opencode_model_is_reasoning,
-    opencode_wizard_agents,
     parse_agent_mode,
 )
 
@@ -101,9 +100,10 @@ def test_claude_efforts_is_the_fixed_set() -> None:
     assert claude_efforts() == ("low", "medium", "high", "xhigh", "max")
 
 
-def test_claude_wizard_agents_excludes_orchestrator() -> None:
-    """The Claude wizard configures the 8 change subagents; the orchestrator skill is fixed."""
+def test_claude_wizard_agents_includes_all_nine() -> None:
+    """The Claude wizard presents all 9 change agents including the orchestrator."""
     assert claude_wizard_agents() == (
+        "change-orchestrator",
         "change-explorer",
         "change-implementor",
         "change-validator",
@@ -120,16 +120,6 @@ def test_claude_wizard_agents_excludes_orchestrator() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_opencode_wizard_agents_includes_orchestrator_first() -> None:
-    """The OpenCode wizard configures all four loop agents, orchestrator on top.
-
-    Acceptance criterion: ``set-models -o opencode`` lists all four loop
-    agents with the orchestrator on top. The orchestrator is a primary
-    OpenCode agent (not a skill) so it carries a model and is configurable.
-    """
-    assert opencode_wizard_agents() == ("loop-orchestrator", "explorer", "implementor", "validator")
-
-
 def test_opencode_efforts_is_the_reasoning_effort_set() -> None:
     """OpenCode's ``reasoningEffort`` values are the fixed (low, medium, high) set."""
     assert opencode_efforts() == ("low", "medium", "high")
@@ -143,7 +133,7 @@ def test_opencode_efforts_is_the_reasoning_effort_set() -> None:
 def test_opencode_change_agents_returns_eight_change_agents() -> None:
     """The change-agent set is exactly the eight named agents, orchestrator first.
 
-    Mirrors ``test_opencode_wizard_agents_includes_orchestrator_first``:
+    Mirrors ``test_claude_wizard_agents_includes_all_nine``:
     the orchestrator leads because on OpenCode it is a primary agent
     carrying a model and effort (not a skill). Order is intentional and
     pinned — a future rename / re-order is a deliberate design change,
@@ -172,13 +162,21 @@ def test_opencode_change_agents_returns_same_tuple_object_each_call() -> None:
     assert opencode_change_agents() is opencode_change_agents()
 
 
-def test_parse_agent_mode_accepts_loop_and_change() -> None:
-    """``parse_agent_mode`` round-trips both valid lowercase values."""
-    assert parse_agent_mode("loop") == AgentMode.LOOP
+def test_parse_agent_mode_accepts_change() -> None:
+    """``parse_agent_mode`` round-trips the only valid lowercase value."""
     assert parse_agent_mode("change") == AgentMode.CHANGE
     # StrEnum values compare equal to raw strings — keeps downstream == / Choice(value=...) working.
-    assert parse_agent_mode("loop") == "loop"
     assert parse_agent_mode("change") == "change"
+
+
+def test_parse_agent_mode_rejects_loop() -> None:
+    """``"loop"`` is no longer a valid value and raises ValueError."""
+    with pytest.raises(ValueError) as excinfo:
+        parse_agent_mode("loop")
+
+    message = str(excinfo.value).lower()
+    assert "change" in message
+    assert "loop" in message  # the rejected value is in the message so the user sees what was wrong
 
 
 def test_parse_agent_mode_rejects_unknown_value() -> None:
@@ -187,7 +185,6 @@ def test_parse_agent_mode_rejects_unknown_value() -> None:
         parse_agent_mode("bogus")
 
     message = str(excinfo.value).lower()
-    assert "loop" in message
     assert "change" in message
     assert "bogus" in message  # the rejected value is in the message so the user sees what was wrong
 
@@ -196,13 +193,12 @@ def test_parse_agent_mode_rejects_uppercase_strict_lowercase() -> None:
     """Uppercase / mixed-case variants are rejected — strict-lowercase vocabulary.
 
     Matches the existing lowercase vocabulary in ``CLAUDE_MODELS`` and
-    ``OPENCODE_REASONING_EFFORTS``. ``"LOOP"`` and ``"Loop"`` are NOT
+    ``OPENCODE_REASONING_EFFORTS``. ``"CHANGE"`` and ``"cHaNgE"`` are NOT
     normalised; both raise with the valid-set hint.
     """
-    for raw in ("LOOP", "Loop", "CHANGE", "cHaNgE"):
+    for raw in ("CHANGE", "cHaNgE"):
         with pytest.raises(ValueError) as excinfo:
             parse_agent_mode(raw)
-        assert "loop" in str(excinfo.value).lower()
         assert "change" in str(excinfo.value).lower()
 
 
@@ -1723,8 +1719,8 @@ def test_build_agent_list_rows_missing_agent_gets_default_model() -> None:
     """An agent missing from the current map gets the Claude default 'sonnet' (template baseline)."""
     rows = build_agent_list_rows(claude_wizard_agents(), {})
 
-    # All eight rows present, all marked
-    assert len(rows) == 8
+    # All nine rows present, all marked
+    assert len(rows) == 9
     assert all(r.is_current for r in rows)
 
 
@@ -2160,17 +2156,16 @@ def test_cli_set_models_help_mentions_only_claude_opencode() -> None:
 
 
 # ---------------------------------------------------------------------------
-# -a/--agent flag — strict-lowercase validation + default-is-loop + help text
+# -a/--agent flag — strict-lowercase validation + default-is-change + help text
 # ---------------------------------------------------------------------------
 
 
-def test_cli_set_models_default_agent_flag_is_loop(isolated_home: Path) -> None:
-    """Omitting ``-a`` defaults to ``loop`` — today's byte-for-byte behavior preserved.
+def test_cli_set_models_default_agent_flag_is_change(isolated_home: Path) -> None:
+    """Omitting ``-a`` defaults to ``change`` — the only valid agent set.
 
     Acceptance scenario 5: ``set-models -o opencode`` (no ``-a``) routes
-    the wizard through the loop-agent branch. With ``-a loop`` added
-    later, the route is identical. Here we verify the flag's *absence*
-    keeps the existing CLI surface intact (a non-zero exit only because
+    the wizard through the change-agent branch. Here we verify the flag's
+    *absence* keeps the CLI surface intact (a non-zero exit only because
     CliRunner has no TTY / no opencode binary — the rejection happens
     AFTER ``-a`` is parsed and defaults).
     """
@@ -2182,7 +2177,7 @@ def test_cli_set_models_default_agent_flag_is_loop(isolated_home: Path) -> None:
 
     captured: dict[str, object] = {}
 
-    def fake_run_wizard_or_bail(cli, *, home, agent_mode=AgentMode.LOOP):
+    def fake_run_wizard_or_bail(cli, *, home, agent_mode=AgentMode.CHANGE):
         captured["cli"] = cli
         captured["agent_mode"] = agent_mode
         return False  # force the command to exit non-zero so we can inspect captured
@@ -2193,45 +2188,58 @@ def test_cli_set_models_default_agent_flag_is_loop(isolated_home: Path) -> None:
         result = runner.invoke(app, ["set-models", "-o", "opencode"])
         assert result.exit_code != 0  # we forced non-zero from the fake
         assert captured.get("cli") == AgentCli.OPENCODE
-        assert captured.get("agent_mode") == AgentMode.LOOP
+        assert captured.get("agent_mode") == AgentMode.CHANGE
     finally:
         monkeypatch.undo()
+
+
+def test_cli_set_models_loop_agent_flag_errors(isolated_home: Path) -> None:
+    """``-a loop`` is rejected — the loop agent set has been removed.
+
+    Acceptance scenario: the rejection message names ``change`` as the
+    only valid value. typer maps ``typer.BadParameter`` to exit code 2.
+    """
+    result = runner.invoke(app, ["set-models", "-o", "opencode", "-a", "loop"])
+
+    assert result.exit_code != 0
+    combined = f"{result.stdout} {result.stderr}".lower()
+    assert "change" in combined
+    # typer exit code 2 for BadParameter; 1 is also acceptable on this CLI surface
+    assert result.exit_code in (1, 2)
 
 
 def test_cli_set_models_unknown_agent_flag_errors(isolated_home: Path) -> None:
     """``-a bogus`` is rejected with a typer error naming the valid set.
 
-    Acceptance scenario 6: the rejection message names both ``loop`` and
-    ``change`` so the user knows which values are accepted. typer maps
+    Acceptance scenario 6: the rejection message names ``change`` so
+    the user knows which value is accepted. typer maps
     ``typer.BadParameter`` to exit code 2.
     """
     result = runner.invoke(app, ["set-models", "-o", "opencode", "-a", "bogus"])
 
     assert result.exit_code != 0
     combined = f"{result.stdout} {result.stderr}".lower()
-    assert "loop" in combined
     assert "change" in combined
     # typer exit code 2 for BadParameter; 1 is also acceptable on this CLI surface
     assert result.exit_code in (1, 2)
 
 
 def test_cli_set_models_uppercase_agent_flag_errors(isolated_home: Path) -> None:
-    """``-a LOOP`` (uppercase) is rejected — strict lowercase vocabulary.
+    """``-a CHANGE`` (uppercase) is rejected — strict lowercase vocabulary.
 
     Acceptance scenario 7: case-insensitive matching is explicitly out
-    of scope. ``-a LOOP`` errors with the same valid-values hint as
+    of scope. ``-a CHANGE`` errors with the same valid-values hint as
     ``-a bogus``. ``typer.BadParameter`` → exit code 2.
     """
-    result = runner.invoke(app, ["set-models", "-o", "opencode", "-a", "LOOP"])
+    result = runner.invoke(app, ["set-models", "-o", "opencode", "-a", "CHANGE"])
 
     assert result.exit_code != 0
     combined = f"{result.stdout} {result.stderr}".lower()
-    assert "loop" in combined
     assert "change" in combined
 
 
 def test_cli_set_models_help_mentions_agent_flag_and_valid_values() -> None:
-    """``--help`` documents the ``-a/--agent`` flag, names both valid values, and states the claude-ignored note.
+    """``--help`` documents the ``-a/--agent`` flag, names the valid value, and states the claude-ignored note.
 
     Acceptance criterion ``req:help-text-honest-001``: future refactors
     must not silently drop the valid-values list or the claude-ignored
@@ -2244,8 +2252,7 @@ def test_cli_set_models_help_mentions_agent_flag_and_valid_values() -> None:
     # Flag is advertised with both short and long forms.
     assert "-a" in lowered
     assert "--agent" in lowered
-    # Both valid values are named explicitly.
-    assert "loop" in lowered
+    # The valid value is named explicitly.
     assert "change" in lowered
     # The claude-ignored note is present so users discover the silent-ignore contract.
     assert "claude" in lowered
