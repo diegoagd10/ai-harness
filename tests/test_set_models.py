@@ -3863,7 +3863,10 @@ def test_run_claude_wizard_effort_phase_shows_unset_for_untouched_agent(
     _, choices = effort_captures[0]
     titles = [c.title for c in choices if isinstance(c, questionary.Choice)]
     # The rich format with "(unset)" must appear for an untouched agent.
-    assert "change-implementor - change-implementor: sonnet / (unset)" in titles
+    # Single agent prefix: ``format_selection_label`` already supplies ``{agent}: ``,
+    # so the prompt function must NOT prepend another ``{agent} - ``.
+    assert "change-implementor: sonnet / (unset)" in titles
+    assert "change-implementor - change-implementor: sonnet / (unset)" not in titles
 
 
 def test_run_claude_wizard_effort_phase_never_shows_na(
@@ -3951,7 +3954,9 @@ def test_run_opencode_wizard_effort_phase_shows_unset_for_reasoning_model(
     assert effort_captures
     _, choices = effort_captures[0]
     titles = [c.title for c in choices if isinstance(c, questionary.Choice)]
-    assert "change-implementor - change-implementor: openai/gpt-5.5 / (unset)" in titles
+    # Single agent prefix — verbatim consumption of ``format_selection_label``.
+    assert "change-implementor: openai/gpt-5.5 / (unset)" in titles
+    assert "change-implementor - change-implementor: openai/gpt-5.5 / (unset)" not in titles
 
 
 def test_run_opencode_wizard_effort_phase_shows_na_for_non_reasoning_model(
@@ -3997,7 +4002,9 @@ def test_run_opencode_wizard_effort_phase_shows_na_for_non_reasoning_model(
     assert effort_captures
     _, choices = effort_captures[0]
     titles = [c.title for c in choices if isinstance(c, questionary.Choice)]
-    assert "change-implementor - change-implementor: openai/gpt-5.5-mini / (NA)" in titles
+    # Single agent prefix for non-reasoning / (NA) branch.
+    assert "change-implementor: openai/gpt-5.5-mini / (NA)" in titles
+    assert "change-implementor - change-implementor: openai/gpt-5.5-mini / (NA)" not in titles
 
 
 def test_run_opencode_wizard_effort_phase_mixed_agent_set(
@@ -4075,8 +4082,117 @@ def test_run_opencode_wizard_effort_phase_mixed_agent_set(
     _, choices = effort_captures[0]
     titles = [c.title for c in choices if isinstance(c, questionary.Choice)]
     # Both branches must be present, driven by per-agent reasoning lookup.
-    assert "change-implementor - change-implementor: openai/gpt-5.5 / high" in titles
-    assert "change-validator - change-validator: openai/gpt-5.5-mini / (NA)" in titles
+    # Single agent prefix — verbatim consumption of ``format_selection_label``.
+    assert "change-implementor: openai/gpt-5.5 / high" in titles
+    assert "change-validator: openai/gpt-5.5-mini / (NA)" in titles
+    assert "change-implementor - change-implementor:" not in " | ".join(titles)
+    assert "change-validator - change-validator:" not in " | ".join(titles)
+
+
+def test_ask_continue_or_agent_effort_phase_no_agent_dash_agent_substring(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Claude: no effort-phase choice title may contain the duplicated ``{agent} - {agent}:`` prefix.
+
+    Locks the fix for the effort-row-duplication bug. Even if a future
+    refactor reorders the title assembly, the bare substring
+    ``{agent} - {agent}:`` MUST NEVER appear in any effort-phase choice
+    title. Captures the choice list through the same ``_filterable_select``
+    shim pattern as ``test_ask_continue_or_agent_uses_dash_label_format``.
+    """
+    import questionary
+
+    from ai_harness.modules.wizard import tui
+
+    captured: list[object] = []
+
+    def fake_select(message, *, choices, **kwargs):
+        captured.append(choices)
+
+        class _Q:
+            def ask(self) -> str:
+                return "__continue__"
+
+        return _Q()
+
+    monkeypatch.setattr(tui, "_filterable_select", fake_select)
+    # Build selections for every Claude wizard agent using the same
+    # ``agent: model / <state>`` shape ``run_effort_phase`` passes in.
+    effort_pairs = [
+        ("change-implementor", "change-implementor: sonnet / high"),
+        ("change-validator", "change-validator: sonnet / (unset)"),
+        ("change-explorer", "change-explorer: opus / high"),
+    ]
+    selections = dict(effort_pairs)
+    tui._ask_continue_or_agent("effort", selections)
+
+    titles = [choice.title for choice in captured[0] if isinstance(choice, questionary.Choice)]
+    for agent, label in effort_pairs:
+        forbidden = f"{agent} - {agent}:"
+        assert forbidden not in titles, (
+            f"Claude effort phase must never duplicate the agent prefix; "
+            f"saw {forbidden!r} in titles {titles!r}"
+        )
+        # And the label the caller passed in must be present verbatim.
+        assert label in titles, (
+            f"Claude effort phase must consume selections[{agent!r}] verbatim; "
+            f"saw titles {titles!r}"
+        )
+
+
+def test_ask_opencode_continue_or_agent_effort_phase_no_agent_dash_agent_substring(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OpenCode: no effort-phase choice title may contain the duplicated ``{agent} - {agent}:`` prefix.
+
+    Covers all three effort states — ``high`` (set), ``(unset)`` (no
+    override), and ``(NA)`` (non-reasoning model). Mirrors the Claude
+    regression test so the two wizards cannot drift on this contract.
+    """
+    import questionary
+
+    from ai_harness.modules.wizard import tui
+
+    captured: list[object] = []
+
+    def fake_select(message, *, choices, **kwargs):
+        captured.append(choices)
+
+        class _Q:
+            def ask(self) -> str:
+                return "__continue__"
+
+        return _Q()
+
+    monkeypatch.setattr(tui, "_filterable_select", fake_select)
+    # Build selections for every OpenCode wizard agent. Seeds all three
+    # effort states — ``high``, ``(unset)``, and ``(NA)`` — so a future
+    # phase-aware formatter change that re-introduces the duplicated
+    # prefix on any of the three branches would fail this test.
+    effort_pairs = [
+        ("change-implementor", "change-implementor: openai/gpt-5.5 / high"),
+        ("change-validator", "change-validator: openai/gpt-5.5-mini / (NA)"),
+        ("change-explorer", "change-explorer: openai/gpt-5.5 / (unset)"),
+    ]
+    selections = dict(effort_pairs)
+    tui._ask_opencode_continue_or_agent(
+        "effort",
+        selections,
+        opencode_change_agents(),
+    )
+
+    titles = [choice.title for choice in captured[0] if isinstance(choice, questionary.Choice)]
+    for agent, label in effort_pairs:
+        forbidden = f"{agent} - {agent}:"
+        assert forbidden not in titles, (
+            f"OpenCode effort phase must never duplicate the agent prefix; "
+            f"saw {forbidden!r} in titles {titles!r}"
+        )
+        # And the label the caller passed in must be present verbatim.
+        assert label in titles, (
+            f"OpenCode effort phase must consume selections[{agent!r}] verbatim; "
+            f"saw titles {titles!r}"
+        )
 
 
 def test_format_selection_label_effort_phase_and_confirm_panel_match_for_none_effort() -> None:

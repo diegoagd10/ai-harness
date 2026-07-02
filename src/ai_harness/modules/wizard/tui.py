@@ -527,6 +527,24 @@ def _ask_continue_or_agent(
     Pressing Esc behaves like "← Back" on every phase except the first
     ("model"), which has no predecessor to return to — there Esc is a
     no-op and re-shows the same screen (#55).
+
+    The shape of ``selections[agent]`` depends on ``phase`` — callers must
+    follow the per-phase contract, otherwise effort-phase rows duplicate
+    the agent prefix:
+
+    - ``phase == "model"``: caller passes a bare Claude model alias
+      (e.g. ``"opus"``, ``"sonnet"``); the prompt function composes
+      ``title = f"{agent} - {selections[agent]}"``. Missing entries
+      default to ``"sonnet"``.
+    - ``phase == "effort"``: caller passes a pre-rendered
+      ``"agent: model / <state>"`` line (typically produced by
+      :func:`format_selection_label`); the prompt function uses the
+      value **verbatim** — the ``agent: `` prefix is already present,
+      so adding another ``"{agent} - "`` would render
+      ``"{agent} - {agent}: model / <state>"`` (the bug this contract
+      pins against). Missing entries fall back to ``"(unset)"`` as
+      defensive dead code — the real effort-phase call site fills the
+      dict for every agent in scope.
     """
     next_phase = {
         "model": "effort",
@@ -540,9 +558,15 @@ def _ask_continue_or_agent(
     if phase != "model":
         choices.append(questionary.Choice(title="← Back", value=Nav.BACK))
         choices.append(questionary.Separator())
+    # Per-phase title assembly — see the docstring for the
+    # ``selections[agent]`` shape contract.
     choices.extend(
         questionary.Choice(
-            title=f"{agent} - {selections.get(agent, 'sonnet')}",
+            title=(
+                selections.get(agent, "(unset)")
+                if phase == "effort"
+                else f"{agent} - {selections.get(agent, 'sonnet')}"
+            ),
             value=agent,
         )
         for agent in agent_list
@@ -820,6 +844,25 @@ def _ask_opencode_continue_or_agent(
     Pressing Esc behaves like "← Back" on every phase except the first
     ("model"), which has no predecessor to return to — there Esc is a
     no-op and re-shows the same screen (#55).
+
+    The shape of ``selections[agent]`` depends on ``phase`` — callers must
+    follow the per-phase contract, otherwise effort-phase rows duplicate
+    the agent prefix:
+
+    - ``phase == "model"``: caller passes a bare ``provider/model`` id
+      (e.g. ``"openai/gpt-5.5"``); the prompt function composes
+      ``title = f"{agent} - {selections[agent]}"``. Missing entries
+      default to ``"(unset)"``.
+    - ``phase == "effort"``: caller passes a pre-rendered
+      ``"agent: model / <state>"`` line (typically produced by
+      :func:`format_selection_label`); the prompt function uses the
+      value **verbatim** — the ``agent: `` prefix is already present,
+      so adding another ``"{agent} - "`` would render
+      ``"{agent} - {agent}: model / <state>"`` (the bug this contract
+      pins against). Missing entries fall back to ``"(unset)"`` as
+      defensive dead code — the real effort-phase call site fills the
+      dict for every agent in scope, covering all three effort states
+      (``high`` / ``(unset)`` / ``(NA)``).
     """
     next_phase = {
         "model": "effort",
@@ -833,9 +876,15 @@ def _ask_opencode_continue_or_agent(
     if phase != "model":
         choices.append(questionary.Choice(title="← Back", value=Nav.BACK))
         choices.append(questionary.Separator())
+    # Per-phase title assembly — see the docstring for the
+    # ``selections[agent]`` shape contract.
     choices.extend(
         questionary.Choice(
-            title=f"{agent} - {selections.get(agent, '(unset)')}",
+            title=(
+                selections.get(agent, "(unset)")
+                if phase == "effort"
+                else f"{agent} - {selections.get(agent, '(unset)')}"
+            ),
             value=agent,
         )
         for agent in agent_list
