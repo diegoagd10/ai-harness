@@ -50,6 +50,7 @@ from ai_harness.modules.wizard.pure import (
     build_opencode_override_payload,
     build_override_payload,
     claude_wizard_agents,
+    format_selection_label,
     join_opencode_catalog,
     opencode_change_agents,
     opencode_model_is_reasoning,
@@ -671,8 +672,16 @@ def run_claude_wizard(*, home: Path, agent_mode: AgentMode = AgentMode.CHANGE) -
         while True:
             _print_header("set-models · claude — effort")
             _console.print("")
-            # Show current effort alongside (placeholder if unset)
-            display = {agent: (efforts[agent] or "(unset)") for agent in efforts}
+            # Render per-agent rows with ``agent: model / <state>`` — the
+            # same format the confirm panel uses. Claude models are
+            # always effort-supporting, so has_effort_support=True keeps
+            # the ``(NA)`` branch unreachable here. The display dict is
+            # then passed unchanged to ``_ask_continue_or_agent`` (no
+            # signature ripple).
+            display = {
+                agent: format_selection_label(agent, models[agent], efforts[agent], has_effort_support=True)
+                for agent in efforts
+            }
             pick = _ask_continue_or_agent("effort", display)
             if pick is None:
                 return Nav.CANCEL
@@ -945,8 +954,21 @@ def run_opencode_wizard(
         while True:
             _print_header("set-models · opencode — effort")
             _console.print("")
-            # Show the current effort alongside (placeholder if unset)
-            display = {agent: (efforts[agent] or "(unset)") for agent in efforts}
+            # Render per-agent rows with ``agent: model / <state>`` — the
+            # same format the confirm panel uses. ``has_effort_support``
+            # is resolved PER AGENT (not wizard-wide) so reasoning-capable
+            # agents render ``(unset)``/``high`` while non-reasoning ones
+            # render ``(NA)``. The display dict is then passed unchanged
+            # to ``_ask_opencode_continue_or_agent`` (no signature ripple).
+            display = {
+                agent: format_selection_label(
+                    agent,
+                    models[agent],
+                    efforts[agent],
+                    has_effort_support=opencode_model_is_reasoning(models[agent], catalog),
+                )
+                for agent in efforts
+            }
             pick = _ask_opencode_continue_or_agent("effort", display, agents)
             if pick is None:
                 return Nav.CANCEL
