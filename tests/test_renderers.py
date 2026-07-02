@@ -2350,11 +2350,9 @@ def test_change_orchestrator_body_entry_class_boundary_statement_present(cli: Ag
     assert small_inline_idx != -1 and recommend_idx != -1
     boundary_window = body[small_inline_idx:recommend_idx]
     # Boundary phrasing must appear in the window between the two class markers.
-    assert (
-        "boundary" in boundary_window
-        or "flips" in boundary_window
-        or "hard" in boundary_window
-    ), f"{cli}: no explicit boundary statement between Small inline and Recommend change flow"
+    assert "boundary" in boundary_window or "flips" in boundary_window or "hard" in boundary_window, (
+        f"{cli}: no explicit boundary statement between Small inline and Recommend change flow"
+    )
 
 
 @pytest.mark.parametrize("cli", NATIVE_RENDERERS)
@@ -2444,15 +2442,10 @@ def test_change_orchestrator_body_mode_preflight_per_change_flow_entry(cli: Agen
     body = _native_change_orchestrator_body(cli).lower()
 
     # Ask on every change-flow entry.
-    assert "ask" in body and "every change-flow entry" in body, (
-        f"{cli}: missing 'ask on every change-flow entry' token"
-    )
+    assert "ask" in body and "every change-flow entry" in body, f"{cli}: missing 'ask on every change-flow entry' token"
     # Skip-when-explicit language.
     assert (
-        "skip" in body
-        and "interactive" in body
-        and "auto" in body
-        and ("same message" in body or "verbatim" in body)
+        "skip" in body and "interactive" in body and "auto" in body and ("same message" in body or "verbatim" in body)
     ), f"{cli}: missing skip-when-explicit mode preflight rule"
 
 
@@ -2528,9 +2521,7 @@ def test_change_orchestrator_body_hard_gate_heading_preserved(cli: AgentCli) -> 
     break the downstream sections.
     """
     body = _native_change_orchestrator_body(cli)
-    assert "## Session mode — auto vs interactive (HARD GATE)" in body, (
-        f"{cli}: hard-gate heading missing or renamed"
-    )
+    assert "## Session mode — auto vs interactive (HARD GATE)" in body, f"{cli}: hard-gate heading missing or renamed"
 
 
 @pytest.mark.parametrize("cli", NATIVE_RENDERERS)
@@ -2554,10 +2545,10 @@ def test_change_orchestrator_body_no_new_cli_commands_or_flags(cli: AgentCli) ->
     )
     for marker in expected_markers:
         assert marker in body, f"{cli}: pre-existing CLI marker {marker!r} removed"
-    # No invented ai-harness.change-status.* envelope field.
-    assert "ai-harness.change-status" not in body, (
-        f"{cli}: invented ai-harness.change-status envelope field"
-    )
+    # The merged CLI-contract section legitimately documents the canonical
+    # schemaName `ai-harness.change-status`; the guard is against invented
+    # namespaced status tokens such as `ai-harness.change-status.foo`.
+    assert "ai-harness.change-status." not in body, f"{cli}: invented ai-harness.change-status.* envelope field"
 
 
 @pytest.mark.parametrize("cli", NATIVE_RENDERERS)
@@ -2618,9 +2609,7 @@ def test_change_orchestrator_body_per_change_flow_run_cache_key(cli: AgentCli) -
     body = _native_change_orchestrator_body(cli).lower()
 
     # The per-change-flow-run cache key.
-    assert "per change-flow run" in body or "change-flow run" in body, (
-        f"{cli}: missing per-change-flow-run cache key"
-    )
+    assert "per change-flow run" in body or "change-flow run" in body, f"{cli}: missing per-change-flow-run cache key"
     # Re-ask for a new change in the same session.
     assert "re-ask" in body or "re-asks" in body, (
         f"{cli}: missing re-ask language for a new change-flow run in the same session"
