@@ -60,7 +60,7 @@
 
 ## Commits
 
-`[{issue_number}] {slug}`
+`[{change_name}][{task_id}] {slug}`
 
 ## Quality gates
 
