@@ -70,6 +70,29 @@ test_install_idempotent_no_args() {
         || log_pass
 }
 
+test_install_renders_commit_format_directive_in_orchestrator() {
+    log_test "install renders commit-format directive in change-orchestrator prompts"; cleanup_test_env
+    "$BINARY" install 2>&1 || true
+    local failed=0
+    # OpenCode render
+    local oc_path="$HOME/.config/opencode/agent/change-orchestrator.md"
+    if [ -f "$oc_path" ]; then
+        assert_file_contains "$oc_path" "Data injected for this delegation:" "OpenCode orchestrator has data-injected block" || failed=1
+        assert_file_contains "$oc_path" "commit-format:" "OpenCode orchestrator has commit-format directive" || failed=1
+    else
+        log_skip "OpenCode orchestrator render absent — install did not produce $oc_path"
+    fi
+    # Claude render
+    local cc_path="$HOME/.claude/skills/change-orchestrator/SKILL.md"
+    if [ -f "$cc_path" ]; then
+        assert_file_contains "$cc_path" "Data injected for this delegation:" "Claude orchestrator has data-injected block" || failed=1
+        assert_file_contains "$cc_path" "commit-format:" "Claude orchestrator has commit-format directive" || failed=1
+    else
+        log_skip "Claude orchestrator render absent — install did not produce $cc_path"
+    fi
+    [ $failed -eq 0 ] && return 0 || return 1
+}
+
 # ===========================================================================
 # TIER 1 — ai-harness init (per-repo scaffolding)
 # ===========================================================================
@@ -497,6 +520,7 @@ fi
 TIER1_TESTS=(test_binary_exists test_binary_runs test_help_and_routing
               test_install_no_args_succeeds test_uninstall_nothing_installed_is_idempotent
               test_install_output_patterns test_flag_coverage test_install_idempotent_no_args
+              test_install_renders_commit_format_directive_in_orchestrator
               test_init_creates_three_files_in_empty_repo
               test_init_creates_byte_identical_agent_docs
               test_init_idempotent_re_run_preserves_mtimes
