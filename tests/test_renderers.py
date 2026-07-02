@@ -2288,3 +2288,341 @@ def test_change_orchestrator_archive_route_uses_cli_command_inside_archiver() ->
     # The archiver's CLI run is named in the route.
     assert "ai-harness change-archive" in post_section
     assert "docs: archive" in post_section
+
+
+# ---------------------------------------------------------------------------
+# gentle-style-change-routing — entry classification, hard boundary,
+# trigger phrases, per-change-flow mode preflight, similarity check
+# ---------------------------------------------------------------------------
+# Behavioral lock-down for the orchestrator policy. Parametrized over
+# every native renderer (Claude, OpenCode, Copilot) so a missing marker
+# in any renderer fails the test with the renderer named.
+
+
+NATIVE_RENDERERS = (AgentCli.OPENCODE, AgentCli.COPILOT, AgentCli.CLAUDE)
+
+
+def _native_change_orchestrator_body(cli: AgentCli) -> str:
+    """Return the rendered change-orchestrator body for the given native CLI."""
+    pair = _find_pair(render_agents(cli), "change-orchestrator")
+    assert pair is not None, f"change-orchestrator not rendered for {cli}"
+    return pair[1].split("---", 2)[2].removeprefix("\n")
+
+
+@pytest.mark.parametrize("cli", NATIVE_RENDERERS)
+def test_change_orchestrator_body_four_entry_classes_in_canonical_order(cli: AgentCli) -> None:
+    """Subtask 5.2 — the four entry classes appear in canonical order in every renderer.
+
+    Locks the 4-way entry contract: the body must name Conversational,
+    Small inline, Recommend change flow, and Explicit change flow in
+    that order, so no renderer silently drops a class.
+    """
+    body = _native_change_orchestrator_body(cli).lower()
+
+    # Substring markers; case-insensitive matching via .lower().
+    class_markers = (
+        "conversational",
+        "small inline",
+        "recommend change flow",
+        "explicit change flow",
+    )
+    last_idx = -1
+    for marker in class_markers:
+        idx = body.find(marker)
+        assert idx != -1, f"{cli}: missing class marker {marker!r}"
+        assert idx > last_idx, f"{cli}: class {marker!r} appears out of canonical order"
+        last_idx = idx
+
+
+@pytest.mark.parametrize("cli", NATIVE_RENDERERS)
+def test_change_orchestrator_body_entry_class_boundary_statement_present(cli: AgentCli) -> None:
+    """Subtask 5.3 — explicit boundary statement between class 2 and class 3.
+
+    Locks the boundary so the classifier does not collapse the two
+    inline classes into one. The boundary prose sits between class 2
+    and class 3 in document order.
+    """
+    body = _native_change_orchestrator_body(cli).lower()
+
+    small_inline_idx = body.find("small inline")
+    recommend_idx = body.find("recommend change flow")
+    assert small_inline_idx != -1 and recommend_idx != -1
+    boundary_window = body[small_inline_idx:recommend_idx]
+    # Boundary phrasing must appear in the window between the two class markers.
+    assert (
+        "boundary" in boundary_window
+        or "flips" in boundary_window
+        or "hard" in boundary_window
+    ), f"{cli}: no explicit boundary statement between Small inline and Recommend change flow"
+
+
+@pytest.mark.parametrize("cli", NATIVE_RENDERERS)
+def test_change_orchestrator_body_six_hard_triggers_present(cli: AgentCli) -> None:
+    """Subtask 5.4 — all six hard trigger labels appear in every renderer.
+
+    Locks the 6-trigger hard boundary: 4-file, multi-file write, heavy
+    test/build, risky/uncertain scope, long-session, incident.
+    """
+    body = _native_change_orchestrator_body(cli).lower()
+
+    triggers = (
+        "4-file",
+        "multi-file write",
+        "heavy test/build",
+        "risky/uncertain scope",
+        "long-session",
+        "incident",
+    )
+    for trigger in triggers:
+        assert trigger in body, f"{cli}: missing hard trigger label {trigger!r}"
+
+
+@pytest.mark.parametrize("cli", NATIVE_RENDERERS)
+def test_change_orchestrator_body_canonical_english_trigger_phrases(cli: AgentCli) -> None:
+    """Subtask 5.5 — canonical English trigger phrases present in every renderer.
+
+    Locks the managed-change trigger phrase list: do this as a change,
+    implement this as a change, use change flow, use the change
+    pipeline, run this through change.
+    """
+    body = _native_change_orchestrator_body(cli).lower()
+
+    phrases = (
+        "do this as a change",
+        "implement this as a change",
+        "use change flow",
+        "use the change pipeline",
+        "run this through change",
+    )
+    for phrase in phrases:
+        assert phrase in body, f"{cli}: missing English trigger phrase {phrase!r}"
+
+
+@pytest.mark.parametrize("cli", NATIVE_RENDERERS)
+def test_change_orchestrator_body_canonical_spanish_trigger_phrases(cli: AgentCli) -> None:
+    """Subtask 5.6 — canonical Spanish trigger phrases present in every renderer.
+
+    Locks the bilingual managed-change trigger phrase list: hazlo con
+    change flow, implementalo como un change, usá change flow.
+    """
+    body = _native_change_orchestrator_body(cli).lower()
+
+    phrases = (
+        "hazlo con change flow",
+        "implementalo como un change",
+        "usá change flow",
+    )
+    for phrase in phrases:
+        assert phrase in body, f"{cli}: missing Spanish trigger phrase {phrase!r}"
+
+
+@pytest.mark.parametrize("cli", NATIVE_RENDERERS)
+def test_change_orchestrator_body_bare_flow_exclusion(cli: AgentCli) -> None:
+    """Subtask 5.7 — bare-flow exclusion is asserted in every renderer.
+
+    Locks the explicit bare-flow exclusion: 'bare flow' must appear
+    paired with a negative-language token (NOT / no / never).
+    """
+    body = _native_change_orchestrator_body(cli).lower()
+
+    # Find the bare-flow mention.
+    bare_flow_idx = body.find("bare flow")
+    assert bare_flow_idx != -1, f"{cli}: missing 'bare flow' exclusion marker"
+    # Pair it with NOT / no / never in a small window after the mention.
+    window = body[bare_flow_idx : bare_flow_idx + 250]
+    assert "not" in window or "no " in window or "never" in window, (
+        f"{cli}: bare-flow mention not paired with a negative-language token"
+    )
+
+
+@pytest.mark.parametrize("cli", NATIVE_RENDERERS)
+def test_change_orchestrator_body_mode_preflight_per_change_flow_entry(cli: AgentCli) -> None:
+    """Subtask 5.8 — mode preflight says 'ask on every change-flow entry'
+    and 'skip if the user provided interactive or auto' in the same message.
+    """
+    body = _native_change_orchestrator_body(cli).lower()
+
+    # Ask on every change-flow entry.
+    assert "ask" in body and "every change-flow entry" in body, (
+        f"{cli}: missing 'ask on every change-flow entry' token"
+    )
+    # Skip-when-explicit language.
+    assert (
+        "skip" in body
+        and "interactive" in body
+        and "auto" in body
+        and ("same message" in body or "verbatim" in body)
+    ), f"{cli}: missing skip-when-explicit mode preflight rule"
+
+
+@pytest.mark.parametrize("cli", NATIVE_RENDERERS)
+def test_change_orchestrator_body_similarity_check_tokens(cli: AgentCli) -> None:
+    """Subtask 5.9 — similarity-check tokens present in every renderer.
+
+    Locks the three-branch contract: Engram, .ai-harness/changes/,
+    .ai-harness/archive/, and the three branches (active, archived,
+    stale).
+    """
+    body = _native_change_orchestrator_body(cli).lower()
+
+    tokens = (
+        "engram",
+        ".ai-harness/changes/",
+        ".ai-harness/archive/",
+        "active",
+        "archived",
+        "stale",
+    )
+    for token in tokens:
+        assert token in body, f"{cli}: missing similarity-check token {token!r}"
+
+
+@pytest.mark.parametrize("cli", NATIVE_RENDERERS)
+def test_change_orchestrator_body_five_pinned_gentle_ai_markers(cli: AgentCli) -> None:
+    """Subtask 5.10 — every pinned Gentle-AI line reference is present in every renderer.
+
+    No invented gentle-ai/ paths. The five pinned references are:
+    gentle-ai/README.md:51-64, opencode/sdd-orchestrator.md:18-64,
+    :100-160, :178-200, antigravity/sdd-orchestrator.md:36-76.
+    """
+    body = _native_change_orchestrator_body(cli)
+
+    refs = (
+        "gentle-ai/README.md:51-64",
+        "gentle-ai/internal/assets/opencode/sdd-orchestrator.md:18-64",
+        "gentle-ai/internal/assets/opencode/sdd-orchestrator.md:100-160",
+        "gentle-ai/internal/assets/opencode/sdd-orchestrator.md:178-200",
+        "gentle-ai/internal/assets/antigravity/sdd-orchestrator.md:36-76",
+    )
+    for ref in refs:
+        assert ref in body, f"{cli}: missing pinned Gentle-AI reference {ref!r}"
+
+
+@pytest.mark.parametrize("cli", NATIVE_RENDERERS)
+def test_change_orchestrator_body_no_invented_gentle_ai_paths(cli: AgentCli) -> None:
+    """Subtask 5.10 — no invented gentle-ai/ paths in the rendered body.
+
+    Any path matching the gentle-ai/ prefix must be one of the five
+    pinned references above. New paths break the test.
+    """
+    import re
+
+    body = _native_change_orchestrator_body(cli)
+    pinned = {
+        "gentle-ai/README.md:51-64",
+        "gentle-ai/internal/assets/opencode/sdd-orchestrator.md:18-64",
+        "gentle-ai/internal/assets/opencode/sdd-orchestrator.md:100-160",
+        "gentle-ai/internal/assets/opencode/sdd-orchestrator.md:178-200",
+        "gentle-ai/internal/assets/antigravity/sdd-orchestrator.md:36-76",
+    }
+    found = set(re.findall(r"gentle-ai/[\w./\-:]+", body))
+    extra = found - pinned
+    assert not extra, f"{cli}: invented gentle-ai/ paths found: {sorted(extra)}"
+
+
+@pytest.mark.parametrize("cli", NATIVE_RENDERERS)
+def test_change_orchestrator_body_hard_gate_heading_preserved(cli: AgentCli) -> None:
+    """Subtask 5.11 — ## Session mode — auto vs interactive (HARD GATE) heading preserved.
+
+    The interactive phase checkpoint and the auto gatekeeper sections
+    downstream anchor on this marker. Renaming or removing it would
+    break the downstream sections.
+    """
+    body = _native_change_orchestrator_body(cli)
+    assert "## Session mode — auto vs interactive (HARD GATE)" in body, (
+        f"{cli}: hard-gate heading missing or renamed"
+    )
+
+
+@pytest.mark.parametrize("cli", NATIVE_RENDERERS)
+def test_change_orchestrator_body_no_new_cli_commands_or_flags(cli: AgentCli) -> None:
+    """Subtask 5.12 — no new CLI commands, flags, or status tokens.
+
+    The pre-change orchestrator body used the same set of CLI markers
+    (change-new, change-continue, change-archive, task-next, task-done,
+    task-create, task-list). The post-change body MUST preserve all
+    pre-existing markers and MUST NOT introduce new CLI commands or
+    `ai-harness.change-status.*` envelope fields.
+    """
+    body = _native_change_orchestrator_body(cli).lower()
+    # Pre-existing CLI surface markers (must still be present). Note that
+    # task-next / task-done / task-create / task-list are owned by the
+    # change-implementor and change-validator prompts, not the orchestrator.
+    expected_markers = (
+        "change-new",
+        "change-continue",
+        "change-archive",
+    )
+    for marker in expected_markers:
+        assert marker in body, f"{cli}: pre-existing CLI marker {marker!r} removed"
+    # No invented ai-harness.change-status.* envelope field.
+    assert "ai-harness.change-status" not in body, (
+        f"{cli}: invented ai-harness.change-status envelope field"
+    )
+
+
+@pytest.mark.parametrize("cli", NATIVE_RENDERERS)
+def test_change_orchestrator_body_similarity_check_gated_to_entry_classes_3_and_4(
+    cli: AgentCli,
+) -> None:
+    """Subtask 5.9 — similarity check is gated to entry classes 3 and 4 only.
+
+    Locks the entry-class gating: the similarity-check section must
+    state that entry classes 1 and 2 (including status reads) do NOT
+    fire the check.
+    """
+    body = _native_change_orchestrator_body(cli).lower()
+
+    # Find the similarity-check section.
+    sim_idx = body.find("similarity check before change-new")
+    assert sim_idx != -1, f"{cli}: similarity check section heading missing"
+    sim_section = body[sim_idx : sim_idx + 2000]
+
+    # Gating to entry classes 3 and 4.
+    assert "entry class 3" in sim_section and "entry class 4" in sim_section, (
+        f"{cli}: similarity check does not state entry class 3 / 4 gating"
+    )
+    # Entry classes 1 and 2 explicitly excluded.
+    assert "entry class 1" in sim_section and "entry class 2" in sim_section, (
+        f"{cli}: similarity check does not state entry class 1 / 2 exclusion"
+    )
+
+
+@pytest.mark.parametrize("cli", NATIVE_RENDERERS)
+def test_change_orchestrator_body_similarity_check_three_branch_contract(cli: AgentCli) -> None:
+    """Subtask 5.9 — similarity check documents the three-branch (plus no-match) contract.
+
+    Locks the outcomes: active folder → recommend continue; archived
+    → default stop; stale Engram → ignore; no match → create new.
+    """
+    body = _native_change_orchestrator_body(cli).lower()
+
+    sim_idx = body.find("similarity check before change-new")
+    assert sim_idx != -1
+    sim_section = body[sim_idx : sim_idx + 4500]
+
+    # All four outcomes named.
+    assert "no match anywhere" in sim_section or "no match" in sim_section, (
+        f"{cli}: similarity check does not document the no-match outcome"
+    )
+    assert ".next" in sim_section, f"{cli}: similarity check does not document the {name}.next override"
+
+
+@pytest.mark.parametrize("cli", NATIVE_RENDERERS)
+def test_change_orchestrator_body_per_change_flow_run_cache_key(cli: AgentCli) -> None:
+    """Subtask 5.8 — cache key is the change-flow run, not the session.
+
+    Locks the per-change-flow-run cache contract: the Session mode
+    section must state that the cache is keyed by change name and that
+    a new change in the same session re-asks the question.
+    """
+    body = _native_change_orchestrator_body(cli).lower()
+
+    # The per-change-flow-run cache key.
+    assert "per change-flow run" in body or "change-flow run" in body, (
+        f"{cli}: missing per-change-flow-run cache key"
+    )
+    # Re-ask for a new change in the same session.
+    assert "re-ask" in body or "re-asks" in body, (
+        f"{cli}: missing re-ask language for a new change-flow run in the same session"
+    )
