@@ -19,5 +19,15 @@ No new test edits. Ran the unchanged test gates listed in the PRD.
 - `uv run pytest tests/test_set_models.py` — 110 passed.
 - `uv run pytest` (full suite) — 534 passed.
 
+## Validator fixup
+
+Validator verdict: `fail` (1 critical — stale `dependsOn` token survived in the input-snippet rejection prose on line 47 of `change-tasks.md`).
+
+- 1bf7438 — fixup: reword the rejection parenthetical in `change-tasks.md` from `the CLI rejects \`dependsOn\`` to `the CLI rejects any non-snake_case variant` so the camelCase token no longer survives anywhere in the prompt. Re-ran the validator gates:
+  - `grep dependsOn src/ai_harness/resources/change-agent/change-tasks.md` — no matches.
+  - `uv run pytest tests/test_renderers.py::test_change_agent_prompt_set_contains_expected_contract_keywords` — PASSED (existing prompt-rendering substring assertions still hold).
+  - `uv run pytest tests/test_renderers.py tests/test_tasks.py` — 149 passed.
+  - `uv run pytest` (full suite) — 534 passed.
+
 ## Remaining
 - none
