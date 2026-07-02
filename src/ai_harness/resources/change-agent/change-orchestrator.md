@@ -211,17 +211,17 @@ Explicit). Pattern adapted from
 
 ## Modes — start vs resume (route contract)
 
-Classify every user message before acting. Routing is the **command**, never a
-folder-presence guess. The two commands are `ai-harness change-new {name}` (Start)
-and `ai-harness change-continue {name}` (Resume); both are described in the
+Routing is the **command**, never a folder-presence guess. This section
+is reached only from **entry class 4 (Explicit change flow)** and **entry
+class 3 (Recommend change flow)** after the user has confirmed the
+recommendation. Entry class 1 (Conversational) and entry class 2 (Small
+inline) are short-circuited in the [Entry classification (4-way)](#entry-classification-4-way)
+section and never reach this section. The two commands are
+`ai-harness change-new {name}` (Start) and
+`ai-harness change-continue {name}` (Resume); both are described in the
 phases below.
 
-1. **Conversational** — questions, status checks, or explanation requests.
-   Reply naturally. Do not start or resume a Change.
-2. **Grill** — the user wants a change but intent, done-when, or constraints
-   are unclear. Load `~/.agents/skills/grill-me-one-by-one/SKILL.md`, ask one
-   question at a time, and keep the shared understanding in conversation only.
-3. **Start** — intent is clear and no existing Change is being resumed.
+1. **Start** — intent is clear and no existing Change is being resumed.
    Choose a short kebab-case name and run:
 
    ```bash
@@ -229,8 +229,11 @@ phases below.
    ```
 
    The CLI hard-errors when the folder already exists (Start-mode name
-   collision → no silent clobber, no implicit resume).
-4. **Resume** — the user asks to continue existing work. If the exact name is
+   collision → no silent clobber, no implicit resume). Before invoking
+   `change-new`, the orchestrator MUST run the
+   [Similarity check before change-new](#similarity-check-before-change-new)
+   so two parallel sessions do not collide on the same name.
+2. **Resume** — the user asks to continue existing work. If the exact name is
    present, use it. If intent is fuzzy, search Engram for name + intent,
    propose the best match, wait for confirmation, then run:
 
@@ -247,7 +250,59 @@ name + intent, then run `ai-harness change-continue {name}` and route on
 
 When in doubt, lean conversational. **Never infer start vs resume from folder
 presence.** The command is the intent; the CLI validates it; disk remains
-authoritative after the call.
+authoritative after the call. The grill gate (proposal-question round) lives
+in its own [Grill / proposal-question gate](#grill--proposal-question-gate)
+section and fires when intent, done-when, or constraints are unclear — it is
+not part of the route contract.
+
+## Similarity check before change-new
+
+The orchestrator runs this check inside entry class 3 (Recommend change
+flow) and entry class 4 (Explicit change flow) when the user names a
+change. Entry class 1 (Conversational) and entry class 2 (Small inline)
+MUST NOT fire it — status reads that happen to mention a change name
+stay conversational.
+
+**Search order.** The check runs in this order, in the same change-flow
+entry:
+
+1. **Engram first** — invoke `mem_search` with project scope and intent
+   keywords. Stale Engram entries (no on-disk folder) are soft signals,
+   not authoritative.
+2. **`.ai-harness/changes/*`** — the active folder set. The CLI's
+   `change-continue` is the source of truth for "does this name exist
+   on disk?", NOT raw `ls`. The CLI errors on missing, which survives
+   worktree / archive race conditions.
+3. **`.ai-harness/archive/*`** — the archived folder set. Same source of
+   truth: CLI first, raw `ls` only as a fallback for surfacing the
+   phase history.
+
+**Three-branch contract.** The check branches into one of:
+
+- **Active folder match** (`.ai-harness/changes/{name}/` exists) →
+  recommend `change-continue` by default; stay conversational; do NOT
+  auto-resume. Surface the existing change's phase and task list, then
+  wait for explicit user confirmation before invoking `change-continue`.
+- **Archived match** (`.ai-harness/archive/{name}/` exists) → default
+  stop because the change is done; user may request a new version
+  (`{name}.next` or a fresh name). Surface the archived phase and
+  validator verdict so the user can decide.
+- **Stale Engram** (Engram mentions it but no folder on disk) → ignore
+  the Engram entry and proceed to create new. Stale Engram is common
+  across worktrees; the on-disk folders are authoritative.
+- **No match anywhere** → proceed to create new. No false-positive
+  stop messages.
+
+**Orchestrator recommends, never auto-routes.** After the check
+branches, the orchestrator surfaces the recommendation and waits for
+explicit user confirmation. It MUST NOT auto-invoke `change-continue`,
+auto-create `{name}.next`, or auto-invoke `change-new`. The user is the
+final decision-maker.
+
+**Read-only Engram.** The similarity check uses `mem_search` (and
+`mem_context` when needed) only. It MUST NOT write new Engram topics.
+Engram writes remain owned by individual phases (exploration, design,
+etc.) — see [Work rules](#work-rules).
 
 ## Pipeline
 
