@@ -924,6 +924,42 @@ def test_install_claude_is_byte_identical_on_reinstall(tmp_path: Path) -> None:
     assert skill_path.read_bytes() == first_pass["skill"], "skill: claude reinstall not byte-identical"
 
 
+def test_install_claude_manifest_is_byte_identical_on_reinstall(tmp_path: Path) -> None:
+    """Second install -o claude produces a byte-identical install manifest.
+
+    Regression for the validator's CRITICAL on
+    ``RUN_FULL_E2E=1 ./e2e/docker-test.sh`` → ``test_idempotent_reinstall``:
+    the persona+skills writer was walking the destination tree to enumerate
+    the files it "wrote". After the first install, the orchestrator skill
+    ``~/.claude/skills/change-orchestrator/SKILL.md`` is on disk (written by
+    the rendered-agents writer). On the second install, the dest-tree walk
+    found it and double-counted it in the manifest's claude entry, so the
+    manifest md5 changed and the e2e idempotency check failed.
+
+    The fix is to walk the SOURCE tree instead — the writer should only
+    record what it copied this call, not what was already on disk.
+    """
+    install_for_agent_clis([AgentCli.GENERIC, AgentCli.CLAUDE], home=tmp_path)
+    first_manifest = json.loads((tmp_path / MANIFEST_REL).read_text(encoding="utf-8"))
+
+    install_for_agent_clis([AgentCli.GENERIC, AgentCli.CLAUDE], home=tmp_path)
+    second_manifest = json.loads((tmp_path / MANIFEST_REL).read_text(encoding="utf-8"))
+
+    assert second_manifest == first_manifest, (
+        f"manifest changed on reinstall:\nFIRST: {first_manifest}\nSECOND: {second_manifest}"
+    )
+    # The cli's "Wrote N file(s)" line is also derived from the writer's
+    # returned paths; assert it matches the manifest count.
+    second_manifest_paths = sum(len(v) for v in second_manifest["files_by_agent_cli"].values())
+    assert second_manifest_paths == 21, (
+        f"manifest should record 21 files (6 generic + 15 claude), got {second_manifest_paths}: "
+        f"{second_manifest['files_by_agent_cli']}"
+    )
+    # No duplicate paths in the claude entry.
+    claude_files = second_manifest["files_by_agent_cli"]["claude"]
+    assert len(claude_files) == len(set(claude_files)), f"claude manifest entry has duplicates: {claude_files}"
+
+
 def test_install_claude_rendered_body_matches_template_verbatim(tmp_path: Path) -> None:
     """Rendered Claude agent body text matches change-agent template body verbatim."""
     from importlib.resources import files

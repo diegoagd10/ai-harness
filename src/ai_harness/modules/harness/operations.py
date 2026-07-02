@@ -283,7 +283,18 @@ def _walk_files(root: Path) -> list[Path]:
 
 
 def _write_persona_and_skills(home: Path, *, config_dest_rel: str, tree_dest_rel: str) -> list[Path]:
-    """Copy the persona file + skills tree into *home*; return absolute paths written."""
+    """Copy the persona file + skills tree into *home*; return absolute paths written.
+
+    The returned paths enumerate what this call copied, not what was already
+    on disk under the destination tree. Walking the destination tree after
+    ``shutil.copytree`` would include leftover files from prior installs
+    (e.g. a renderer-written skill at ``<tree_dest>/<name>/SKILL.md``), which
+    breaks idempotent-reinstall manifests: the second install would record
+    those leftovers under the persona+skills writer's entry, double-counting
+    paths the renderer already records, and the install manifest's md5
+    would change between reinstalls. See regression test
+    ``test_install_claude_manifest_is_byte_identical_on_reinstall``.
+    """
     resources = _resources_root()
     written: list[Path] = []
 
@@ -292,9 +303,15 @@ def _write_persona_and_skills(home: Path, *, config_dest_rel: str, tree_dest_rel
     shutil.copy2(resources / _CONFIG_SOURCE, config_dest)
     written.append(config_dest)
 
+    source_tree = resources / _TREE_SOURCE
     tree_dest = home / tree_dest_rel
-    shutil.copytree(resources / _TREE_SOURCE, tree_dest, dirs_exist_ok=True)
-    written.extend(_walk_files(tree_dest))
+    shutil.copytree(source_tree, tree_dest, dirs_exist_ok=True)
+    # Walk the SOURCE tree to know what this call copied; translate each
+    # source path to its dest path so the manifest records destination-side
+    # rel paths consistently with the renderer-writer output.
+    for src in _walk_files(source_tree):
+        rel = src.relative_to(source_tree).as_posix()
+        written.append(tree_dest / rel)
 
     return written
 
