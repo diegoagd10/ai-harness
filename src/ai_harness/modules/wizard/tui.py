@@ -660,6 +660,11 @@ def run_claude_wizard(*, home: Path, agent_mode: AgentMode = AgentMode.CHANGE) -
             if new_model == Nav.BACK:
                 continue
             models[pick] = new_model
+            # Clear any previously selected effort — the model switch
+            # invalidates the prior effort choice. Unconditional: same-model
+            # picks still reset, so the user re-affirms effort on the next
+            # pass. Per-pick: only this agent's effort is touched.
+            efforts[pick] = None
 
     def run_effort_phase() -> str:
         """Drive the effort phase loop; return '__continue__', '__back__', or '__cancel__'."""
@@ -920,6 +925,12 @@ def run_opencode_wizard(
             if new_model == Nav.BACK:
                 continue
             models[pick] = new_model
+            # Clear any previously selected effort — the model switch
+            # invalidates the prior effort choice. Unconditional: applies
+            # even when new_model == models[pick] pre-pick, even when the
+            # new model is non-reasoning. Per-pick: only this agent's
+            # effort is touched; siblings survive untouched.
+            efforts[pick] = None
 
     def run_effort_phase() -> str:
         """Drive the effort phase loop; return '__continue__', '__back__', or '__cancel__'.

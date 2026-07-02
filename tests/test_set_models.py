@@ -3780,6 +3780,443 @@ def test_run_claude_wizard_preserves_existing_install_manifest(
 
 
 # ---------------------------------------------------------------------------
+# Model-switch effort reset (issue #63)
+#
+# Every successful model pick clears the agent's previously selected
+# effort immediately, regardless of whether the new model supports
+# effort. The clear is unconditional (no new_model != models[pick] gate)
+# and per-pick (only efforts[pick] is mutated).
+# ---------------------------------------------------------------------------
+
+
+def test_run_claude_wizard_same_model_pick_clears_effort(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Claude: a same-model pick still clears the agent's effort.
+
+    The clear is unconditional — it fires even when ``new_model ==
+    models[pick]`` (the user picked the model the agent already had).
+    Gating the clear on a model change would let a same-model pick leak
+    a stale effort into the override payload.
+    """
+    from ai_harness.modules.wizard import tui
+
+    # Seed baseline: change-implementor had effort="high" previously.
+    _override_file(tmp_path).parent.mkdir(parents=True, exist_ok=True)
+    _override_file(tmp_path).write_text(
+        json.dumps({"change-implementor": {"effort": {"claude": "high"}}}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(tui.questionary, "select", _ScriptedSelect)
+    monkeypatch.setattr(tui.questionary, "confirm", _ScriptedConfirm)
+    _ScriptedSelect.instances = []
+    _ScriptedConfirm.instances = []
+
+    # Pick change-implementor → pick "sonnet" (same as the template default) → continue → continue.
+    scripted = _ScriptedSelect()
+    scripted.queue("change-implementor", "sonnet", "__continue__", "__continue__")
+    monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
+    confirm = _ScriptedConfirm().queue(True)
+    monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
+
+    wrote = tui.run_claude_wizard(home=tmp_path)
+
+    assert wrote is True
+    overrides = json.loads(_override_file(tmp_path).read_text(encoding="utf-8"))
+    # Effort was cleared to None even though the model didn't change.
+    assert overrides["change-implementor"]["effort"] == {"claude": None}
+    # No model entry — same-model pick is not a model change.
+    assert "model" not in overrides["change-implementor"]
+
+
+def test_run_claude_wizard_switching_one_agent_leaves_others_efforts_untouched(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Claude: switching one agent's model only clears that agent's effort; others stay.
+
+    The model-switch reset is per-pick — only ``efforts[pick]`` is mutated.
+    Other agents' efforts survive untouched even when the user switches
+    a sibling agent's model in the same wizard session.
+    """
+    from ai_harness.modules.wizard import tui
+
+    _override_file(tmp_path).parent.mkdir(parents=True, exist_ok=True)
+    _override_file(tmp_path).write_text(
+        json.dumps(
+            {
+                "change-validator": {"effort": {"claude": "high"}},
+                "change-implementor": {"effort": {"claude": "max"}},
+            },
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(tui.questionary, "select", _ScriptedSelect)
+    monkeypatch.setattr(tui.questionary, "confirm", _ScriptedConfirm)
+    _ScriptedSelect.instances = []
+    _ScriptedConfirm.instances = []
+
+    # Switch only change-implementor to opus.
+    scripted = _ScriptedSelect()
+    scripted.queue("change-implementor", "opus", "__continue__", "__continue__")
+    monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
+    confirm = _ScriptedConfirm().queue(True)
+    monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
+
+    wrote = tui.run_claude_wizard(home=tmp_path)
+
+    assert wrote is True
+    overrides = json.loads(_override_file(tmp_path).read_text(encoding="utf-8"))
+    # change-validator's effort survives untouched (no per-agent cross-talk).
+    assert overrides["change-validator"]["effort"] == {"claude": "high"}
+    # change-implementor's effort cleared and model updated.
+    assert overrides["change-implementor"]["effort"] == {"claude": None}
+    assert overrides["change-implementor"]["model"] == {"claude": "opus"}
+
+
+def test_run_claude_wizard_back_navigation_preserves_effort_clear(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Claude: back-navigation after a switch preserves the cleared effort.
+
+    The model-switch reset mutates ``efforts[pick]`` in-place. Backing
+    out of the effort phase and re-entering it (or going all the way
+    forward to confirm) must observe the cleared value — the clear
+    lives in the closure's state, not in the prompt-rendering layer.
+    """
+    from ai_harness.modules.wizard import tui
+
+    _override_file(tmp_path).parent.mkdir(parents=True, exist_ok=True)
+    _override_file(tmp_path).write_text(
+        json.dumps({"change-implementor": {"effort": {"claude": "high"}}}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(tui.questionary, "select", _ScriptedSelect)
+    monkeypatch.setattr(tui.questionary, "confirm", _ScriptedConfirm)
+    _ScriptedSelect.instances = []
+    _ScriptedConfirm.instances = []
+
+    # Phase 1: pick implementor -> opus -> continue.
+    # Phase 2: back (returns to phase 1).
+    # Phase 1 again: continue (no agent picked; the model change persists).
+    # Phase 2 again: continue.
+    # Confirm.
+    scripted = _ScriptedSelect()
+    scripted.queue(
+        "change-implementor",
+        "opus",
+        "__continue__",
+        "__back__",
+        "__continue__",
+        "__continue__",
+    )
+    monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
+    confirm = _ScriptedConfirm().queue(True)
+    monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
+
+    wrote = tui.run_claude_wizard(home=tmp_path)
+
+    assert wrote is True
+    overrides = json.loads(_override_file(tmp_path).read_text(encoding="utf-8"))
+    # Effort remains cleared after the round trip — the back-nav didn't restore the old "high".
+    assert overrides["change-implementor"]["effort"] == {"claude": None}
+    assert overrides["change-implementor"]["model"] == {"claude": "opus"}
+
+
+def test_run_opencode_wizard_switch_to_reasoning_leaves_effort_none(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OpenCode: switching from a non-reasoning to a reasoning model leaves effort None.
+
+    A non-reasoning baseline (no prior effort, since the model can't
+    carry one) switched to a reasoning model leaves the wizard's
+    ``efforts[pick]`` at ``None``. The override payload contains no
+    ``effort`` entry — the renderer drops the field.
+    """
+    from ai_harness.modules.wizard import tui
+
+    _override_file(tmp_path).parent.mkdir(parents=True, exist_ok=True)
+    _override_file(tmp_path).write_text(
+        json.dumps({"change-implementor": {"model": {"opencode": "openai/gpt-5.5-mini"}}}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(tui, "_resolve_opencode_binary", lambda: "/fake/opencode")
+
+    def fake_loader(home: Path, *, runner=None) -> tuple[list[str], dict]:
+        return ["openai/gpt-5.5", "openai/gpt-5.5-mini"], {
+            "alpha": {
+                "models": {
+                    "openai/gpt-5.5": {"reasoning": True, "cost": {"input": 3, "output": 15}},
+                    "openai/gpt-5.5-mini": {"reasoning": False, "cost": {"input": 0.1, "output": 0.2}},
+                },
+            },
+        }
+
+    monkeypatch.setattr(tui, "_load_opencode_catalog", fake_loader)
+    monkeypatch.setattr(tui.questionary, "select", _ScriptedSelect)
+    monkeypatch.setattr(tui.questionary, "confirm", _ScriptedConfirm)
+    _ScriptedSelect.instances = []
+    _ScriptedConfirm.instances = []
+
+    scripted = _ScriptedSelect()
+    scripted.queue("change-implementor", "openai/gpt-5.5", "__continue__", "__continue__")
+    monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
+    confirm = _ScriptedConfirm().queue(True)
+    monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
+
+    wrote = tui.run_opencode_wizard(home=tmp_path, agents=opencode_change_agents())
+
+    assert wrote is True
+    overrides = json.loads(_override_file(tmp_path).read_text(encoding="utf-8"))
+    assert "effort" not in overrides["change-implementor"]
+    assert overrides["change-implementor"]["model"] == {"opencode": "openai/gpt-5.5"}
+
+
+def test_run_opencode_wizard_switch_between_reasoning_models_clears_effort(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OpenCode: switching between two reasoning-capable models clears the prior effort.
+
+    The clear is unconditional — it fires whether the new model supports
+    effort or not. Switching from one reasoning model to a DIFFERENT
+    reasoning model still wipes the prior effort so the user must
+    re-affirm it on the effort phase.
+    """
+    from ai_harness.modules.wizard import tui
+
+    _override_file(tmp_path).parent.mkdir(parents=True, exist_ok=True)
+    _override_file(tmp_path).write_text(
+        json.dumps(
+            {
+                "change-implementor": {
+                    "model": {"opencode": "openai/gpt-5.5"},
+                    "effort": {"opencode": "high"},
+                },
+            },
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(tui, "_resolve_opencode_binary", lambda: "/fake/opencode")
+
+    def fake_loader(home: Path, *, runner=None) -> tuple[list[str], dict]:
+        # Two reasoning-capable models so the test can switch between them.
+        return ["openai/gpt-5.5", "openai/gpt-5.5-pro"], {
+            "alpha": {
+                "models": {
+                    "openai/gpt-5.5": {"reasoning": True, "cost": {"input": 3, "output": 15}},
+                    "openai/gpt-5.5-pro": {"reasoning": True, "cost": {"input": 6, "output": 30}},
+                },
+            },
+        }
+
+    monkeypatch.setattr(tui, "_load_opencode_catalog", fake_loader)
+    monkeypatch.setattr(tui.questionary, "select", _ScriptedSelect)
+    monkeypatch.setattr(tui.questionary, "confirm", _ScriptedConfirm)
+    _ScriptedSelect.instances = []
+    _ScriptedConfirm.instances = []
+
+    scripted = _ScriptedSelect()
+    scripted.queue(
+        "change-implementor",
+        "openai/gpt-5.5-pro",
+        "__continue__",
+        "__continue__",
+    )
+    monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
+    confirm = _ScriptedConfirm().queue(True)
+    monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
+
+    wrote = tui.run_opencode_wizard(home=tmp_path, agents=opencode_change_agents())
+
+    assert wrote is True
+    overrides = json.loads(_override_file(tmp_path).read_text(encoding="utf-8"))
+    # Effort cleared even though the new model is also reasoning-capable.
+    assert overrides["change-implementor"]["effort"] == {"opencode": None}
+    assert overrides["change-implementor"]["model"] == {"opencode": "openai/gpt-5.5-pro"}
+
+
+def test_run_opencode_wizard_same_model_pick_clears_effort(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OpenCode: a same-model pick clears the agent's effort.
+
+    Mirrors the Claude same-model test (2.2): the clear fires whether or
+    not the model actually changed. Picking the model the agent already
+    had is still a "switch" from the wizard's point of view — and the
+    effort must be cleared so the user re-affirms it on the effort phase.
+    """
+    from ai_harness.modules.wizard import tui
+
+    _override_file(tmp_path).parent.mkdir(parents=True, exist_ok=True)
+    _override_file(tmp_path).write_text(
+        json.dumps(
+            {
+                "change-implementor": {
+                    "model": {"opencode": "openai/gpt-5.5"},
+                    "effort": {"opencode": "high"},
+                },
+            },
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(tui, "_resolve_opencode_binary", lambda: "/fake/opencode")
+
+    def fake_loader(home: Path, *, runner=None) -> tuple[list[str], dict]:
+        return ["openai/gpt-5.5"], {
+            "alpha": {
+                "models": {
+                    "openai/gpt-5.5": {"reasoning": True, "cost": {"input": 3, "output": 15}},
+                },
+            },
+        }
+
+    monkeypatch.setattr(tui, "_load_opencode_catalog", fake_loader)
+    monkeypatch.setattr(tui.questionary, "select", _ScriptedSelect)
+    monkeypatch.setattr(tui.questionary, "confirm", _ScriptedConfirm)
+    _ScriptedSelect.instances = []
+    _ScriptedConfirm.instances = []
+
+    scripted = _ScriptedSelect()
+    scripted.queue("change-implementor", "openai/gpt-5.5", "__continue__", "__continue__")
+    monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
+    confirm = _ScriptedConfirm().queue(True)
+    monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
+
+    wrote = tui.run_opencode_wizard(home=tmp_path, agents=opencode_change_agents())
+
+    assert wrote is True
+    overrides = json.loads(_override_file(tmp_path).read_text(encoding="utf-8"))
+    assert overrides["change-implementor"]["effort"] == {"opencode": None}
+    # Model entry unchanged (same-model pick).
+    assert overrides["change-implementor"]["model"] == {"opencode": "openai/gpt-5.5"}
+
+
+def test_run_opencode_wizard_switching_one_agent_leaves_others_efforts_untouched(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OpenCode: switching one agent's model only clears that agent's effort; others stay."""
+    from ai_harness.modules.wizard import tui
+
+    _override_file(tmp_path).parent.mkdir(parents=True, exist_ok=True)
+    _override_file(tmp_path).write_text(
+        json.dumps(
+            {
+                "change-validator": {"effort": {"opencode": "high"}},
+                "change-implementor": {
+                    "model": {"opencode": "openai/gpt-5.5"},
+                    "effort": {"opencode": "max"},
+                },
+            },
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(tui, "_resolve_opencode_binary", lambda: "/fake/opencode")
+
+    def fake_loader(home: Path, *, runner=None) -> tuple[list[str], dict]:
+        return ["openai/gpt-5.5", "openai/gpt-5.5-pro"], {
+            "alpha": {
+                "models": {
+                    "openai/gpt-5.5": {"reasoning": True, "cost": {"input": 3, "output": 15}},
+                    "openai/gpt-5.5-pro": {"reasoning": True, "cost": {"input": 6, "output": 30}},
+                },
+            },
+        }
+
+    monkeypatch.setattr(tui, "_load_opencode_catalog", fake_loader)
+    monkeypatch.setattr(tui.questionary, "select", _ScriptedSelect)
+    monkeypatch.setattr(tui.questionary, "confirm", _ScriptedConfirm)
+    _ScriptedSelect.instances = []
+    _ScriptedConfirm.instances = []
+
+    scripted = _ScriptedSelect()
+    scripted.queue(
+        "change-implementor",
+        "openai/gpt-5.5-pro",
+        "__continue__",
+        "__continue__",
+    )
+    monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
+    confirm = _ScriptedConfirm().queue(True)
+    monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
+
+    wrote = tui.run_opencode_wizard(home=tmp_path, agents=opencode_change_agents())
+
+    assert wrote is True
+    overrides = json.loads(_override_file(tmp_path).read_text(encoding="utf-8"))
+    assert overrides["change-validator"]["effort"] == {"opencode": "high"}
+    assert overrides["change-implementor"]["effort"] == {"opencode": None}
+    assert overrides["change-implementor"]["model"] == {"opencode": "openai/gpt-5.5-pro"}
+
+
+def test_run_claude_wizard_repeated_identical_model_picks_keep_effort_none(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Claude: repeated identical model picks keep effort ``None`` (idempotent clear).
+
+    The clear is a single ``efforts[pick] = None`` assignment; assigning
+    ``None`` to a key that already holds ``None`` is a no-op. After the
+    first clear the second identical pick leaves the cleared value
+    cleared — the override payload still has no effective effort change
+    beyond the original clear.
+    """
+    from ai_harness.modules.wizard import tui
+
+    _override_file(tmp_path).parent.mkdir(parents=True, exist_ok=True)
+    _override_file(tmp_path).write_text(
+        json.dumps({"change-implementor": {"effort": {"claude": "high"}}}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(tui.questionary, "select", _ScriptedSelect)
+    monkeypatch.setattr(tui.questionary, "confirm", _ScriptedConfirm)
+    _ScriptedSelect.instances = []
+    _ScriptedConfirm.instances = []
+
+    # Phase 1: pick implementor -> sonnet (same as default) -> continue.  [first clear]
+    # Phase 2: back -> re-enters Phase 1.
+    # Phase 1 again: pick implementor -> sonnet (same model again) -> continue.  [idempotent clear]
+    # Phase 2 again: continue.
+    # Confirm.
+    scripted = _ScriptedSelect()
+    scripted.queue(
+        "change-implementor",
+        "sonnet",
+        "__continue__",
+        "__back__",
+        "change-implementor",
+        "sonnet",
+        "__continue__",
+        "__continue__",
+    )
+    monkeypatch.setattr(tui.questionary, "select", lambda *a, **kw: scripted)
+    confirm = _ScriptedConfirm().queue(True)
+    monkeypatch.setattr(tui.questionary, "confirm", lambda *a, **kw: confirm)
+
+    wrote = tui.run_claude_wizard(home=tmp_path)
+
+    assert wrote is True
+    overrides = json.loads(_override_file(tmp_path).read_text(encoding="utf-8"))
+    # Effort still cleared after the second identical model pick — clear is idempotent.
+    assert overrides["change-implementor"]["effort"] == {"claude": None}
+    # No model entry — both picks were same-model.
+    assert "model" not in overrides["change-implementor"]
+
+
+# ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
