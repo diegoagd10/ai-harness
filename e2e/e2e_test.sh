@@ -434,8 +434,8 @@ sys.exit(0 if s1==s2 else 1)
     test_override_updates_installer_section() {
         log_test "install with override updates installer section"; cleanup_test_env
         mkdir -p "$HOME/.ai-harness"
-        echo '{"implementor": {"model": {"opencode": "openai/gpt-5.4"}}}' > "$HOME/.ai-harness/overrides.json"
-        "$BINARY" install -o opencode 2>&1 || true; local af="$HOME/.config/opencode/agent/implementor.md"
+        echo '{"change-implementor": {"model": {"opencode": "openai/gpt-5.4"}}}' > "$HOME/.ai-harness/overrides.json"
+        "$BINARY" install -o opencode 2>&1 || true; local af="$HOME/.config/opencode/agent/change-implementor.md"
         assert_file_exists "$af" "Agent file rendered"
         grep -q "openai/gpt-5.4" "$af" 2>/dev/null \
             && log_pass "Override model value in rendered file" \

@@ -88,10 +88,19 @@ CLAUDE_MODELS: tuple[str, ...] = ("opus", "sonnet", "haiku", "fable", "inherit")
 #: Claude effort values the wizard offers. Order is intentional: low → max.
 CLAUDE_EFFORTS: tuple[str, ...] = ("low", "medium", "high", "xhigh", "max")
 
-#: Agents configurable through the Claude wizard. The orchestrator is
+#: Agents configurable through the Claude wizard. The change-orchestrator is
 #: excluded because on Claude it renders as a skill (no model/effort).
 #: Kept as a tuple so callers can't mutate the source of truth.
-CLAUDE_WIZARD_AGENTS: tuple[str, ...] = ("explorer", "implementor", "validator")
+CLAUDE_WIZARD_AGENTS: tuple[str, ...] = (
+    "change-explorer",
+    "change-implementor",
+    "change-validator",
+    "change-archiver",
+    "change-design",
+    "change-propose",
+    "change-specs",
+    "change-tasks",
+)
 
 
 def claude_models() -> tuple[str, ...]:
