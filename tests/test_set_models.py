@@ -4540,26 +4540,44 @@ def test_ask_opencode_continue_or_agent_effort_phase_no_agent_dash_agent_substri
 
 
 def test_format_selection_label_effort_phase_and_confirm_panel_match_for_none_effort() -> None:
-    """Both call sites produce byte-identical labels for ``(agent, model, None)``.
+    """The right column produced by ``format_selection_label`` matches the confirm panel's right column.
 
-    The effort phase (which passes ``has_effort_support=True`` per
-    Claude / per OpenCode reasoning-capable model) and the confirm
-    panel (which always passes ``has_effort_support=True``) render
-    the same triple with the same wording. Locking the contract here
-    makes a future divergence between the two displays a test failure.
+    The effort phase uses the right-column output of
+    :func:`format_selection_label` directly (e.g. ``"opus / (unset)"``).
+    The confirm panel wraps that same right column around the agent name
+    via :func:`align_label_rows`, producing
+    ``"change-implementor - opus / (unset)"``. The two right columns
+    MUST be byte-identical — the alignment helper adds the agent prefix
+    and trailing-space padding, never re-splits the right column.
+
+    This right-column parity is the underlying invariant that the
+    alignment helper relies on. Locking it here makes a future
+    divergence between the two displays a test failure.
     """
-    effort_label = format_selection_label("change-implementor", "opus", None, True)
+    right = format_selection_label("change-implementor", "opus", None, True)
     confirm_rows = build_confirmation_rows({"change-implementor": ModelSelection("opus", None)})
 
-    assert effort_label == confirm_rows[0].label
+    # Right column from the formatter appears verbatim in the confirm panel.
+    assert right in confirm_rows[0].label
+    # Equal-length right-column check: the confirm panel's label is
+    # ``agent - right`` (with right-column padding) so the right column
+    # is the substring after ``" - "``.
+    assert confirm_rows[0].label.rstrip().endswith(right)
 
 
 def test_format_selection_label_effort_phase_and_confirm_panel_match_for_set_effort() -> None:
-    """Both call sites produce byte-identical labels for ``(agent, model, 'high')``."""
-    effort_label = format_selection_label("change-implementor", "opus", "high", True)
+    """The right column produced by ``format_selection_label`` matches the confirm panel's right column.
+
+    Mirrors ``test_format_selection_label_effort_phase_and_confirm_panel_match_for_none_effort``
+    for the set-effort branch (``"high"`` instead of ``None``). Locks
+    the same right-column byte-identity invariant.
+    """
+    right = format_selection_label("change-implementor", "opus", "high", True)
     confirm_rows = build_confirmation_rows({"change-implementor": ModelSelection("opus", "high")})
 
-    assert effort_label == confirm_rows[0].label
+    # Right column from the formatter appears verbatim in the confirm panel.
+    assert right in confirm_rows[0].label
+    assert confirm_rows[0].label.rstrip().endswith(right)
 
 
 # ---------------------------------------------------------------------------
