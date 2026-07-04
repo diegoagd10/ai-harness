@@ -34,6 +34,7 @@ from ai_harness.modules.harness.renderers import (
 from ai_harness.modules.wizard.pure import (
     AgentMode,
     ModelSelection,
+    align_label_rows,
     build_agent_list_rows,
     build_confirmation_rows,
     build_effort_picker_rows,
@@ -1789,6 +1790,217 @@ def test_build_confirmation_rows_never_renders_na_on_confirm_panel() -> None:
     assert len(rows) == 1
     assert "(NA)" not in rows[0].label
     assert "(unset)" in rows[0].label
+
+
+# ---------------------------------------------------------------------------
+# align_label_rows — pure helper: two-column dynamic-width label formatter.
+#
+# Load-bearing seam shared by the model / effort / confirm surfaces in the
+# set-models wizard. Locks the invariants listed in the spec
+# (specs/alignment.md, "Helper tests" section): equal raw len(), separator
+# at the same column, trailing-space right padding, order preservation,
+# empty input → [], single-row uses self as max, placeholders pass through,
+# and the keyword-only ``separator`` argument.
+# ---------------------------------------------------------------------------
+
+
+def test_align_label_rows_default_separator_and_signature() -> None:
+    """``align_label_rows`` is callable with only the positional ``pairs`` argument.
+
+    The signature is ``align_label_rows(pairs, *, separator=" - ")`` —
+    ``separator`` is keyword-only with default ``" - "``. The returned
+    labels use ``" - "`` between the two columns when no separator is
+    supplied.
+    """
+    import inspect
+
+    sig = inspect.signature(align_label_rows)
+    assert "pairs" in sig.parameters
+    separator_param = sig.parameters["separator"]
+    assert separator_param.kind is inspect.Parameter.KEYWORD_ONLY
+    assert separator_param.default == " - "
+
+    labels = align_label_rows([("a", "b")])
+    assert " - " in labels[0]
+
+
+def test_align_label_rows_pairs_are_opaque() -> None:
+    """The helper does NOT inspect, parse, or normalise the input strings.
+
+    Widths come from ``len()`` alone — characters that look like separators
+    inside either column do NOT trigger re-splitting or stripping. The
+    right column ``"b/e"`` (with an internal slash) is treated as one
+    opaque unit and the left column ``"a-a"`` (with an internal dash) is
+    not split either.
+    """
+    labels = align_label_rows([("a-a", "b/e"), ("c", "d")])
+    # Right column widths are computed purely from len(), so the long row
+    # ("a-a" / "b/e" = 3 chars) drives right_width = 3.
+    assert labels == ["a-a - b/e", "c   - d  "]
+    # Both labels must have identical len() — the helper's load-bearing
+    # invariant.
+    assert len(labels[0]) == len(labels[1])
+
+
+def test_align_label_rows_equal_raw_len_across_rows() -> None:
+    """Mixed-width input → every label has the same raw ``len()``.
+
+    The common length equals ``left_width + len(separator) + right_width``
+    where the widths are the per-call maxima over the provided pairs.
+    """
+    pairs = [
+        ("change-implementor", "opus"),
+        ("change-validator", "openai/gpt-5.5"),
+    ]
+    labels = align_label_rows(pairs)
+
+    lengths = {len(label) for label in labels}
+    assert len(lengths) == 1, f"expected equal len() across rows, got {lengths}"
+    expected_len = len("change-implementor") + len(" - ") + len("openai/gpt-5.5")
+    assert next(iter(lengths)) == expected_len
+
+
+def test_align_label_rows_equal_widths_passthrough() -> None:
+    """Uniform-width input gets no extra padding — the row IS the max."""
+    labels = align_label_rows([("a", "x"), ("b", "y")])
+
+    # left_width = 1, right_width = 1, separator = 3 → 5 chars per label.
+    assert labels == ["a - x", "b - y"]
+    assert len(labels[0]) == len(labels[1]) == 5
+
+
+def test_align_label_rows_separator_at_same_column() -> None:
+    """The separator substring begins at the same column index in every label.
+
+    That column index equals ``left_width`` — the maximum ``len(left)``
+    over the provided pairs.
+    """
+    pairs = [
+        ("change-validator", "openai/gpt-5.5"),
+        ("a", "opus"),
+        ("change-implementor", "sonnet"),
+    ]
+    labels = align_label_rows(pairs)
+
+    left_width = max(len(left) for left, _ in pairs)
+    for label in labels:
+        assert label.index(" - ") == left_width
+
+
+def test_align_label_rows_trailing_space_padding_for_shorter_right() -> None:
+    """Shorter right values are right-padded with ASCII spaces to the max width.
+
+    ``repr()`` is used to make the trailing spaces visible in the assertion
+    output — the failure message would otherwise hide them.
+    """
+    labels = align_label_rows([("a", "opus"), ("a", "haiku")])
+
+    # "haiku" is shorter than "opus" by one character → the "opus" row is
+    # padded with one trailing space. ``repr()`` shows the trailing space
+    # explicitly so a regression that loses the padding fails visibly.
+    assert repr(labels[0]) == "'a - opus '"
+    assert labels[0].endswith(" ")
+    assert len(labels[0]) == len(labels[1])
+
+
+def test_align_label_rows_padding_survives_round_trip() -> None:
+    """Trailing spaces survive assignment to ``questionary.Choice.title`` and back."""
+    import questionary
+
+    labels = align_label_rows([("a", "opus"), ("a", "haiku")])
+    choice = questionary.Choice(title=labels[0], value="agent")
+
+    assert choice.title.endswith(" ")
+    assert choice.title == labels[0]
+
+
+def test_align_label_rows_preserves_input_order() -> None:
+    """Shuffled input → labels are returned in the same shuffled order.
+
+    Output index N corresponds to input pair index N — the helper MUST NOT
+    sort, group, or reorder the pairs.
+    """
+    pairs = [("c", "3"), ("a", "1"), ("b", "2")]
+    labels = align_label_rows(pairs)
+
+    # Right halves (after the separator) must match the input's right column.
+    rights = [label.split(" - ", 1)[1].rstrip() for label in labels]
+    assert rights == ["3", "1", "2"]
+    # Left halves too — full input order is preserved verbatim.
+    assert [label.split(" - ", 1)[0].rstrip() for label in labels] == ["c", "a", "b"]
+
+
+def test_align_label_rows_empty_input_returns_empty_list() -> None:
+    """``[]`` returns ``[]`` without raising."""
+    assert align_label_rows([]) == []
+
+
+def test_align_label_rows_single_row_uses_self_as_max() -> None:
+    """A single pair returns one label sized to its own lengths — no extra padding."""
+    labels = align_label_rows([("change-implementor", "opus")])
+
+    assert len(labels) == 1
+    expected = len("change-implementor") + len(" - ") + len("opus")
+    assert len(labels[0]) == expected
+    assert labels[0] == "change-implementor - opus"
+
+
+def test_align_label_rows_opencode_long_ids_set_wider_right() -> None:
+    """Long OpenCode ``provider/model`` IDs drive ``right_width`` to the long ID.
+
+    Mixing a short Claude alias (``"opus"``) with a long OpenCode id
+    (``"openai/gpt-5.5"``) must size ``right_width`` to the longer id —
+    not a hard-coded constant. The short alias gets right-padded with
+    trailing spaces to match.
+    """
+    pairs = [
+        ("change-implementor", "opus"),
+        ("change-validator", "openai/gpt-5.5"),
+    ]
+    labels = align_label_rows(pairs)
+
+    right_width = max(len(right) for _, right in pairs)
+    assert right_width == len("openai/gpt-5.5")
+    # The "opus" row's right column must be right-padded with spaces.
+    assert labels[0].endswith(" " * (right_width - len("opus")))
+    assert labels[0][len("change-implementor") + len(" - ") :] == "opus" + " " * (right_width - len("opus"))
+
+
+def test_align_label_rows_unset_placeholder_verbatim() -> None:
+    """The ``(unset)`` substring passes through the helper untouched."""
+    labels = align_label_rows([("change-implementor", "opus / (unset)")])
+
+    assert "/ (unset)" in labels[0]
+    # Verbatim — case, parentheses, and surrounding spaces preserved.
+    assert labels[0].endswith("opus / (unset)")
+
+
+def test_align_label_rows_na_placeholder_verbatim() -> None:
+    """The ``(NA)`` substring passes through the helper untouched, uppercase."""
+    labels = align_label_rows([("change-implementor", "opus / (NA)")])
+
+    assert "/ (NA)" in labels[0]
+    # Uppercase NA — no lowercasing, no translation.
+    assert "(na)" not in labels[0]
+
+
+def test_align_label_rows_custom_separator_kwarg() -> None:
+    """A caller-supplied ``separator=" | "`` produces ``" | "``-separated labels."""
+    labels = align_label_rows([("a", "x"), ("b", "y")], separator=" | ")
+
+    assert all(" | " in label for label in labels)
+    assert labels == ["a | x", "b | y"]
+    # Equal-len() invariant still holds with the custom separator.
+    assert len(labels[0]) == len(labels[1])
+
+
+def test_align_label_rows_default_separator_is_dash() -> None:
+    """The default separator (kwarg omitted) is ``" - "``."""
+    labels = align_label_rows([("change-orchestrator", "opus")])
+
+    assert " - " in labels[0]
+    # Default is exactly " - " — three chars: dash with surrounding spaces.
+    assert labels[0] == "change-orchestrator - opus"
 
 
 # ---------------------------------------------------------------------------
