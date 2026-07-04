@@ -16,6 +16,7 @@ can use to mark the current selection in the prompt.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, NamedTuple
@@ -446,6 +447,49 @@ def build_confirmation_rows(
             )
         )
     return rows
+
+
+def align_label_rows(
+    pairs: Sequence[tuple[str, str]],
+    *,
+    separator: str = " - ",
+) -> list[str]:
+    """Format an ordered sequence of ``(left, right)`` pairs into aligned label strings.
+
+    The returned labels share a fixed separator column and an identical
+    raw line width — including intentional trailing-space right padding
+    on shorter right-column values. Widths are computed dynamically from
+    the visible row set passed in (``left_width = max(len(left))`` and
+    ``right_width = max(len(right))``), never memoised and never keyed on
+    a global, so the model / effort / confirm phases (and the Claude /
+    OpenCode variants) can each compute widths against their own row set.
+
+    The helper treats the pairs as **opaque strings**: it never inspects,
+    parses, splits, normalises, or reorders the tuples. The placeholders
+    ``(unset)`` and ``(NA)`` reach the output verbatim — the alignment
+    helper does not own the semantic decision, only the geometry.
+
+    Invariants (load-bearing for the set-models wizard — see
+    ``specs/alignment.md``):
+
+    1. Every returned label has identical ``len()`` equal to
+       ``left_width + len(separator) + right_width``.
+    2. The separator substring begins at column ``left_width`` in every
+       label.
+    3. Shorter right values are right-padded with ASCII spaces via
+       ``f"{right:<{right_width}}"``; the helper MUST NOT call
+       ``.strip()`` / ``.rstrip()`` / ``.lstrip()`` on its output.
+    4. Output index N corresponds to input index N — no reordering.
+    5. Empty input returns ``[]`` (no exception).
+
+    Pure: no I/O, no globals, fully driven by the arguments. The TUI
+    consumes this helper for the model chooser, the effort chooser, and
+    (transitively via :func:`build_confirmation_rows`) the confirmation
+    panel.
+    """
+    left_width = max((len(left) for left, _ in pairs), default=0)
+    right_width = max((len(right) for _, right in pairs), default=0)
+    return [f"{left:<{left_width}}{separator}{right:<{right_width}}" for left, right in pairs]
 
 
 # ---------------------------------------------------------------------------
