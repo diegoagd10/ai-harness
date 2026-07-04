@@ -449,27 +449,36 @@ def format_selection_label(
 def build_confirmation_rows(
     selections: dict[str, ModelSelection],
 ) -> list[PickerRow]:
-    """Build the confirmation rows: one per agent with model and effort.
+    """Build the confirmation rows: one per agent with model and effort, aligned.
 
     *selections* maps ``agent -> ModelSelection(model, effort)``. Each
-    row's label is assembled by :func:`format_selection_label` with
-    ``has_effort_support=True`` — the constant is load-bearing: the
+    row's right column is assembled by :func:`format_selection_label`
+    with ``has_effort_support=True`` — the constant is load-bearing: the
     ``(NA)`` branch is unreachable from the confirm panel because the
     model-switch reset (issue #63) has already cleared any effort for
     non-reasoning models by the time the user reaches confirm. A
     ``None`` effort here therefore always renders as ``"(unset)"``.
+
+    The full set of right columns is then run through
+    :func:`align_label_rows` once — so the confirm panel shares the
+    same fixed separator column and equal raw line width as the model
+    and effort chooser surfaces. Row order matches ``selections.items()``
+    insertion order (Python 3.7+ stable).
     """
-    rows: list[PickerRow] = []
+    pairs: list[tuple[str, str]] = []
     for agent, selection in selections.items():
-        label = format_selection_label(agent, selection.model, selection.effort, has_effort_support=True)
-        rows.append(
-            PickerRow(
-                value=agent,
-                label=label,
-                is_current=False,
-            )
+        right = format_selection_label(
+            agent,
+            selection.model,
+            selection.effort,
+            has_effort_support=True,
         )
-    return rows
+        pairs.append((agent, right))
+    aligned_titles = align_label_rows(pairs)
+    return [
+        PickerRow(value=agent, label=title, is_current=False)
+        for (agent, _), title in zip(pairs, aligned_titles, strict=True)
+    ]
 
 
 def _column_widths(pairs: Sequence[tuple[str, str]]) -> tuple[int, int]:

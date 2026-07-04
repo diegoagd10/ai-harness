@@ -1766,7 +1766,7 @@ def test_build_agent_list_rows_missing_agent_gets_default_model() -> None:
 
 
 def test_build_confirmation_rows_includes_model_and_effort() -> None:
-    """Confirmation rows show ``agent: model / effort`` for each agent."""
+    """Confirmation rows show ``agent - model / effort`` for each agent (aligned)."""
     selections = {
         "explorer": ModelSelection("haiku", "low"),
         "implementor": ModelSelection("opus", "high"),
@@ -1784,6 +1784,8 @@ def test_build_confirmation_rows_includes_model_and_effort() -> None:
     assert "high" in by_value["implementor"]
     # None effort renders as a placeholder
     assert "sonnet" in by_value["validator"]
+    # Equal raw len() across all rows — the alignment helper's invariant.
+    assert len({len(r.label) for r in rows}) == 1
 
 
 def test_build_confirmation_rows_unset_effort_renders_unset_placeholder() -> None:
@@ -1792,20 +1794,22 @@ def test_build_confirmation_rows_unset_effort_renders_unset_placeholder() -> Non
     Locks in the contract that the confirm panel routes ``None`` effort
     through the ``(unset)`` branch. The ``has_effort_support=True``
     constant at this call site is the load-bearing suppression of the
-    ``(NA)`` branch — confirmed by spec ``effort-phase-label-formatter``.
+    ``(NA)`` branch. The returned label uses the aligned ``agent -
+    right_column`` shape produced by ``align_label_rows`` — for a
+    single-row input, the row IS the max so no extra padding is added.
     """
     rows = build_confirmation_rows({"change-implementor": ModelSelection("opus", None)})
 
     assert len(rows) == 1
-    assert rows[0].label == "change-implementor: opus / (unset)"
+    assert rows[0].label == "change-implementor - opus / (unset)"
 
 
 def test_build_confirmation_rows_set_effort_renders_effort_value() -> None:
-    """Confirm panel: a set effort renders the effort value as-is."""
+    """Confirm panel: a set effort renders the effort value as-is (aligned)."""
     rows = build_confirmation_rows({"change-implementor": ModelSelection("opus", "high")})
 
     assert len(rows) == 1
-    assert rows[0].label == "change-implementor: opus / high"
+    assert rows[0].label == "change-implementor - opus / high"
 
 
 def test_build_confirmation_rows_never_renders_na_on_confirm_panel() -> None:
