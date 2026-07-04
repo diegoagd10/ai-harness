@@ -42,6 +42,7 @@ from ai_harness.modules.harness.renderers import (
 from ai_harness.modules.wizard.pure import (
     AgentMode,
     ModelSelection,
+    align_label_rows,
     build_confirmation_rows,
     build_effort_picker_rows,
     build_model_picker_rows,
@@ -529,22 +530,25 @@ def _ask_continue_or_agent(
     no-op and re-shows the same screen (#55).
 
     The shape of ``selections[agent]`` depends on ``phase`` — callers must
-    follow the per-phase contract, otherwise effort-phase rows duplicate
-    the agent prefix:
+    follow the per-phase contract. Both phases feed the alignment helper
+    (``align_label_rows``) as ``(agent, right_column)`` pairs so the
+    model / effort / confirm sections share one formatter:
 
     - ``phase == "model"``: caller passes a bare Claude model alias
-      (e.g. ``"opus"``, ``"sonnet"``); the prompt function composes
-      ``title = f"{agent} - {selections[agent]}"``. Missing entries
-      default to ``"sonnet"``.
-    - ``phase == "effort"``: caller passes a pre-rendered
-      ``"agent: model / <state>"`` line (typically produced by
-      :func:`format_selection_label`); the prompt function uses the
-      value **verbatim** — the ``agent: `` prefix is already present,
-      so adding another ``"{agent} - "`` would render
-      ``"{agent} - {agent}: model / <state>"`` (the bug this contract
-      pins against). Missing entries fall back to ``"(unset)"`` as
-      defensive dead code — the real effort-phase call site fills the
-      dict for every agent in scope.
+      (e.g. ``"opus"``, ``"sonnet"``). Missing entries default to
+      ``"sonnet"``.
+    - ``phase == "effort"``: caller passes the right column only — the
+      output of :func:`format_selection_label` (``"opus / (unset)"``,
+      ``"opus / high"``, ``"openai/gpt-5.5 / (NA)"``). The alignment
+      helper wraps the agent name around whatever the caller supplied
+      via ``align_label_rows``. Missing entries fall back to
+      ``"(unset)"`` as defensive dead code — the real effort-phase call
+      site fills the dict for every agent in scope.
+
+    The ``← Back``, ``Separator``, and ``Continue`` choices are appended
+    around the aligned agent rows but are NOT themselves passed through
+    the alignment helper — only the agent rows share the equal-``len()``
+    invariant.
     """
     next_phase = {
         "model": "effort",
@@ -558,18 +562,15 @@ def _ask_continue_or_agent(
     if phase != "model":
         choices.append(questionary.Choice(title="← Back", value=Nav.BACK))
         choices.append(questionary.Separator())
-    # Per-phase title assembly — see the docstring for the
-    # ``selections[agent]`` shape contract.
+    # Both phases build the same shape: ``(agent, right_column)`` pairs.
+    # The right column is what callers pre-compute for the effort phase;
+    # for the model phase it's the bare model alias. ``align_label_rows``
+    # computes widths once over the visible row set and wraps the agent
+    # name around each right column with intentional trailing-space padding.
+    pairs = [(agent, selections.get(agent, "(unset)" if phase == "effort" else "sonnet")) for agent in agent_list]
+    aligned_titles = align_label_rows(pairs)
     choices.extend(
-        questionary.Choice(
-            title=(
-                selections.get(agent, "(unset)")
-                if phase == "effort"
-                else f"{agent} - {selections.get(agent, 'sonnet')}"
-            ),
-            value=agent,
-        )
-        for agent in agent_list
+        questionary.Choice(title=title, value=agent) for agent, title in zip(agent_list, aligned_titles, strict=True)
     )
     choices.append(questionary.Separator())
     choices.append(

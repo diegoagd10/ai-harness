@@ -1432,7 +1432,7 @@ def test_cli_set_models_agent_flag_with_claude_is_silently_ignored(
 
 
 def test_ask_continue_or_agent_uses_dash_label_format(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The Claude agent chooser renders ``{agent} - {value}``, not ``(current: ...)``."""
+    """The Claude agent chooser renders aligned ``{agent} - {value}`` rows with equal ``len()``."""
     import questionary
 
     from ai_harness.modules.wizard import tui
@@ -1452,8 +1452,19 @@ def test_ask_continue_or_agent_uses_dash_label_format(monkeypatch: pytest.Monkey
     tui._ask_continue_or_agent("model", {"change-implementor": "opus"})
 
     titles = [choice.title for choice in captured[0] if isinstance(choice, questionary.Choice)]
-    assert "change-implementor - opus" in titles
+    # The "opus" row is padded to the longest right-column width across
+    # the visible row set — it ends with trailing spaces.
+    opus_title = next(t for t in titles if "opus" in t)
+    assert opus_title.rstrip().endswith("- opus")
+    assert "opus" in opus_title
+    # No legacy "(current: ...)" leakage from ``build_agent_list_rows``.
     assert not any("(current:" in title for title in titles)
+    # Equal raw len() across agent rows — the alignment helper's invariant.
+    # Filter out navigation rows ("← Back", Separator, "Continue") which
+    # are intentionally NOT padded by the helper.
+    agent_titles = [t for t in titles if t not in ("Continue",) and not t.startswith(("←", "-"))]
+    assert agent_titles, "expected at least one agent row in titles"
+    assert len({len(t) for t in agent_titles}) == 1
 
 
 def test_ask_opencode_continue_or_agent_uses_dash_label_format(monkeypatch: pytest.MonkeyPatch) -> None:
