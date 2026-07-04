@@ -2005,27 +2005,39 @@ def test_align_label_rows_default_separator_is_dash() -> None:
 
 # ---------------------------------------------------------------------------
 # format_selection_label — pure helper: the single source of truth for the
-# ``agent: model / <state>`` display used by both the effort phase and the
-# confirm panel.
+# ``model / <state>`` right-column display used by both the effort phase
+# and the confirm panel. The agent prefix is added later by the alignment
+# helper (``align_label_rows``); this function returns the right column
+# only.
 # ---------------------------------------------------------------------------
 
 
 def test_format_selection_label_supported_model_with_effort() -> None:
-    """Supported model + set effort → ``agent: model / effort`` (exact branch assertion)."""
+    """Supported model + set effort → ``"opus / high"`` (right column only)."""
     label = format_selection_label("change-implementor", "opus", "high", True)
-    assert label == "change-implementor: opus / high"
+    assert label == "opus / high"
+    # The agent prefix MUST NOT appear in the right column — the alignment
+    # helper wraps it back on after this returns.
+    assert "change-implementor" not in label
 
 
 def test_format_selection_label_supported_model_no_effort_emits_unset() -> None:
-    """Supported model + ``None`` effort → ``agent: model / (unset)`` branch."""
+    """Supported model + ``None`` effort → ``"opus / (unset)"`` (right column only)."""
     label = format_selection_label("change-implementor", "opus", None, True)
-    assert label == "change-implementor: opus / (unset)"
+    assert label == "opus / (unset)"
+    assert "change-implementor" not in label
 
 
 def test_format_selection_label_unsupported_model_no_effort_emits_na() -> None:
-    """Unsupported model + ``None`` effort → ``agent: model / (NA)`` branch."""
+    """Unsupported model + ``None`` effort → ``"opus / (NA)"`` (right column only).
+
+    ``has_effort_support=False`` dominates: the function returns the
+    ``(NA)`` branch even when effort is ``None`` — never ``(unset)``.
+    """
     label = format_selection_label("change-implementor", "minimax/non-reasoning", None, False)
-    assert label == "change-implementor: minimax/non-reasoning / (NA)"
+    assert label == "minimax/non-reasoning / (NA)"
+    assert "change-implementor" not in label
+    assert "(unset)" not in label
 
 
 def test_format_selection_label_unsupported_model_ignores_effort_value() -> None:
@@ -2035,11 +2047,12 @@ def test_format_selection_label_unsupported_model_ignores_effort_value() -> None
     branch — the effort value must NOT appear in the rendered string.
     """
     label = format_selection_label("change-implementor", "minimax/non-reasoning", "high", False)
-    assert label == "change-implementor: minimax/non-reasoning / (NA)"
+    assert label == "minimax/non-reasoning / (NA)"
     assert "high" not in label
+    assert "change-implementor" not in label
 
 
-def test_format_selection_label_defensive_empty_model_does_not_raise() -> None:
+def test_format_selection_label_empty_model_does_not_raise() -> None:
     """Defensive empty-model edge: ``model=""`` must not crash; ``(unset)`` still renders.
 
     Locks in the contract that the formatter does not raise on an empty
@@ -2047,8 +2060,50 @@ def test_format_selection_label_defensive_empty_model_does_not_raise() -> None:
     path that feeds an uninitialised model value into the helper.
     """
     label = format_selection_label("change-implementor", "", None, True)
-    assert label.startswith("change-implementor: ")
     assert "(unset)" in label
+    # Right-column-only — no agent prefix in the returned string.
+    assert "change-implementor" not in label
+
+
+def test_format_selection_label_no_agent_prefix_in_output() -> None:
+    """The agent name MUST NOT appear anywhere in the right-column output.
+
+    Locks the narrowing: the alignment helper wraps the agent name around
+    whatever this returns, so the function MUST NOT re-introduce the
+    ``agent: `` prefix that the old code path emitted.
+    """
+    label = format_selection_label("change-implementor", "opus", "high", True)
+    assert "change-implementor" not in label
+    # No leading agent prefix pattern — the string starts with the model.
+    assert not label.startswith("change-implementor")
+
+
+def test_format_selection_label_no_agent_prefix_on_na_branch() -> None:
+    """The ``(NA)`` branch also drops the agent prefix.
+
+    Locks the same invariant on the unsupported-model branch with a long
+    OpenCode ``provider/model`` id — both branches must return the right
+    column only.
+    """
+    label = format_selection_label("change-validator", "openai/gpt-5.5", "low", False)
+    assert label == "openai/gpt-5.5 / (NA)"
+    assert "change-validator" not in label
+
+
+def test_format_selection_label_unset_case_preserved() -> None:
+    """``(unset)`` is lowercase verbatim — no lowercasing/normalisation."""
+    label = format_selection_label("a", "opus", None, True)
+    assert "(unset)" in label
+    assert "(UNSET)" not in label
+    assert "(Unset)" not in label
+
+
+def test_format_selection_label_na_case_preserved() -> None:
+    """``(NA)`` is uppercase verbatim — no translation to ``(na)`` or ``(Not Available)``."""
+    label = format_selection_label("a", "opus", "high", False)
+    assert "(NA)" in label
+    assert "(na)" not in label
+    assert "(Not Available)" not in label
 
 
 # ---------------------------------------------------------------------------
