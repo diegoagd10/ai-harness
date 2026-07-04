@@ -409,7 +409,7 @@ def format_selection_label(
     effort: str | None,
     has_effort_support: bool,
 ) -> str:
-    """Format one row of the ``agent: model / <state>`` display used by both phases.
+    """Format one row's right column (``model / <state>``) for the set-models wizard.
 
     Single source of truth for the wording shown in the effort phase
     picker and the confirm panel — both call sites consume this helper
@@ -418,24 +418,32 @@ def format_selection_label(
     callers pass ``True`` unconditionally (Claude models are always
     effort-supporting).
 
+    The returned string is the **right column only** — the agent name is
+    NOT prepended. ``align_label_rows`` wraps the agent name around
+    whatever this returns so the three display surfaces (model chooser,
+    effort chooser, confirm panel) share a single formatter. The ``agent``
+    argument is preserved in the signature for call-site uniformity, but
+    its value is not part of the output.
+
     The three branches:
 
     - ``has_effort_support=True`` and ``effort`` is set →
-      ``f"{agent}: {model} / {effort}"``
+      ``f"{model} / {effort}"``
     - ``has_effort_support=True`` and ``effort is None`` →
-      ``f"{agent}: {model} / (unset)"``
+      ``f"{model} / (unset)"``
     - ``has_effort_support=False`` (OpenCode non-reasoning model) →
-      ``f"{agent}: {model} / (NA)"``; the *effort* value is ignored.
+      ``f"{model} / (NA)"``; the *effort* value is ignored.
 
     Pure: no I/O, no globals, no catalog lookup. The caller resolves
     *has_effort_support* (Claude passes ``True``; OpenCode passes
     ``opencode_model_is_reasoning(model, catalog)``).
     """
+    del agent  # right-column-only output; agent prefix is added by align_label_rows
     if not has_effort_support:
-        return f"{agent}: {model} / (NA)"
+        return f"{model} / (NA)"
     if effort is None:
-        return f"{agent}: {model} / (unset)"
-    return f"{agent}: {model} / {effort}"
+        return f"{model} / (unset)"
+    return f"{model} / {effort}"
 
 
 def build_confirmation_rows(
