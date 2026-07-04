@@ -4424,13 +4424,19 @@ def test_run_opencode_wizard_effort_phase_mixed_agent_set(
 def test_ask_continue_or_agent_effort_phase_no_agent_dash_agent_substring(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Claude: no effort-phase choice title may contain the duplicated ``{agent} - {agent}:`` prefix.
+    """Claude: no effort-phase choice title may contain the duplicated ``{agent} - {agent} -`` prefix.
 
     Locks the fix for the effort-row-duplication bug. Even if a future
     refactor reorders the title assembly, the bare substring
-    ``{agent} - {agent}:`` MUST NEVER appear in any effort-phase choice
+    ``{agent} - {agent} -`` MUST NEVER appear in any effort-phase choice
     title. Captures the choice list through the same ``_filterable_select``
     shim pattern as ``test_ask_continue_or_agent_uses_dash_label_format``.
+
+    The forbidden shape changed from ``{agent} - {agent}:`` to
+    ``{agent} - {agent} -`` because the alignment helper uses ``" - "``
+    as the separator; if a caller still pre-rendered the old
+    ``"agent: model / <state>"`` shape, the helper would wrap the
+    agent prefix around it twice.
     """
     import questionary
 
@@ -4448,36 +4454,43 @@ def test_ask_continue_or_agent_effort_phase_no_agent_dash_agent_substring(
         return _Q()
 
     monkeypatch.setattr(tui, "_filterable_select", fake_select)
-    # Build selections for every Claude wizard agent using the same
-    # ``agent: model / <state>`` shape ``run_effort_phase`` passes in.
+    # Build selections for every Claude wizard agent using the right-column
+    # shape that ``format_selection_label`` now emits (no agent prefix).
     effort_pairs = [
-        ("change-implementor", "change-implementor: sonnet / high"),
-        ("change-validator", "change-validator: sonnet / (unset)"),
-        ("change-explorer", "change-explorer: opus / high"),
+        ("change-implementor", "sonnet / high"),
+        ("change-validator", "sonnet / (unset)"),
+        ("change-explorer", "opus / high"),
     ]
     selections = dict(effort_pairs)
     tui._ask_continue_or_agent("effort", selections)
 
     titles = [choice.title for choice in captured[0] if isinstance(choice, questionary.Choice)]
-    for agent, label in effort_pairs:
-        forbidden = f"{agent} - {agent}:"
+    for agent, right in effort_pairs:
+        forbidden = f"{agent} - {agent} -"
         assert forbidden not in titles, (
             f"Claude effort phase must never duplicate the agent prefix; saw {forbidden!r} in titles {titles!r}"
         )
-        # And the label the caller passed in must be present verbatim.
-        assert label in titles, (
-            f"Claude effort phase must consume selections[{agent!r}] verbatim; saw titles {titles!r}"
+        # The right column the caller passed in must appear verbatim inside
+        # the aligned title — the alignment helper wraps the agent name
+        # around it without re-splitting.
+        matching = [t for t in titles if t.startswith(agent) and right in t]
+        assert matching, (
+            f"Claude effort phase must consume selections[{agent!r}]={right!r} verbatim; saw titles {titles!r}"
         )
 
 
 def test_ask_opencode_continue_or_agent_effort_phase_no_agent_dash_agent_substring(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """OpenCode: no effort-phase choice title may contain the duplicated ``{agent} - {agent}:`` prefix.
+    """OpenCode: no effort-phase choice title may contain the duplicated ``{agent} - {agent} -`` prefix.
 
     Covers all three effort states — ``high`` (set), ``(unset)`` (no
     override), and ``(NA)`` (non-reasoning model). Mirrors the Claude
     regression test so the two wizards cannot drift on this contract.
+
+    The forbidden shape changed from ``{agent} - {agent}:`` to
+    ``{agent} - {agent} -`` because the alignment helper uses ``" - "``
+    as the separator.
     """
     import questionary
 
@@ -4500,9 +4513,9 @@ def test_ask_opencode_continue_or_agent_effort_phase_no_agent_dash_agent_substri
     # phase-aware formatter change that re-introduces the duplicated
     # prefix on any of the three branches would fail this test.
     effort_pairs = [
-        ("change-implementor", "change-implementor: openai/gpt-5.5 / high"),
-        ("change-validator", "change-validator: openai/gpt-5.5-mini / (NA)"),
-        ("change-explorer", "change-explorer: openai/gpt-5.5 / (unset)"),
+        ("change-implementor", "openai/gpt-5.5 / high"),
+        ("change-validator", "openai/gpt-5.5-mini / (NA)"),
+        ("change-explorer", "openai/gpt-5.5 / (unset)"),
     ]
     selections = dict(effort_pairs)
     tui._ask_opencode_continue_or_agent(
@@ -4512,14 +4525,17 @@ def test_ask_opencode_continue_or_agent_effort_phase_no_agent_dash_agent_substri
     )
 
     titles = [choice.title for choice in captured[0] if isinstance(choice, questionary.Choice)]
-    for agent, label in effort_pairs:
-        forbidden = f"{agent} - {agent}:"
+    for agent, right in effort_pairs:
+        forbidden = f"{agent} - {agent} -"
         assert forbidden not in titles, (
             f"OpenCode effort phase must never duplicate the agent prefix; saw {forbidden!r} in titles {titles!r}"
         )
-        # And the label the caller passed in must be present verbatim.
-        assert label in titles, (
-            f"OpenCode effort phase must consume selections[{agent!r}] verbatim; saw titles {titles!r}"
+        # The right column the caller passed in must appear verbatim inside
+        # the aligned title — the alignment helper wraps the agent name
+        # around it without re-splitting.
+        matching = [t for t in titles if t.startswith(agent) and right in t]
+        assert matching, (
+            f"OpenCode effort phase must consume selections[{agent!r}]={right!r} verbatim; saw titles {titles!r}"
         )
 
 
