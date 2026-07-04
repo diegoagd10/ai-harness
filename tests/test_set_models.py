@@ -1468,7 +1468,12 @@ def test_ask_continue_or_agent_uses_dash_label_format(monkeypatch: pytest.Monkey
 
 
 def test_ask_opencode_continue_or_agent_uses_dash_label_format(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The OpenCode agent chooser renders ``{agent} - {value}``, not ``(current: ...)``."""
+    """The OpenCode agent chooser renders aligned ``{agent} - {value}`` rows with equal ``len()``.
+
+    Long OpenCode ``provider/model`` IDs drive the right-column width;
+    shorter aliases right-pad with trailing spaces so all agent rows
+    share the same raw ``len()``.
+    """
     import questionary
 
     from ai_harness.modules.wizard import tui
@@ -1485,11 +1490,29 @@ def test_ask_opencode_continue_or_agent_uses_dash_label_format(monkeypatch: pyte
         return _Q()
 
     monkeypatch.setattr(tui, "_filterable_select", fake_select)
-    tui._ask_opencode_continue_or_agent("model", {"change-implementor": "openai/gpt-5.5"}, opencode_change_agents())
+    tui._ask_opencode_continue_or_agent(
+        "model",
+        {"change-implementor": "openai/gpt-5.5"},
+        opencode_change_agents(),
+    )
 
     titles = [choice.title for choice in captured[0] if isinstance(choice, questionary.Choice)]
-    assert "change-implementor - openai/gpt-5.5" in titles
+    # "openai/gpt-5.5" is the longest right-column value in the visible
+    # row set, so it appears verbatim (no padding). Shorter aliases get
+    # right-padded with trailing spaces.
+    long_id_title = next(t for t in titles if "openai/gpt-5.5" in t)
+    assert long_id_title.rstrip().endswith("- openai/gpt-5.5")
+    # No legacy "(current: ...)" leakage from ``build_agent_list_rows``.
     assert not any("(current:" in title for title in titles)
+    # Equal raw len() across agent rows — the alignment helper's invariant.
+    # Filter out navigation rows ("← Back", Separator, "Continue") which
+    # are intentionally NOT padded by the helper.
+    agent_titles = [t for t in titles if t not in ("Continue",) and not t.startswith(("←", "-"))]
+    assert agent_titles, "expected at least one agent row in titles"
+    assert len({len(t) for t in agent_titles}) == 1
+    # Long ID drives right_width — a shorter alias row ends with trailing spaces.
+    short_alias_title = next(t for t in agent_titles if "(unset)" in t)
+    assert short_alias_title.endswith(" ")
 
 
 def test_ask_continue_or_agent_continue_label_has_no_arrow(monkeypatch: pytest.MonkeyPatch) -> None:

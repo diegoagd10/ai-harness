@@ -847,23 +847,27 @@ def _ask_opencode_continue_or_agent(
     no-op and re-shows the same screen (#55).
 
     The shape of ``selections[agent]`` depends on ``phase`` — callers must
-    follow the per-phase contract, otherwise effort-phase rows duplicate
-    the agent prefix:
+    follow the per-phase contract. Both phases feed the alignment helper
+    (``align_label_rows``) as ``(agent, right_column)`` pairs so the
+    model / effort / confirm sections share one formatter:
 
     - ``phase == "model"``: caller passes a bare ``provider/model`` id
-      (e.g. ``"openai/gpt-5.5"``); the prompt function composes
-      ``title = f"{agent} - {selections[agent]}"``. Missing entries
-      default to ``"(unset)"``.
-    - ``phase == "effort"``: caller passes a pre-rendered
-      ``"agent: model / <state>"`` line (typically produced by
-      :func:`format_selection_label`); the prompt function uses the
-      value **verbatim** — the ``agent: `` prefix is already present,
-      so adding another ``"{agent} - "`` would render
-      ``"{agent} - {agent}: model / <state>"`` (the bug this contract
-      pins against). Missing entries fall back to ``"(unset)"`` as
-      defensive dead code — the real effort-phase call site fills the
-      dict for every agent in scope, covering all three effort states
-      (``high`` / ``(unset)`` / ``(NA)``).
+      (e.g. ``"openai/gpt-5.5"``). Missing entries default to
+      ``"(unset)"``.
+    - ``phase == "effort"``: caller passes the right column only — the
+      output of :func:`format_selection_label` (``"openai/gpt-5.5 / high"``,
+      ``"openai/gpt-5.5 / (unset)"``, ``"openai/gpt-5.5 / (NA)"``).
+      The alignment helper wraps the agent name around whatever the caller
+      supplied. Missing entries fall back to ``"(unset)"`` as defensive
+      dead code — the real effort-phase call site fills the dict for every
+      agent in scope, covering all three effort states.
+
+    The ``← Back``, ``Separator``, and ``Continue`` choices are appended
+    around the aligned agent rows but are NOT themselves passed through
+    the alignment helper — only the agent rows share the equal-``len()``
+    invariant. Long OpenCode ``provider/model`` IDs drive ``right_width``
+    across the visible row set; shorter aliases right-pad with trailing
+    spaces.
     """
     next_phase = {
         "model": "effort",
@@ -877,18 +881,14 @@ def _ask_opencode_continue_or_agent(
     if phase != "model":
         choices.append(questionary.Choice(title="← Back", value=Nav.BACK))
         choices.append(questionary.Separator())
-    # Per-phase title assembly — see the docstring for the
-    # ``selections[agent]`` shape contract.
+    # Both phases build the same shape: ``(agent, right_column)`` pairs.
+    # The right column is what callers pre-compute for the effort phase;
+    # for the model phase it's the bare ``provider/model`` id. Long IDs
+    # drive the right column width — shorter ids right-pad with spaces.
+    pairs = [(agent, selections.get(agent, "(unset)")) for agent in agent_list]
+    aligned_titles = align_label_rows(pairs)
     choices.extend(
-        questionary.Choice(
-            title=(
-                selections.get(agent, "(unset)")
-                if phase == "effort"
-                else f"{agent} - {selections.get(agent, '(unset)')}"
-            ),
-            value=agent,
-        )
-        for agent in agent_list
+        questionary.Choice(title=title, value=agent) for agent, title in zip(agent_list, aligned_titles, strict=True)
     )
     choices.append(questionary.Separator())
     choices.append(
