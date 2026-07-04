@@ -12,10 +12,26 @@ The picker-row builders are the only formatting surface the TUI consumes:
 each row carries a ``value`` (the canonical string written to the override
 store) and a user-facing ``label``, plus an ``is_current`` flag the TUI
 can use to mark the current selection in the prompt.
+
+Load-bearing display seam
+-------------------------
+:func:`align_label_rows` is the single shared formatter for the model
+chooser, the effort chooser, and the confirmation panel — three call
+sites in :mod:`ai_harness.modules.wizard.tui` route through it. The
+helper computes dynamic column widths from the visible row set and
+returns aligned label strings (fixed separator column, equal raw line
+width, intentional trailing-space right padding). It treats its
+inputs as opaque strings: the semantic decisions — which model, which
+effort, whether the placeholder is ``(unset)`` / ``(NA)`` / a bare
+value — stay inside :func:`format_selection_label`. Deleting the
+alignment helper would re-spread column-width arithmetic across
+three call sites and reintroduce the "did we forget to pad the shorter
+rows?" bug class. See ``specs/alignment.md`` for the full invariants.
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, NamedTuple
@@ -393,7 +409,7 @@ def format_selection_label(
     effort: str | None,
     has_effort_support: bool,
 ) -> str:
-    """Format one row of the ``agent: model / <state>`` display used by both phases.
+    """Format one row's right column (``model / <state>``) for the set-models wizard.
 
     Single source of truth for the wording shown in the effort phase
     picker and the confirm panel — both call sites consume this helper
@@ -402,50 +418,121 @@ def format_selection_label(
     callers pass ``True`` unconditionally (Claude models are always
     effort-supporting).
 
+    The returned string is the **right column only** — the agent name is
+    NOT prepended. ``align_label_rows`` wraps the agent name around
+    whatever this returns so the three display surfaces (model chooser,
+    effort chooser, confirm panel) share a single formatter. The ``agent``
+    argument is preserved in the signature for call-site uniformity, but
+    its value is not part of the output.
+
     The three branches:
 
     - ``has_effort_support=True`` and ``effort`` is set →
-      ``f"{agent}: {model} / {effort}"``
+      ``f"{model} / {effort}"``
     - ``has_effort_support=True`` and ``effort is None`` →
-      ``f"{agent}: {model} / (unset)"``
+      ``f"{model} / (unset)"``
     - ``has_effort_support=False`` (OpenCode non-reasoning model) →
-      ``f"{agent}: {model} / (NA)"``; the *effort* value is ignored.
+      ``f"{model} / (NA)"``; the *effort* value is ignored.
 
     Pure: no I/O, no globals, no catalog lookup. The caller resolves
     *has_effort_support* (Claude passes ``True``; OpenCode passes
     ``opencode_model_is_reasoning(model, catalog)``).
     """
+    del agent  # right-column-only output; agent prefix is added by align_label_rows
     if not has_effort_support:
-        return f"{agent}: {model} / (NA)"
+        return f"{model} / (NA)"
     if effort is None:
-        return f"{agent}: {model} / (unset)"
-    return f"{agent}: {model} / {effort}"
+        return f"{model} / (unset)"
+    return f"{model} / {effort}"
 
 
 def build_confirmation_rows(
     selections: dict[str, ModelSelection],
 ) -> list[PickerRow]:
-    """Build the confirmation rows: one per agent with model and effort.
+    """Build the confirmation rows: one per agent with model and effort, aligned.
 
     *selections* maps ``agent -> ModelSelection(model, effort)``. Each
-    row's label is assembled by :func:`format_selection_label` with
-    ``has_effort_support=True`` — the constant is load-bearing: the
+    row's right column is assembled by :func:`format_selection_label`
+    with ``has_effort_support=True`` — the constant is load-bearing: the
     ``(NA)`` branch is unreachable from the confirm panel because the
     model-switch reset (issue #63) has already cleared any effort for
     non-reasoning models by the time the user reaches confirm. A
     ``None`` effort here therefore always renders as ``"(unset)"``.
+
+    The full set of right columns is then run through
+    :func:`align_label_rows` once — so the confirm panel shares the
+    same fixed separator column and equal raw line width as the model
+    and effort chooser surfaces. Row order matches ``selections.items()``
+    insertion order (Python 3.7+ stable).
     """
-    rows: list[PickerRow] = []
+    pairs: list[tuple[str, str]] = []
     for agent, selection in selections.items():
-        label = format_selection_label(agent, selection.model, selection.effort, has_effort_support=True)
-        rows.append(
-            PickerRow(
-                value=agent,
-                label=label,
-                is_current=False,
-            )
+        right = format_selection_label(
+            agent,
+            selection.model,
+            selection.effort,
+            has_effort_support=True,
         )
-    return rows
+        pairs.append((agent, right))
+    aligned_titles = align_label_rows(pairs)
+    return [
+        PickerRow(value=agent, label=title, is_current=False)
+        for (agent, _), title in zip(pairs, aligned_titles, strict=True)
+    ]
+
+
+def _column_widths(pairs: Sequence[tuple[str, str]]) -> tuple[int, int]:
+    """Return ``(left_width, right_width)`` as the per-call maxima over *pairs*.
+
+    Extracted from :func:`align_label_rows` so the geometry and the
+    emission can be read independently. ``default=0`` makes an empty
+    input safe — no ``ValueError`` from ``max()`` over an empty iterable.
+    """
+    left_width = max((len(left) for left, _ in pairs), default=0)
+    right_width = max((len(right) for _, right in pairs), default=0)
+    return left_width, right_width
+
+
+def align_label_rows(
+    pairs: Sequence[tuple[str, str]],
+    *,
+    separator: str = " - ",
+) -> list[str]:
+    """Format an ordered sequence of ``(left, right)`` pairs into aligned label strings.
+
+    The returned labels share a fixed separator column and an identical
+    raw line width — including intentional trailing-space right padding
+    on shorter right-column values. Widths are computed dynamically from
+    the visible row set passed in (``left_width = max(len(left))`` and
+    ``right_width = max(len(right))``), never memoised and never keyed on
+    a global, so the model / effort / confirm phases (and the Claude /
+    OpenCode variants) can each compute widths against their own row set.
+
+    The helper treats the pairs as **opaque strings**: it never inspects,
+    parses, splits, normalises, or reorders the tuples. The placeholders
+    ``(unset)`` and ``(NA)`` reach the output verbatim — the alignment
+    helper does not own the semantic decision, only the geometry.
+
+    Invariants (load-bearing for the set-models wizard — see
+    ``specs/alignment.md``):
+
+    1. Every returned label has identical ``len()`` equal to
+       ``left_width + len(separator) + right_width``.
+    2. The separator substring begins at column ``left_width`` in every
+       label.
+    3. Shorter right values are right-padded with ASCII spaces via
+       ``f"{right:<{right_width}}"``; the helper MUST NOT call
+       ``.strip()`` / ``.rstrip()`` / ``.lstrip()`` on its output.
+    4. Output index N corresponds to input index N — no reordering.
+    5. Empty input returns ``[]`` (no exception).
+
+    Pure: no I/O, no globals, fully driven by the arguments. The TUI
+    consumes this helper for the model chooser, the effort chooser, and
+    (transitively via :func:`build_confirmation_rows`) the confirmation
+    panel.
+    """
+    left_width, right_width = _column_widths(pairs)
+    return [f"{left:<{left_width}}{separator}{right:<{right_width}}" for left, right in pairs]
 
 
 # ---------------------------------------------------------------------------

@@ -34,6 +34,7 @@ from ai_harness.modules.harness.renderers import (
 from ai_harness.modules.wizard.pure import (
     AgentMode,
     ModelSelection,
+    align_label_rows,
     build_agent_list_rows,
     build_confirmation_rows,
     build_effort_picker_rows,
@@ -1431,7 +1432,7 @@ def test_cli_set_models_agent_flag_with_claude_is_silently_ignored(
 
 
 def test_ask_continue_or_agent_uses_dash_label_format(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The Claude agent chooser renders ``{agent} - {value}``, not ``(current: ...)``."""
+    """The Claude agent chooser renders aligned ``{agent} - {value}`` rows with equal ``len()``."""
     import questionary
 
     from ai_harness.modules.wizard import tui
@@ -1451,12 +1452,28 @@ def test_ask_continue_or_agent_uses_dash_label_format(monkeypatch: pytest.Monkey
     tui._ask_continue_or_agent("model", {"change-implementor": "opus"})
 
     titles = [choice.title for choice in captured[0] if isinstance(choice, questionary.Choice)]
-    assert "change-implementor - opus" in titles
+    # The "opus" row is padded to the longest right-column width across
+    # the visible row set — it ends with trailing spaces.
+    opus_title = next(t for t in titles if "opus" in t)
+    assert opus_title.rstrip().endswith("- opus")
+    assert "opus" in opus_title
+    # No legacy "(current: ...)" leakage from ``build_agent_list_rows``.
     assert not any("(current:" in title for title in titles)
+    # Equal raw len() across agent rows — the alignment helper's invariant.
+    # Filter out navigation rows ("← Back", Separator, "Continue") which
+    # are intentionally NOT padded by the helper.
+    agent_titles = [t for t in titles if t not in ("Continue",) and not t.startswith(("←", "-"))]
+    assert agent_titles, "expected at least one agent row in titles"
+    assert len({len(t) for t in agent_titles}) == 1
 
 
 def test_ask_opencode_continue_or_agent_uses_dash_label_format(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The OpenCode agent chooser renders ``{agent} - {value}``, not ``(current: ...)``."""
+    """The OpenCode agent chooser renders aligned ``{agent} - {value}`` rows with equal ``len()``.
+
+    Long OpenCode ``provider/model`` IDs drive the right-column width;
+    shorter aliases right-pad with trailing spaces so all agent rows
+    share the same raw ``len()``.
+    """
     import questionary
 
     from ai_harness.modules.wizard import tui
@@ -1473,11 +1490,29 @@ def test_ask_opencode_continue_or_agent_uses_dash_label_format(monkeypatch: pyte
         return _Q()
 
     monkeypatch.setattr(tui, "_filterable_select", fake_select)
-    tui._ask_opencode_continue_or_agent("model", {"change-implementor": "openai/gpt-5.5"}, opencode_change_agents())
+    tui._ask_opencode_continue_or_agent(
+        "model",
+        {"change-implementor": "openai/gpt-5.5"},
+        opencode_change_agents(),
+    )
 
     titles = [choice.title for choice in captured[0] if isinstance(choice, questionary.Choice)]
-    assert "change-implementor - openai/gpt-5.5" in titles
+    # "openai/gpt-5.5" is the longest right-column value in the visible
+    # row set, so it appears verbatim (no padding). Shorter aliases get
+    # right-padded with trailing spaces.
+    long_id_title = next(t for t in titles if "openai/gpt-5.5" in t)
+    assert long_id_title.rstrip().endswith("- openai/gpt-5.5")
+    # No legacy "(current: ...)" leakage from ``build_agent_list_rows``.
     assert not any("(current:" in title for title in titles)
+    # Equal raw len() across agent rows — the alignment helper's invariant.
+    # Filter out navigation rows ("← Back", Separator, "Continue") which
+    # are intentionally NOT padded by the helper.
+    agent_titles = [t for t in titles if t not in ("Continue",) and not t.startswith(("←", "-"))]
+    assert agent_titles, "expected at least one agent row in titles"
+    assert len({len(t) for t in agent_titles}) == 1
+    # Long ID drives right_width — a shorter alias row ends with trailing spaces.
+    short_alias_title = next(t for t in agent_titles if "(unset)" in t)
+    assert short_alias_title.endswith(" ")
 
 
 def test_ask_continue_or_agent_continue_label_has_no_arrow(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1731,7 +1766,7 @@ def test_build_agent_list_rows_missing_agent_gets_default_model() -> None:
 
 
 def test_build_confirmation_rows_includes_model_and_effort() -> None:
-    """Confirmation rows show ``agent: model / effort`` for each agent."""
+    """Confirmation rows show ``agent - model / effort`` for each agent (aligned)."""
     selections = {
         "explorer": ModelSelection("haiku", "low"),
         "implementor": ModelSelection("opus", "high"),
@@ -1749,6 +1784,8 @@ def test_build_confirmation_rows_includes_model_and_effort() -> None:
     assert "high" in by_value["implementor"]
     # None effort renders as a placeholder
     assert "sonnet" in by_value["validator"]
+    # Equal raw len() across all rows — the alignment helper's invariant.
+    assert len({len(r.label) for r in rows}) == 1
 
 
 def test_build_confirmation_rows_unset_effort_renders_unset_placeholder() -> None:
@@ -1757,20 +1794,22 @@ def test_build_confirmation_rows_unset_effort_renders_unset_placeholder() -> Non
     Locks in the contract that the confirm panel routes ``None`` effort
     through the ``(unset)`` branch. The ``has_effort_support=True``
     constant at this call site is the load-bearing suppression of the
-    ``(NA)`` branch — confirmed by spec ``effort-phase-label-formatter``.
+    ``(NA)`` branch. The returned label uses the aligned ``agent -
+    right_column`` shape produced by ``align_label_rows`` — for a
+    single-row input, the row IS the max so no extra padding is added.
     """
     rows = build_confirmation_rows({"change-implementor": ModelSelection("opus", None)})
 
     assert len(rows) == 1
-    assert rows[0].label == "change-implementor: opus / (unset)"
+    assert rows[0].label == "change-implementor - opus / (unset)"
 
 
 def test_build_confirmation_rows_set_effort_renders_effort_value() -> None:
-    """Confirm panel: a set effort renders the effort value as-is."""
+    """Confirm panel: a set effort renders the effort value as-is (aligned)."""
     rows = build_confirmation_rows({"change-implementor": ModelSelection("opus", "high")})
 
     assert len(rows) == 1
-    assert rows[0].label == "change-implementor: opus / high"
+    assert rows[0].label == "change-implementor - opus / high"
 
 
 def test_build_confirmation_rows_never_renders_na_on_confirm_panel() -> None:
@@ -1792,28 +1831,251 @@ def test_build_confirmation_rows_never_renders_na_on_confirm_panel() -> None:
 
 
 # ---------------------------------------------------------------------------
+# align_label_rows — pure helper: two-column dynamic-width label formatter.
+#
+# Load-bearing seam shared by the model / effort / confirm surfaces in the
+# set-models wizard. Locks the invariants listed in the spec
+# (specs/alignment.md, "Helper tests" section): equal raw len(), separator
+# at the same column, trailing-space right padding, order preservation,
+# empty input → [], single-row uses self as max, placeholders pass through,
+# and the keyword-only ``separator`` argument.
+# ---------------------------------------------------------------------------
+
+
+def test_align_label_rows_default_separator_and_signature() -> None:
+    """``align_label_rows`` is callable with only the positional ``pairs`` argument.
+
+    The signature is ``align_label_rows(pairs, *, separator=" - ")`` —
+    ``separator`` is keyword-only with default ``" - "``. The returned
+    labels use ``" - "`` between the two columns when no separator is
+    supplied.
+    """
+    import inspect
+
+    sig = inspect.signature(align_label_rows)
+    assert "pairs" in sig.parameters
+    separator_param = sig.parameters["separator"]
+    assert separator_param.kind is inspect.Parameter.KEYWORD_ONLY
+    assert separator_param.default == " - "
+
+    labels = align_label_rows([("a", "b")])
+    assert " - " in labels[0]
+
+
+def test_align_label_rows_pairs_are_opaque() -> None:
+    """The helper does NOT inspect, parse, or normalise the input strings.
+
+    Widths come from ``len()`` alone — characters that look like separators
+    inside either column do NOT trigger re-splitting or stripping. The
+    right column ``"b/e"`` (with an internal slash) is treated as one
+    opaque unit and the left column ``"a-a"`` (with an internal dash) is
+    not split either.
+    """
+    labels = align_label_rows([("a-a", "b/e"), ("c", "d")])
+    # Right column widths are computed purely from len(), so the long row
+    # ("a-a" / "b/e" = 3 chars) drives right_width = 3.
+    assert labels == ["a-a - b/e", "c   - d  "]
+    # Both labels must have identical len() — the helper's load-bearing
+    # invariant.
+    assert len(labels[0]) == len(labels[1])
+
+
+def test_align_label_rows_equal_raw_len_across_rows() -> None:
+    """Mixed-width input → every label has the same raw ``len()``.
+
+    The common length equals ``left_width + len(separator) + right_width``
+    where the widths are the per-call maxima over the provided pairs.
+    """
+    pairs = [
+        ("change-implementor", "opus"),
+        ("change-validator", "openai/gpt-5.5"),
+    ]
+    labels = align_label_rows(pairs)
+
+    lengths = {len(label) for label in labels}
+    assert len(lengths) == 1, f"expected equal len() across rows, got {lengths}"
+    expected_len = len("change-implementor") + len(" - ") + len("openai/gpt-5.5")
+    assert next(iter(lengths)) == expected_len
+
+
+def test_align_label_rows_equal_widths_passthrough() -> None:
+    """Uniform-width input gets no extra padding — the row IS the max."""
+    labels = align_label_rows([("a", "x"), ("b", "y")])
+
+    # left_width = 1, right_width = 1, separator = 3 → 5 chars per label.
+    assert labels == ["a - x", "b - y"]
+    assert len(labels[0]) == len(labels[1]) == 5
+
+
+def test_align_label_rows_separator_at_same_column() -> None:
+    """The separator substring begins at the same column index in every label.
+
+    That column index equals ``left_width`` — the maximum ``len(left)``
+    over the provided pairs.
+    """
+    pairs = [
+        ("change-validator", "openai/gpt-5.5"),
+        ("a", "opus"),
+        ("change-implementor", "sonnet"),
+    ]
+    labels = align_label_rows(pairs)
+
+    left_width = max(len(left) for left, _ in pairs)
+    for label in labels:
+        assert label.index(" - ") == left_width
+
+
+def test_align_label_rows_trailing_space_padding_for_shorter_right() -> None:
+    """Shorter right values are right-padded with ASCII spaces to the max width.
+
+    ``repr()`` is used to make the trailing spaces visible in the assertion
+    output — the failure message would otherwise hide them.
+    """
+    labels = align_label_rows([("a", "opus"), ("a", "haiku")])
+
+    # "haiku" is shorter than "opus" by one character → the "opus" row is
+    # padded with one trailing space. ``repr()`` shows the trailing space
+    # explicitly so a regression that loses the padding fails visibly.
+    assert repr(labels[0]) == "'a - opus '"
+    assert labels[0].endswith(" ")
+    assert len(labels[0]) == len(labels[1])
+
+
+def test_align_label_rows_padding_survives_round_trip() -> None:
+    """Trailing spaces survive assignment to ``questionary.Choice.title`` and back."""
+    import questionary
+
+    labels = align_label_rows([("a", "opus"), ("a", "haiku")])
+    choice = questionary.Choice(title=labels[0], value="agent")
+
+    assert choice.title.endswith(" ")
+    assert choice.title == labels[0]
+
+
+def test_align_label_rows_preserves_input_order() -> None:
+    """Shuffled input → labels are returned in the same shuffled order.
+
+    Output index N corresponds to input pair index N — the helper MUST NOT
+    sort, group, or reorder the pairs.
+    """
+    pairs = [("c", "3"), ("a", "1"), ("b", "2")]
+    labels = align_label_rows(pairs)
+
+    # Right halves (after the separator) must match the input's right column.
+    rights = [label.split(" - ", 1)[1].rstrip() for label in labels]
+    assert rights == ["3", "1", "2"]
+    # Left halves too — full input order is preserved verbatim.
+    assert [label.split(" - ", 1)[0].rstrip() for label in labels] == ["c", "a", "b"]
+
+
+def test_align_label_rows_empty_input_returns_empty_list() -> None:
+    """``[]`` returns ``[]`` without raising."""
+    assert align_label_rows([]) == []
+
+
+def test_align_label_rows_single_row_uses_self_as_max() -> None:
+    """A single pair returns one label sized to its own lengths — no extra padding."""
+    labels = align_label_rows([("change-implementor", "opus")])
+
+    assert len(labels) == 1
+    expected = len("change-implementor") + len(" - ") + len("opus")
+    assert len(labels[0]) == expected
+    assert labels[0] == "change-implementor - opus"
+
+
+def test_align_label_rows_opencode_long_ids_set_wider_right() -> None:
+    """Long OpenCode ``provider/model`` IDs drive ``right_width`` to the long ID.
+
+    Mixing a short Claude alias (``"opus"``) with a long OpenCode id
+    (``"openai/gpt-5.5"``) must size ``right_width`` to the longer id —
+    not a hard-coded constant. The short alias gets right-padded with
+    trailing spaces to match.
+    """
+    pairs = [
+        ("change-implementor", "opus"),
+        ("change-validator", "openai/gpt-5.5"),
+    ]
+    labels = align_label_rows(pairs)
+
+    right_width = max(len(right) for _, right in pairs)
+    assert right_width == len("openai/gpt-5.5")
+    # The "opus" row's right column must be right-padded with spaces.
+    assert labels[0].endswith(" " * (right_width - len("opus")))
+    assert labels[0][len("change-implementor") + len(" - ") :] == "opus" + " " * (right_width - len("opus"))
+
+
+def test_align_label_rows_unset_placeholder_verbatim() -> None:
+    """The ``(unset)`` substring passes through the helper untouched."""
+    labels = align_label_rows([("change-implementor", "opus / (unset)")])
+
+    assert "/ (unset)" in labels[0]
+    # Verbatim — case, parentheses, and surrounding spaces preserved.
+    assert labels[0].endswith("opus / (unset)")
+
+
+def test_align_label_rows_na_placeholder_verbatim() -> None:
+    """The ``(NA)`` substring passes through the helper untouched, uppercase."""
+    labels = align_label_rows([("change-implementor", "opus / (NA)")])
+
+    assert "/ (NA)" in labels[0]
+    # Uppercase NA — no lowercasing, no translation.
+    assert "(na)" not in labels[0]
+
+
+def test_align_label_rows_custom_separator_kwarg() -> None:
+    """A caller-supplied ``separator=" | "`` produces ``" | "``-separated labels."""
+    labels = align_label_rows([("a", "x"), ("b", "y")], separator=" | ")
+
+    assert all(" | " in label for label in labels)
+    assert labels == ["a | x", "b | y"]
+    # Equal-len() invariant still holds with the custom separator.
+    assert len(labels[0]) == len(labels[1])
+
+
+def test_align_label_rows_default_separator_is_dash() -> None:
+    """The default separator (kwarg omitted) is ``" - "``."""
+    labels = align_label_rows([("change-orchestrator", "opus")])
+
+    assert " - " in labels[0]
+    # Default is exactly " - " — three chars: dash with surrounding spaces.
+    assert labels[0] == "change-orchestrator - opus"
+
+
+# ---------------------------------------------------------------------------
 # format_selection_label — pure helper: the single source of truth for the
-# ``agent: model / <state>`` display used by both the effort phase and the
-# confirm panel.
+# ``model / <state>`` right-column display used by both the effort phase
+# and the confirm panel. The agent prefix is added later by the alignment
+# helper (``align_label_rows``); this function returns the right column
+# only.
 # ---------------------------------------------------------------------------
 
 
 def test_format_selection_label_supported_model_with_effort() -> None:
-    """Supported model + set effort → ``agent: model / effort`` (exact branch assertion)."""
+    """Supported model + set effort → ``"opus / high"`` (right column only)."""
     label = format_selection_label("change-implementor", "opus", "high", True)
-    assert label == "change-implementor: opus / high"
+    assert label == "opus / high"
+    # The agent prefix MUST NOT appear in the right column — the alignment
+    # helper wraps it back on after this returns.
+    assert "change-implementor" not in label
 
 
 def test_format_selection_label_supported_model_no_effort_emits_unset() -> None:
-    """Supported model + ``None`` effort → ``agent: model / (unset)`` branch."""
+    """Supported model + ``None`` effort → ``"opus / (unset)"`` (right column only)."""
     label = format_selection_label("change-implementor", "opus", None, True)
-    assert label == "change-implementor: opus / (unset)"
+    assert label == "opus / (unset)"
+    assert "change-implementor" not in label
 
 
 def test_format_selection_label_unsupported_model_no_effort_emits_na() -> None:
-    """Unsupported model + ``None`` effort → ``agent: model / (NA)`` branch."""
+    """Unsupported model + ``None`` effort → ``"opus / (NA)"`` (right column only).
+
+    ``has_effort_support=False`` dominates: the function returns the
+    ``(NA)`` branch even when effort is ``None`` — never ``(unset)``.
+    """
     label = format_selection_label("change-implementor", "minimax/non-reasoning", None, False)
-    assert label == "change-implementor: minimax/non-reasoning / (NA)"
+    assert label == "minimax/non-reasoning / (NA)"
+    assert "change-implementor" not in label
+    assert "(unset)" not in label
 
 
 def test_format_selection_label_unsupported_model_ignores_effort_value() -> None:
@@ -1823,11 +2085,12 @@ def test_format_selection_label_unsupported_model_ignores_effort_value() -> None
     branch — the effort value must NOT appear in the rendered string.
     """
     label = format_selection_label("change-implementor", "minimax/non-reasoning", "high", False)
-    assert label == "change-implementor: minimax/non-reasoning / (NA)"
+    assert label == "minimax/non-reasoning / (NA)"
     assert "high" not in label
+    assert "change-implementor" not in label
 
 
-def test_format_selection_label_defensive_empty_model_does_not_raise() -> None:
+def test_format_selection_label_empty_model_does_not_raise() -> None:
     """Defensive empty-model edge: ``model=""`` must not crash; ``(unset)`` still renders.
 
     Locks in the contract that the formatter does not raise on an empty
@@ -1835,8 +2098,50 @@ def test_format_selection_label_defensive_empty_model_does_not_raise() -> None:
     path that feeds an uninitialised model value into the helper.
     """
     label = format_selection_label("change-implementor", "", None, True)
-    assert label.startswith("change-implementor: ")
     assert "(unset)" in label
+    # Right-column-only — no agent prefix in the returned string.
+    assert "change-implementor" not in label
+
+
+def test_format_selection_label_no_agent_prefix_in_output() -> None:
+    """The agent name MUST NOT appear anywhere in the right-column output.
+
+    Locks the narrowing: the alignment helper wraps the agent name around
+    whatever this returns, so the function MUST NOT re-introduce the
+    ``agent: `` prefix that the old code path emitted.
+    """
+    label = format_selection_label("change-implementor", "opus", "high", True)
+    assert "change-implementor" not in label
+    # No leading agent prefix pattern — the string starts with the model.
+    assert not label.startswith("change-implementor")
+
+
+def test_format_selection_label_no_agent_prefix_on_na_branch() -> None:
+    """The ``(NA)`` branch also drops the agent prefix.
+
+    Locks the same invariant on the unsupported-model branch with a long
+    OpenCode ``provider/model`` id — both branches must return the right
+    column only.
+    """
+    label = format_selection_label("change-validator", "openai/gpt-5.5", "low", False)
+    assert label == "openai/gpt-5.5 / (NA)"
+    assert "change-validator" not in label
+
+
+def test_format_selection_label_unset_case_preserved() -> None:
+    """``(unset)`` is lowercase verbatim — no lowercasing/normalisation."""
+    label = format_selection_label("a", "opus", None, True)
+    assert "(unset)" in label
+    assert "(UNSET)" not in label
+    assert "(Unset)" not in label
+
+
+def test_format_selection_label_na_case_preserved() -> None:
+    """``(NA)`` is uppercase verbatim — no translation to ``(na)`` or ``(Not Available)``."""
+    label = format_selection_label("a", "opus", "high", False)
+    assert "(NA)" in label
+    assert "(na)" not in label
+    assert "(Not Available)" not in label
 
 
 # ---------------------------------------------------------------------------
@@ -3862,11 +4167,18 @@ def test_run_claude_wizard_effort_phase_shows_unset_for_untouched_agent(
     assert effort_captures, "expected at least one questionary.select call during the effort phase"
     _, choices = effort_captures[0]
     titles = [c.title for c in choices if isinstance(c, questionary.Choice)]
-    # The rich format with "(unset)" must appear for an untouched agent.
-    # Single agent prefix: ``format_selection_label`` already supplies ``{agent}: ``,
-    # so the prompt function must NOT prepend another ``{agent} - ``.
-    assert "change-implementor: sonnet / (unset)" in titles
-    assert "change-implementor - change-implementor: sonnet / (unset)" not in titles
+    # The aligned format with "(unset)" must appear for an untouched agent.
+    # The prompt function MUST route through ``align_label_rows`` so the
+    # right column (from ``format_selection_label``) is wrapped by the
+    # agent name with a single ``-`` separator. Use a substring match so
+    # the assertion survives the left-column padding the helper applies.
+    implementor_title = next(t for t in titles if "change-implementor" in t)
+    assert "- sonnet / (unset)" in implementor_title
+    # No duplicated agent prefix — the new forbidden substring shape.
+    assert "change-implementor - change-implementor -" not in " | ".join(titles)
+    # Equal raw len() across agent rows — the alignment helper's invariant.
+    agent_titles = [t for t in titles if t not in ("Continue",) and not t.startswith(("←", "-"))]
+    assert len({len(t) for t in agent_titles}) == 1
 
 
 def test_run_claude_wizard_effort_phase_never_shows_na(
@@ -3906,6 +4218,9 @@ def test_run_claude_wizard_effort_phase_never_shows_na(
     for _, choices in effort_captures:
         titles = [c.title for c in choices if isinstance(c, questionary.Choice)]
         for title in titles:
+            # (NA) is unreachable from the Claude effort phase regardless
+            # of the separator shape — but the alignment helper now uses
+            # " - " instead of ":". Either way, the branch must not render.
             assert "(NA)" not in title, f"Claude effort phase must never render (NA); saw title {title!r}"
 
 
@@ -3952,9 +4267,15 @@ def test_run_opencode_wizard_effort_phase_shows_unset_for_reasoning_model(
     assert effort_captures
     _, choices = effort_captures[0]
     titles = [c.title for c in choices if isinstance(c, questionary.Choice)]
-    # Single agent prefix — verbatim consumption of ``format_selection_label``.
-    assert "change-implementor: openai/gpt-5.5 / (unset)" in titles
-    assert "change-implementor - change-implementor: openai/gpt-5.5 / (unset)" not in titles
+    # Aligned format — the prompt function MUST route through
+    # ``align_label_rows`` so the right column (from
+    # ``format_selection_label``) is wrapped by the agent name with a
+    # single ``-`` separator. Use a substring match so the assertion
+    # survives the left-column padding the helper applies.
+    implementor_title = next(t for t in titles if "change-implementor" in t)
+    assert "- openai/gpt-5.5 / (unset)" in implementor_title
+    # No duplicated agent prefix — the new forbidden substring shape.
+    assert "change-implementor - change-implementor -" not in " | ".join(titles)
 
 
 def test_run_opencode_wizard_effort_phase_shows_na_for_non_reasoning_model(
@@ -4000,9 +4321,13 @@ def test_run_opencode_wizard_effort_phase_shows_na_for_non_reasoning_model(
     assert effort_captures
     _, choices = effort_captures[0]
     titles = [c.title for c in choices if isinstance(c, questionary.Choice)]
-    # Single agent prefix for non-reasoning / (NA) branch.
-    assert "change-implementor: openai/gpt-5.5-mini / (NA)" in titles
-    assert "change-implementor - change-implementor: openai/gpt-5.5-mini / (NA)" not in titles
+    # Aligned format — non-reasoning / (NA) branch wrapped by the agent
+    # name with a single ``-`` separator. Use a substring match so the
+    # assertion survives the left-column padding the helper applies.
+    implementor_title = next(t for t in titles if "change-implementor" in t)
+    assert "- openai/gpt-5.5-mini / (NA)" in implementor_title
+    # No duplicated agent prefix — the new forbidden substring shape.
+    assert "change-implementor - change-implementor -" not in " | ".join(titles)
 
 
 def test_run_opencode_wizard_effort_phase_mixed_agent_set(
@@ -4080,23 +4405,38 @@ def test_run_opencode_wizard_effort_phase_mixed_agent_set(
     _, choices = effort_captures[0]
     titles = [c.title for c in choices if isinstance(c, questionary.Choice)]
     # Both branches must be present, driven by per-agent reasoning lookup.
-    # Single agent prefix — verbatim consumption of ``format_selection_label``.
-    assert "change-implementor: openai/gpt-5.5 / high" in titles
-    assert "change-validator: openai/gpt-5.5-mini / (NA)" in titles
-    assert "change-implementor - change-implementor:" not in " | ".join(titles)
-    assert "change-validator - change-validator:" not in " | ".join(titles)
+    # Aligned format — the prompt function MUST route through
+    # ``align_label_rows`` so the right column is wrapped by the agent
+    # name with a single ``-`` separator. Use substring matches so the
+    # assertions survive the left-column padding the helper applies.
+    implementor_title = next(t for t in titles if "change-implementor" in t)
+    validator_title = next(t for t in titles if "change-validator" in t)
+    assert "- openai/gpt-5.5 / high" in implementor_title
+    assert "- openai/gpt-5.5-mini / (NA)" in validator_title
+    # No duplicated agent prefix — the new forbidden substring shape.
+    assert "change-implementor - change-implementor -" not in " | ".join(titles)
+    assert "change-validator - change-validator -" not in " | ".join(titles)
+    # Equal raw len() across agent rows — the alignment helper's invariant.
+    agent_titles = [t for t in titles if t not in ("Continue",) and not t.startswith(("←", "-"))]
+    assert len({len(t) for t in agent_titles}) == 1
 
 
 def test_ask_continue_or_agent_effort_phase_no_agent_dash_agent_substring(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Claude: no effort-phase choice title may contain the duplicated ``{agent} - {agent}:`` prefix.
+    """Claude: no effort-phase choice title may contain the duplicated ``{agent} - {agent} -`` prefix.
 
     Locks the fix for the effort-row-duplication bug. Even if a future
     refactor reorders the title assembly, the bare substring
-    ``{agent} - {agent}:`` MUST NEVER appear in any effort-phase choice
+    ``{agent} - {agent} -`` MUST NEVER appear in any effort-phase choice
     title. Captures the choice list through the same ``_filterable_select``
     shim pattern as ``test_ask_continue_or_agent_uses_dash_label_format``.
+
+    The forbidden shape changed from ``{agent} - {agent}:`` to
+    ``{agent} - {agent} -`` because the alignment helper uses ``" - "``
+    as the separator; if a caller still pre-rendered the old
+    ``"agent: model / <state>"`` shape, the helper would wrap the
+    agent prefix around it twice.
     """
     import questionary
 
@@ -4114,36 +4454,43 @@ def test_ask_continue_or_agent_effort_phase_no_agent_dash_agent_substring(
         return _Q()
 
     monkeypatch.setattr(tui, "_filterable_select", fake_select)
-    # Build selections for every Claude wizard agent using the same
-    # ``agent: model / <state>`` shape ``run_effort_phase`` passes in.
+    # Build selections for every Claude wizard agent using the right-column
+    # shape that ``format_selection_label`` now emits (no agent prefix).
     effort_pairs = [
-        ("change-implementor", "change-implementor: sonnet / high"),
-        ("change-validator", "change-validator: sonnet / (unset)"),
-        ("change-explorer", "change-explorer: opus / high"),
+        ("change-implementor", "sonnet / high"),
+        ("change-validator", "sonnet / (unset)"),
+        ("change-explorer", "opus / high"),
     ]
     selections = dict(effort_pairs)
     tui._ask_continue_or_agent("effort", selections)
 
     titles = [choice.title for choice in captured[0] if isinstance(choice, questionary.Choice)]
-    for agent, label in effort_pairs:
-        forbidden = f"{agent} - {agent}:"
+    for agent, right in effort_pairs:
+        forbidden = f"{agent} - {agent} -"
         assert forbidden not in titles, (
             f"Claude effort phase must never duplicate the agent prefix; saw {forbidden!r} in titles {titles!r}"
         )
-        # And the label the caller passed in must be present verbatim.
-        assert label in titles, (
-            f"Claude effort phase must consume selections[{agent!r}] verbatim; saw titles {titles!r}"
+        # The right column the caller passed in must appear verbatim inside
+        # the aligned title — the alignment helper wraps the agent name
+        # around it without re-splitting.
+        matching = [t for t in titles if t.startswith(agent) and right in t]
+        assert matching, (
+            f"Claude effort phase must consume selections[{agent!r}]={right!r} verbatim; saw titles {titles!r}"
         )
 
 
 def test_ask_opencode_continue_or_agent_effort_phase_no_agent_dash_agent_substring(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """OpenCode: no effort-phase choice title may contain the duplicated ``{agent} - {agent}:`` prefix.
+    """OpenCode: no effort-phase choice title may contain the duplicated ``{agent} - {agent} -`` prefix.
 
     Covers all three effort states — ``high`` (set), ``(unset)`` (no
     override), and ``(NA)`` (non-reasoning model). Mirrors the Claude
     regression test so the two wizards cannot drift on this contract.
+
+    The forbidden shape changed from ``{agent} - {agent}:`` to
+    ``{agent} - {agent} -`` because the alignment helper uses ``" - "``
+    as the separator.
     """
     import questionary
 
@@ -4166,9 +4513,9 @@ def test_ask_opencode_continue_or_agent_effort_phase_no_agent_dash_agent_substri
     # phase-aware formatter change that re-introduces the duplicated
     # prefix on any of the three branches would fail this test.
     effort_pairs = [
-        ("change-implementor", "change-implementor: openai/gpt-5.5 / high"),
-        ("change-validator", "change-validator: openai/gpt-5.5-mini / (NA)"),
-        ("change-explorer", "change-explorer: openai/gpt-5.5 / (unset)"),
+        ("change-implementor", "openai/gpt-5.5 / high"),
+        ("change-validator", "openai/gpt-5.5-mini / (NA)"),
+        ("change-explorer", "openai/gpt-5.5 / (unset)"),
     ]
     selections = dict(effort_pairs)
     tui._ask_opencode_continue_or_agent(
@@ -4178,38 +4525,59 @@ def test_ask_opencode_continue_or_agent_effort_phase_no_agent_dash_agent_substri
     )
 
     titles = [choice.title for choice in captured[0] if isinstance(choice, questionary.Choice)]
-    for agent, label in effort_pairs:
-        forbidden = f"{agent} - {agent}:"
+    for agent, right in effort_pairs:
+        forbidden = f"{agent} - {agent} -"
         assert forbidden not in titles, (
             f"OpenCode effort phase must never duplicate the agent prefix; saw {forbidden!r} in titles {titles!r}"
         )
-        # And the label the caller passed in must be present verbatim.
-        assert label in titles, (
-            f"OpenCode effort phase must consume selections[{agent!r}] verbatim; saw titles {titles!r}"
+        # The right column the caller passed in must appear verbatim inside
+        # the aligned title — the alignment helper wraps the agent name
+        # around it without re-splitting.
+        matching = [t for t in titles if t.startswith(agent) and right in t]
+        assert matching, (
+            f"OpenCode effort phase must consume selections[{agent!r}]={right!r} verbatim; saw titles {titles!r}"
         )
 
 
 def test_format_selection_label_effort_phase_and_confirm_panel_match_for_none_effort() -> None:
-    """Both call sites produce byte-identical labels for ``(agent, model, None)``.
+    """The right column produced by ``format_selection_label`` matches the confirm panel's right column.
 
-    The effort phase (which passes ``has_effort_support=True`` per
-    Claude / per OpenCode reasoning-capable model) and the confirm
-    panel (which always passes ``has_effort_support=True``) render
-    the same triple with the same wording. Locking the contract here
-    makes a future divergence between the two displays a test failure.
+    The effort phase uses the right-column output of
+    :func:`format_selection_label` directly (e.g. ``"opus / (unset)"``).
+    The confirm panel wraps that same right column around the agent name
+    via :func:`align_label_rows`, producing
+    ``"change-implementor - opus / (unset)"``. The two right columns
+    MUST be byte-identical — the alignment helper adds the agent prefix
+    and trailing-space padding, never re-splits the right column.
+
+    This right-column parity is the underlying invariant that the
+    alignment helper relies on. Locking it here makes a future
+    divergence between the two displays a test failure.
     """
-    effort_label = format_selection_label("change-implementor", "opus", None, True)
+    right = format_selection_label("change-implementor", "opus", None, True)
     confirm_rows = build_confirmation_rows({"change-implementor": ModelSelection("opus", None)})
 
-    assert effort_label == confirm_rows[0].label
+    # Right column from the formatter appears verbatim in the confirm panel.
+    assert right in confirm_rows[0].label
+    # Equal-length right-column check: the confirm panel's label is
+    # ``agent - right`` (with right-column padding) so the right column
+    # is the substring after ``" - "``.
+    assert confirm_rows[0].label.rstrip().endswith(right)
 
 
 def test_format_selection_label_effort_phase_and_confirm_panel_match_for_set_effort() -> None:
-    """Both call sites produce byte-identical labels for ``(agent, model, 'high')``."""
-    effort_label = format_selection_label("change-implementor", "opus", "high", True)
+    """The right column produced by ``format_selection_label`` matches the confirm panel's right column.
+
+    Mirrors ``test_format_selection_label_effort_phase_and_confirm_panel_match_for_none_effort``
+    for the set-effort branch (``"high"`` instead of ``None``). Locks
+    the same right-column byte-identity invariant.
+    """
+    right = format_selection_label("change-implementor", "opus", "high", True)
     confirm_rows = build_confirmation_rows({"change-implementor": ModelSelection("opus", "high")})
 
-    assert effort_label == confirm_rows[0].label
+    # Right column from the formatter appears verbatim in the confirm panel.
+    assert right in confirm_rows[0].label
+    assert confirm_rows[0].label.rstrip().endswith(right)
 
 
 # ---------------------------------------------------------------------------
