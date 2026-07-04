@@ -4167,11 +4167,18 @@ def test_run_claude_wizard_effort_phase_shows_unset_for_untouched_agent(
     assert effort_captures, "expected at least one questionary.select call during the effort phase"
     _, choices = effort_captures[0]
     titles = [c.title for c in choices if isinstance(c, questionary.Choice)]
-    # The rich format with "(unset)" must appear for an untouched agent.
-    # Single agent prefix: ``format_selection_label`` already supplies ``{agent}: ``,
-    # so the prompt function must NOT prepend another ``{agent} - ``.
-    assert "change-implementor: sonnet / (unset)" in titles
-    assert "change-implementor - change-implementor: sonnet / (unset)" not in titles
+    # The aligned format with "(unset)" must appear for an untouched agent.
+    # The prompt function MUST route through ``align_label_rows`` so the
+    # right column (from ``format_selection_label``) is wrapped by the
+    # agent name with a single ``-`` separator. Use a substring match so
+    # the assertion survives the left-column padding the helper applies.
+    implementor_title = next(t for t in titles if "change-implementor" in t)
+    assert "- sonnet / (unset)" in implementor_title
+    # No duplicated agent prefix — the new forbidden substring shape.
+    assert "change-implementor - change-implementor -" not in " | ".join(titles)
+    # Equal raw len() across agent rows — the alignment helper's invariant.
+    agent_titles = [t for t in titles if t not in ("Continue",) and not t.startswith(("←", "-"))]
+    assert len({len(t) for t in agent_titles}) == 1
 
 
 def test_run_claude_wizard_effort_phase_never_shows_na(
@@ -4211,6 +4218,9 @@ def test_run_claude_wizard_effort_phase_never_shows_na(
     for _, choices in effort_captures:
         titles = [c.title for c in choices if isinstance(c, questionary.Choice)]
         for title in titles:
+            # (NA) is unreachable from the Claude effort phase regardless
+            # of the separator shape — but the alignment helper now uses
+            # " - " instead of ":". Either way, the branch must not render.
             assert "(NA)" not in title, f"Claude effort phase must never render (NA); saw title {title!r}"
 
 
@@ -4257,9 +4267,15 @@ def test_run_opencode_wizard_effort_phase_shows_unset_for_reasoning_model(
     assert effort_captures
     _, choices = effort_captures[0]
     titles = [c.title for c in choices if isinstance(c, questionary.Choice)]
-    # Single agent prefix — verbatim consumption of ``format_selection_label``.
-    assert "change-implementor: openai/gpt-5.5 / (unset)" in titles
-    assert "change-implementor - change-implementor: openai/gpt-5.5 / (unset)" not in titles
+    # Aligned format — the prompt function MUST route through
+    # ``align_label_rows`` so the right column (from
+    # ``format_selection_label``) is wrapped by the agent name with a
+    # single ``-`` separator. Use a substring match so the assertion
+    # survives the left-column padding the helper applies.
+    implementor_title = next(t for t in titles if "change-implementor" in t)
+    assert "- openai/gpt-5.5 / (unset)" in implementor_title
+    # No duplicated agent prefix — the new forbidden substring shape.
+    assert "change-implementor - change-implementor -" not in " | ".join(titles)
 
 
 def test_run_opencode_wizard_effort_phase_shows_na_for_non_reasoning_model(
@@ -4305,9 +4321,13 @@ def test_run_opencode_wizard_effort_phase_shows_na_for_non_reasoning_model(
     assert effort_captures
     _, choices = effort_captures[0]
     titles = [c.title for c in choices if isinstance(c, questionary.Choice)]
-    # Single agent prefix for non-reasoning / (NA) branch.
-    assert "change-implementor: openai/gpt-5.5-mini / (NA)" in titles
-    assert "change-implementor - change-implementor: openai/gpt-5.5-mini / (NA)" not in titles
+    # Aligned format — non-reasoning / (NA) branch wrapped by the agent
+    # name with a single ``-`` separator. Use a substring match so the
+    # assertion survives the left-column padding the helper applies.
+    implementor_title = next(t for t in titles if "change-implementor" in t)
+    assert "- openai/gpt-5.5-mini / (NA)" in implementor_title
+    # No duplicated agent prefix — the new forbidden substring shape.
+    assert "change-implementor - change-implementor -" not in " | ".join(titles)
 
 
 def test_run_opencode_wizard_effort_phase_mixed_agent_set(
@@ -4385,11 +4405,20 @@ def test_run_opencode_wizard_effort_phase_mixed_agent_set(
     _, choices = effort_captures[0]
     titles = [c.title for c in choices if isinstance(c, questionary.Choice)]
     # Both branches must be present, driven by per-agent reasoning lookup.
-    # Single agent prefix — verbatim consumption of ``format_selection_label``.
-    assert "change-implementor: openai/gpt-5.5 / high" in titles
-    assert "change-validator: openai/gpt-5.5-mini / (NA)" in titles
-    assert "change-implementor - change-implementor:" not in " | ".join(titles)
-    assert "change-validator - change-validator:" not in " | ".join(titles)
+    # Aligned format — the prompt function MUST route through
+    # ``align_label_rows`` so the right column is wrapped by the agent
+    # name with a single ``-`` separator. Use substring matches so the
+    # assertions survive the left-column padding the helper applies.
+    implementor_title = next(t for t in titles if "change-implementor" in t)
+    validator_title = next(t for t in titles if "change-validator" in t)
+    assert "- openai/gpt-5.5 / high" in implementor_title
+    assert "- openai/gpt-5.5-mini / (NA)" in validator_title
+    # No duplicated agent prefix — the new forbidden substring shape.
+    assert "change-implementor - change-implementor -" not in " | ".join(titles)
+    assert "change-validator - change-validator -" not in " | ".join(titles)
+    # Equal raw len() across agent rows — the alignment helper's invariant.
+    agent_titles = [t for t in titles if t not in ("Continue",) and not t.startswith(("←", "-"))]
+    assert len({len(t) for t in agent_titles}) == 1
 
 
 def test_ask_continue_or_agent_effort_phase_no_agent_dash_agent_substring(
