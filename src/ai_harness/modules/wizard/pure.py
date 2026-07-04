@@ -12,6 +12,21 @@ The picker-row builders are the only formatting surface the TUI consumes:
 each row carries a ``value`` (the canonical string written to the override
 store) and a user-facing ``label``, plus an ``is_current`` flag the TUI
 can use to mark the current selection in the prompt.
+
+Load-bearing display seam
+-------------------------
+:func:`align_label_rows` is the single shared formatter for the model
+chooser, the effort chooser, and the confirmation panel — three call
+sites in :mod:`ai_harness.modules.wizard.tui` route through it. The
+helper computes dynamic column widths from the visible row set and
+returns aligned label strings (fixed separator column, equal raw line
+width, intentional trailing-space right padding). It treats its
+inputs as opaque strings: the semantic decisions — which model, which
+effort, whether the placeholder is ``(unset)`` / ``(NA)`` / a bare
+value — stay inside :func:`format_selection_label`. Deleting the
+alignment helper would re-spread column-width arithmetic across
+three call sites and reintroduce the "did we forget to pad the shorter
+rows?" bug class. See ``specs/alignment.md`` for the full invariants.
 """
 
 from __future__ import annotations
@@ -449,6 +464,18 @@ def build_confirmation_rows(
     return rows
 
 
+def _column_widths(pairs: Sequence[tuple[str, str]]) -> tuple[int, int]:
+    """Return ``(left_width, right_width)`` as the per-call maxima over *pairs*.
+
+    Extracted from :func:`align_label_rows` so the geometry and the
+    emission can be read independently. ``default=0`` makes an empty
+    input safe — no ``ValueError`` from ``max()`` over an empty iterable.
+    """
+    left_width = max((len(left) for left, _ in pairs), default=0)
+    right_width = max((len(right) for _, right in pairs), default=0)
+    return left_width, right_width
+
+
 def align_label_rows(
     pairs: Sequence[tuple[str, str]],
     *,
@@ -487,8 +514,7 @@ def align_label_rows(
     (transitively via :func:`build_confirmation_rows`) the confirmation
     panel.
     """
-    left_width = max((len(left) for left, _ in pairs), default=0)
-    right_width = max((len(right) for _, right in pairs), default=0)
+    left_width, right_width = _column_widths(pairs)
     return [f"{left:<{left_width}}{separator}{right:<{right_width}}" for left, right in pairs]
 
 
