@@ -43,7 +43,6 @@ __all__ = [
 # Constants
 # ---------------------------------------------------------------------------
 
-_AGENT_PACKAGE = "ai_harness.resources"
 _AGENT_RESOURCE_DIRS: tuple[str | Traversable, ...] = ("change-agent",)
 
 _OVERRIDES_REL = ".ai-harness/overrides.json"
@@ -320,7 +319,7 @@ _AGENT_META: dict[str, dict] = {
 
 def _agent_resource_dirs() -> list[Traversable]:
     """Return existing agent resource directories in render order."""
-    package_root = files(_AGENT_PACKAGE)
+    package_root = files("ai_harness.resources")
     roots: list[Traversable] = []
     for entry in _AGENT_RESOURCE_DIRS:
         root = package_root / entry if isinstance(entry, str) else entry
