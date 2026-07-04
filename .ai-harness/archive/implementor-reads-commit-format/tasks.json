@@ -1,0 +1,154 @@
+{
+  "tasks": [
+    {
+      "id": "1",
+      "title": "Add CommitFormatResolver module with unit tests for the five resolve scenarios",
+      "spec": "resolve-commit-format-from-standards",
+      "phase": "core",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "1.1",
+          "title": "Create src/ai_harness/modules/commit/__init__.py and src/ai_harness/modules/commit/format_resolver.py exposing resolve_commit_format(repo_root) -> str and CommitFormatError, with surrounding-backtick stripping on the returned line",
+          "scenario": "implementor-receives-the-injected-format-with-backticks-stripped",
+          "status": "done"
+        },
+        {
+          "id": "1.2",
+          "title": "Add unit test in tests/test_commit_format_resolver.py asserting that resolve_commit_format raises CommitFormatError('CODING_STANDARDS.md not found at <absolute path>') when the standards file is absent from the repo root",
+          "scenario": "coding-standards-md-absent-from-repo-root",
+          "status": "done"
+        },
+        {
+          "id": "1.3",
+          "title": "Add unit test asserting resolve_commit_format raises CommitFormatError('## Commits section missing in CODING_STANDARDS.md') when the file exists but has no ## Commits heading",
+          "scenario": "coding-standards-md-exists-but-has-no-commits-heading",
+          "status": "done"
+        },
+        {
+          "id": "1.4",
+          "title": "Add unit test asserting resolve_commit_format raises CommitFormatError('## Commits body is empty') when the ## Commits heading exists but the body has no non-comment, non-blank line",
+          "scenario": "commits-heading-exists-but-the-body-is-empty",
+          "status": "done"
+        },
+        {
+          "id": "1.5",
+          "title": "Add unit test asserting the line-selection rule: skip blank lines, HTML comments (<!-- ... -->), and blockquote continuations (>), return the first surviving line with surrounding backticks stripped",
+          "scenario": "comments-and-blanks-precede-the-literal-format-line",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "2",
+      "title": "Edit orchestrator prompt to resolve and inline commit-format directive at delegation-build time",
+      "spec": "resolve-commit-format-from-standards",
+      "phase": "core",
+      "depends_on": [
+        "1"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "2.1",
+          "title": "Edit src/ai_harness/resources/change-agent/change-orchestrator.md delegation-build block to invoke resolve_commit_format(repo_root) and inline the returned string under `Data injected for this delegation:` as `- commit-format: <format>`, with the existing Skills block preserved above",
+          "scenario": "implementor-receives-the-injected-format-with-backticks-stripped",
+          "status": "done"
+        },
+        {
+          "id": "2.2",
+          "title": "Add unit test confirming the directive block is constructed: resolve_commit_format is called per delegation and the returned string appears verbatim as the `commit-format:` value (no surrounding backticks, no placeholder rewriting)",
+          "scenario": "implementor-receives-the-injected-format-with-backticks-stripped",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "3",
+      "title": "Edit implementor prompt loop step 6 to apply the injected commit-format directive",
+      "spec": "apply-injected-commit-format",
+      "phase": "core",
+      "depends_on": [
+        "2"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "3.1",
+          "title": "Edit src/ai_harness/resources/change-agent/change-implementor.md loop step 6 to read the injected commit-format directive verbatim, substitute {change_name}, {task_id}, {slug} in that fixed order, and pass the result as the single -m argument to `git commit`",
+          "scenario": "implementor-commits-with-substituted-tokens",
+          "status": "done"
+        },
+        {
+          "id": "3.2",
+          "title": "Add the defensive missing-directive block: before reaching loop step 6, return `status: blocked` with `blocked_reason: commit-format directive missing from delegation` if no `commit-format:` directive is present, and MUST NOT attempt `git commit`",
+          "scenario": "implementor-spawned-without-commit-format-directive",
+          "status": "done"
+        },
+        {
+          "id": "3.3",
+          "title": "Add the unknown-token block: after substituting the three documented tokens, scan with regex \\{[a-z_]+\\} and return `status: blocked` with `unknown placeholder {<token>} in commit format` for any match outside the closed set {change_name, task_id, slug}, MUST NOT attempt `git commit`",
+          "scenario": "typo-placeholder-survives-substitution",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "4",
+      "title": "Strengthen tests/test_renderers.py with paramterized parity assertions across Claude, OpenCode, and Copilot renderers",
+      "spec": "renderer-parity-for-commit-format-directive",
+      "phase": "test",
+      "depends_on": [
+        "2",
+        "3"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "4.1",
+          "title": "Assert the rendered change-orchestrator.md body contains both `Data injected for this delegation:` and `commit-format:` in the OpenCode render",
+          "scenario": "every-renderer-renders-the-new-delegation-directive",
+          "status": "done"
+        },
+        {
+          "id": "4.2",
+          "title": "Assert the rendered change-orchestrator.md body contains both `Data injected for this delegation:` and `commit-format:` in the Claude render",
+          "scenario": "every-renderer-renders-the-new-delegation-directive",
+          "status": "done"
+        },
+        {
+          "id": "4.3",
+          "title": "Assert the rendered change-implementor.md body contains the loop step-6 substitution rule prose naming {change_name}, {task_id}, and {slug} in both OpenCode and Claude renders",
+          "scenario": "every-renderer-renders-the-substitution-rule-and-missing-directive-error",
+          "status": "done"
+        },
+        {
+          "id": "4.4",
+          "title": "Assert the rendered change-implementor.md body contains the canonical missing-directive error string `commit-format directive missing from delegation` in both OpenCode and Claude renders",
+          "scenario": "every-renderer-renders-the-substitution-rule-and-missing-directive-error",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "5",
+      "title": "Add e2e/e2e_test.sh Tier-1 grep block against the rendered home install dir",
+      "spec": "e2e-grep-coverage-for-commit-format-directive",
+      "phase": "e2e",
+      "depends_on": [
+        "2",
+        "3"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "5.1",
+          "title": "Add a Tier-1 grep block to e2e/e2e_test.sh asserting that `Data injected for this delegation:` and `commit-format:` both appear in the rendered change-orchestrator prompt under the home install dir after install",
+          "scenario": "tier-1-grep-finds-the-new-directive-in-the-rendered-orchestrator",
+          "status": "done"
+        }
+      ]
+    }
+  ]
+}
