@@ -1,0 +1,490 @@
+{
+  "tasks": [
+    {
+      "id": "1",
+      "title": "Add direct align_label_rows tests (red)",
+      "spec": "align-helper",
+      "phase": "foundation",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "1.1",
+          "title": "test_align_label_rows_equal_raw_len_across_rows",
+          "scenario": "equal-raw-len",
+          "status": "done"
+        },
+        {
+          "id": "1.2",
+          "title": "test_align_label_rows_separator_at_same_column",
+          "scenario": "separator-column-consistency",
+          "status": "done"
+        },
+        {
+          "id": "1.3",
+          "title": "test_align_label_rows_trailing_space_padding_for_shorter_right",
+          "scenario": "trailing-space-right-padding",
+          "status": "done"
+        },
+        {
+          "id": "1.4",
+          "title": "test_align_label_rows_preserves_input_order",
+          "scenario": "order-preservation",
+          "status": "done"
+        },
+        {
+          "id": "1.5",
+          "title": "test_align_label_rows_empty_input_returns_empty_list",
+          "scenario": "empty-input",
+          "status": "done"
+        },
+        {
+          "id": "1.6",
+          "title": "test_align_label_rows_single_row_uses_self_as_max",
+          "scenario": "single-row-self-max",
+          "status": "done"
+        },
+        {
+          "id": "1.7",
+          "title": "test_align_label_rows_opencode_long_ids_set_wider_right",
+          "scenario": "opencode-long-ids-set-wider-right",
+          "status": "done"
+        },
+        {
+          "id": "1.8",
+          "title": "test_align_label_rows_placeholders_pass_through_verbatim",
+          "scenario": "placeholders-pass-through",
+          "status": "done"
+        },
+        {
+          "id": "1.9",
+          "title": "test_align_label_rows_custom_separator_kwarg",
+          "scenario": "custom-separator-kwarg",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "2",
+      "title": "Implement align_label_rows in wizard.pure",
+      "spec": "align-helper",
+      "phase": "foundation",
+      "depends_on": [
+        "1"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "2.1",
+          "title": "Define align_label_rows(pairs: Sequence[tuple[str, str]], *, separator: str = \" - \") -> list[str] in pure.py",
+          "scenario": "signature-and-shape",
+          "status": "done"
+        },
+        {
+          "id": "2.2",
+          "title": "Compute left_width and right_width from max(len(...)) over the visible row set",
+          "scenario": "equal-raw-len",
+          "status": "done"
+        },
+        {
+          "id": "2.3",
+          "title": "Emit labels via f-string padding preserving trailing spaces",
+          "scenario": "trailing-space-right-padding",
+          "status": "done"
+        },
+        {
+          "id": "2.4",
+          "title": "Preserve input order; return [] for empty input",
+          "scenario": "order-preservation",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "3",
+      "title": "Refactor align_label_rows for clarity",
+      "spec": "align-helper",
+      "phase": "foundation",
+      "depends_on": [
+        "2"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "3.1",
+          "title": "Extract width computation for readability and guard against empty input",
+          "scenario": "signature-and-shape",
+          "status": "done"
+        },
+        {
+          "id": "3.2",
+          "title": "Add module-level docstring describing the load-bearing seam and its invariants",
+          "scenario": "signature-and-shape",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "4",
+      "title": "Update format_selection_label branch tests for narrowed shape (red)",
+      "spec": "format-selection-label",
+      "phase": "core",
+      "depends_on": [
+        "2"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "4.1",
+          "title": "Update test_format_selection_label_supported_model_with_effort to expect \"opus / high\"",
+          "scenario": "supported-model-set-effort",
+          "status": "done"
+        },
+        {
+          "id": "4.2",
+          "title": "Update test_format_selection_label_supported_model_no_effort_emits_unset to expect \"opus / (unset)\"",
+          "scenario": "supported-model-no-effort",
+          "status": "done"
+        },
+        {
+          "id": "4.3",
+          "title": "Update test_format_selection_label_unsupported_model_no_effort_emits_na to expect \"opus / (NA)\"",
+          "scenario": "not-supported-na-branch-with-none-effort",
+          "status": "done"
+        },
+        {
+          "id": "4.4",
+          "title": "Update test_format_selection_label_unsupported_model_ignores_effort_value to expect \"opus / (NA)\" and assert \"high\" is absent",
+          "scenario": "not-supported-na-branch-discards-effort",
+          "status": "done"
+        },
+        {
+          "id": "4.5",
+          "title": "Add agent-name-absent assertions across all four branch tests",
+          "scenario": "agent-name-absent-from-output",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "5",
+      "title": "Narrow format_selection_label output to right-column-only",
+      "spec": "format-selection-label",
+      "phase": "core",
+      "depends_on": [
+        "4"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "5.1",
+          "title": "Drop the f-string agent prefix from format_selection_label return",
+          "scenario": "no-agent-prefix-in-output",
+          "status": "done"
+        },
+        {
+          "id": "5.2",
+          "title": "Preserve the three-branch semantic: bare value, (unset), (NA)",
+          "scenario": "three-branch-decision-preserved",
+          "status": "done"
+        },
+        {
+          "id": "5.3",
+          "title": "Keep (NA) case-sensitive and effort-value-discarding",
+          "scenario": "placeholders-not-normalised",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "6",
+      "title": "Route Claude chooser through align_label_rows",
+      "spec": "model-section",
+      "phase": "integration",
+      "depends_on": [
+        "5"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "6.1",
+          "title": "Update _ask_continue_or_agent model phase to build (agent, model_alias) pairs and call align_label_rows",
+          "scenario": "claude-model-chooser-uses-helper",
+          "status": "done"
+        },
+        {
+          "id": "6.2",
+          "title": "Update _ask_continue_or_agent effort phase to consume right-column-only selections[agent]",
+          "scenario": "contract-with-effort-phase-caller",
+          "status": "done"
+        },
+        {
+          "id": "6.3",
+          "title": "Preserve Back / Continue / Separator / Esc navigation choices and values",
+          "scenario": "back-continue-esc-semantics-unchanged",
+          "status": "done"
+        },
+        {
+          "id": "6.4",
+          "title": "Preserve Choice.value as bare agent string on every aligned row",
+          "scenario": "claude-choice-value-is-agent",
+          "status": "done"
+        },
+        {
+          "id": "6.5",
+          "title": "Append navigation rows around the aligned agent rows without padding them",
+          "scenario": "navigation-choices-appended-not-aligned",
+          "status": "done"
+        },
+        {
+          "id": "6.6",
+          "title": "Update test_ask_continue_or_agent_uses_dash_label_format to lock equal-len() and trailing-space padding",
+          "scenario": "claude-ask-uses-aligned-format",
+          "status": "done"
+        },
+        {
+          "id": "6.7",
+          "title": "Update function docstring documenting the new effort-phase contract",
+          "scenario": "contract-with-effort-phase-caller",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "7",
+      "title": "Route OpenCode chooser through align_label_rows",
+      "spec": "model-section",
+      "phase": "integration",
+      "depends_on": [
+        "6"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "7.1",
+          "title": "Update _ask_opencode_continue_or_agent model phase to build (agent, alias) pairs and call align_label_rows",
+          "scenario": "opencode-model-chooser-uses-helper",
+          "status": "done"
+        },
+        {
+          "id": "7.2",
+          "title": "Update _ask_opencode_continue_or_agent effort phase to consume right-column-only selections[agent]",
+          "scenario": "contract-with-effort-phase-caller",
+          "status": "done"
+        },
+        {
+          "id": "7.3",
+          "title": "Preserve Back / Continue / Separator / Esc navigation choices",
+          "scenario": "back-continue-esc-semantics-unchanged",
+          "status": "done"
+        },
+        {
+          "id": "7.4",
+          "title": "Preserve Choice.value as bare agent string on every aligned row",
+          "scenario": "opencode-choice-value-is-agent",
+          "status": "done"
+        },
+        {
+          "id": "7.5",
+          "title": "Long OpenCode provider/model IDs drive right_width; shorter aliases right-pad with spaces",
+          "scenario": "opencode-long-id-width",
+          "status": "done"
+        },
+        {
+          "id": "7.6",
+          "title": "Update test_ask_opencode_continue_or_agent_uses_dash_label_format to lock equal-len() and trailing-space padding",
+          "scenario": "opencode-ask-uses-aligned-format",
+          "status": "done"
+        },
+        {
+          "id": "7.7",
+          "title": "Update function docstring documenting the new effort-phase contract",
+          "scenario": "contract-with-effort-phase-caller",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "8",
+      "title": "Route summary through align_label_rows via build_confirmation_rows",
+      "spec": "summary-section",
+      "phase": "integration",
+      "depends_on": [
+        "5"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "8.1",
+          "title": "Rewrite build_confirmation_rows to compute right column via format_selection_label then align via align_label_rows",
+          "scenario": "build-confirmation-rows-uses-helper",
+          "status": "done"
+        },
+        {
+          "id": "8.2",
+          "title": "Walk selections.items() in insertion order without reordering",
+          "scenario": "row-order-equals-insertion-order",
+          "status": "done"
+        },
+        {
+          "id": "8.3",
+          "title": "Pass has_effort_support=True as the constant internally",
+          "scenario": "confirm-never-renders-na",
+          "status": "done"
+        },
+        {
+          "id": "8.4",
+          "title": "Update test_build_confirmation_rows_unset_effort_renders_unset_placeholder for aligned shape",
+          "scenario": "confirmation-row-tests-aligned",
+          "status": "done"
+        },
+        {
+          "id": "8.5",
+          "title": "Update test_build_confirmation_rows_set_effort_renders_effort_value for aligned shape",
+          "scenario": "confirmation-row-tests-aligned",
+          "status": "done"
+        },
+        {
+          "id": "8.6",
+          "title": "Update test_build_confirmation_rows_never_renders_na_on_confirm_panel to assert (NA) absent in aligned label",
+          "scenario": "confirm-never-renders-na",
+          "status": "done"
+        },
+        {
+          "id": "8.7",
+          "title": "Add equal-len() assertion across multi-row outputs",
+          "scenario": "equal-len-across-confirm-rows",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "9",
+      "title": "Update effort-phase context parity tests for aligned shape",
+      "spec": "test-coverage",
+      "phase": "testing",
+      "depends_on": [
+        "7"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "9.1",
+          "title": "Update test_run_claude_wizard_effort_phase_shows_unset_for_untouched_agent to expect aligned title",
+          "scenario": "effort-phase-context-parity-tests",
+          "status": "done"
+        },
+        {
+          "id": "9.2",
+          "title": "Update test_run_claude_wizard_effort_phase_never_shows_na to use \" - \" separator in negative assertion",
+          "scenario": "claude-effort-never-shows-na",
+          "status": "done"
+        },
+        {
+          "id": "9.3",
+          "title": "Update test_run_opencode_wizard_effort_phase_shows_unset_for_reasoning_model to expect aligned title",
+          "scenario": "effort-phase-context-parity-tests",
+          "status": "done"
+        },
+        {
+          "id": "9.4",
+          "title": "Update test_run_opencode_wizard_effort_phase_shows_na_for_non_reasoning_model to expect aligned title",
+          "scenario": "effort-phase-context-parity-tests",
+          "status": "done"
+        },
+        {
+          "id": "9.5",
+          "title": "Update test_run_opencode_wizard_effort_phase_mixed_agent_set to lock equal-len() across titles",
+          "scenario": "effort-phase-context-parity-tests",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "10",
+      "title": "Update duplicate-prefix guard tests for new format",
+      "spec": "test-coverage",
+      "phase": "testing",
+      "depends_on": [
+        "7"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "10.1",
+          "title": "Update test_ask_continue_or_agent_effort_phase_no_agent_dash_agent_substring to lock \"{agent} - {agent} -\" forbidden",
+          "scenario": "no-duplicate-agent-prefix",
+          "status": "done"
+        },
+        {
+          "id": "10.2",
+          "title": "Update test_ask_opencode_continue_or_agent_effort_phase_no_agent_dash_agent_substring to lock \"{agent} - {agent} -\" forbidden",
+          "scenario": "no-duplicate-agent-prefix",
+          "status": "done"
+        },
+        {
+          "id": "10.3",
+          "title": "Update verbatim-consumption assertion: caller-supplied right column appears inside aligned title",
+          "scenario": "duplicate-prefix-guard-tests",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "11",
+      "title": "Update format_selection_label effort/confirm parity tests",
+      "spec": "test-coverage",
+      "phase": "testing",
+      "depends_on": [
+        "8"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "11.1",
+          "title": "Update test_format_selection_label_effort_phase_and_confirm_panel_match_for_none_effort for right-column byte-identity",
+          "scenario": "effort-phase-and-confirm-parity-tests",
+          "status": "done"
+        },
+        {
+          "id": "11.2",
+          "title": "Update test_format_selection_label_effort_phase_and_confirm_panel_match_for_set_effort for right-column byte-identity",
+          "scenario": "effort-phase-and-confirm-parity-tests",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "12",
+      "title": "Run full wizard test suite for regression check",
+      "spec": "seam-preservation",
+      "phase": "cleanup",
+      "depends_on": [
+        "9",
+        "10",
+        "11"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "12.1",
+          "title": "Run pytest on tests/test_set_models.py and confirm green",
+          "scenario": "write-path-tests-pass-unmodified",
+          "status": "done"
+        },
+        {
+          "id": "12.2",
+          "title": "Verify full-wizard scripted tests assert on persisted state, not label text",
+          "scenario": "structural-behaviour-tests-pass-unmodified",
+          "status": "done"
+        },
+        {
+          "id": "12.3",
+          "title": "Confirm no .strip() / .rstrip() calls on aligned labels in any assertion",
+          "scenario": "no-normalization-in-assertion",
+          "status": "done"
+        }
+      ]
+    }
+  ]
+}
