@@ -12,3 +12,9 @@ node_modules/
 .env.*.local
 
 tests-prompts/logs/
+
+# pnpm
+.pnpm-store/
+
+# TypeScript build output
+*.tsbuildinfo

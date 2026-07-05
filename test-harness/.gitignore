@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.pnpm-store/
+*.log
+.env
+.env.local
+.env.*.local
+
+# Per-test fixture directories used by withScratchDir's named-persistent mode.
+# These accumulate state across runs (sessions, AGENTS.md, MCP config) and are
+# not source files. Use `git add -f <file>` to track specific fixtures.
+tests-cases/
