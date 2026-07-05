@@ -11,7 +11,15 @@ import {
   runSimpleTestCase,
   runEngramRecallTestCase,
   runFNAFGrillTestCase,
+  runFibonacciWriteTestCase,
+  runReadThreePythonFilesTestCase,
+  runSimpleCommitTestCase,
 } from "./simpleTestCase.js";
+import {
+  runUpdateFiveFilesTestCase,
+  runExploreAndPlanTestCase,
+  runNodeQualityGateTestCase,
+} from "./subTaskTestCase.js";
 
 type TestCase = {
   name: string;
@@ -22,6 +30,12 @@ const CASES: TestCase[] = [
   { name: "simple-pong", run: runSimpleTestCase },
   { name: "engram-recall", run: runEngramRecallTestCase },
   { name: "fnaf-grill", run: runFNAFGrillTestCase },
+  { name: "fibonacci-write", run: runFibonacciWriteTestCase },
+  { name: "read-three-python", run: runReadThreePythonFilesTestCase },
+  { name: "simple-commit", run: runSimpleCommitTestCase },
+  { name: "update-five-files", run: runUpdateFiveFilesTestCase },
+  { name: "explore-and-plan", run: runExploreAndPlanTestCase },
+  { name: "node-quality-gate", run: runNodeQualityGateTestCase },
 ];
 
 async function main(): Promise<void> {

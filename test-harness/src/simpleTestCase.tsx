@@ -1,4 +1,6 @@
 /// <reference types="node" />
+import { execSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -187,5 +189,257 @@ export async function runFNAFGrillTestCase(): Promise<{ passed: boolean; message
       };
     },
     { dir: path.join(TEST_CASES_ROOT, "test3") },
+  );
+}
+
+/*
+ * runFibonacciWriteTestCase — Test 4.
+ *
+ * Asks the agent to create a single Python file (fib.py) containing a
+ * fibonacci function. The task is single-file, single-step, so the agent
+ * is expected to handle it inline with one `write` tool call — no
+ * sub-agent delegation.
+ *
+ * Acceptance criteria:
+ *   - opencode exits successfully
+ *   - the agent invokes the `write` tool exactly once (creates fib.py)
+ *   - the agent does NOT invoke any sub-agent (subAgents.length === 0)
+ *   - the agent does NOT use the `task` tool (same as above; belt-and-suspenders)
+ *   - fib.py exists on disk after the run
+ *
+ * Runs in <test-harness>/tests-cases/test4/.
+ */
+export async function runFibonacciWriteTestCase(): Promise<{ passed: boolean; message: string }> {
+  return withScratchDir(
+    async (dir) => {
+      const oc = new OpenCode({ agent: "build", timeoutMs: 60_000, dir });
+      const prompt =
+        "Create a single Python file at fib.py that defines a function fibonacci(n) " +
+        "which returns the nth Fibonacci number. Do not create any other files.";
+
+      const r = await oc.execute(prompt);
+
+      if (!r.success) {
+        return { passed: false, message: r.error };
+      }
+
+      const allToolCalls = r.assistant.flatMap((m) => m.toolCalls);
+      const writeCalls = allToolCalls.filter((t) => t.tool === "write");
+      const taskToolCalls = allToolCalls.filter((t) => t.tool === "task");
+      const allSubAgents = r.assistant.flatMap((m) => m.subAgents);
+
+      if (writeCalls.length !== 1) {
+        const seen = Array.from(new Set(allToolCalls.map((t) => t.tool)));
+        return {
+          passed: false,
+          message:
+            `Expected exactly one write tool call to create fib.py, got ${writeCalls.length}. ` +
+            `Tools seen: [${seen.join(", ")}]. ` +
+            `Reply preview: '${r.text.slice(0, 200)}'`,
+        };
+      }
+
+      if (allSubAgents.length > 0 || taskToolCalls.length > 0) {
+        return {
+          passed: false,
+          message:
+            `Expected zero sub-agent / task usage for a single-file task, ` +
+            `got ${allSubAgents.length} sub-agent(s) and ${taskToolCalls.length} task tool call(s). ` +
+            `Reply preview: '${r.text.slice(0, 200)}'`,
+        };
+      }
+
+      if (!existsSync(path.join(dir, "fib.py"))) {
+        return {
+          passed: false,
+          message: `Expected fib.py to exist on disk after the agent's write call, but it was not found.`,
+        };
+      }
+
+      return {
+        passed: true,
+        message: `Agent created fib.py inline with 1 write call and 0 sub-agents.`,
+      };
+    },
+    { dir: path.join(TEST_CASES_ROOT, "test4") },
+  );
+}
+
+/*
+ * runReadThreePythonFilesTestCase — Test 5.
+ *
+ * Pre-seeds 3 small Python files in the working directory and asks the
+ * agent to summarize what each one does. The task is read-only and all
+ * files are in a single small directory, so the agent is expected to
+ * answer inline by reading the files directly — no sub-agent delegation.
+ *
+ * Acceptance criteria:
+ *   - opencode exits successfully
+ *   - the agent invokes the `read` tool at least once
+ *   - the agent does NOT invoke any sub-agent (subAgents.length === 0)
+ *
+ * Runs in <test-harness>/tests-cases/test5/.
+ */
+export async function runReadThreePythonFilesTestCase(): Promise<{ passed: boolean; message: string }> {
+  const seed: Record<string, string> = {
+    "app.py":
+      "def main():\n" +
+      "    print('Hello from app')\n\n" +
+      "if __name__ == '__main__':\n" +
+      "    main()\n",
+    "utils.py":
+      "def add(a, b):\n" +
+      "    return a + b\n\n" +
+      "def multiply(a, b):\n" +
+      "    return a * b\n",
+    "models.py":
+      "class User:\n" +
+      "    def __init__(self, name):\n" +
+      "        self.name = name\n",
+  };
+
+  return withScratchDir(
+    async (dir) => {
+      const oc = new OpenCode({ agent: "build", timeoutMs: 60_000, dir });
+      const prompt =
+        "There are 3 Python files in this directory (app.py, utils.py, models.py). " +
+        "Read each one and briefly summarize what each file does. " +
+        "Do not create or modify any files.";
+
+      const r = await oc.execute(prompt);
+
+      if (!r.success) {
+        return { passed: false, message: r.error };
+      }
+
+      const allToolCalls = r.assistant.flatMap((m) => m.toolCalls);
+      const readCalls = allToolCalls.filter((t) => t.tool === "read");
+      const taskToolCalls = allToolCalls.filter((t) => t.tool === "task");
+      const allSubAgents = r.assistant.flatMap((m) => m.subAgents);
+
+      if (allSubAgents.length > 0 || taskToolCalls.length > 0) {
+        return {
+          passed: false,
+          message:
+            `Expected zero sub-agent / task usage for a 3-file read-only task, ` +
+            `got ${allSubAgents.length} sub-agent(s) and ${taskToolCalls.length} task tool call(s). ` +
+            `Reply preview: '${r.text.slice(0, 200)}'`,
+        };
+      }
+
+      if (readCalls.length === 0) {
+        const seen = Array.from(new Set(allToolCalls.map((t) => t.tool)));
+        return {
+          passed: false,
+          message:
+            `Expected at least one read tool call, got 0. ` +
+            `Tools seen: [${seen.join(", ")}]. ` +
+            `Reply preview: '${r.text.slice(0, 200)}'`,
+        };
+      }
+
+      return {
+        passed: true,
+        message:
+          `Agent summarized 3 files inline with ${readCalls.length} read call(s) and 0 sub-agents.`,
+      };
+    },
+    { dir: path.join(TEST_CASES_ROOT, "test5"), seed },
+  );
+}
+
+/*
+ * runSimpleCommitTestCase — Test 6.
+ *
+ * Pre-initializes a fresh git repository in the scratch directory (so
+ * the commit step is deterministic across re-runs) and asks the agent
+ * to create one new file and commit it. The task is a single git
+ * operation, so the agent should handle it inline via `write` + `bash`
+ * — no sub-agent delegation.
+ *
+ * Acceptance criteria:
+ *   - opencode exits successfully
+ *   - the agent uses `write` to create a new file and `bash` to commit
+ *   - the agent does NOT invoke any sub-agent
+ *   - the commit actually shows up in `git log` afterwards
+ *
+ * Runs in <test-harness>/tests-cases/test6/.
+ */
+export async function runSimpleCommitTestCase(): Promise<{ passed: boolean; message: string }> {
+  return withScratchDir(
+    async (dir) => {
+      // Reset git state to make the test reproducible across re-runs.
+      execSync("rm -rf .git", { cwd: dir, stdio: "ignore" });
+      execSync("git init -b main", { cwd: dir, stdio: "ignore" });
+      execSync("git config user.email 'test-harness@example.com'", { cwd: dir, stdio: "ignore" });
+      execSync("git config user.name 'Test Harness'", { cwd: dir, stdio: "ignore" });
+      execSync("git commit --allow-empty -m 'initial' --no-verify", { cwd: dir, stdio: "ignore" });
+
+      const oc = new OpenCode({ agent: "build", timeoutMs: 60_000, dir });
+      const prompt =
+        "Create a file called hello.txt with the content 'Hello world' and commit it " +
+        "with the message 'Add hello.txt'. Do not modify any other files.";
+
+      const r = await oc.execute(prompt);
+
+      if (!r.success) {
+        return { passed: false, message: r.error };
+      }
+
+      const allToolCalls = r.assistant.flatMap((m) => m.toolCalls);
+      const writeCalls = allToolCalls.filter((t) => t.tool === "write");
+      const bashCalls = allToolCalls.filter((t) => t.tool === "bash");
+      const taskToolCalls = allToolCalls.filter((t) => t.tool === "task");
+      const allSubAgents = r.assistant.flatMap((m) => m.subAgents);
+
+      if (allSubAgents.length > 0 || taskToolCalls.length > 0) {
+        return {
+          passed: false,
+          message:
+            `Expected zero sub-agent / task usage for a simple commit, ` +
+            `got ${allSubAgents.length} sub-agent(s) and ${taskToolCalls.length} task tool call(s). ` +
+            `Reply preview: '${r.text.slice(0, 200)}'`,
+        };
+      }
+
+      if (writeCalls.length === 0 || bashCalls.length === 0) {
+        const seen = Array.from(new Set(allToolCalls.map((t) => t.tool)));
+        return {
+          passed: false,
+          message:
+            `Expected at least one write and one bash call, ` +
+            `got ${writeCalls.length} write and ${bashCalls.length} bash. ` +
+            `Tools seen: [${seen.join(", ")}]. ` +
+            `Reply preview: '${r.text.slice(0, 200)}'`,
+        };
+      }
+
+      // Verify the commit actually landed.
+      let log = "";
+      try {
+        log = execSync("git log --oneline", { cwd: dir, encoding: "utf8" });
+      } catch (err) {
+        return {
+          passed: false,
+          message: `git log failed: ${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
+      if (!log.includes("Add hello.txt")) {
+        return {
+          passed: false,
+          message:
+            `Expected a commit with message 'Add hello.txt' in git log, got:\n${log.trim()}\n` +
+            `Agent reply preview: '${r.text.slice(0, 200)}'`,
+        };
+      }
+
+      return {
+        passed: true,
+        message:
+          `Agent committed inline (${writeCalls.length} write + ${bashCalls.length} bash), ` +
+          `0 sub-agents, commit visible in git log.`,
+      };
+    },
+    { dir: path.join(TEST_CASES_ROOT, "test6") },
   );
 }

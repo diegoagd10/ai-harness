@@ -34,14 +34,29 @@ The test pins `--agent build` and `--format json` on every invocation.
 
 ## Per-test working directories
 
-The three test cases in `src/simpleTestCase.tsx` each run inside their own
-named working directory under `test-harness/tests-cases/`:
+The test cases split into two groups, each with its own source file:
 
-| Test | Directory | What it asserts |
-| --- | --- | --- |
-| `runSimpleTestCase` | `tests-cases/test1/` | Agent replies to "Reply with exactly: PONG" with PONG. |
-| `runEngramRecallTestCase` | `tests-cases/test2/` | Agent invokes an engram `mem_*` tool when asked to recall. |
-| `runFNAFGrillTestCase` | `tests-cases/test3/` | When given an ambiguous creative-build prompt, the agent applies the `grill-me-one-by-one` skill (sub-agent call, tool, name mention, or interview-style reply). |
+- **`src/simpleTestCase.tsx`** — inline-execution tests. The agent should
+  solve the task directly with the standard tools (`read`, `write`,
+  `bash`, `edit`, …) and must NOT spawn a sub-agent.
+- **`src/subTaskTestCase.tsx`** — delegation tests. The task is
+  multi-file or multi-step enough that the orchestrator is expected
+  to use the `task` tool to fan out to a sub-agent.
+
+Each test runs inside its own named working directory under
+`test-harness/tests-cases/`:
+
+| Test | Directory | Group | What it asserts |
+| --- | --- | --- | --- |
+| `runSimpleTestCase` | `tests-cases/test1/` | inline | Agent replies to "Reply with exactly: PONG" with PONG. |
+| `runEngramRecallTestCase` | `tests-cases/test2/` | inline | Agent invokes an engram `mem_*` tool when asked to recall. |
+| `runFNAFGrillTestCase` | `tests-cases/test3/` | inline | When given an ambiguous creative-build prompt, the agent applies the `grill-me-one-by-one` skill (sub-agent call, tool, name mention, or interview-style reply). |
+| `runFibonacciWriteTestCase` | `tests-cases/test4/` | inline | For a "create fib.py with fibonacci(n)" prompt: exactly 1 `write` call, 0 sub-agents / `task` tool usage, fib.py exists on disk. |
+| `runReadThreePythonFilesTestCase` | `tests-cases/test5/` | inline | Pre-seeded with 3 Python files; agent summarizes them with `read` only, 0 sub-agents. |
+| `runSimpleCommitTestCase` | `tests-cases/test6/` | inline | Fresh git repo; agent creates `hello.txt` and commits it with `write` + `bash`, 0 sub-agents, commit visible in `git log`. |
+| `runUpdateFiveFilesTestCase` | `tests-cases/test7/` | sub-task | Pre-seeded with 5 Python files; agent must delegate the docstring sweep to at least 1 sub-agent. |
+| `runExploreAndPlanTestCase` | `tests-cases/test8/` | sub-task | Pre-seeded with 5 project files; agent must delegate the exploration to at least 1 sub-agent, then write `plan.md`. |
+| `runNodeQualityGateTestCase` | `tests-cases/test9/` | sub-task | Pre-seeded Node + pnpm project with `lint` / `format` / `test` scripts; agent must delegate the multi-step quality gate to at least 1 sub-agent. |
 
 A named directory is created with `mkdir -p` (so re-running a test is safe —
 files already in the dir stay) and is **left in place** after the test
