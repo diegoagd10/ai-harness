@@ -182,7 +182,11 @@ export async function runFNAFGrillTestCase(): Promise<TestCaseResult> {
       const grillSubAgents = allSubAgents.filter((s) => /grill/i.test(s.agent));
 
       const allToolCalls = r.assistant.flatMap((m) => m.toolCalls);
-      const grillTools = allToolCalls.filter((t) => /grill/i.test(t.tool));
+      // Covers both wire shapes: a tool literally named *grill* AND opencode's
+      // `skill` tool invoked with a grill-* skill name in its args.
+      const grillTools = allToolCalls.filter(
+        (t) => /grill/i.test(t.tool) || (t.tool === "skill" && /grill/i.test(JSON.stringify(t.args))),
+      );
 
       const mentionsSkillName = /grill-me-one-by-one/i.test(r.text);
       const questionCount = (r.text.match(/\?/g) ?? []).length;

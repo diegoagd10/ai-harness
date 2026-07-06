@@ -25,6 +25,23 @@ import {
   runExploreAndPlanTestCase,
   runNodeQualityGateTestCase,
 } from "./subTaskTestCase.js";
+import {
+  runConversationalStatusCheckTestCase,
+  runExplicitChangeFlowStartTestCase,
+} from "./changeFlowTestCase.js";
+import {
+  runChangeExplorerTestCase,
+  runChangeProposeTestCase,
+  runChangeDesignTestCase,
+  runChangeSpecsTestCase,
+  runChangeTasksTestCase,
+  runChangeImplementorTestCase,
+  runChangeValidatorTestCase,
+  runChangeArchiverTestCase,
+  runImplementorMissingDirectiveTestCase,
+  runArchiverCliFailureTestCase,
+  runValidatorFailVerdictTestCase,
+} from "./changeAgentTestCase.js";
 
 type TestCase = {
   name: string;
@@ -103,15 +120,38 @@ const CASES: TestCase[] = [
   { name: "update-five-files", run: runUpdateFiveFilesTestCase },
   { name: "explore-and-plan", run: runExploreAndPlanTestCase },
   { name: "node-quality-gate", run: runNodeQualityGateTestCase },
+  { name: "change-flow-conversational-status", run: runConversationalStatusCheckTestCase },
+  { name: "change-flow-explicit-start", run: runExplicitChangeFlowStartTestCase },
+  { name: "change-explorer", run: runChangeExplorerTestCase },
+  { name: "change-propose", run: runChangeProposeTestCase },
+  { name: "change-design", run: runChangeDesignTestCase },
+  { name: "change-specs", run: runChangeSpecsTestCase },
+  { name: "change-tasks", run: runChangeTasksTestCase },
+  { name: "change-implementor", run: runChangeImplementorTestCase },
+  { name: "change-validator", run: runChangeValidatorTestCase },
+  { name: "change-archiver", run: runChangeArchiverTestCase },
+  { name: "implementor-blocked-no-directive", run: runImplementorMissingDirectiveTestCase },
+  { name: "archiver-blocked-cli-failure", run: runArchiverCliFailureTestCase },
+  { name: "validator-fail-verdict", run: runValidatorFailVerdictTestCase },
 ];
 
 async function main(): Promise<void> {
   const results: LoggedTestCaseResult[] = [];
   const startedAt = new Date();
 
+  // Optional name filter: `pnpm dev [-- ] name1 name2` runs only the named
+  // cases (exact match against CASES[].name). No args = full suite.
+  const filter = process.argv.slice(2).filter((a) => a !== "--");
+  const cases = filter.length > 0 ? CASES.filter((c) => filter.includes(c.name)) : CASES;
+  if (filter.length > 0 && cases.length === 0) {
+    console.error(`No test cases match [${filter.join(", ")}]. Known: ${CASES.map((c) => c.name).join(", ")}`);
+    process.exitCode = 1;
+    return;
+  }
+
   console.log(color("ai-harness test run", ANSI.bold));
 
-  for (const c of CASES) {
+  for (const c of cases) {
     try {
       const result = await c.run();
       results.push({ name: c.name, ...result });

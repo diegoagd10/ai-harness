@@ -42,6 +42,15 @@ The test cases split into two groups, each with its own source file:
 - **`src/subTaskTestCase.tsx`** — delegation tests. The task is
   multi-file or multi-step enough that the orchestrator is expected
   to use the `task` tool to fan out to a sub-agent.
+- **`src/changeFlowTestCase.tsx`** — file-backed Change flow tests. Pins
+  only the entry-classification / CLI-routing boundary of the change
+  flow (kept minimal since `change-orchestrator.md` is being rebuilt
+  step by step).
+- **`src/changeAgentTestCase.tsx`** — direct per-sub-agent tests. Each
+  test drives one `change-*` sub-agent with a delegation-style prompt
+  over a pre-seeded change folder, asserts that phase's artifact
+  contract, and asserts the agent never probes `ai-harness --help` /
+  `ai-harness help` (a help probe means the prompt lacks CLI context).
 
 Each test runs inside its own named working directory under
 `test-harness/tests-cases/`:
@@ -57,6 +66,22 @@ Each test runs inside its own named working directory under
 | `runUpdateFiveFilesTestCase` | `tests-cases/test7/` | sub-task | Pre-seeded with 5 Python files; agent must delegate the docstring sweep to at least 1 sub-agent. |
 | `runExploreAndPlanTestCase` | `tests-cases/test8/` | sub-task | Pre-seeded with 5 project files; agent must delegate the exploration to at least 1 sub-agent, then write `plan.md`. |
 | `runNodeQualityGateTestCase` | `tests-cases/test9/` | sub-task | Pre-seeded Node + pnpm project with `lint` / `format` / `test` scripts; agent must delegate the multi-step quality gate to at least 1 sub-agent. |
+| `runConversationalStatusCheckTestCase` | `tests-cases/test10/` | change-flow | A change-flavored status question ("how's the auth-rework change going?") stays conversational: no `ai-harness change-*` CLI call, no Change folder, no sub-agent. |
+| `runExplicitChangeFlowStartTestCase` | `tests-cases/test11/` | change-flow | An explicit change-flow trigger phrase with mode given inline ("auto") drives `ai-harness change-new`/`change-continue` and/or creates a `.ai-harness/changes/*` folder. |
+| `runChangeExplorerTestCase` | `tests-cases/test12/` | change-agent | `change-explorer` writes `exploration.md` with an integer `## Budget`; no help probes. |
+| `runChangeProposeTestCase` | `tests-cases/test13/` | change-agent | `change-propose` writes `prd.md` with `## Capabilities`; no help probes. |
+| `runChangeDesignTestCase` | `tests-cases/test14/` | change-agent | `change-design` writes `design.md` with `## Deep modules`; no help probes. |
+| `runChangeSpecsTestCase` | `tests-cases/test15/` | change-agent | `change-specs` writes `specs/*.md` with RFC 2119 requirements + GIVEN/WHEN/THEN; no help probes. |
+| `runChangeTasksTestCase` | `tests-cases/test16/` | change-agent | `change-tasks` creates tasks only via `ai-harness task-create` (never hand-writes tasks.json); no help probes. |
+| `runChangeImplementorTestCase` | `tests-cases/test17/` | change-agent | `change-implementor` drains a CLI-created task via `task-next`/`task-done` and commits with the injected commit-format; no help probes. |
+| `runChangeValidatorTestCase` | `tests-cases/test18/` | change-agent | `change-validator` reads state via `task-list`, writes `validation.md` with `verdict`/`critical`, stays read-only outside `.ai-harness/`; no help probes. |
+| `runChangeArchiverTestCase` | `tests-cases/test19/` | change-agent | `change-archiver` runs `ai-harness change-archive`, moves the folder to `.ai-harness/archive/`, and makes the single `docs: archive {change}` commit; no help probes. |
+| `runImplementorMissingDirectiveTestCase` | `tests-cases/test20/` | guard-rail | `change-implementor` with no `commit-format` directive blocks, names the missing directive, and makes NO commit. |
+| `runArchiverCliFailureTestCase` | `tests-cases/test21/` | guard-rail | `change-archiver` with a failing `change-archive` preflight (no validation.md) blocks, surfaces the errors, makes NO commit, and leaves the change folder in place. |
+| `runValidatorFailVerdictTestCase` | `tests-cases/test22/` | guard-rail | `change-validator` returns `verdict: fail` with `critical >= 1` when TDD evidence violates the grammar (GREEN != passed, behavior-without-test row). |
+
+The change-flow tests (test10/test11) also assert zero help probes on the
+orchestrator itself.
 
 A named directory is created with `mkdir -p` (so re-running a test is safe —
 files already in the dir stay) and is **left in place** after the test
