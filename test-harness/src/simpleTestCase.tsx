@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { OpenCode } from "./openCode.js";
+import { OpenCode, type Result } from "./openCode.js";
 import { withScratchDir } from "./scratch.js";
 
 /*
@@ -17,6 +17,34 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const TEST_CASES_ROOT = path.resolve(__dirname, "..", "tests-cases");
 
+type TestCaseResult = {
+  passed: boolean;
+  message: string;
+  assertion: string;
+  replyText: string;
+  executeResult: Result;
+  failedAssertion?: string;
+};
+
+function passResult(
+  assertion: string,
+  replyText: string,
+  executeResult: Result,
+  message: string,
+): TestCaseResult {
+  return { passed: true, message, assertion, replyText, executeResult };
+}
+
+function failResult(
+  assertion: string,
+  replyText: string,
+  executeResult: Result,
+  failedAssertion: string,
+  message: string,
+): TestCaseResult {
+  return { passed: false, message, assertion, replyText, executeResult, failedAssertion };
+}
+
 /*
  * Test 1 — smoke test.
  *
@@ -25,19 +53,22 @@ const TEST_CASES_ROOT = path.resolve(__dirname, "..", "tests-cases");
  * — session storage, .opencode config it auto-creates, generated files —
  * can be inspected between runs.
  */
-export async function runSimpleTestCase(): Promise<{ passed: boolean; message: string }> {
+export async function runSimpleTestCase(): Promise<TestCaseResult> {
+  const assertion = "reply with exactly PONG";
   return withScratchDir(
     async (dir) => {
-      const oc = new OpenCode({ agent: "build", timeoutMs: 60_000, dir });
+      const oc = new OpenCode({ agent: "change-orchestrator", timeoutMs: 60_000, dir });
       const r = await oc.execute("Reply with exactly: PONG");
+      const replyText = r.success ? r.text : r.error;
 
       if (!r.success) {
-        return { passed: false, message: r.error };
+        return failResult(assertion, replyText, r, "OpenCode run succeeds and returns a reply", r.error);
       }
       if (!r.text.includes("PONG")) {
-        return { passed: false, message: `Expected reply to contain 'PONG', got: '${r.text.slice(0, 200)}'` };
+        const message = `Expected reply to contain 'PONG', got: '${r.text.slice(0, 200)}'`;
+        return failResult(assertion, replyText, r, assertion, message);
       }
-      return { passed: true, message: "opencode agent replied with PONG" };
+      return passResult(assertion, replyText, r, "opencode agent replied with PONG");
     },
     { dir: path.join(TEST_CASES_ROOT, "test1") },
   );
@@ -61,10 +92,11 @@ export async function runSimpleTestCase(): Promise<{ passed: boolean; message: s
  * (sessions, MCP-cached state, generated artifacts) is isolated from
  * test 1 and inspectable separately.
  */
-export async function runEngramRecallTestCase(): Promise<{ passed: boolean; message: string }> {
+export async function runEngramRecallTestCase(): Promise<TestCaseResult> {
+  const assertion = "invoke at least one engram memory tool";
   return withScratchDir(
     async (dir) => {
-      const oc = new OpenCode({ agent: "build", timeoutMs: 60_000, dir });
+      const oc = new OpenCode({ agent: "change-orchestrator", timeoutMs: 60_000, dir });
 
       const prompt =
         "Recall what you remember from previous sessions using the engram MCP server. " +
@@ -73,9 +105,10 @@ export async function runEngramRecallTestCase(): Promise<{ passed: boolean; mess
         "If no memories exist, call the tools anyway and explicitly report the empty result.";
 
       const r = await oc.execute(prompt);
+      const replyText = r.success ? r.text : r.error;
 
       if (!r.success) {
-        return { passed: false, message: r.error };
+        return failResult(assertion, replyText, r, "OpenCode run succeeds and returns a reply", r.error);
       }
 
       const isEngramTool = (name: string): boolean =>
@@ -87,22 +120,21 @@ export async function runEngramRecallTestCase(): Promise<{ passed: boolean; mess
       if (engramCalls.length === 0) {
         const seen = Array.from(new Set(allToolCalls.map((t) => t.tool)));
         const seenSummary = seen.length > 0 ? seen.join(", ") : "(no tool calls captured)";
-        return {
-          passed: false,
-          message:
-            `Expected at least one engram tool call (mem_* or engram_mem_*), got none. ` +
-            `Tools actually invoked: ${seenSummary}. ` +
-            `Agent reply: '${r.text.slice(0, 200)}'`,
-        };
+        const message =
+          `Expected at least one engram tool call (mem_* or engram_mem_*), got none. ` +
+          `Tools actually invoked: ${seenSummary}. ` +
+          `Agent reply: '${r.text.slice(0, 200)}'`;
+        return failResult(assertion, replyText, r, assertion, message);
       }
 
       const engramTools = Array.from(new Set(engramCalls.map((c) => c.tool)));
-      return {
-        passed: true,
-        message:
-          `opencode invoked ${engramCalls.length} engram tool call(s): ${engramTools.join(", ")}. ` +
+      return passResult(
+        assertion,
+        replyText,
+        r,
+        `opencode invoked ${engramCalls.length} engram tool call(s): ${engramTools.join(", ")}. ` +
           `Reply preview: '${r.text.slice(0, 120)}'`,
-      };
+      );
     },
     { dir: path.join(TEST_CASES_ROOT, "test2") },
   );
@@ -131,17 +163,19 @@ export async function runEngramRecallTestCase(): Promise<{ passed: boolean; mess
  * Runs in <test-harness>/tests-cases/test3/ so test 3 stays isolated from
  * tests 1 and 2.
  */
-export async function runFNAFGrillTestCase(): Promise<{ passed: boolean; message: string }> {
+export async function runFNAFGrillTestCase(): Promise<TestCaseResult> {
+  const assertion = "trigger grill-me-one-by-one behavior";
   return withScratchDir(
     async (dir) => {
-      const oc = new OpenCode({ agent: "build", timeoutMs: 90_000, dir });
+      const oc = new OpenCode({ agent: "change-orchestrator", timeoutMs: 90_000, dir });
 
       const prompt = "Create a FNAF 1 game style with html, css, javascript and canvas, grill me one by one";
 
       const r = await oc.execute(prompt);
+      const replyText = r.success ? r.text : r.error;
 
       if (!r.success) {
-        return { passed: false, message: r.error };
+        return failResult(assertion, replyText, r, "OpenCode run succeeds and returns a reply", r.error);
       }
 
       const allSubAgents = r.assistant.flatMap((m) => m.subAgents);
@@ -171,22 +205,17 @@ export async function runFNAFGrillTestCase(): Promise<{ passed: boolean; message
       if (detections.length === 0) {
         const seenSubAgents = Array.from(new Set(allSubAgents.map((s) => s.agent || "(unnamed)")));
         const seenTools = Array.from(new Set(allToolCalls.map((t) => t.tool)));
-        return {
-          passed: false,
-          message:
-            `Expected the FNAF prompt to trigger grill-me-one-by-one behavior. ` +
-            `Detections — grill sub-agent: 0 (saw: [${seenSubAgents.join(", ")}]); ` +
-            `grill tool: 0 (saw: [${seenTools.join(", ")}]); ` +
-            `skill-name mention: no; ` +
-            `interview-style: no (${questionCount} questions in ${r.text.length} chars). ` +
-            `Reply preview: '${r.text.slice(0, 300)}'`,
-        };
+        const message =
+          `Expected the FNAF prompt to trigger grill-me-one-by-one behavior. ` +
+          `Detections — grill sub-agent: 0 (saw: [${seenSubAgents.join(", ")}]); ` +
+          `grill tool: 0 (saw: [${seenTools.join(", ")}]); ` +
+          `skill-name mention: no; ` +
+          `interview-style: no (${questionCount} questions in ${r.text.length} chars). ` +
+          `Reply preview: '${r.text.slice(0, 300)}'`;
+        return failResult(assertion, replyText, r, assertion, message);
       }
 
-      return {
-        passed: true,
-        message: `FNAF prompt triggered grill-me-one-by-one — ${detections.join("; ")}.`,
-      };
+      return passResult(assertion, replyText, r, `FNAF prompt triggered grill-me-one-by-one — ${detections.join("; ")}.`);
     },
     { dir: path.join(TEST_CASES_ROOT, "test3") },
   );
@@ -209,18 +238,20 @@ export async function runFNAFGrillTestCase(): Promise<{ passed: boolean; message
  *
  * Runs in <test-harness>/tests-cases/test4/.
  */
-export async function runFibonacciWriteTestCase(): Promise<{ passed: boolean; message: string }> {
+export async function runFibonacciWriteTestCase(): Promise<TestCaseResult> {
+  const assertion = "create exactly one write call, no task or sub-agent usage, and write fib.py";
   return withScratchDir(
     async (dir) => {
-      const oc = new OpenCode({ agent: "build", timeoutMs: 60_000, dir });
+      const oc = new OpenCode({ agent: "change-orchestrator", timeoutMs: 60_000, dir });
       const prompt =
         "Create a single Python file at fib.py that defines a function fibonacci(n) " +
         "which returns the nth Fibonacci number. Do not create any other files.";
 
       const r = await oc.execute(prompt);
+      const replyText = r.success ? r.text : r.error;
 
       if (!r.success) {
-        return { passed: false, message: r.error };
+        return failResult(assertion, replyText, r, "OpenCode run succeeds and returns a reply", r.error);
       }
 
       const allToolCalls = r.assistant.flatMap((m) => m.toolCalls);
@@ -230,36 +261,27 @@ export async function runFibonacciWriteTestCase(): Promise<{ passed: boolean; me
 
       if (writeCalls.length !== 1) {
         const seen = Array.from(new Set(allToolCalls.map((t) => t.tool)));
-        return {
-          passed: false,
-          message:
-            `Expected exactly one write tool call to create fib.py, got ${writeCalls.length}. ` +
-            `Tools seen: [${seen.join(", ")}]. ` +
-            `Reply preview: '${r.text.slice(0, 200)}'`,
-        };
+        const message =
+          `Expected exactly one write tool call to create fib.py, got ${writeCalls.length}. ` +
+          `Tools seen: [${seen.join(", ")}]. ` +
+          `Reply preview: '${r.text.slice(0, 200)}'`;
+        return failResult(assertion, replyText, r, "exactly one write tool call", message);
       }
 
       if (allSubAgents.length > 0 || taskToolCalls.length > 0) {
-        return {
-          passed: false,
-          message:
-            `Expected zero sub-agent / task usage for a single-file task, ` +
-            `got ${allSubAgents.length} sub-agent(s) and ${taskToolCalls.length} task tool call(s). ` +
-            `Reply preview: '${r.text.slice(0, 200)}'`,
-        };
+        const message =
+          `Expected zero sub-agent / task usage for a single-file task, ` +
+          `got ${allSubAgents.length} sub-agent(s) and ${taskToolCalls.length} task tool call(s). ` +
+          `Reply preview: '${r.text.slice(0, 200)}'`;
+        return failResult(assertion, replyText, r, "zero sub-agent / task usage", message);
       }
 
       if (!existsSync(path.join(dir, "fib.py"))) {
-        return {
-          passed: false,
-          message: `Expected fib.py to exist on disk after the agent's write call, but it was not found.`,
-        };
+        const message = `Expected fib.py to exist on disk after the agent's write call, but it was not found.`;
+        return failResult(assertion, replyText, r, "fib.py exists on disk after the write call", message);
       }
 
-      return {
-        passed: true,
-        message: `Agent created fib.py inline with 1 write call and 0 sub-agents.`,
-      };
+      return passResult(assertion, replyText, r, `Agent created fib.py inline with 1 write call and 0 sub-agents.`);
     },
     { dir: path.join(TEST_CASES_ROOT, "test4") },
   );
@@ -280,7 +302,8 @@ export async function runFibonacciWriteTestCase(): Promise<{ passed: boolean; me
  *
  * Runs in <test-harness>/tests-cases/test5/.
  */
-export async function runReadThreePythonFilesTestCase(): Promise<{ passed: boolean; message: string }> {
+export async function runReadThreePythonFilesTestCase(): Promise<TestCaseResult> {
+  const assertion = "read the three Python files inline without sub-agents";
   const seed: Record<string, string> = {
     "app.py":
       "def main():\n" +
@@ -300,16 +323,17 @@ export async function runReadThreePythonFilesTestCase(): Promise<{ passed: boole
 
   return withScratchDir(
     async (dir) => {
-      const oc = new OpenCode({ agent: "build", timeoutMs: 60_000, dir });
+      const oc = new OpenCode({ agent: "change-orchestrator", timeoutMs: 60_000, dir });
       const prompt =
         "There are 3 Python files in this directory (app.py, utils.py, models.py). " +
         "Read each one and briefly summarize what each file does. " +
         "Do not create or modify any files.";
 
       const r = await oc.execute(prompt);
+      const replyText = r.success ? r.text : r.error;
 
       if (!r.success) {
-        return { passed: false, message: r.error };
+        return failResult(assertion, replyText, r, "OpenCode run succeeds and returns a reply", r.error);
       }
 
       const allToolCalls = r.assistant.flatMap((m) => m.toolCalls);
@@ -318,31 +342,28 @@ export async function runReadThreePythonFilesTestCase(): Promise<{ passed: boole
       const allSubAgents = r.assistant.flatMap((m) => m.subAgents);
 
       if (allSubAgents.length > 0 || taskToolCalls.length > 0) {
-        return {
-          passed: false,
-          message:
-            `Expected zero sub-agent / task usage for a 3-file read-only task, ` +
-            `got ${allSubAgents.length} sub-agent(s) and ${taskToolCalls.length} task tool call(s). ` +
-            `Reply preview: '${r.text.slice(0, 200)}'`,
-        };
+        const message =
+          `Expected zero sub-agent / task usage for a 3-file read-only task, ` +
+          `got ${allSubAgents.length} sub-agent(s) and ${taskToolCalls.length} task tool call(s). ` +
+          `Reply preview: '${r.text.slice(0, 200)}'`;
+        return failResult(assertion, replyText, r, "zero sub-agent / task usage", message);
       }
 
       if (readCalls.length === 0) {
         const seen = Array.from(new Set(allToolCalls.map((t) => t.tool)));
-        return {
-          passed: false,
-          message:
-            `Expected at least one read tool call, got 0. ` +
-            `Tools seen: [${seen.join(", ")}]. ` +
-            `Reply preview: '${r.text.slice(0, 200)}'`,
-        };
+        const message =
+          `Expected at least one read tool call, got 0. ` +
+          `Tools seen: [${seen.join(", ")}]. ` +
+          `Reply preview: '${r.text.slice(0, 200)}'`;
+        return failResult(assertion, replyText, r, "at least one read tool call", message);
       }
 
-      return {
-        passed: true,
-        message:
-          `Agent summarized 3 files inline with ${readCalls.length} read call(s) and 0 sub-agents.`,
-      };
+      return passResult(
+        assertion,
+        replyText,
+        r,
+        `Agent summarized 3 files inline with ${readCalls.length} read call(s) and 0 sub-agents.`,
+      );
     },
     { dir: path.join(TEST_CASES_ROOT, "test5"), seed },
   );
@@ -365,7 +386,8 @@ export async function runReadThreePythonFilesTestCase(): Promise<{ passed: boole
  *
  * Runs in <test-harness>/tests-cases/test6/.
  */
-export async function runSimpleCommitTestCase(): Promise<{ passed: boolean; message: string }> {
+export async function runSimpleCommitTestCase(): Promise<TestCaseResult> {
+  const assertion = "write hello.txt, commit it, and show the commit in git log";
   return withScratchDir(
     async (dir) => {
       // Reset git state to make the test reproducible across re-runs.
@@ -375,15 +397,16 @@ export async function runSimpleCommitTestCase(): Promise<{ passed: boolean; mess
       execSync("git config user.name 'Test Harness'", { cwd: dir, stdio: "ignore" });
       execSync("git commit --allow-empty -m 'initial' --no-verify", { cwd: dir, stdio: "ignore" });
 
-      const oc = new OpenCode({ agent: "build", timeoutMs: 60_000, dir });
+      const oc = new OpenCode({ agent: "change-orchestrator", timeoutMs: 60_000, dir });
       const prompt =
         "Create a file called hello.txt with the content 'Hello world' and commit it " +
         "with the message 'Add hello.txt'. Do not modify any other files.";
 
       const r = await oc.execute(prompt);
+      const replyText = r.success ? r.text : r.error;
 
       if (!r.success) {
-        return { passed: false, message: r.error };
+        return failResult(assertion, replyText, r, "OpenCode run succeeds and returns a reply", r.error);
       }
 
       const allToolCalls = r.assistant.flatMap((m) => m.toolCalls);
@@ -393,25 +416,21 @@ export async function runSimpleCommitTestCase(): Promise<{ passed: boolean; mess
       const allSubAgents = r.assistant.flatMap((m) => m.subAgents);
 
       if (allSubAgents.length > 0 || taskToolCalls.length > 0) {
-        return {
-          passed: false,
-          message:
-            `Expected zero sub-agent / task usage for a simple commit, ` +
-            `got ${allSubAgents.length} sub-agent(s) and ${taskToolCalls.length} task tool call(s). ` +
-            `Reply preview: '${r.text.slice(0, 200)}'`,
-        };
+        const message =
+          `Expected zero sub-agent / task usage for a simple commit, ` +
+          `got ${allSubAgents.length} sub-agent(s) and ${taskToolCalls.length} task tool call(s). ` +
+          `Reply preview: '${r.text.slice(0, 200)}'`;
+        return failResult(assertion, replyText, r, "zero sub-agent / task usage", message);
       }
 
       if (writeCalls.length === 0 || bashCalls.length === 0) {
         const seen = Array.from(new Set(allToolCalls.map((t) => t.tool)));
-        return {
-          passed: false,
-          message:
-            `Expected at least one write and one bash call, ` +
-            `got ${writeCalls.length} write and ${bashCalls.length} bash. ` +
-            `Tools seen: [${seen.join(", ")}]. ` +
-            `Reply preview: '${r.text.slice(0, 200)}'`,
-        };
+        const message =
+          `Expected at least one write and one bash call, ` +
+          `got ${writeCalls.length} write and ${bashCalls.length} bash. ` +
+          `Tools seen: [${seen.join(", ")}]. ` +
+          `Reply preview: '${r.text.slice(0, 200)}'`;
+        return failResult(assertion, replyText, r, "at least one write and one bash call", message);
       }
 
       // Verify the commit actually landed.
@@ -419,26 +438,23 @@ export async function runSimpleCommitTestCase(): Promise<{ passed: boolean; mess
       try {
         log = execSync("git log --oneline", { cwd: dir, encoding: "utf8" });
       } catch (err) {
-        return {
-          passed: false,
-          message: `git log failed: ${err instanceof Error ? err.message : String(err)}`,
-        };
+        const message = `git log failed: ${err instanceof Error ? err.message : String(err)}`;
+        return failResult(assertion, replyText, r, "git log succeeds after the commit", message);
       }
       if (!log.includes("Add hello.txt")) {
-        return {
-          passed: false,
-          message:
-            `Expected a commit with message 'Add hello.txt' in git log, got:\n${log.trim()}\n` +
-            `Agent reply preview: '${r.text.slice(0, 200)}'`,
-        };
+        const message =
+          `Expected a commit with message 'Add hello.txt' in git log, got:\n${log.trim()}\n` +
+          `Agent reply preview: '${r.text.slice(0, 200)}'`;
+        return failResult(assertion, replyText, r, "git log contains 'Add hello.txt'", message);
       }
 
-      return {
-        passed: true,
-        message:
-          `Agent committed inline (${writeCalls.length} write + ${bashCalls.length} bash), ` +
+      return passResult(
+        assertion,
+        replyText,
+        r,
+        `Agent committed inline (${writeCalls.length} write + ${bashCalls.length} bash), ` +
           `0 sub-agents, commit visible in git log.`,
-      };
+      );
     },
     { dir: path.join(TEST_CASES_ROOT, "test6") },
   );

@@ -20,12 +20,40 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { OpenCode } from "./openCode.js";
+import { OpenCode, type Result } from "./openCode.js";
 import { withScratchDir } from "./scratch.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const TEST_CASES_ROOT = path.resolve(__dirname, "..", "tests-cases");
+
+type TestCaseResult = {
+  passed: boolean;
+  message: string;
+  assertion: string;
+  replyText: string;
+  executeResult: Result;
+  failedAssertion?: string;
+};
+
+function passResult(
+  assertion: string,
+  replyText: string,
+  executeResult: Result,
+  message: string,
+): TestCaseResult {
+  return { passed: true, message, assertion, replyText, executeResult };
+}
+
+function failResult(
+  assertion: string,
+  replyText: string,
+  executeResult: Result,
+  failedAssertion: string,
+  message: string,
+): TestCaseResult {
+  return { passed: false, message, assertion, replyText, executeResult, failedAssertion };
+}
 
 /*
  * runUpdateFiveFilesTestCase — Test 7.
@@ -42,7 +70,8 @@ const TEST_CASES_ROOT = path.resolve(__dirname, "..", "tests-cases");
  *
  * Runs in <test-harness>/tests-cases/test7/.
  */
-export async function runUpdateFiveFilesTestCase(): Promise<{ passed: boolean; message: string }> {
+export async function runUpdateFiveFilesTestCase(): Promise<TestCaseResult> {
+  const assertion = "delegate the 5-file update to a sub-agent";
   const seed: Record<string, string> = {
     "alpha.py": "def greet(name):\n    return f'Hello, {name}!'\n",
     "beta.py": "def square(x):\n    return x * x\n\ndef cube(x):\n    return x * x * x\n",
@@ -62,16 +91,17 @@ export async function runUpdateFiveFilesTestCase(): Promise<{ passed: boolean; m
 
   return withScratchDir(
     async (dir) => {
-      const oc = new OpenCode({ agent: "build", timeoutMs: 120_000, dir });
+      const oc = new OpenCode({ agent: "change-orchestrator", timeoutMs: 120_000, dir });
       const prompt =
         "Add a one-line function-level docstring to every function and method in the 5 " +
         "Python files in this directory (alpha.py, beta.py, gamma.py, delta.py, epsilon.py). " +
         "Do not change any logic — only add docstrings.";
 
       const r = await oc.execute(prompt);
+      const replyText = r.success ? r.text : r.error;
 
       if (!r.success) {
-        return { passed: false, message: r.error };
+        return failResult(assertion, replyText, r, "OpenCode run succeeds and returns a reply", r.error);
       }
 
       const allSubAgents = r.assistant.flatMap((m) => m.subAgents);
@@ -79,22 +109,21 @@ export async function runUpdateFiveFilesTestCase(): Promise<{ passed: boolean; m
 
       if (allSubAgents.length === 0) {
         const seen = Array.from(new Set(allToolCalls.map((t) => t.tool)));
-        return {
-          passed: false,
-          message:
-            `Expected a sub-agent to be used for the 5-file update, got 0. ` +
-            `Tools used: [${seen.join(", ")}]. ` +
-            `Reply preview: '${r.text.slice(0, 200)}'`,
-        };
+        const message =
+          `Expected a sub-agent to be used for the 5-file update, got 0. ` +
+          `Tools used: [${seen.join(", ")}]. ` +
+          `Reply preview: '${r.text.slice(0, 200)}'`;
+        return failResult(assertion, replyText, r, "use a sub-agent", message);
       }
 
       const agentTypes = Array.from(new Set(allSubAgents.map((s) => s.agent || "(unnamed)")));
-      return {
-        passed: true,
-        message:
-          `Agent delegated the 5-file update to ${allSubAgents.length} sub-agent call(s): ` +
+      return passResult(
+        assertion,
+        replyText,
+        r,
+        `Agent delegated the 5-file update to ${allSubAgents.length} sub-agent call(s): ` +
           `${agentTypes.join(", ")}.`,
-      };
+      );
     },
     { dir: path.join(TEST_CASES_ROOT, "test7"), seed },
   );
@@ -116,7 +145,8 @@ export async function runUpdateFiveFilesTestCase(): Promise<{ passed: boolean; m
  *
  * Runs in <test-harness>/tests-cases/test8/.
  */
-export async function runExploreAndPlanTestCase(): Promise<{ passed: boolean; message: string }> {
+export async function runExploreAndPlanTestCase(): Promise<TestCaseResult> {
+  const assertion = "delegate exploration to a sub-agent and write plan.md";
   const seed: Record<string, string> = {
     "auth.py":
       "# Authentication module.\n" +
@@ -143,16 +173,17 @@ export async function runExploreAndPlanTestCase(): Promise<{ passed: boolean; me
 
   return withScratchDir(
     async (dir) => {
-      const oc = new OpenCode({ agent: "build", timeoutMs: 120_000, dir });
+      const oc = new OpenCode({ agent: "change-orchestrator", timeoutMs: 120_000, dir });
       const prompt =
         "Explore every file in this directory, then create a plan.md that summarizes the " +
         "project's architecture (modules, responsibilities, data flow). " +
         "Do not modify the existing source files.";
 
       const r = await oc.execute(prompt);
+      const replyText = r.success ? r.text : r.error;
 
       if (!r.success) {
-        return { passed: false, message: r.error };
+        return failResult(assertion, replyText, r, "OpenCode run succeeds and returns a reply", r.error);
       }
 
       const allSubAgents = r.assistant.flatMap((m) => m.subAgents);
@@ -160,29 +191,26 @@ export async function runExploreAndPlanTestCase(): Promise<{ passed: boolean; me
 
       if (allSubAgents.length === 0) {
         const seen = Array.from(new Set(allToolCalls.map((t) => t.tool)));
-        return {
-          passed: false,
-          message:
-            `Expected a sub-agent to be used for the 5-file exploration + plan, got 0. ` +
-            `Tools used: [${seen.join(", ")}]. ` +
-            `Reply preview: '${r.text.slice(0, 200)}'`,
-        };
+        const message =
+          `Expected a sub-agent to be used for the 5-file exploration + plan, got 0. ` +
+          `Tools used: [${seen.join(", ")}]. ` +
+          `Reply preview: '${r.text.slice(0, 200)}'`;
+        return failResult(assertion, replyText, r, "use a sub-agent", message);
       }
 
       if (!existsSync(path.join(dir, "plan.md"))) {
-        return {
-          passed: false,
-          message: `Expected plan.md to exist on disk after the agent's run, but it was not found.`,
-        };
+        const message = `Expected plan.md to exist on disk after the agent's run, but it was not found.`;
+        return failResult(assertion, replyText, r, "plan.md exists on disk after the run", message);
       }
 
       const agentTypes = Array.from(new Set(allSubAgents.map((s) => s.agent || "(unnamed)")));
-      return {
-        passed: true,
-        message:
-          `Agent delegated the exploration to ${allSubAgents.length} sub-agent call(s): ` +
+      return passResult(
+        assertion,
+        replyText,
+        r,
+        `Agent delegated the exploration to ${allSubAgents.length} sub-agent call(s): ` +
           `${agentTypes.join(", ")}; plan.md written.`,
-      };
+      );
     },
     { dir: path.join(TEST_CASES_ROOT, "test8"), seed },
   );
@@ -203,7 +231,8 @@ export async function runExploreAndPlanTestCase(): Promise<{ passed: boolean; me
  *
  * Runs in <test-harness>/tests-cases/test9/.
  */
-export async function runNodeQualityGateTestCase(): Promise<{ passed: boolean; message: string }> {
+export async function runNodeQualityGateTestCase(): Promise<TestCaseResult> {
+  const assertion = "delegate the quality gate to a sub-agent";
   const seed: Record<string, string> = {
     "package.json":
       JSON.stringify(
@@ -252,16 +281,17 @@ export async function runNodeQualityGateTestCase(): Promise<{ passed: boolean; m
 
   return withScratchDir(
     async (dir) => {
-      const oc = new OpenCode({ agent: "build", timeoutMs: 120_000, dir });
+      const oc = new OpenCode({ agent: "change-orchestrator", timeoutMs: 120_000, dir });
       const prompt =
         "This is a Node.js + pnpm project. Run the project's quality gate: " +
         "lint, format check, and tests. Use the package.json scripts. " +
         "Report the result of each step.";
 
       const r = await oc.execute(prompt);
+      const replyText = r.success ? r.text : r.error;
 
       if (!r.success) {
-        return { passed: false, message: r.error };
+        return failResult(assertion, replyText, r, "OpenCode run succeeds and returns a reply", r.error);
       }
 
       const allSubAgents = r.assistant.flatMap((m) => m.subAgents);
@@ -269,22 +299,21 @@ export async function runNodeQualityGateTestCase(): Promise<{ passed: boolean; m
 
       if (allSubAgents.length === 0) {
         const seen = Array.from(new Set(allToolCalls.map((t) => t.tool)));
-        return {
-          passed: false,
-          message:
-            `Expected a sub-agent to be used for the quality gate, got 0. ` +
-            `Tools used: [${seen.join(", ")}]. ` +
-            `Reply preview: '${r.text.slice(0, 200)}'`,
-        };
+        const message =
+          `Expected a sub-agent to be used for the quality gate, got 0. ` +
+          `Tools used: [${seen.join(", ")}]. ` +
+          `Reply preview: '${r.text.slice(0, 200)}'`;
+        return failResult(assertion, replyText, r, "use a sub-agent", message);
       }
 
       const agentTypes = Array.from(new Set(allSubAgents.map((s) => s.agent || "(unnamed)")));
-      return {
-        passed: true,
-        message:
-          `Agent delegated the quality gate to ${allSubAgents.length} sub-agent call(s): ` +
+      return passResult(
+        assertion,
+        replyText,
+        r,
+        `Agent delegated the quality gate to ${allSubAgents.length} sub-agent call(s): ` +
           `${agentTypes.join(", ")}.`,
-      };
+      );
     },
     { dir: path.join(TEST_CASES_ROOT, "test9"), seed },
   );

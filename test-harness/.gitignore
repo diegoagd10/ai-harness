@@ -2,6 +2,7 @@ node_modules/
 dist/
 .pnpm-store/
 *.log
+log-*
 .env
 .env.local
 .env.*.local
