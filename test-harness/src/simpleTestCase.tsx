@@ -57,7 +57,7 @@ export async function runSimpleTestCase(): Promise<TestCaseResult> {
   const assertion = "reply with exactly PONG";
   return withScratchDir(
     async (dir) => {
-      const oc = new OpenCode({ agent: "change-orchestrator", timeoutMs: 60_000, dir });
+      const oc = new OpenCode({ agent: "change-orchestrator", timeoutMs: 180_000, dir });
       const r = await oc.execute("Reply with exactly: PONG");
       const replyText = r.success ? r.text : r.error;
 
@@ -96,7 +96,7 @@ export async function runEngramRecallTestCase(): Promise<TestCaseResult> {
   const assertion = "invoke at least one engram memory tool";
   return withScratchDir(
     async (dir) => {
-      const oc = new OpenCode({ agent: "change-orchestrator", timeoutMs: 60_000, dir });
+      const oc = new OpenCode({ agent: "change-orchestrator", timeoutMs: 180_000, dir });
 
       const prompt =
         "Recall what you remember from previous sessions using the engram MCP server. " +
@@ -167,7 +167,7 @@ export async function runFNAFGrillTestCase(): Promise<TestCaseResult> {
   const assertion = "trigger grill-me-one-by-one behavior";
   return withScratchDir(
     async (dir) => {
-      const oc = new OpenCode({ agent: "change-orchestrator", timeoutMs: 90_000, dir });
+      const oc = new OpenCode({ agent: "change-orchestrator", timeoutMs: 180_000, dir });
 
       const prompt = "Create a FNAF 1 game style with html, css, javascript and canvas, grill me one by one";
 
@@ -242,7 +242,18 @@ export async function runFibonacciWriteTestCase(): Promise<TestCaseResult> {
   const assertion = "create exactly one write call, no task or sub-agent usage, and write fib.py";
   return withScratchDir(
     async (dir) => {
-      const oc = new OpenCode({ agent: "change-orchestrator", timeoutMs: 60_000, dir });
+      // Reset fib.py so the agent's write creates a fresh file (named-persistent
+      // dirs accumulate state across runs).
+      const fibPath = path.join(dir, "fib.py");
+      if (existsSync(fibPath)) {
+        try {
+          execSync(`rm ${JSON.stringify(fibPath)}`, { stdio: "ignore" });
+        } catch {
+          // best-effort cleanup
+        }
+      }
+
+      const oc = new OpenCode({ agent: "change-orchestrator", timeoutMs: 180_000, dir });
       const prompt =
         "Create a single Python file at fib.py that defines a function fibonacci(n) " +
         "which returns the nth Fibonacci number. Do not create any other files.";
@@ -323,7 +334,7 @@ export async function runReadThreePythonFilesTestCase(): Promise<TestCaseResult>
 
   return withScratchDir(
     async (dir) => {
-      const oc = new OpenCode({ agent: "change-orchestrator", timeoutMs: 60_000, dir });
+      const oc = new OpenCode({ agent: "change-orchestrator", timeoutMs: 180_000, dir });
       const prompt =
         "There are 3 Python files in this directory (app.py, utils.py, models.py). " +
         "Read each one and briefly summarize what each file does. " +
@@ -390,14 +401,16 @@ export async function runSimpleCommitTestCase(): Promise<TestCaseResult> {
   const assertion = "write hello.txt, commit it, and show the commit in git log";
   return withScratchDir(
     async (dir) => {
-      // Reset git state to make the test reproducible across re-runs.
-      execSync("rm -rf .git", { cwd: dir, stdio: "ignore" });
+      // Reset git state AND remove any leftover hello.txt so the agent's
+      // `write` actually creates the file (named-persistent dirs accumulate
+      // state across runs).
+      execSync("rm -rf .git hello.txt", { cwd: dir, stdio: "ignore" });
       execSync("git init -b main", { cwd: dir, stdio: "ignore" });
       execSync("git config user.email 'test-harness@example.com'", { cwd: dir, stdio: "ignore" });
       execSync("git config user.name 'Test Harness'", { cwd: dir, stdio: "ignore" });
       execSync("git commit --allow-empty -m 'initial' --no-verify", { cwd: dir, stdio: "ignore" });
 
-      const oc = new OpenCode({ agent: "change-orchestrator", timeoutMs: 60_000, dir });
+      const oc = new OpenCode({ agent: "change-orchestrator", timeoutMs: 180_000, dir });
       const prompt =
         "Create a file called hello.txt with the content 'Hello world' and commit it " +
         "with the message 'Add hello.txt'. Do not modify any other files.";

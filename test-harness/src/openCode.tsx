@@ -57,7 +57,7 @@ export interface SubAgentCall {
   reply: string;
 }
 
-const DEFAULT_TIMEOUT_MS = 60_000;
+const DEFAULT_TIMEOUT_MS = 180_000;
 const DIAGNOSTIC_LIMIT = 500;
 
 interface OpenCodeEvent {

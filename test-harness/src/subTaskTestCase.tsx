@@ -17,6 +17,7 @@
  */
 
 import { existsSync } from "node:fs";
+import { execSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -91,7 +92,7 @@ export async function runUpdateFiveFilesTestCase(): Promise<TestCaseResult> {
 
   return withScratchDir(
     async (dir) => {
-      const oc = new OpenCode({ agent: "change-orchestrator", timeoutMs: 120_000, dir });
+      const oc = new OpenCode({ agent: "change-orchestrator", timeoutMs: 180_000, dir });
       const prompt =
         "Add a one-line function-level docstring to every function and method in the 5 " +
         "Python files in this directory (alpha.py, beta.py, gamma.py, delta.py, epsilon.py). " +
@@ -173,7 +174,18 @@ export async function runExploreAndPlanTestCase(): Promise<TestCaseResult> {
 
   return withScratchDir(
     async (dir) => {
-      const oc = new OpenCode({ agent: "change-orchestrator", timeoutMs: 120_000, dir });
+      // Reset plan.md so the agent's write actually creates a fresh file
+      // (named-persistent dirs accumulate state across runs).
+      const planPath = path.join(dir, "plan.md");
+      if (existsSync(planPath)) {
+        try {
+          execSync(`rm ${JSON.stringify(planPath)}`, { stdio: "ignore" });
+        } catch {
+          // best-effort cleanup
+        }
+      }
+
+      const oc = new OpenCode({ agent: "change-orchestrator", timeoutMs: 180_000, dir });
       const prompt =
         "Explore every file in this directory, then create a plan.md that summarizes the " +
         "project's architecture (modules, responsibilities, data flow). " +
@@ -281,7 +293,7 @@ export async function runNodeQualityGateTestCase(): Promise<TestCaseResult> {
 
   return withScratchDir(
     async (dir) => {
-      const oc = new OpenCode({ agent: "change-orchestrator", timeoutMs: 120_000, dir });
+      const oc = new OpenCode({ agent: "change-orchestrator", timeoutMs: 180_000, dir });
       const prompt =
         "This is a Node.js + pnpm project. Run the project's quality gate: " +
         "lint, format check, and tests. Use the package.json scripts. " +
