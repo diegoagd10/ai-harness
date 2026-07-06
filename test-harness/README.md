@@ -30,7 +30,7 @@ pnpm typecheck  # tsc --noEmit
   `--dir` when a test case does not set its own. Usually unnecessary;
   each test allocates its own scratch directory automatically (see below).
 
-The test pins `--agent build` and `--format json` on every invocation.
+The test pins `--agent change-orchestrator` and `--format json` on every invocation.
 
 ## Per-test working directories
 
@@ -81,7 +81,7 @@ the duration of the test:
 ```ts
 return withScratchDir(
   async (dir) => {
-    const oc = new OpenCode({ agent: "build", dir });
+    const oc = new OpenCode({ agent: "change-orchestrator", dir });
     // ...
   },
   {
