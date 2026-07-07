@@ -8,6 +8,7 @@ for each agent CLI that supports native agents.
 
 from __future__ import annotations
 
+import copy
 import json
 import re
 from pathlib import Path
@@ -2384,3 +2385,183 @@ def test_administrator_stubs_raise_for_metadata_and_discovery_too() -> None:
             admin.get_agent_metadata("change-explorer")
         with pytest.raises(NotImplementedError, match=label):
             admin.discover_agent_names()
+
+
+# ---------------------------------------------------------------------------
+# Override-store helper (task 2) — module lives at harness/override_store.py
+# ---------------------------------------------------------------------------
+
+
+def test_load_override_store_returns_empty_when_file_missing(tmp_path: Path) -> None:
+    """No overrides.json at home → load_override_store returns ``{}`` (no-op)."""
+    from ai_harness.modules.harness.override_store import load_override_store
+
+    assert load_override_store(tmp_path) == {}
+
+
+def test_load_override_store_returns_dict_when_file_present(tmp_path: Path) -> None:
+    """A well-formed overrides.json round-trips through load_override_store."""
+    from ai_harness.modules.harness.override_store import load_override_store
+
+    payload = {"implementor": {"model": {"claude": "opus"}}}
+    (tmp_path / ".ai-harness").mkdir(parents=True)
+    (tmp_path / ".ai-harness" / "overrides.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    assert load_override_store(tmp_path) == payload
+
+
+def test_load_override_store_propagates_json_decode_error(tmp_path: Path) -> None:
+    """Malformed JSON in overrides.json propagates JSONDecodeError verbatim (no silent fallback)."""
+    from ai_harness.modules.harness.override_store import load_override_store
+
+    (tmp_path / ".ai-harness").mkdir(parents=True)
+    (tmp_path / ".ai-harness" / "overrides.json").write_text("{not valid json", encoding="utf-8")
+
+    with pytest.raises(json.JSONDecodeError):
+        load_override_store(tmp_path)
+
+
+def test_save_override_store_writes_new_payload_to_disk(tmp_path: Path) -> None:
+    """save_override_store creates ~/.ai-harness/overrides.json from a fresh payload."""
+    from ai_harness.modules.harness.override_store import save_override_store
+
+    save_override_store(tmp_path, {"implementor": {"model": {"claude": "opus"}}})
+
+    path = tmp_path / ".ai-harness" / "overrides.json"
+    assert path.is_file()
+    assert json.loads(path.read_text(encoding="utf-8")) == {"implementor": {"model": {"claude": "opus"}}}
+
+
+def test_save_override_store_preserves_unrelated_existing_keys(tmp_path: Path) -> None:
+    """save_override_store deep-merges over the existing store, leaving unrelated keys untouched."""
+    from ai_harness.modules.harness.override_store import save_override_store
+
+    path = tmp_path / ".ai-harness" / "overrides.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"validator": {"model": {"claude": "haiku"}}}), encoding="utf-8")
+
+    save_override_store(tmp_path, {"implementor": {"model": {"claude": "opus"}}})
+
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["validator"] == {"model": {"claude": "haiku"}}
+    assert data["implementor"] == {"model": {"claude": "opus"}}
+
+
+def test_save_override_store_merges_partial_override_for_same_agent(tmp_path: Path) -> None:
+    """Two writes touching different fields of the same agent are deep-merged, not replaced."""
+    from ai_harness.modules.harness.override_store import save_override_store
+
+    path = tmp_path / ".ai-harness" / "overrides.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"implementor": {"effort": {"claude": "high"}}}), encoding="utf-8")
+
+    save_override_store(tmp_path, {"implementor": {"model": {"claude": "opus"}}})
+
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["implementor"]["effort"] == {"claude": "high"}
+    assert data["implementor"]["model"] == {"claude": "opus"}
+
+
+def test_save_override_store_round_trips_through_loader(tmp_path: Path) -> None:
+    """What save_override_store writes is what load_override_store reads back."""
+    from ai_harness.modules.harness.override_store import load_override_store, save_override_store
+
+    payload = {
+        "implementor": {"model": {"claude": "opus"}, "effort": {"claude": "high"}},
+        "validator": {"model": {"claude": "haiku"}},
+    }
+    save_override_store(tmp_path, payload)
+    assert load_override_store(tmp_path) == payload
+
+
+def test_save_override_store_creates_parent_directory(tmp_path: Path) -> None:
+    """The ~/.ai-harness/ parent directory is created on first write."""
+    from ai_harness.modules.harness.override_store import save_override_store
+
+    assert not (tmp_path / ".ai-harness").exists()
+    save_override_store(tmp_path, {"implementor": {"model": {"claude": "opus"}}})
+    assert (tmp_path / ".ai-harness").is_dir()
+    assert (tmp_path / ".ai-harness" / "overrides.json").is_file()
+
+
+def test_save_override_store_writes_pretty_stable_json(tmp_path: Path) -> None:
+    """Stable pretty JSON (indent=2, sort_keys=True) keeps repeated writes byte-identical."""
+    from ai_harness.modules.harness.override_store import save_override_store
+
+    save_override_store(
+        tmp_path,
+        {"implementor": {"model": {"claude": "opus"}, "effort": {"claude": "high"}}},
+    )
+    first = (tmp_path / ".ai-harness" / "overrides.json").read_text(encoding="utf-8")
+
+    # Re-write with same payload — output should be byte-identical (stable key ordering).
+    save_override_store(
+        tmp_path,
+        {"implementor": {"model": {"claude": "opus"}, "effort": {"claude": "high"}}},
+    )
+    second = (tmp_path / ".ai-harness" / "overrides.json").read_text(encoding="utf-8")
+
+    assert first == second
+    # Sanity check: pretty-printed with newline terminator.
+    assert first.endswith("\n")
+    assert "\n  " in first  # 2-space indent
+
+
+def test_deep_merge_does_not_mutate_inputs() -> None:
+    """deep_merge returns a fresh dict; neither input is mutated."""
+    from ai_harness.modules.harness.override_store import deep_merge
+
+    base = {"a": {"b": 1, "c": 2}, "d": [1, 2, 3]}
+    override = {"a": {"c": 99, "e": 3}, "d": "scalar-replace"}
+
+    base_snapshot = copy.deepcopy(base)
+    override_snapshot = copy.deepcopy(override)
+
+    merged = deep_merge(base, override)
+
+    assert base == base_snapshot, "deep_merge mutated base"
+    assert override == override_snapshot, "deep_merge mutated override"
+    # The returned dict is a separate object.
+    assert merged is not base
+    assert merged["a"] is not base["a"]
+
+
+def test_deep_merge_recursively_merges_dicts() -> None:
+    """Nested dicts in override recursively merge over base rather than replace wholesale."""
+    from ai_harness.modules.harness.override_store import deep_merge
+
+    base = {"a": {"b": 1, "c": {"d": 1}}, "x": 10}
+    override = {"a": {"c": {"e": 2}}, "y": 20}
+
+    merged = deep_merge(base, override)
+
+    assert merged == {"a": {"b": 1, "c": {"d": 1, "e": 2}}, "x": 10, "y": 20}
+
+
+def test_deep_merge_scalars_lists_and_nulls_replace() -> None:
+    """Scalars, lists, and None in override replace the matching base value."""
+    from ai_harness.modules.harness.override_store import deep_merge
+
+    base = {"a": "string", "b": [1, 2, 3], "c": {"nested": True}}
+    override = {"a": None, "b": ["fresh"], "c": "scalar-replaces-dict"}
+
+    merged = deep_merge(base, override)
+
+    assert merged == {"a": None, "b": ["fresh"], "c": "scalar-replaces-dict"}
+
+
+def test_deep_merge_handles_empty_dicts() -> None:
+    """Empty base or override returns a fresh dict shaped after the other input."""
+    from ai_harness.modules.harness.override_store import deep_merge
+
+    assert deep_merge({}, {"a": 1}) == {"a": 1}
+    assert deep_merge({"a": 1}, {}) == {"a": 1}
+    assert deep_merge({}, {}) == {}
+
+
+def test_override_store_path_constant_matches_install_manifest_parent() -> None:
+    """OVERRIDES_REL sits next to the install manifest under ~/.ai-harness/."""
+    from ai_harness.modules.harness.override_store import OVERRIDES_REL
+
+    assert OVERRIDES_REL == ".ai-harness/overrides.json"
+    assert Path(OVERRIDES_REL).parent == Path(".ai-harness")
