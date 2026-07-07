@@ -2217,3 +2217,170 @@ def test_renderer_parity_change_implementor_has_missing_directive_error(cli: Age
     assert "commit-format directive missing from delegation" in body, (
         f"{cli}: change-implementor body missing the 'commit-format directive missing from delegation' error string"
     )
+
+
+# ---------------------------------------------------------------------------
+# Foundation contract — Artifact, AgentMetadata, ArtifactsAdministrator,
+# ADMINISTRATORS dispatch (task 1).
+# ---------------------------------------------------------------------------
+
+
+def test_artifact_is_frozen_slots_dataclass_with_install_path_and_content() -> None:
+    """Artifact is the caller-facing render output: install_path + content.
+
+    Locks the new output contract that replaces ``RenderedFile.filename``.
+    Frozen/slots enforces immutability — artifacts are render results, not
+    mutable scratch space.
+    """
+    from dataclasses import FrozenInstanceError, fields
+
+    from ai_harness.modules.harness.renderers import Artifact
+
+    artifact = Artifact(install_path=".claude/agents/change-explorer.md", content="---\nname: x\n---\nbody")
+
+    assert artifact.install_path == ".claude/agents/change-explorer.md"
+    assert artifact.content.startswith("---\n")
+    # Field set is exactly install_path + content.
+    assert {f.name for f in fields(Artifact)} == {"install_path", "content"}
+    # Frozen: attribute mutation raises.
+    with pytest.raises(FrozenInstanceError):
+        artifact.install_path = "mutated"  # type: ignore[misc]
+
+
+def test_artifact_equality_compares_by_value_not_identity() -> None:
+    """Two Artifacts with the same install_path/content compare equal — value semantics."""
+    from ai_harness.modules.harness.renderers import Artifact
+
+    left = Artifact(install_path=".config/opencode/agent/x.md", content="body")
+    right = Artifact(install_path=".config/opencode/agent/x.md", content="body")
+
+    assert left == right
+    assert hash(left) == hash(right)
+
+
+def test_agent_metadata_is_frozen_slots_with_default_factory_caps() -> None:
+    """AgentMetadata exposes the design's typed metadata fields with safe defaults."""
+    from dataclasses import FrozenInstanceError, fields
+
+    from ai_harness.modules.harness.renderers import AgentCaps, AgentMetadata
+
+    meta = AgentMetadata(description="test")
+
+    # Defaults match the design contract.
+    assert meta.mode == "subagent"
+    assert dict(meta.model) == {}
+    assert dict(meta.effort) == {}
+    assert meta.caps == AgentCaps()
+    assert meta.permission is None
+    assert meta.color is None
+    # Frozen: mutation raises.
+    with pytest.raises(FrozenInstanceError):
+        meta.description = "mutated"  # type: ignore[misc]
+    # Field set covers the design's JSON schema.
+    assert {f.name for f in fields(AgentMetadata)} == {
+        "description",
+        "mode",
+        "model",
+        "effort",
+        "caps",
+        "permission",
+        "color",
+    }
+
+
+def test_artifacts_administrator_abc_subclasses_must_implement_contract() -> None:
+    """ArtifactsAdministrator subclasses must implement render_artifacts, get_agent_metadata, discover_agent_names.
+
+    Locks the abstract-method contract: a subclass that forgets any of the
+    three methods cannot be instantiated.
+    """
+    from abc import ABC
+
+    from ai_harness.modules.harness.renderers import ArtifactsAdministrator
+
+    assert issubclass(ArtifactsAdministrator, ABC)
+
+    class _Incomplete(ArtifactsAdministrator):
+        provider = "claude"
+
+        def render_artifacts(self, names=None, overrides=None, *, home=None):  # noqa: ARG002
+            return []
+
+        # Missing get_agent_metadata and discover_agent_names on purpose.
+
+    with pytest.raises(TypeError, match="abstract"):
+        _Incomplete()
+
+
+def test_administrators_dispatch_table_keys_each_supported_cli() -> None:
+    """ADMINISTRATORS maps Claude/OpenCode/Copilot to concrete administrators; Generic is absent."""
+    from ai_harness.modules.harness.renderers import (
+        ADMINISTRATORS,
+        ArtifactsAdministrator,
+        ClaudeArtifactsAdministrator,
+        CopilotArtifactsAdministrator,
+        OpenCodeArtifactsAdministrator,
+    )
+
+    assert set(ADMINISTRATORS) == {AgentCli.CLAUDE, AgentCli.OPENCODE, AgentCli.COPILOT}
+    assert isinstance(ADMINISTRATORS[AgentCli.CLAUDE], ClaudeArtifactsAdministrator)
+    assert isinstance(ADMINISTRATORS[AgentCli.OPENCODE], OpenCodeArtifactsAdministrator)
+    assert isinstance(ADMINISTRATORS[AgentCli.COPILOT], CopilotArtifactsAdministrator)
+    # Generic intentionally absent: callers should use ``.get(AgentCli.GENERIC)`` for a no-op path.
+    assert ADMINISTRATORS.get(AgentCli.GENERIC) is None
+    # Every entry is an ArtifactsAdministrator (locks the dispatch polymorphism).
+    for admin in ADMINISTRATORS.values():
+        assert isinstance(admin, ArtifactsAdministrator)
+
+
+def test_administrators_provider_class_attributes_identify_the_provider() -> None:
+    """Each concrete administrator carries a ``provider`` class attribute naming its CLI."""
+    from ai_harness.modules.harness.renderers import (
+        ADMINISTRATORS,
+        ClaudeArtifactsAdministrator,
+        CopilotArtifactsAdministrator,
+        OpenCodeArtifactsAdministrator,
+    )
+
+    assert ADMINISTRATORS[AgentCli.CLAUDE].provider == "claude"
+    assert ADMINISTRATORS[AgentCli.OPENCODE].provider == "opencode"
+    assert ADMINISTRATORS[AgentCli.COPILOT].provider == "copilot"
+    # Lock the type annotations so a future swap can't quietly change the
+    # provider literal away from the closed set.
+    assert ClaudeArtifactsAdministrator.provider == "claude"
+    assert OpenCodeArtifactsAdministrator.provider == "opencode"
+    assert CopilotArtifactsAdministrator.provider == "copilot"
+
+
+def test_administrator_stubs_raise_not_implemented_until_tasks_5_6_7_land() -> None:
+    """Until the per-provider tasks populate the concrete admins, calling the contract raises.
+
+    Locks the foundation-task scope: this task registers the dispatch
+    table but does not yet implement rendering. Tasks 5/6/7 will replace
+    each NotImplementedError with the provider-specific behavior. The
+    sentinel message names the owning task so the failure is debuggable.
+    """
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    with pytest.raises(NotImplementedError, match="task 5"):
+        ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts()
+    with pytest.raises(NotImplementedError, match="task 6"):
+        ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts()
+    with pytest.raises(NotImplementedError, match="task 7"):
+        ADMINISTRATORS[AgentCli.COPILOT].render_artifacts()
+
+
+def test_administrator_stubs_raise_for_metadata_and_discovery_too() -> None:
+    """get_agent_metadata and discover_agent_names are also stubs until tasks 5/6/7 land."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    for cli, label in (
+        (AgentCli.CLAUDE, "task 5"),
+        (AgentCli.OPENCODE, "task 6"),
+        (AgentCli.COPILOT, "task 7"),
+    ):
+        admin = ADMINISTRATORS[cli]
+        with pytest.raises(NotImplementedError, match=label):
+            admin.get_agent_metadata("change-explorer")
+        with pytest.raises(NotImplementedError, match=label):
+            admin.discover_agent_names()

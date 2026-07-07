@@ -21,18 +21,27 @@ from __future__ import annotations
 
 import copy
 import json
-from dataclasses import dataclass
+from abc import ABC, abstractmethod
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from importlib.resources import files
 from importlib.resources.abc import Traversable
 from pathlib import Path
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
 import yaml
 
 from ai_harness.modules.harness.models import AgentCli
 
 __all__ = [
+    "ADMINISTRATORS",
     "AgentCaps",
+    "AgentMetadata",
+    "Artifact",
+    "ArtifactsAdministrator",
+    "ClaudeArtifactsAdministrator",
+    "CopilotArtifactsAdministrator",
+    "OpenCodeArtifactsAdministrator",
     "RenderedFile",
     "get_agent_meta",
     "render_agents",
@@ -85,6 +94,231 @@ class AgentCaps:
     write: bool = True  # may modify the filesystem (edit + create)
     bash: bool = True  # may run shell commands
     spawn: tuple[str, ...] | None = None  # None = cannot spawn; tuple = subagent allowlist
+
+
+# ---------------------------------------------------------------------------
+# Public types — provider-administrator contract.
+#
+# These four types are the load-bearing seam of the new architecture:
+#
+# - ``Artifact`` is the rendered output of every administrator — home-relative
+#   POSIX path plus full file content. It replaces the old ``RenderedFile``
+#   abstraction so operations can write ``home / artifact.install_path``
+#   without knowing the provider's directory layout.
+#
+# - ``AgentMetadata`` is the decoded, typed representation of one
+#   ``agent-metadata/<name>.json`` resource. Concrete administrators receive
+#   a parsed ``AgentMetadata`` and translate it into provider-specific
+#   frontmatter and install paths.
+#
+# - ``ArtifactsAdministrator`` is the abstract base class that locks the
+#   three public methods administrators expose. Each provider implements
+#   these with its own discovery, metadata loading, override merging,
+#   frontmatter shape, and path layout.
+#
+# - ``ADMINISTRATORS`` is the dispatch table keyed by ``AgentCli``. Callers
+#   select an administrator once and then call the shared contract
+#   polymorphically — no per-provider branching in operations or the wizard.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class Artifact:
+    """One rendered install artifact: a home-relative path and the full file content.
+
+    Every administrator's ``render_artifacts`` returns a list of ``Artifact``
+    objects. Callers write each artifact to ``home / artifact.install_path``
+    using ``artifact.content`` — the provider-owned path and the
+    provider-rendered content, with no provider-specific branching required.
+    """
+
+    install_path: str
+    content: str
+
+
+@dataclass(frozen=True, slots=True)
+class AgentMetadata:
+    """Decoded ``agent-metadata/<name>.json`` content.
+
+    * ``description`` — required string from the JSON resource.
+    * ``mode`` — provider-meaning string (``"primary"`` routes Claude to a skill;
+      other values pass through as Claude/OpenCode ``mode``; Copilot ignores it).
+    * ``model`` — provider-keyed model map. ``model.claude`` is required for
+      Claude rendering; ``model.opencode`` is required for OpenCode rendering;
+      Copilot requires no model.
+    * ``effort`` — provider-keyed effort map. Values are strings or ``None``;
+      ``None`` means "drop the field" and MUST omit the frontmatter key.
+    * ``caps`` — typed capability flags translated to provider permission/tool
+      schemas. Defaults to ``AgentCaps()`` (no restrictions).
+    * ``permission`` — raw OpenCode permission block, only honored when the
+      OpenCode administrator renders. ``None`` means "derive from caps".
+    * ``color`` — OpenCode color passthrough (hex or named). Optional.
+    """
+
+    description: str
+    mode: str = "subagent"
+    model: Mapping[str, str] = field(default_factory=dict)
+    effort: Mapping[str, str | None] = field(default_factory=dict)
+    caps: AgentCaps = field(default_factory=AgentCaps)
+    permission: Mapping[str, object] | None = None
+    color: str | None = None
+
+
+class ArtifactsAdministrator(ABC):
+    """Provider administrator contract.
+
+    Each concrete administrator owns template discovery, JSON metadata
+    loading, override-store reading/merging, provider-specific frontmatter
+    generation, and the provider's install-path layout. Callers select
+    ``ADMINISTRATORS[AgentCli.X]`` and call this shared contract; they do
+    not branch on provider internals.
+
+    Implementations MUST raise :class:`ValueError` for unknown agent names,
+    duplicate template names, missing metadata, invalid metadata, and
+    missing provider model values.
+
+    Subclasses set the ``provider`` class attribute to one of
+    ``"claude" | "opencode" | "copilot"`` so test assertions and runtime
+    introspection can identify the administrator without isinstance checks.
+    """
+
+    provider: Literal["claude", "opencode", "copilot"]
+
+    @abstractmethod
+    def render_artifacts(
+        self,
+        names: list[str] | None = None,
+        overrides: dict | None = None,
+        *,
+        home: Path | None = None,
+    ) -> list[Artifact]:
+        """Render the named change agents to installable artifacts.
+
+        *names* defaults to all discovered agents when ``None``; pass an
+        explicit list to render a subset in the order given. *overrides*
+        follows the documented contract: ``None`` reads the override store
+        from ``home/.ai-harness/overrides.json`` (default ``Path.home()``);
+        ``{}`` is an explicit no-disk-read path; any other dict is used
+        verbatim.
+
+        Returns artifacts in the discovered/requested order so the install
+        path is stable and the install manifest is deterministic.
+        """
+
+    @abstractmethod
+    def get_agent_metadata(
+        self,
+        name: str,
+        overrides: dict | None = None,
+        *,
+        home: Path | None = None,
+    ) -> AgentMetadata:
+        """Return the decoded metadata for *name* with overrides applied.
+
+        The override semantics match :meth:`render_artifacts`: ``None``
+        reads disk, ``{}`` skips the disk read, and explicit dicts are
+        used verbatim. The returned ``AgentMetadata`` is a fresh value
+        callers may inspect or mutate without affecting shared state.
+        """
+
+    @abstractmethod
+    def discover_agent_names(self) -> list[str]:
+        """Return visible change-agent names in sorted filename order.
+
+        ``_``-prefixed templates are excluded; duplicates fail loudly.
+        The returned list is the install/manifest ordering authority.
+        """
+
+
+class ClaudeArtifactsAdministrator(ArtifactsAdministrator):
+    """Claude provider administrator — stub populated in task 5."""
+
+    provider: Literal["claude", "opencode", "copilot"] = "claude"
+
+    def render_artifacts(
+        self,
+        names: list[str] | None = None,
+        overrides: dict | None = None,
+        *,
+        home: Path | None = None,
+    ) -> list[Artifact]:
+        raise NotImplementedError("ClaudeArtifactsAdministrator.render_artifacts lands in task 5")
+
+    def get_agent_metadata(
+        self,
+        name: str,
+        overrides: dict | None = None,
+        *,
+        home: Path | None = None,
+    ) -> AgentMetadata:
+        raise NotImplementedError("ClaudeArtifactsAdministrator.get_agent_metadata lands in task 5")
+
+    def discover_agent_names(self) -> list[str]:
+        raise NotImplementedError("ClaudeArtifactsAdministrator.discover_agent_names lands in task 5")
+
+
+class OpenCodeArtifactsAdministrator(ArtifactsAdministrator):
+    """OpenCode provider administrator — stub populated in task 6."""
+
+    provider: Literal["claude", "opencode", "copilot"] = "opencode"
+
+    def render_artifacts(
+        self,
+        names: list[str] | None = None,
+        overrides: dict | None = None,
+        *,
+        home: Path | None = None,
+    ) -> list[Artifact]:
+        raise NotImplementedError("OpenCodeArtifactsAdministrator.render_artifacts lands in task 6")
+
+    def get_agent_metadata(
+        self,
+        name: str,
+        overrides: dict | None = None,
+        *,
+        home: Path | None = None,
+    ) -> AgentMetadata:
+        raise NotImplementedError("OpenCodeArtifactsAdministrator.get_agent_metadata lands in task 6")
+
+    def discover_agent_names(self) -> list[str]:
+        raise NotImplementedError("OpenCodeArtifactsAdministrator.discover_agent_names lands in task 6")
+
+
+class CopilotArtifactsAdministrator(ArtifactsAdministrator):
+    """Copilot provider administrator — stub populated in task 7."""
+
+    provider: Literal["claude", "opencode", "copilot"] = "copilot"
+
+    def render_artifacts(
+        self,
+        names: list[str] | None = None,
+        overrides: dict | None = None,
+        *,
+        home: Path | None = None,
+    ) -> list[Artifact]:
+        raise NotImplementedError("CopilotArtifactsAdministrator.render_artifacts lands in task 7")
+
+    def get_agent_metadata(
+        self,
+        name: str,
+        overrides: dict | None = None,
+        *,
+        home: Path | None = None,
+    ) -> AgentMetadata:
+        raise NotImplementedError("CopilotArtifactsAdministrator.get_agent_metadata lands in task 7")
+
+    def discover_agent_names(self) -> list[str]:
+        raise NotImplementedError("CopilotArtifactsAdministrator.discover_agent_names lands in task 7")
+
+
+# Dispatch table — populated with one administrator per supported CLI.
+# Generic has no administrator; callers that need generic behavior should
+# use ``ADMINISTRATORS.get(AgentCli.GENERIC)`` and treat absence as a no-op.
+ADMINISTRATORS: dict[AgentCli, ArtifactsAdministrator] = {
+    AgentCli.CLAUDE: ClaudeArtifactsAdministrator(),
+    AgentCli.OPENCODE: OpenCodeArtifactsAdministrator(),
+    AgentCli.COPILOT: CopilotArtifactsAdministrator(),
+}
 
 
 # ---------------------------------------------------------------------------
