@@ -280,7 +280,15 @@ class ClaudeArtifactsAdministrator(ArtifactsAdministrator):
 
 
 class OpenCodeArtifactsAdministrator(ArtifactsAdministrator):
-    """OpenCode provider administrator — stub populated in task 6."""
+    """OpenCode provider administrator — owns OpenCode frontmatter and install paths.
+
+    Hides the ``.config/opencode/agent/<name>.md`` install path, the
+    permission derivation from :class:`AgentCaps`, the explicit
+    ``permission`` precedence over caps-derived permission, the
+    ``reasoningEffort`` mapping from ``effort.opencode``, the color
+    passthrough, and the ``mode`` passthrough. Callers select this
+    administrator and call :meth:`render_artifacts` polymorphically.
+    """
 
     provider: Literal["claude", "opencode", "copilot"] = "opencode"
 
@@ -291,7 +299,13 @@ class OpenCodeArtifactsAdministrator(ArtifactsAdministrator):
         *,
         home: Path | None = None,
     ) -> list[Artifact]:
-        raise NotImplementedError("OpenCodeArtifactsAdministrator.render_artifacts lands in task 6")
+        """Render OpenCode change agents to installable artifacts."""
+        resolved_names = list(names) if names is not None else self.discover_agent_names()
+        artifacts: list[Artifact] = []
+        for name in resolved_names:
+            metadata = self.get_agent_metadata(name, overrides=overrides, home=home)
+            artifacts.append(_render_opencode_agent_artifact(name, metadata))
+        return artifacts
 
     def get_agent_metadata(
         self,
@@ -300,7 +314,8 @@ class OpenCodeArtifactsAdministrator(ArtifactsAdministrator):
         *,
         home: Path | None = None,
     ) -> AgentMetadata:
-        raise NotImplementedError("OpenCodeArtifactsAdministrator.get_agent_metadata lands in task 6")
+        """Return OpenCode-resolved metadata for *name* with overrides applied."""
+        return _resolve_agent_metadata(name, overrides=overrides, home=home)
 
     def discover_agent_names(self) -> list[str]:
         return discover_agent_names()
@@ -1246,3 +1261,50 @@ def _render_claude_skill_artifact(name: str, meta: AgentMetadata) -> Artifact:
     yaml_text = _yaml_dump_frontmatter(fm)
     rendered = f"---\n{yaml_text}\n---\n{body}{spawn_note}"
     return Artifact(install_path=f"{_CLAUDE_SKILLS_DIR}/{name}/SKILL.md", content=rendered)
+
+
+def _render_opencode_agent_artifact(name: str, meta: AgentMetadata) -> Artifact:
+    """Render an OpenCode change agent as an Artifact at ``.config/opencode/agent/<name>.md``.
+
+    Frontmatter keys (ordered): ``description``, ``mode``, ``model``,
+    optional ``reasoningEffort``, optional ``permission``, optional ``color``.
+
+    ``model.opencode`` is required; missing/non-string raises
+    :class:`ValueError`. ``effort.opencode = null`` (or missing) omits
+    the ``reasoningEffort`` key — the wizard clears effort for
+    non-reasoning models and a stale ``reasoningEffort: null`` would
+    violate the renderer contract.
+
+    Explicit ``permission`` (raw dict) wins over caps-derived permission.
+    Caps-derived permission is omitted when empty (no ``{}`` block on
+    disk). ``color`` passes through when present; OpenCode accepts hex
+    colors of the form ``#RGB``/``#RRGGBB`` or named colors (validation
+    is left to OpenCode itself).
+    """
+    body = _read_template_body(name)
+    model_opencode = meta.model.get("opencode")
+    if not isinstance(model_opencode, str):
+        raise ValueError(f"Template {name}: missing or invalid model.opencode")
+
+    fm: dict[str, object] = {
+        "description": meta.description,
+        "mode": meta.mode,
+        "model": model_opencode,
+    }
+
+    if "opencode" in meta.effort and meta.effort["opencode"] is not None:
+        fm["reasoningEffort"] = meta.effort["opencode"]
+
+    if meta.permission is not None:
+        fm["permission"] = dict(meta.permission)
+    else:
+        derived = _opencode_permission(meta.caps)
+        if derived:
+            fm["permission"] = derived
+
+    if isinstance(meta.color, str):
+        fm["color"] = meta.color
+
+    yaml_text = _yaml_dump_frontmatter(fm)
+    rendered = f"---\n{yaml_text}\n---\n{body}"
+    return Artifact(install_path=f"{_OPENCODE_AGENT_DIR}/{name}.md", content=rendered)

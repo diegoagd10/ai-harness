@@ -2353,23 +2353,24 @@ def test_administrators_provider_class_attributes_identify_the_provider() -> Non
     assert CopilotArtifactsAdministrator.provider == "copilot"
 
 
-def test_administrator_stubs_raise_for_tasks_6_7_until_landed() -> None:
-    """Tasks 5 landed Claude's render+metadata; 6/7 still raise until those tasks land."""
+def test_administrator_stubs_raise_for_task_7_only() -> None:
+    """Tasks 5 and 6 are wired (Claude + OpenCode); only Copilot (task 7) still raises."""
     from ai_harness.modules.harness.renderers import ADMINISTRATORS
 
-    # Task 5 (Claude) is now wired — Claude's contract no longer raises.
+    # Tasks 5 and 6 are wired — Claude and OpenCode contracts no longer raise.
     artifacts = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts()
     assert isinstance(artifacts, list)
     meta = ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata("change-explorer")
     assert meta.description
 
-    # Tasks 6 and 7 are still pending.
-    with pytest.raises(NotImplementedError, match="task 6"):
-        ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts()
+    artifacts = ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts()
+    assert isinstance(artifacts, list)
+    meta = ADMINISTRATORS[AgentCli.OPENCODE].get_agent_metadata("change-explorer")
+    assert meta.description
+
+    # Task 7 (Copilot) is still pending.
     with pytest.raises(NotImplementedError, match="task 7"):
         ADMINISTRATORS[AgentCli.COPILOT].render_artifacts()
-    with pytest.raises(NotImplementedError, match="task 6"):
-        ADMINISTRATORS[AgentCli.OPENCODE].get_agent_metadata("change-explorer")
     with pytest.raises(NotImplementedError, match="task 7"):
         ADMINISTRATORS[AgentCli.COPILOT].get_agent_metadata("change-explorer")
 
@@ -3083,3 +3084,142 @@ def test_claude_administrator_skill_includes_spawn_prose_when_caps_set(tmp_path:
     assert "## Subagent spawn allowlist" in body
     assert "change-explorer" in body
     assert "change-validator" in body
+
+
+# ---------------------------------------------------------------------------
+# OpenCodeArtifactsAdministrator (task 6) — permission derivation, color, paths
+# ---------------------------------------------------------------------------
+
+
+def test_opencode_administrator_renders_to_opencode_agent_dir(tmp_path: Path) -> None:
+    """OpenCode admin writes every change agent to .config/opencode/agent/<name>.md."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.OPENCODE]
+    artifacts = admin.render_artifacts(overrides={}, home=tmp_path)
+
+    paths = [a.install_path for a in artifacts]
+    assert paths == [
+        ".config/opencode/agent/change-archiver.md",
+        ".config/opencode/agent/change-design.md",
+        ".config/opencode/agent/change-explorer.md",
+        ".config/opencode/agent/change-implementor.md",
+        ".config/opencode/agent/change-orchestrator.md",
+        ".config/opencode/agent/change-propose.md",
+        ".config/opencode/agent/change-specs.md",
+        ".config/opencode/agent/change-tasks.md",
+        ".config/opencode/agent/change-validator.md",
+    ]
+
+
+def test_opencode_administrator_frontmatter_has_description_mode_model(tmp_path: Path) -> None:
+    """OpenCode subagent frontmatter is ordered: description, mode, model."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.OPENCODE]
+    artifacts = admin.render_artifacts(["change-explorer"], overrides={}, home=tmp_path)
+
+    fm = yaml.safe_load(artifacts[0].content.split("---", 2)[1])
+    assert fm["description"].startswith("Change explorer")
+    assert fm["mode"] == "all"
+    assert fm["model"] == "minimax/MiniMax-M2.7"
+
+
+def test_opencode_administrator_missing_model_raises(tmp_path: Path) -> None:
+    """Missing model.opencode raises ValueError naming the missing provider."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.OPENCODE]
+    # Wipe the entire model map by setting it to None — non-dict
+    # override values replace the base wholesale, so model.opencode is
+    # absent after the merge.
+    overrides = {"change-explorer": {"model": None}}
+
+    with pytest.raises(ValueError, match="missing or invalid model.opencode"):
+        admin.render_artifacts(["change-explorer"], overrides=overrides, home=tmp_path)
+
+
+def test_opencode_administrator_reasoning_effort_emitted_when_set(tmp_path: Path) -> None:
+    """effort.opencode shows up as ``reasoningEffort`` in the frontmatter."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.OPENCODE]
+    overrides = {"change-validator": {"effort": {"opencode": "high"}}}
+
+    artifacts = admin.render_artifacts(["change-validator"], overrides=overrides, home=tmp_path)
+    fm = yaml.safe_load(artifacts[0].content.split("---", 2)[1])
+    assert fm["reasoningEffort"] == "high"
+
+
+def test_opencode_administrator_reasoning_effort_null_is_omitted(tmp_path: Path) -> None:
+    """effort.opencode = null drops the reasoningEffort field (no YAML null on disk)."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.OPENCODE]
+    overrides = {"change-validator": {"effort": {"opencode": None}}}
+
+    artifacts = admin.render_artifacts(["change-validator"], overrides=overrides, home=tmp_path)
+    fm = yaml.safe_load(artifacts[0].content.split("---", 2)[1])
+    assert "reasoningEffort" not in fm
+    assert "reasoningEffort: null" not in artifacts[0].content
+
+
+def test_opencode_administrator_explicit_permission_wins_over_caps(tmp_path: Path) -> None:
+    """A raw ``permission`` block in metadata is emitted exactly; caps-derived block is ignored."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.OPENCODE]
+    artifacts = admin.render_artifacts(["change-orchestrator"], overrides={}, home=tmp_path)
+
+    fm = yaml.safe_load(artifacts[0].content.split("---", 2)[1])
+    assert fm["permission"] == {
+        "question": "allow",
+        "task": {"*": "allow"},
+        "bash": "allow",
+        "edit": "allow",
+        "read": "allow",
+        "write": "allow",
+    }
+
+
+def test_opencode_administrator_render_artifacts_byte_matches_old_renderer(tmp_path: Path) -> None:
+    """OpenCode admin renders byte-identical output to legacy render_agents."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS, render_agents
+
+    admin = ADMINISTRATORS[AgentCli.OPENCODE]
+    old = render_agents(AgentCli.OPENCODE, overrides={}, home=tmp_path)
+    new = admin.render_artifacts(overrides={}, home=tmp_path)
+
+    assert len(old) == len(new)
+    for old_pair, new_art in zip(old, new, strict=True):
+        assert old_pair.filename == new_art.install_path
+        assert old_pair.content == new_art.content
+
+
+def test_opencode_administrator_get_agent_metadata_resolves_overrides(tmp_path: Path) -> None:
+    """OpenCode admin's get_agent_metadata applies the override store semantics."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.OPENCODE]
+    meta = admin.get_agent_metadata(
+        "change-explorer",
+        overrides={"change-explorer": {"model": {"opencode": "openai/gpt-5.5"}}},
+        home=tmp_path,
+    )
+
+    assert meta.model["opencode"] == "openai/gpt-5.5"
+    # The unrelated Claude model is preserved.
+    assert meta.model["claude"] == "sonnet"
+
+
+def test_opencode_administrator_empty_permission_omitted(tmp_path: Path) -> None:
+    """A caps-derived empty permission block must not emit ``{}`` on disk."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.OPENCODE]
+    artifacts = admin.render_artifacts(["change-implementor"], overrides={}, home=tmp_path)
+
+    # Full-capability agent → no permission block on disk.
+    fm = yaml.safe_load(artifacts[0].content.split("---", 2)[1])
+    assert "permission" not in fm
+    assert "permission: {}" not in artifacts[0].content
