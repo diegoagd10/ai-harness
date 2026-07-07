@@ -27,9 +27,9 @@ from typer.testing import CliRunner
 from ai_harness.commands import parse_agent_clis
 from ai_harness.main import app
 from ai_harness.modules.harness import AgentCli
-from ai_harness.modules.harness.renderers import (
-    _load_override_store,
-    write_override_store,
+from ai_harness.modules.harness.override_store import (
+    load_override_store,
+    save_override_store,
 )
 from ai_harness.modules.wizard.pure import (
     AgentMode,
@@ -445,7 +445,7 @@ def test_build_opencode_override_payload_no_changes_returns_empty() -> None:
 def test_build_opencode_override_payload_keys_under_opencode() -> None:
     """Each emitted model/effort is nested under the ``opencode`` CLI key.
 
-    The deep-merge in :func:`write_override_store` uses these keys to land
+    The deep-merge in :func:`save_override_store` uses these keys to land
     in the right per-CLI slot of the override store — same convention
     as :func:`build_override_payload` uses for ``claude``.
     """
@@ -2249,7 +2249,7 @@ def test_build_override_payload_keeps_existing_non_default_override_untouched() 
     """When the user keeps a non-default existing value, nothing is written for it.
 
     The existing override entry already in the store survives because we do
-    not re-serialize it — write_override_store deep-merges, so untouched
+    not re-serialize it — save_override_store deep-merges, so untouched
     fields are preserved verbatim.
     """
     # Existing override: implementor had been previously set to haiku.
@@ -2321,13 +2321,13 @@ def test_build_override_payload_ignores_agent_missing_from_baseline() -> None:
 
 
 # ---------------------------------------------------------------------------
-# write_override_store — deep-merge writer next to the loader
+# save_override_store — deep-merge writer next to the loader
 # ---------------------------------------------------------------------------
 
 
-def test_write_override_store_writes_new_payload(tmp_path: Path) -> None:
+def test_save_override_store_writes_new_payload(tmp_path: Path) -> None:
     """Writing a fresh payload creates ``~/.ai-harness/overrides.json`` with that JSON."""
-    write_override_store(tmp_path, {"implementor": {"model": {"claude": "opus"}}})
+    save_override_store(tmp_path, {"implementor": {"model": {"claude": "opus"}}})
 
     path = tmp_path / OVERRIDES_REL
     assert path.is_file()
@@ -2335,7 +2335,7 @@ def test_write_override_store_writes_new_payload(tmp_path: Path) -> None:
     assert data == {"implementor": {"model": {"claude": "opus"}}}
 
 
-def test_write_override_store_preserves_unrelated_existing_entries(tmp_path: Path) -> None:
+def test_save_override_store_preserves_unrelated_existing_entries(tmp_path: Path) -> None:
     """An existing entry for another agent survives a new write."""
     existing_path = tmp_path / OVERRIDES_REL
     existing_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2344,14 +2344,14 @@ def test_write_override_store_preserves_unrelated_existing_entries(tmp_path: Pat
         encoding="utf-8",
     )
 
-    write_override_store(tmp_path, {"implementor": {"model": {"claude": "opus"}}})
+    save_override_store(tmp_path, {"implementor": {"model": {"claude": "opus"}}})
 
     data = json.loads(existing_path.read_text(encoding="utf-8"))
     assert data["validator"] == {"model": {"claude": "haiku"}}
     assert data["implementor"] == {"model": {"claude": "opus"}}
 
 
-def test_write_override_store_merges_partial_override_for_same_agent(tmp_path: Path) -> None:
+def test_save_override_store_merges_partial_override_for_same_agent(tmp_path: Path) -> None:
     """Writing model for an agent merges with an existing effort override for the same agent."""
     existing_path = tmp_path / OVERRIDES_REL
     existing_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2360,29 +2360,29 @@ def test_write_override_store_merges_partial_override_for_same_agent(tmp_path: P
         encoding="utf-8",
     )
 
-    write_override_store(tmp_path, {"implementor": {"model": {"claude": "opus"}}})
+    save_override_store(tmp_path, {"implementor": {"model": {"claude": "opus"}}})
 
     data = json.loads(existing_path.read_text(encoding="utf-8"))
     assert data["implementor"]["model"] == {"claude": "opus"}
     assert data["implementor"]["effort"] == {"claude": "high"}
 
 
-def test_write_override_store_round_trips_through_loader(tmp_path: Path) -> None:
+def test_save_override_store_round_trips_through_loader(tmp_path: Path) -> None:
     """What we write is what the existing override loader reads back."""
     payload = {
         "implementor": {"model": {"claude": "opus"}, "effort": {"claude": "high"}},
         "validator": {"model": {"claude": "haiku"}},
     }
-    write_override_store(tmp_path, payload)
+    save_override_store(tmp_path, payload)
 
-    loaded = _load_override_store(tmp_path)
+    loaded = load_override_store(tmp_path)
     assert loaded == payload
 
 
-def test_write_override_store_creates_parent_directory(tmp_path: Path) -> None:
+def test_save_override_store_creates_parent_directory(tmp_path: Path) -> None:
     """The parent ``~/.ai-harness/`` directory is created on first write."""
     assert not (tmp_path / ".ai-harness").exists()
-    write_override_store(tmp_path, {"implementor": {"model": {"claude": "opus"}}})
+    save_override_store(tmp_path, {"implementor": {"model": {"claude": "opus"}}})
     assert (tmp_path / ".ai-harness").is_dir()
     assert (tmp_path / OVERRIDES_REL).is_file()
 
