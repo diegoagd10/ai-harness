@@ -3446,3 +3446,122 @@ def test_operations_uses_artifact_install_path_for_writes(tmp_path: Path) -> Non
         expected_path = tmp_path / artifact.install_path
         assert expected_path.is_file(), f"artifact path missing: {expected_path}"
         assert expected_path.read_text(encoding="utf-8") == artifact.content
+
+
+# ---------------------------------------------------------------------------
+# Caller migration: wizard/tui.py (task 10) — current-value helpers
+# ---------------------------------------------------------------------------
+
+
+def test_wizard_current_claude_model_reads_via_administrator(tmp_path: Path) -> None:
+    """_current_claude_model routes through ADMINISTRATORS[CLAUDE].get_agent_metadata."""
+    from ai_harness.modules.wizard.tui import _current_claude_model
+
+    # No override store → template default for Claude (sonnet).
+    assert _current_claude_model("change-implementor", tmp_path) == "sonnet"
+
+
+def test_wizard_current_claude_model_applies_override(tmp_path: Path) -> None:
+    """An override.json entry on the agent flows through to _current_claude_model."""
+    from ai_harness.modules.wizard.tui import _current_claude_model
+
+    (tmp_path / ".ai-harness").mkdir(parents=True)
+    (tmp_path / ".ai-harness" / "overrides.json").write_text(
+        json.dumps({"change-implementor": {"model": {"claude": "opus"}}}),
+        encoding="utf-8",
+    )
+
+    assert _current_claude_model("change-implementor", tmp_path) == "opus"
+
+
+def test_wizard_current_claude_effort_returns_none_when_unset(tmp_path: Path) -> None:
+    """_current_claude_effort returns None when no effort.claude override exists."""
+    from ai_harness.modules.wizard.tui import _current_claude_effort
+
+    assert _current_claude_effort("change-implementor", tmp_path) is None
+
+
+def test_wizard_current_claude_effort_applies_override(tmp_path: Path) -> None:
+    """_current_claude_effort applies effort.claude from the override store."""
+    from ai_harness.modules.wizard.tui import _current_claude_effort
+
+    (tmp_path / ".ai-harness").mkdir(parents=True)
+    (tmp_path / ".ai-harness" / "overrides.json").write_text(
+        json.dumps({"change-implementor": {"effort": {"claude": "high"}}}),
+        encoding="utf-8",
+    )
+
+    assert _current_claude_effort("change-implementor", tmp_path) == "high"
+
+
+def test_wizard_current_opencode_model_returns_template_default(tmp_path: Path) -> None:
+    """_current_opencode_model returns the agent's native opencode model."""
+    from ai_harness.modules.wizard.tui import _current_opencode_model
+
+    assert _current_opencode_model("change-implementor", tmp_path) == "minimax/MiniMax-M3"
+
+
+def test_wizard_current_opencode_model_applies_override(tmp_path: Path) -> None:
+    """_current_opencode_model applies model.opencode from the override store."""
+    from ai_harness.modules.wizard.tui import _current_opencode_model
+
+    (tmp_path / ".ai-harness").mkdir(parents=True)
+    (tmp_path / ".ai-harness" / "overrides.json").write_text(
+        json.dumps({"change-explorer": {"model": {"opencode": "openai/gpt-5.5"}}}),
+        encoding="utf-8",
+    )
+
+    assert _current_opencode_model("change-explorer", tmp_path) == "openai/gpt-5.5"
+
+
+def test_wizard_current_opencode_effort_returns_none_when_unset(tmp_path: Path) -> None:
+    """_current_opencode_effort returns None when no effort.opencode override exists."""
+    from ai_harness.modules.wizard.tui import _current_opencode_effort
+
+    assert _current_opencode_effort("change-explorer", tmp_path) is None
+
+
+def test_wizard_current_opencode_effort_applies_override(tmp_path: Path) -> None:
+    """_current_opencode_effort applies effort.opencode from the override store."""
+    from ai_harness.modules.wizard.tui import _current_opencode_effort
+
+    (tmp_path / ".ai-harness").mkdir(parents=True)
+    (tmp_path / ".ai-harness" / "overrides.json").write_text(
+        json.dumps({"change-explorer": {"effort": {"opencode": "medium"}}}),
+        encoding="utf-8",
+    )
+
+    assert _current_opencode_effort("change-explorer", tmp_path) == "medium"
+
+
+def test_wizard_does_not_import_removed_renderer_api() -> None:
+    """The wizard module no longer imports get_agent_meta / write_override_store.
+
+    Locks the task-10 caller migration: importing the removed symbols
+    would cause a runtime error once task 8 fully deletes them. The
+    wizard now uses ADMINISTRATORS metadata queries and the shared
+    override-store helper instead.
+    """
+    import ai_harness.modules.wizard.tui as tui
+
+    src = Path(tui.__file__).read_text(encoding="utf-8")
+    # No top-level import of the removed symbols.
+    assert "from ai_harness.modules.harness.renderers import" in src
+    import_line = next(
+        line for line in src.splitlines() if line.startswith("from ai_harness.modules.harness.renderers import")
+    )
+    assert "get_agent_meta" not in import_line
+    assert "write_override_store" not in import_line
+    # No bare calls to the removed entry points anywhere in the wizard.
+    assert "write_override_store(" not in src
+
+
+def test_wizard_imports_administrators_and_override_store_helper() -> None:
+    """The wizard imports ADMINISTRATORS and save_override_store from the new modules."""
+    import ai_harness.modules.wizard.tui as tui
+
+    src = Path(tui.__file__).read_text(encoding="utf-8")
+    assert "ADMINISTRATORS" in src
+    assert "save_override_store" in src
+    assert "from ai_harness.modules.harness.renderers import ADMINISTRATORS" in src
+    assert "from ai_harness.modules.harness.override_store import save_override_store" in src
