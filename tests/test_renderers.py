@@ -3325,3 +3325,43 @@ def test_copilot_administrator_get_agent_metadata_resolves_overrides(tmp_path: P
 
     assert meta.description == "Updated explorer description."
     assert meta.mode == "all"
+
+
+# ---------------------------------------------------------------------------
+# Public-surface bookkeeping (task 8) — __all__ exports
+# ---------------------------------------------------------------------------
+
+
+def test_renderers_public_surface_excludes_old_apis() -> None:
+    """renderers.__all__ no longer advertises the removed APIs.
+
+    Locks the public-surface change: removing ``render_agents``,
+    ``get_agent_meta``, ``write_override_store``, and ``RenderedFile``
+    from the package's public API. Tasks 9/10 will delete the underlying
+    implementations once callers migrate.
+    """
+    import ai_harness.modules.harness.renderers as renderers
+
+    assert "render_agents" not in renderers.__all__
+    assert "get_agent_meta" not in renderers.__all__
+    assert "write_override_store" not in renderers.__all__
+    assert "RenderedFile" not in renderers.__all__
+
+
+def test_renderers_public_surface_includes_new_apis() -> None:
+    """renderers.__all__ exposes the new administrator contract and types."""
+    import ai_harness.modules.harness.renderers as renderers
+
+    for export in (
+        "Artifact",
+        "AgentCaps",
+        "AgentMetadata",
+        "ArtifactsAdministrator",
+        "ADMINISTRATORS",
+        "ClaudeArtifactsAdministrator",
+        "OpenCodeArtifactsAdministrator",
+        "CopilotArtifactsAdministrator",
+        "discover_agent_names",
+        "load_agent_metadata",
+    ):
+        assert export in renderers.__all__, f"{export!r} missing from renderers.__all__"

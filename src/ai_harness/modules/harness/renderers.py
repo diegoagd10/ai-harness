@@ -42,13 +42,14 @@ __all__ = [
     "ClaudeArtifactsAdministrator",
     "CopilotArtifactsAdministrator",
     "OpenCodeArtifactsAdministrator",
-    "RenderedFile",
     "discover_agent_names",
-    "get_agent_meta",
     "load_agent_metadata",
-    "render_agents",
-    "write_override_store",
 ]
+
+# Internal symbols retained for the caller-migration tasks (9 and 10).
+# These are NO LONGER part of the package's public surface — callers
+# must use ``ADMINISTRATORS[AgentCli.X]`` and the artifact output contract
+# instead. They will be deleted in the caller-migration tasks.
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -385,7 +386,13 @@ def render_agents(
     overrides: dict | None = None,
     *,
     home: Path | None = None,
-) -> list[RenderedFile]:
+) -> list[RenderedFile]:  # pragma: no cover - removed in task 9
+    """DEPRECATED: use ``ADMINISTRATORS[cli].render_artifacts`` instead.
+
+    Internal-only: kept so tasks 9/10 can migrate callers off this entry
+    point in the same change. Will be deleted once ``operations.py`` and
+    ``wizard/tui.py`` migrate to the administrator contract.
+    """
     """Render the change agents for *cli* as home-relative ``RenderedFile`` records.
 
     The sole public agent-render entry. Owns skill-vs-agent mode dispatch,
@@ -415,7 +422,13 @@ def render_agents(
     return []
 
 
-def get_agent_meta(name: str, overrides: dict | None = None, *, home: Path | None = None) -> dict:
+def get_agent_meta(name: str, overrides: dict | None = None, *, home: Path | None = None) -> dict:  # pragma: no cover
+    """DEPRECATED: use ``ADMINISTRATORS[AgentCli.X].get_agent_metadata`` instead.
+
+    Internal-only: kept so task 10 can migrate the wizard off this entry
+    point in the same change. Will be deleted once ``wizard/tui.py``
+    migrates to the administrator metadata query.
+    """
     """Return the metadata dict for a named agent (from ``_AGENT_META``).
 
     *overrides* is an optional per-agent partial overlay (see project docs).
@@ -440,7 +453,13 @@ def get_agent_meta(name: str, overrides: dict | None = None, *, home: Path | Non
     return _deep_merge(meta, override_entry)
 
 
-def write_override_store(home: Path, payload: dict) -> None:
+def write_override_store(home: Path, payload: dict) -> None:  # pragma: no cover
+    """DEPRECATED: use ``override_store.save_override_store`` instead.
+
+    Internal-only: kept so task 10 can migrate the wizard off this entry
+    point in the same change. Will be deleted once ``wizard/tui.py``
+    migrates to the shared override-store helper module.
+    """
     """Deep-merge *payload* into the per-agent override store and write it back.
 
     Public so the ``set-models`` wizard can persist user choices without
