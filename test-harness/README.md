@@ -79,9 +79,10 @@ Each test runs inside its own named working directory under
 | `runImplementorMissingDirectiveTestCase` | `tests-cases/test20/` | guard-rail | `change-implementor` with no `commit-format` directive blocks, names the missing directive, and makes NO commit. |
 | `runArchiverCliFailureTestCase` | `tests-cases/test21/` | guard-rail | `change-archiver` with a failing `change-archive` preflight (no validation.md) blocks, surfaces the errors, makes NO commit, and leaves the change folder in place. |
 | `runValidatorFailVerdictTestCase` | `tests-cases/test22/` | guard-rail | `change-validator` returns `verdict: fail` with `critical >= 1` when TDD evidence violates the grammar (GREEN != passed, behavior-without-test row). |
+| `runResumeChangeFlowContinueTestCase` | `tests-cases/test23/` | change-flow | Resuming a change with `exploration.md` already done drives `ai-harness change-continue {change}` to find `nextRecommended`, and does NOT re-spawn `change-explorer`. |
 
-The change-flow tests (test10/test11) also assert zero help probes on the
-orchestrator itself.
+The change-flow tests (test10/test11/test23) also assert zero help probes on
+the orchestrator itself.
 
 A named directory is created with `mkdir -p` (so re-running a test is safe —
 files already in the dir stay) and is **left in place** after the test

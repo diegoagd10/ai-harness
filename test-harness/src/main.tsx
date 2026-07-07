@@ -28,6 +28,7 @@ import {
 import {
   runConversationalStatusCheckTestCase,
   runExplicitChangeFlowStartTestCase,
+  runResumeChangeFlowContinueTestCase,
 } from "./changeFlowTestCase.js";
 import {
   runChangeExplorerTestCase,
@@ -133,6 +134,7 @@ const CASES: TestCase[] = [
   { name: "implementor-blocked-no-directive", run: runImplementorMissingDirectiveTestCase },
   { name: "archiver-blocked-cli-failure", run: runArchiverCliFailureTestCase },
   { name: "validator-fail-verdict", run: runValidatorFailVerdictTestCase },
+  { name: "change-flow-resume-continue", run: runResumeChangeFlowContinueTestCase },
 ];
 
 async function main(): Promise<void> {

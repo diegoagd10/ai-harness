@@ -14,7 +14,7 @@
  */
 
 import { execSync } from "node:child_process";
-import { existsSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -203,5 +203,103 @@ export async function runExplicitChangeFlowStartTestCase(): Promise<TestCaseResu
       );
     },
     { dir: path.join(TEST_CASES_ROOT, "test11") },
+  );
+}
+
+/*
+ * runResumeChangeFlowContinueTestCase — Test 23.
+ *
+ * Resuming a change that already has exploration.md on disk must route
+ * through `ai-harness change-continue {change}` to discover nextRecommended
+ * (here: prd) rather than restarting from explore. Pins two things: the
+ * change-continue CLI call actually happens, and the orchestrator does not
+ * re-spawn change-explorer for a phase already marked done on disk — the
+ * concrete, testable slice of the duplicate-launch guard.
+ *
+ * Runs in <test-harness>/tests-cases/test23/.
+ */
+export async function runResumeChangeFlowContinueTestCase(): Promise<TestCaseResult> {
+  const assertion =
+    "resuming a change with exploration.md done drives ai-harness change-continue and does not re-spawn change-explorer";
+  const change = "resume-check";
+  return withScratchDir(
+    async (dir) => {
+      ensureGitRepo(dir);
+      rmSync(path.join(dir, ".ai-harness"), { recursive: true, force: true });
+      execSync(`ai-harness change-new ${change}`, { cwd: dir, stdio: "ignore" });
+
+      const changeDir = path.join(dir, ".ai-harness", "changes", change);
+      writeFileSync(
+        path.join(changeDir, "exploration.md"),
+        "# Exploration — " +
+          change +
+          "\n\n## Budget\n30\n\n## Affected Files\n- app.py — add /healthz endpoint\n\n" +
+          "## Plan\n- add /healthz returning 200 OK\n\n## Edge Cases\n- none\n\n" +
+          "## Test Surface\n- unit test for /healthz\n\n## Risks\n- none significant\n",
+      );
+
+      const oc = new OpenCode({ agent: "change-orchestrator", timeoutMs: 420_000, dir });
+      const prompt = `interactive mode. Continue the change ${change}.`;
+
+      const r = await oc.execute(prompt);
+      const replyText = r.success ? r.text : r.error;
+
+      if (!r.success) {
+        return failResult(assertion, replyText, r, "OpenCode run succeeds and returns a reply", r.error);
+      }
+
+      const allToolCalls = r.assistant.flatMap((m) => m.toolCalls);
+      const allSubAgents = r.assistant.flatMap((m) => m.subAgents);
+      const helpCalls = findHelpCalls(allToolCalls);
+      if (helpCalls.length > 0) {
+        const cmds = helpCalls.map((c) => JSON.stringify(c.args).slice(0, 120)).join(" || ");
+        return failResult(
+          assertion,
+          replyText,
+          r,
+          "zero ai-harness help/--help probes",
+          `Orchestrator probed ai-harness help ${helpCalls.length} time(s): ${cmds}`,
+        );
+      }
+
+      const continueCalls = allToolCalls.filter(
+        (t) =>
+          t.tool === "bash" &&
+          new RegExp(`ai-harness\\s+change-continue\\s+${change}\\b`).test(JSON.stringify(t.args)),
+      );
+      if (continueCalls.length === 0) {
+        const seen = allToolCalls
+          .filter((t) => t.tool === "bash" && /ai-harness\s+change-/i.test(JSON.stringify(t.args)))
+          .map((t) => JSON.stringify(t.args).slice(0, 120));
+        return failResult(
+          assertion,
+          replyText,
+          r,
+          `ai-harness change-continue ${change} is invoked`,
+          `Expected 'ai-harness change-continue ${change}' to drive routing, got none. ` +
+            `ai-harness bash calls seen: [${seen.join(" || ")}].`,
+        );
+      }
+
+      const explorerSpawns = allSubAgents.filter((s) => s.agent === "change-explorer");
+      if (explorerSpawns.length > 0) {
+        return failResult(
+          assertion,
+          replyText,
+          r,
+          "change-explorer is not re-spawned once exploration.md already exists",
+          `Expected no change-explorer spawn (exploration.md already on disk), got ${explorerSpawns.length}.`,
+        );
+      }
+
+      return passResult(
+        assertion,
+        replyText,
+        r,
+        `Resume drove ${continueCalls.length} 'ai-harness change-continue ${change}' call(s) ` +
+          `and did not re-spawn change-explorer.`,
+      );
+    },
+    { dir: path.join(TEST_CASES_ROOT, "test23") },
   );
 }
