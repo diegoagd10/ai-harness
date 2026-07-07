@@ -1361,8 +1361,7 @@ def test_render_agents_explicit_overrides_skips_malformed_home_store(
     # Explicit empty overrides — must NOT read HOME. Pass home=tmp_path so the
     # frontmatter pass still uses tmp_path (no home store either, but explicit
     # overrides sidestep ambient state regardless of the home arg).
-    pairs = render_agents(
-        AgentCli.CLAUDE,
+    pairs = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts(
         ["change-implementor"],
         overrides={},
         home=tmp_path,
@@ -1385,8 +1384,7 @@ def test_render_agents_explicit_overrides_sidestep_home_store_state(
     )
     monkeypatch.setenv("HOME", str(tmp_path))
 
-    pairs = render_agents(
-        AgentCli.CLAUDE,
+    pairs = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts(
         ["change-implementor"],
         overrides={"change-implementor": {"model": {"claude": "explicit-value"}}},
     )
@@ -1409,15 +1407,14 @@ def test_render_agents_mode_override_routes_through_dispatch(tmp_path: Path, mon
     """
     monkeypatch.setenv("HOME", str(tmp_path))  # no overrides.json on disk
 
-    pairs = render_agents(
-        AgentCli.CLAUDE,
+    pairs = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts(
         ["change-implementor"],
         overrides={"change-implementor": {"mode": "primary"}},
     )
 
     # Primary → skill directory, with SKILL.md as the leaf filename.
-    skill_paths = [a.install_path for a in pairs if path.endswith("/SKILL.md")]
-    assert skill_paths, f"expected a SKILL.md dispatch, got {[p for p, _ in pairs]}"
+    skill_paths = [a.install_path for a in pairs if a.install_path.endswith("/SKILL.md")]
+    assert skill_paths, f"expected a SKILL.md dispatch, got {[a.install_path for a in pairs]}"
     assert skill_paths[0].endswith("/change-implementor/SKILL.md")
 
 
