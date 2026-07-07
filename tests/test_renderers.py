@@ -3365,3 +3365,84 @@ def test_renderers_public_surface_includes_new_apis() -> None:
         "load_agent_metadata",
     ):
         assert export in renderers.__all__, f"{export!r} missing from renderers.__all__"
+
+
+# ---------------------------------------------------------------------------
+# Caller migration: operations.py (task 9) — already exercised by test_install.py
+# ---------------------------------------------------------------------------
+
+
+def test_operations_dispatches_through_administrators(tmp_path: Path) -> None:
+    """install_for_agent_clis writes the same stable paths via ADMINISTRATORS dispatch.
+
+    Locks the operations-migration seam: provider-owned install paths
+    come from each administrator's Artifact output, not from
+    operations assembling them. Any drift surfaces here as a path
+    mismatch with the canonical list.
+    """
+    from ai_harness.modules.harness import install_for_agent_clis
+    from ai_harness.modules.harness.models import AgentCli
+
+    manifest = install_for_agent_clis(
+        [AgentCli.GENERIC, AgentCli.CLAUDE, AgentCli.OPENCODE, AgentCli.COPILOT],
+        home=tmp_path,
+    )
+
+    # Provider-visible paths from each administrator.
+    claude_skill = tmp_path / ".claude/skills/change-orchestrator/SKILL.md"
+    claude_agent = tmp_path / ".claude/agents/change-explorer.md"
+    opencode_agent = tmp_path / ".config/opencode/agent/change-explorer.md"
+    copilot_agent = tmp_path / ".copilot/agents/change-explorer.agent.md"
+
+    assert claude_skill.is_file(), "claude skill missing"
+    assert claude_agent.is_file(), "claude subagent missing"
+    assert opencode_agent.is_file(), "opencode agent missing"
+    assert copilot_agent.is_file(), "copilot agent missing"
+
+    # Manifest records each artifact through the operations layer.
+    assert claude_skill in manifest.written_paths
+    assert opencode_agent in manifest.written_paths
+    assert copilot_agent in manifest.written_paths
+
+
+def test_operations_generic_is_noop_for_change_agent_rendering(tmp_path: Path) -> None:
+    """Generic has no administrator → no change-agent artifacts written.
+
+    Locks the Generic no-op contract: callers see ``ADMINISTRATORS.get(AgentCli.GENERIC)``
+    is ``None`` so the rendered-agents writer short-circuits without
+    needing per-provider branching in operations.
+    """
+    from ai_harness.modules.harness import install_for_agent_clis
+    from ai_harness.modules.harness.models import AgentCli
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    assert ADMINISTRATORS.get(AgentCli.GENERIC) is None
+
+    install_for_agent_clis([AgentCli.GENERIC], home=tmp_path)
+    # Generic gets persona+skills only — no change-agent artifacts anywhere.
+    assert not (tmp_path / ".claude/agents").exists()
+    assert not (tmp_path / ".config/opencode/agent").exists()
+    assert not (tmp_path / ".copilot/agents").exists()
+
+
+def test_operations_uses_artifact_install_path_for_writes(tmp_path: Path) -> None:
+    """Operations writes home / artifact.install_path — no provider-path logic.
+
+    Locks the operations-side contract: every write happens through
+    ``Artifact.install_path`` and ``Artifact.content``, never by
+    assembling provider paths or filenames in operations itself.
+    """
+    from ai_harness.modules.harness import install_for_agent_clis
+    from ai_harness.modules.harness.models import AgentCli
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    install_for_agent_clis([AgentCli.GENERIC, AgentCli.OPENCODE], home=tmp_path)
+
+    # Verify the operations-written path matches the artifact's install_path exactly.
+    admin = ADMINISTRATORS[AgentCli.OPENCODE]
+    artifacts = admin.render_artifacts(overrides={}, home=tmp_path)
+
+    for artifact in artifacts:
+        expected_path = tmp_path / artifact.install_path
+        assert expected_path.is_file(), f"artifact path missing: {expected_path}"
+        assert expected_path.read_text(encoding="utf-8") == artifact.content
