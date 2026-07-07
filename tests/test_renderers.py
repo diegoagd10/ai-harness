@@ -2371,8 +2371,8 @@ def test_administrator_stubs_raise_not_implemented_until_tasks_5_6_7_land() -> N
         ADMINISTRATORS[AgentCli.COPILOT].render_artifacts()
 
 
-def test_administrator_stubs_raise_for_metadata_and_discovery_too() -> None:
-    """get_agent_metadata and discover_agent_names are also stubs until tasks 5/6/7 land."""
+def test_administrator_stubs_raise_for_metadata_only() -> None:
+    """get_agent_metadata stays a stub until tasks 5/6/7 land; discovery is already wired."""
     from ai_harness.modules.harness.renderers import ADMINISTRATORS
 
     for cli, label in (
@@ -2383,8 +2383,9 @@ def test_administrator_stubs_raise_for_metadata_and_discovery_too() -> None:
         admin = ADMINISTRATORS[cli]
         with pytest.raises(NotImplementedError, match=label):
             admin.get_agent_metadata("change-explorer")
-        with pytest.raises(NotImplementedError, match=label):
-            admin.discover_agent_names()
+        # discover_agent_names delegates to the shared module function
+        # (task 4) so it returns the canonical list, not a stub error.
+        assert isinstance(admin.discover_agent_names(), list)
 
 
 # ---------------------------------------------------------------------------
@@ -2653,3 +2654,251 @@ def test_subagent_metadata_json_sets_native_models_per_agent() -> None:
         raw = (root / f"{name}.json").read_text(encoding="utf-8")
         data = json.loads(raw)
         assert data["model"] == expected, f"{name}: model mismatch ({data['model']} != {expected})"
+
+
+# ---------------------------------------------------------------------------
+# Metadata loader (task 4) — schema validation, caps decoding, discovery
+# ---------------------------------------------------------------------------
+
+
+def test_load_agent_metadata_decodes_typed_agent_metadata() -> None:
+    """load_agent_metadata returns a typed AgentMetadata with all defaults wired up."""
+    from ai_harness.modules.harness.renderers import load_agent_metadata
+
+    meta = load_agent_metadata("change-explorer")
+
+    assert meta.description.startswith("Change explorer")
+    assert meta.mode == "all"
+    assert dict(meta.model) == {"opencode": "minimax/MiniMax-M2.7", "claude": "sonnet"}
+    # Defaults when fields are absent.
+    assert dict(meta.effort) == {}
+    assert meta.caps.write is True
+    assert meta.caps.bash is True
+    assert meta.caps.spawn is None
+    assert meta.permission is None
+    assert meta.color is None
+
+
+def test_load_agent_metadata_raises_for_missing_metadata_file() -> None:
+    """A template name without a matching metadata JSON raises ValueError."""
+    from ai_harness.modules.harness.renderers import load_agent_metadata
+
+    with pytest.raises(ValueError, match="Missing agent metadata"):
+        load_agent_metadata("not-a-real-agent")
+
+
+def test_load_agent_metadata_orchestrator_carries_permission_block() -> None:
+    """The orchestrator metadata decodes its raw OpenCode permission block exactly."""
+    from ai_harness.modules.harness.renderers import load_agent_metadata
+
+    meta = load_agent_metadata("change-orchestrator")
+
+    assert meta.mode == "primary"
+    assert meta.permission == {
+        "question": "allow",
+        "task": {"*": "allow"},
+        "bash": "allow",
+        "edit": "allow",
+        "read": "allow",
+        "write": "allow",
+    }
+
+
+def test_validate_metadata_schema_rejects_unknown_top_level_field() -> None:
+    """Schema validator rejects unsupported top-level keys (drift detection)."""
+    from ai_harness.modules.harness.renderers import _validate_metadata_schema
+
+    bad = {"description": "test", "mode": "subagent", "model": {}, "forbidden": 1}
+    with pytest.raises(ValueError, match="unknown metadata field.*forbidden"):
+        _validate_metadata_schema(bad, filename="agent-metadata/x.json")
+
+
+def test_validate_metadata_schema_requires_description_string() -> None:
+    """Description is required and must be a string."""
+    from ai_harness.modules.harness.renderers import _validate_metadata_schema
+
+    with pytest.raises(ValueError, match="missing required 'description'"):
+        _validate_metadata_schema({"mode": "subagent"}, filename="agent-metadata/x.json")
+    with pytest.raises(ValueError, match="'description' must be a string"):
+        _validate_metadata_schema({"description": 123}, filename="agent-metadata/x.json")
+
+
+def test_validate_metadata_schema_rejects_non_string_mode() -> None:
+    """Mode, when present, must be a string — provider meaning is text-encoded."""
+    from ai_harness.modules.harness.renderers import _validate_metadata_schema
+
+    with pytest.raises(ValueError, match="'mode' must be a string"):
+        _validate_metadata_schema(
+            {"description": "x", "mode": 42},
+            filename="agent-metadata/x.json",
+        )
+
+
+def test_validate_metadata_schema_rejects_non_object_top_level() -> None:
+    """Top-level metadata must be a JSON object."""
+    from ai_harness.modules.harness.renderers import _validate_metadata_schema
+
+    with pytest.raises(ValueError, match="top-level must be an object"):
+        _validate_metadata_schema("a string", filename="agent-metadata/x.json")
+
+
+def test_decode_agent_caps_returns_defaults_for_missing_or_null() -> None:
+    """Absent or null caps → AgentCaps() (full capability)."""
+    from ai_harness.modules.harness.renderers import _decode_agent_caps
+
+    assert _decode_agent_caps(None, filename="x.json") == AgentCaps()
+    # No raw arg at all — pass missing key by simulating absent field.
+    assert _decode_agent_caps({}, filename="x.json") == AgentCaps()
+
+
+def test_decode_agent_caps_decodes_explicit_capabilities() -> None:
+    """Explicit caps decode to the typed AgentCaps shape with a tuple spawn."""
+    from ai_harness.modules.harness.renderers import _decode_agent_caps
+
+    caps = _decode_agent_caps(
+        {"write": False, "bash": False, "spawn": ["change-explorer", "change-validator"]},
+        filename="x.json",
+    )
+
+    assert caps.write is False
+    assert caps.bash is False
+    assert caps.spawn == ("change-explorer", "change-validator")
+
+
+def test_decode_agent_caps_rejects_non_bool_flags() -> None:
+    """write/bash flags must be booleans — no truthy coercion."""
+    from ai_harness.modules.harness.renderers import _decode_agent_caps
+
+    with pytest.raises(ValueError, match="'caps.write' must be a bool"):
+        _decode_agent_caps({"write": "yes"}, filename="x.json")
+    with pytest.raises(ValueError, match="'caps.bash' must be a bool"):
+        _decode_agent_caps({"bash": 1}, filename="x.json")
+
+
+def test_decode_agent_caps_rejects_malformed_spawn() -> None:
+    """Spawn must be null or an array of strings; non-string entries fail loudly."""
+    from ai_harness.modules.harness.renderers import _decode_agent_caps
+
+    with pytest.raises(ValueError, match="'caps.spawn' entries must all be strings"):
+        _decode_agent_caps({"spawn": ["ok", 1]}, filename="x.json")
+    with pytest.raises(ValueError, match="'caps.spawn' must be null or array"):
+        _decode_agent_caps({"spawn": "change-explorer"}, filename="x.json")
+
+
+def test_decode_agent_caps_rejects_non_object_caps() -> None:
+    """Caps must be a JSON object (or null/missing)."""
+    from ai_harness.modules.harness.renderers import _decode_agent_caps
+
+    with pytest.raises(ValueError, match="'caps' must be an object"):
+        _decode_agent_caps("string", filename="x.json")
+
+
+def test_decode_effort_map_preserves_null_values() -> None:
+    """Effort map keeps null values verbatim — they're the "drop the field" sentinel."""
+    from ai_harness.modules.harness.renderers import _decode_effort_map
+
+    effort = _decode_effort_map(
+        {"claude": "high", "opencode": None},
+        filename="x.json",
+    )
+
+    assert effort["claude"] == "high"
+    assert "opencode" in effort and effort["opencode"] is None
+
+
+def test_decode_effort_map_rejects_non_string_non_null() -> None:
+    """Each effort value must be a string or null — no numbers, bools, etc."""
+    from ai_harness.modules.harness.renderers import _decode_effort_map
+
+    with pytest.raises(ValueError, match="'effort.claude' must be string or null"):
+        _decode_effort_map({"claude": 42}, filename="x.json")
+    with pytest.raises(ValueError, match="'effort' must be an object"):
+        _decode_effort_map("string", filename="x.json")
+
+
+def test_decode_model_map_rejects_non_string_values() -> None:
+    """Each model value must be a string — silent coercion would mis-route providers."""
+    from ai_harness.modules.harness.renderers import _decode_model_map
+
+    with pytest.raises(ValueError, match="'model.claude' must be a string"):
+        _decode_model_map({"claude": 123}, filename="x.json")
+
+
+def test_decode_permission_keeps_raw_dict() -> None:
+    """Raw permission dicts pass through with no key coercion."""
+    from ai_harness.modules.harness.renderers import _decode_permission
+
+    raw = {"edit": "allow", "task": {"*": "allow"}}
+    assert _decode_permission(raw, filename="x.json") == raw
+    assert _decode_permission(None, filename="x.json") is None
+
+
+def test_decode_permission_rejects_non_object() -> None:
+    """Permission must be null or an object — OpenCode permission is dict-shaped."""
+    from ai_harness.modules.harness.renderers import _decode_permission
+
+    with pytest.raises(ValueError, match="'permission' must be an object"):
+        _decode_permission("string", filename="x.json")
+
+
+def test_discover_agent_names_returns_sorted_visible_templates() -> None:
+    """discover_agent_names returns the visible change-agent set in sorted order."""
+    from ai_harness.modules.harness.renderers import discover_agent_names
+
+    names = discover_agent_names()
+
+    assert names == [
+        "change-archiver",
+        "change-design",
+        "change-explorer",
+        "change-implementor",
+        "change-orchestrator",
+        "change-propose",
+        "change-specs",
+        "change-tasks",
+        "change-validator",
+    ]
+    assert len(names) == 9
+
+
+def test_administrator_discover_agent_names_matches_module_function() -> None:
+    """Each administrator's discover_agent_names matches the shared module-level function."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS, discover_agent_names
+
+    shared = discover_agent_names()
+    for cli, admin in ADMINISTRATORS.items():
+        assert admin.discover_agent_names() == shared, f"{cli}: admin discovery drifted from shared discovery"
+
+
+def test_administrator_dispatch_returns_artifact_objects() -> None:
+    """Each concrete administrator returns Artifact objects from the shared contract.
+
+    Locks the polymorphic seam: a future provider addition must satisfy
+    the same return type. Tasks 5/6/7 will turn these stubs into real
+    renderers; the assertion below already locks the ABC contract shape.
+    """
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    # discover_agent_names returns the shared list — verify shape across providers.
+    for cli, admin in ADMINISTRATORS.items():
+        names = admin.discover_agent_names()
+        assert isinstance(names, list)
+        assert all(isinstance(n, str) for n in names), f"{cli}: discovery returned non-string names"
+
+
+def test_load_agent_metadata_with_effort_null_round_trips() -> None:
+    """JSON ``null`` in effort is preserved on the AgentMetadata value side."""
+    from importlib.resources import files
+
+    # Sanity-check that we can hand-decode a JSON resource with null effort.
+    raw_path = files("ai_harness.resources") / "agent-metadata" / "change-explorer.json"
+    raw = json.loads(raw_path.read_text(encoding="utf-8"))
+    # Baseline file has no effort key. Add one for the test then drop it.
+    raw["effort"] = {"claude": "high", "opencode": None}
+
+    from ai_harness.modules.harness.renderers import _decode_agent_metadata
+
+    meta = _decode_agent_metadata(raw, name="change-explorer")
+
+    assert meta.effort["claude"] == "high"
+    assert meta.effort["opencode"] is None

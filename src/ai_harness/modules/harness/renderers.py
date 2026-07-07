@@ -43,7 +43,9 @@ __all__ = [
     "CopilotArtifactsAdministrator",
     "OpenCodeArtifactsAdministrator",
     "RenderedFile",
+    "discover_agent_names",
     "get_agent_meta",
+    "load_agent_metadata",
     "render_agents",
     "write_override_store",
 ]
@@ -254,7 +256,9 @@ class ClaudeArtifactsAdministrator(ArtifactsAdministrator):
         raise NotImplementedError("ClaudeArtifactsAdministrator.get_agent_metadata lands in task 5")
 
     def discover_agent_names(self) -> list[str]:
-        raise NotImplementedError("ClaudeArtifactsAdministrator.discover_agent_names lands in task 5")
+        # Discovery is provider-agnostic — all administrators see the same
+        # visible template set. Tasks 5/6/7 keep this delegation intact.
+        return discover_agent_names()
 
 
 class OpenCodeArtifactsAdministrator(ArtifactsAdministrator):
@@ -281,7 +285,7 @@ class OpenCodeArtifactsAdministrator(ArtifactsAdministrator):
         raise NotImplementedError("OpenCodeArtifactsAdministrator.get_agent_metadata lands in task 6")
 
     def discover_agent_names(self) -> list[str]:
-        raise NotImplementedError("OpenCodeArtifactsAdministrator.discover_agent_names lands in task 6")
+        return discover_agent_names()
 
 
 class CopilotArtifactsAdministrator(ArtifactsAdministrator):
@@ -308,7 +312,7 @@ class CopilotArtifactsAdministrator(ArtifactsAdministrator):
         raise NotImplementedError("CopilotArtifactsAdministrator.get_agent_metadata lands in task 7")
 
     def discover_agent_names(self) -> list[str]:
-        raise NotImplementedError("CopilotArtifactsAdministrator.discover_agent_names lands in task 7")
+        return discover_agent_names()
 
 
 # Dispatch table — populated with one administrator per supported CLI.
@@ -897,3 +901,186 @@ def _render_copilot(
     """Render one Copilot change agent as a home-relative ``RenderedFile`` record."""
     rendered = _render_copilot_agent(name, overrides=overrides)
     return RenderedFile(f"{_COPILOT_AGENT_DIR}/{rendered.filename}", rendered.content)
+
+
+# ---------------------------------------------------------------------------
+# JSON metadata loader — task 4.
+#
+# Resource discovery and metadata decoding live behind the administrators
+# and the public :func:`discover_agent_names`. The decoders translate
+# ``agent-metadata/<name>.json`` into typed ``AgentMetadata`` /
+# ``AgentCaps`` values; the schema validator rejects drift loudly so
+# provider rendering can assume well-formed input.
+# ---------------------------------------------------------------------------
+
+#: Allowed top-level keys in an agent-metadata JSON resource. Unknown keys
+#: fail loudly with :class:`ValueError` during decoding.
+_METADATA_ALLOWED_KEYS: frozenset[str] = frozenset(
+    {"description", "mode", "model", "effort", "caps", "permission", "color"}
+)
+
+
+def _agent_metadata_root() -> Traversable:
+    """Return the ``agent-metadata/`` resource directory."""
+    return files("ai_harness.resources") / "agent-metadata"
+
+
+def _load_agent_metadata(name: str) -> dict:
+    """Read ``agent-metadata/<name>.json`` via importlib.resources.
+
+    Returns the parsed JSON dict. Raises :class:`ValueError` if the file
+    is missing — the resource layout is the contract, and a template
+    without metadata is drift that must surface at install time.
+    """
+    path = _agent_metadata_root() / f"{name}.json"
+    if not path.is_file():
+        raise ValueError(f"Missing agent metadata for {name!r}: {path}")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _validate_metadata_schema(raw: dict, *, filename: str) -> None:
+    """Reject unknown fields, missing description, and wrong top-level types.
+
+    Raises :class:`ValueError` naming the file and offending field so the
+    failure is debuggable from a single log line. Inner-field validation
+    (model/effort shape, permission type, etc.) is delegated to the
+    individual decoders.
+    """
+    if not isinstance(raw, dict):
+        raise ValueError(f"{filename}: metadata top-level must be an object, got {type(raw).__name__}")
+    unknown = set(raw) - _METADATA_ALLOWED_KEYS
+    if unknown:
+        raise ValueError(f"{filename}: unknown metadata field(s) {sorted(unknown)!r}")
+    if "description" not in raw:
+        raise ValueError(f"{filename}: missing required 'description' field")
+    if not isinstance(raw["description"], str):
+        raise ValueError(f"{filename}: 'description' must be a string, got {type(raw['description']).__name__}")
+    if "mode" in raw and not isinstance(raw["mode"], str):
+        raise ValueError(f"{filename}: 'mode' must be a string, got {type(raw['mode']).__name__}")
+
+
+def _decode_agent_caps(raw: object, *, filename: str) -> AgentCaps:
+    """Decode a ``caps`` JSON value into a typed :class:`AgentCaps`.
+
+    ``None``/missing → :class:`AgentCaps` defaults. A non-dict raises
+    :class:`ValueError` naming the file.
+    """
+    if raw is None:
+        return AgentCaps()
+    if not isinstance(raw, dict):
+        raise ValueError(f"{filename}: 'caps' must be an object, got {type(raw).__name__}")
+    write = raw.get("write", True)
+    bash = raw.get("bash", True)
+    spawn_raw = raw.get("spawn", None)
+    if not isinstance(write, bool):
+        raise ValueError(f"{filename}: 'caps.write' must be a bool, got {type(write).__name__}")
+    if not isinstance(bash, bool):
+        raise ValueError(f"{filename}: 'caps.bash' must be a bool, got {type(bash).__name__}")
+    if spawn_raw is None:
+        spawn: tuple[str, ...] | None = None
+    elif isinstance(spawn_raw, list):
+        if not all(isinstance(item, str) for item in spawn_raw):
+            raise ValueError(f"{filename}: 'caps.spawn' entries must all be strings")
+        spawn = tuple(spawn_raw)
+    else:
+        raise ValueError(f"{filename}: 'caps.spawn' must be null or array of strings, got {type(spawn_raw).__name__}")
+    return AgentCaps(write=write, bash=bash, spawn=spawn)
+
+
+def _decode_effort_map(raw: object, *, filename: str) -> Mapping[str, str | None]:
+    """Decode the ``effort`` JSON value into a provider-keyed mapping.
+
+    Each value MUST be either a string or ``null`` — JSON ``null`` is the
+    documented "drop the field" sentinel that admin renderers translate
+    into "omit the provider frontmatter key". Other types fail loudly.
+    """
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"{filename}: 'effort' must be an object, got {type(raw).__name__}")
+    decoded: dict[str, str | None] = {}
+    for provider, value in raw.items():
+        if value is None or isinstance(value, str):
+            decoded[provider] = value
+        else:
+            raise ValueError(f"{filename}: 'effort.{provider}' must be string or null, got {type(value).__name__}")
+    return decoded
+
+
+def _decode_model_map(raw: object, *, filename: str) -> Mapping[str, str]:
+    """Decode the ``model`` JSON value into a provider-keyed string map.
+
+    Each value MUST be a string; non-string values fail loudly so
+    silent model coercion never reaches a provider renderer.
+    """
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"{filename}: 'model' must be an object, got {type(raw).__name__}")
+    decoded: dict[str, str] = {}
+    for provider, value in raw.items():
+        if not isinstance(value, str):
+            raise ValueError(f"{filename}: 'model.{provider}' must be a string, got {type(value).__name__}")
+        decoded[provider] = value
+    return decoded
+
+
+def _decode_permission(raw: object, *, filename: str) -> Mapping[str, object] | None:
+    """Decode the raw ``permission`` JSON value (only used for OpenCode)."""
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError(f"{filename}: 'permission' must be an object, got {type(raw).__name__}")
+    return raw
+
+
+def _decode_agent_metadata(raw: dict, *, name: str) -> AgentMetadata:
+    """Decode a single agent metadata JSON dict into :class:`AgentMetadata`.
+
+    Runs the schema validator and the per-field decoders in one place so
+    :class:`AgentMetadata` construction stays atomic — partial state
+    cannot leak out of this function. *name* is passed separately so the
+    raw dict stays untouched and the schema validator can reject any
+    unexpected keys cleanly.
+    """
+    filename = f"agent-metadata/{name}.json"
+    _validate_metadata_schema(raw, filename=filename)
+    return AgentMetadata(
+        description=raw["description"],
+        mode=raw.get("mode", "subagent"),
+        model=_decode_model_map(raw.get("model"), filename=filename),
+        effort=_decode_effort_map(raw.get("effort"), filename=filename),
+        caps=_decode_agent_caps(raw.get("caps"), filename=filename),
+        permission=_decode_permission(raw.get("permission"), filename=filename),
+        color=raw.get("color") if isinstance(raw.get("color"), str) else None,
+    )
+
+
+def load_agent_metadata(name: str) -> AgentMetadata:
+    """Public loader: read ``agent-metadata/<name>.json`` and decode it.
+
+    Combines ``_load_agent_metadata`` with ``_decode_agent_metadata``
+    so callers get a fully-typed :class:`AgentMetadata` from a single
+    call. The decoder is strict: unknown fields, missing description,
+    wrong types, and missing metadata all raise :class:`ValueError`.
+    """
+    raw = _load_agent_metadata(name)
+    return _decode_agent_metadata(raw, name=name)
+
+
+def discover_agent_names() -> list[str]:
+    """Return the visible change-agent template names in sorted order.
+
+    Walks ``change-agent/*.md`` via importlib.resources, sorts by
+    filename, and excludes ``_``-prefixed templates (which are bundled
+    resources, not agents). Duplicate template names across the resource
+    set fail loudly with :class:`ValueError`.
+
+    The returned order is the canonical install order: it is the order
+    rendered agents appear on disk and the order recorded in the install
+    manifest. Templates without matching metadata, or metadata without a
+    visible template, are caught by the administrators'
+    :meth:`render_artifacts` calls — this function returns the template
+    set as the source of truth.
+    """
+    return _discover_agents()
