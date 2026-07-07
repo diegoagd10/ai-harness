@@ -2353,39 +2353,25 @@ def test_administrators_provider_class_attributes_identify_the_provider() -> Non
     assert CopilotArtifactsAdministrator.provider == "copilot"
 
 
-def test_administrator_stubs_raise_not_implemented_until_tasks_5_6_7_land() -> None:
-    """Until the per-provider tasks populate the concrete admins, calling the contract raises.
-
-    Locks the foundation-task scope: this task registers the dispatch
-    table but does not yet implement rendering. Tasks 5/6/7 will replace
-    each NotImplementedError with the provider-specific behavior. The
-    sentinel message names the owning task so the failure is debuggable.
-    """
+def test_administrator_stubs_raise_for_tasks_6_7_until_landed() -> None:
+    """Tasks 5 landed Claude's render+metadata; 6/7 still raise until those tasks land."""
     from ai_harness.modules.harness.renderers import ADMINISTRATORS
 
-    with pytest.raises(NotImplementedError, match="task 5"):
-        ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts()
+    # Task 5 (Claude) is now wired — Claude's contract no longer raises.
+    artifacts = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts()
+    assert isinstance(artifacts, list)
+    meta = ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata("change-explorer")
+    assert meta.description
+
+    # Tasks 6 and 7 are still pending.
     with pytest.raises(NotImplementedError, match="task 6"):
         ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts()
     with pytest.raises(NotImplementedError, match="task 7"):
         ADMINISTRATORS[AgentCli.COPILOT].render_artifacts()
-
-
-def test_administrator_stubs_raise_for_metadata_only() -> None:
-    """get_agent_metadata stays a stub until tasks 5/6/7 land; discovery is already wired."""
-    from ai_harness.modules.harness.renderers import ADMINISTRATORS
-
-    for cli, label in (
-        (AgentCli.CLAUDE, "task 5"),
-        (AgentCli.OPENCODE, "task 6"),
-        (AgentCli.COPILOT, "task 7"),
-    ):
-        admin = ADMINISTRATORS[cli]
-        with pytest.raises(NotImplementedError, match=label):
-            admin.get_agent_metadata("change-explorer")
-        # discover_agent_names delegates to the shared module function
-        # (task 4) so it returns the canonical list, not a stub error.
-        assert isinstance(admin.discover_agent_names(), list)
+    with pytest.raises(NotImplementedError, match="task 6"):
+        ADMINISTRATORS[AgentCli.OPENCODE].get_agent_metadata("change-explorer")
+    with pytest.raises(NotImplementedError, match="task 7"):
+        ADMINISTRATORS[AgentCli.COPILOT].get_agent_metadata("change-explorer")
 
 
 # ---------------------------------------------------------------------------
@@ -2902,3 +2888,198 @@ def test_load_agent_metadata_with_effort_null_round_trips() -> None:
 
     assert meta.effort["claude"] == "high"
     assert meta.effort["opencode"] is None
+
+
+# ---------------------------------------------------------------------------
+# ClaudeArtifactsAdministrator (task 5) — mode dispatch, frontmatter, paths
+# ---------------------------------------------------------------------------
+
+
+def test_claude_administrator_render_artifacts_returns_artifact_objects(tmp_path: Path) -> None:
+    """Claude admin returns Artifact objects with install_path + content."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS, Artifact
+
+    admin = ADMINISTRATORS[AgentCli.CLAUDE]
+    artifacts = admin.render_artifacts(overrides={}, home=tmp_path)
+
+    assert len(artifacts) == 9
+    for artifact in artifacts:
+        assert isinstance(artifact, Artifact)
+        assert isinstance(artifact.install_path, str)
+        assert isinstance(artifact.content, str)
+
+
+def test_claude_administrator_routes_primary_mode_to_skill(tmp_path: Path) -> None:
+    """Claude admin renders change-orchestrator (mode=primary) as a skill at .claude/skills/.../SKILL.md."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.CLAUDE]
+    artifacts = admin.render_artifacts(overrides={}, home=tmp_path)
+
+    skill_paths = [a.install_path for a in artifacts if a.install_path.endswith("SKILL.md")]
+    assert skill_paths == [".claude/skills/change-orchestrator/SKILL.md"]
+
+
+def test_claude_administrator_routes_non_primary_mode_to_agent(tmp_path: Path) -> None:
+    """Claude admin renders subagents (mode != primary) at .claude/agents/<name>.md."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.CLAUDE]
+    artifacts = admin.render_artifacts(overrides={}, home=tmp_path)
+
+    agent_paths = sorted(
+        a.install_path for a in artifacts if a.install_path.endswith(".md") and "agents/" in a.install_path
+    )
+    assert agent_paths == [
+        ".claude/agents/change-archiver.md",
+        ".claude/agents/change-design.md",
+        ".claude/agents/change-explorer.md",
+        ".claude/agents/change-implementor.md",
+        ".claude/agents/change-propose.md",
+        ".claude/agents/change-specs.md",
+        ".claude/agents/change-tasks.md",
+        ".claude/agents/change-validator.md",
+    ]
+
+
+def test_claude_administrator_skill_frontmatter_description_only(tmp_path: Path) -> None:
+    """Primary skills carry only ``description`` in frontmatter (no model/effort/tools)."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.CLAUDE]
+    artifacts = admin.render_artifacts(["change-orchestrator"], overrides={}, home=tmp_path)
+
+    assert len(artifacts) == 1
+    skill = artifacts[0]
+    assert skill.install_path == ".claude/skills/change-orchestrator/SKILL.md"
+
+    # Parse YAML frontmatter — only ``description`` is allowed.
+    fm_text = skill.content.split("---", 2)[1]
+    parsed = yaml.safe_load(fm_text)
+    assert list(parsed.keys()) == ["description"]
+    assert "model" not in parsed
+    assert "effort" not in parsed
+    assert "tools" not in parsed
+    assert "mode" not in parsed
+    assert "name" not in parsed
+
+
+def test_claude_administrator_subagent_frontmatter_contains_name_model(tmp_path: Path) -> None:
+    """Claude subagent frontmatter is ordered: name, description, model."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.CLAUDE]
+    artifacts = admin.render_artifacts(["change-explorer"], overrides={}, home=tmp_path)
+
+    assert len(artifacts) == 1
+    subagent = artifacts[0]
+    fm_text = subagent.content.split("---", 2)[1]
+    parsed = yaml.safe_load(fm_text)
+    assert parsed["name"] == "change-explorer"
+    assert parsed["model"] == "sonnet"
+    assert "description" in parsed
+
+
+def test_claude_administrator_effort_override_propagates_to_frontmatter(tmp_path: Path) -> None:
+    """A Claude effort override shows up in the rendered agent frontmatter."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.CLAUDE]
+    overrides = {"change-implementor": {"effort": {"claude": "high"}}}
+    artifacts = admin.render_artifacts(["change-implementor"], overrides=overrides, home=tmp_path)
+
+    fm = yaml.safe_load(artifacts[0].content.split("---", 2)[1])
+    assert fm["effort"] == "high"
+
+
+def test_claude_administrator_effort_null_drops_field(tmp_path: Path) -> None:
+    """A Claude effort override of ``None`` drops the effort field rather than emitting null."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.CLAUDE]
+    overrides = {"change-implementor": {"effort": {"claude": None}}}
+    artifacts = admin.render_artifacts(["change-implementor"], overrides=overrides, home=tmp_path)
+
+    fm = yaml.safe_load(artifacts[0].content.split("---", 2)[1])
+    assert "effort" not in fm
+    assert "effort: null" not in artifacts[0].content
+
+
+def test_claude_administrator_get_agent_metadata_returns_typed_value(tmp_path: Path) -> None:
+    """get_agent_metadata returns a typed AgentMetadata with the expected fields."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS, AgentMetadata
+
+    admin = ADMINISTRATORS[AgentCli.CLAUDE]
+    meta = admin.get_agent_metadata("change-explorer", overrides={}, home=tmp_path)
+
+    assert isinstance(meta, AgentMetadata)
+    assert meta.description.startswith("Change explorer")
+    assert meta.mode == "all"
+    assert meta.model.get("claude") == "sonnet"
+
+
+def test_claude_administrator_get_agent_metadata_applies_overrides(tmp_path: Path) -> None:
+    """A model override on the agent lands in the resolved AgentMetadata."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.CLAUDE]
+    meta = admin.get_agent_metadata(
+        "change-explorer",
+        overrides={"change-explorer": {"model": {"claude": "opus"}}},
+        home=tmp_path,
+    )
+
+    assert meta.model.get("claude") == "opus"
+
+
+def test_claude_administrator_render_artifacts_byte_matches_old_renderer(tmp_path: Path) -> None:
+    """The new admin's render output is byte-identical to the legacy ``render_agents``.
+
+    Locks the migration contract: any drift surfaces as a test failure
+    before callers/tests rely on the new seam.
+    """
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS, render_agents
+
+    admin = ADMINISTRATORS[AgentCli.CLAUDE]
+    old = render_agents(AgentCli.CLAUDE, overrides={}, home=tmp_path)
+    new = admin.render_artifacts(overrides={}, home=tmp_path)
+
+    assert len(old) == len(new)
+    for old_pair, new_artifact in zip(old, new, strict=True):
+        assert old_pair.filename == new_artifact.install_path
+        assert old_pair.content == new_artifact.content
+
+
+def test_claude_administrator_skill_includes_spawn_prose_when_caps_set(tmp_path: Path) -> None:
+    """A primary skill with caps.spawn gets the spawn-allowlist prose section appended.
+
+    Locks the Claude asymmetry: Claude skills cannot enforce spawn
+    restrictions in frontmatter, so the prose section replaces the
+    OpenCode ``permission.task`` block semantically.
+    """
+    from importlib.resources import files
+
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS, AgentCaps
+
+    # Hand-build a metadata dict with caps.spawn set on the primary agent.
+    raw_path = files("ai_harness.resources") / "agent-metadata" / "change-orchestrator.json"
+    raw = json.loads(raw_path.read_text(encoding="utf-8"))
+    raw["caps"] = {"write": True, "bash": True, "spawn": ["change-explorer", "change-validator"]}
+
+    # Patch the in-memory override store with this metadata view so
+    # the admin sees the new caps.
+    from ai_harness.modules.harness.renderers import _decode_agent_metadata as decode_fn
+
+    meta = decode_fn(raw, name="change-orchestrator")
+    assert meta.caps == AgentCaps(spawn=("change-explorer", "change-validator"))
+
+    # The admin's render path applies overrides; emulate by feeding a
+    # custom override that injects caps through the deep-merge round-trip.
+    admin = ADMINISTRATORS[AgentCli.CLAUDE]
+    overrides = {"change-orchestrator": {"caps": {"spawn": ["change-explorer", "change-validator"]}}}
+    artifacts = admin.render_artifacts(["change-orchestrator"], overrides=overrides, home=tmp_path)
+
+    body = artifacts[0].content.split("---", 2)[2]
+    assert "## Subagent spawn allowlist" in body
+    assert "change-explorer" in body
+    assert "change-validator" in body

@@ -233,7 +233,15 @@ class ArtifactsAdministrator(ABC):
 
 
 class ClaudeArtifactsAdministrator(ArtifactsAdministrator):
-    """Claude provider administrator — stub populated in task 5."""
+    """Claude provider administrator — owns Claude frontmatter and install paths.
+
+    Hides the Claude skill-vs-agent mode dispatch, the ``.claude/skills/...``
+    and ``.claude/agents/...`` install-path layout, the model/effort/tools
+    frontmatter shape, and the spawn-allowlist prose injection for primary
+    skills. Callers select this administrator and call
+    :meth:`render_artifacts` polymorphically — no per-provider branching
+    in operations or the wizard.
+    """
 
     provider: Literal["claude", "opencode", "copilot"] = "claude"
 
@@ -244,7 +252,16 @@ class ClaudeArtifactsAdministrator(ArtifactsAdministrator):
         *,
         home: Path | None = None,
     ) -> list[Artifact]:
-        raise NotImplementedError("ClaudeArtifactsAdministrator.render_artifacts lands in task 5")
+        """Render Claude change agents to installable artifacts."""
+        resolved_names = list(names) if names is not None else self.discover_agent_names()
+        artifacts: list[Artifact] = []
+        for name in resolved_names:
+            metadata = self.get_agent_metadata(name, overrides=overrides, home=home)
+            if metadata.mode == "primary":
+                artifacts.append(_render_claude_skill_artifact(name, metadata))
+            else:
+                artifacts.append(_render_claude_agent_artifact(name, metadata))
+        return artifacts
 
     def get_agent_metadata(
         self,
@@ -253,7 +270,8 @@ class ClaudeArtifactsAdministrator(ArtifactsAdministrator):
         *,
         home: Path | None = None,
     ) -> AgentMetadata:
-        raise NotImplementedError("ClaudeArtifactsAdministrator.get_agent_metadata lands in task 5")
+        """Return Claude-resolved metadata for *name* with overrides applied."""
+        return _resolve_agent_metadata(name, overrides=overrides, home=home)
 
     def discover_agent_names(self) -> list[str]:
         # Discovery is provider-agnostic — all administrators see the same
@@ -1084,3 +1102,147 @@ def discover_agent_names() -> list[str]:
     set as the source of truth.
     """
     return _discover_agents()
+
+
+# ---------------------------------------------------------------------------
+# Provider rendering helpers — translate AgentMetadata into provider-shaped
+# frontmatter, body, and install-path artifacts.
+#
+# These functions are private (the public surface is the administrator
+# classes); tests should assert behavior through the administrator's
+# ``render_artifacts`` output. Translating to Artifact values keeps the
+# install-path and content ownership inside each provider administrator.
+# ---------------------------------------------------------------------------
+
+
+def _agent_caps_to_dict(caps: AgentCaps) -> dict:
+    """Serialize :class:`AgentCaps` to a plain dict for override merging.
+
+    Round-trips through :func:`_decode_agent_caps` so merged override
+    payloads land back in the typed dataclass.
+    """
+    return {"write": caps.write, "bash": caps.bash, "spawn": list(caps.spawn) if caps.spawn else None}
+
+
+def _resolve_agent_metadata(
+    name: str,
+    overrides: dict | None = None,
+    *,
+    home: Path | None = None,
+) -> AgentMetadata:
+    """Resolve *name*'s metadata with the override-store semantics.
+
+    ``overrides=None`` reads the shared override store from
+    ``home/.ai-harness/overrides.json`` (default ``Path.home()``); ``{}``
+    is an explicit no-disk-read path; any other dict is used verbatim.
+    The resolved metadata is returned as a fresh :class:`AgentMetadata`
+    so callers cannot mutate the shared template state.
+    """
+    from ai_harness.modules.harness.override_store import deep_merge, load_override_store
+
+    if overrides is None:
+        overrides = load_override_store(home if home is not None else Path.home())
+
+    base = load_agent_metadata(name)
+    entry = overrides.get(name, {})
+    if not entry:
+        return base
+
+    base_dict: dict = {
+        "description": base.description,
+        "mode": base.mode,
+        "model": dict(base.model),
+        "effort": dict(base.effort),
+        "caps": _agent_caps_to_dict(base.caps),
+        "permission": dict(base.permission) if base.permission is not None else None,
+        "color": base.color,
+    }
+    merged = deep_merge(base_dict, entry)
+    # Re-decode through the schema validator so the merged value is
+    # type-safe and any override drift surfaces as ValueError here.
+    return _decode_agent_metadata(merged, name=name)
+
+
+def _claude_frontmatter(meta: AgentMetadata) -> str:
+    """Render Claude subagent frontmatter from *meta*.
+
+    Ordered keys: ``name``, ``description``, ``model``, optional ``effort``,
+    optional ``tools``. ``effort`` is omitted when ``meta.effort.get("claude")``
+    is ``None`` or absent. ``tools`` is omitted when ``meta.caps`` is the
+    default :class:`AgentCaps` (full capability) — Claude's tools allow-list
+    is a closed allowlist, so an unrestricted agent renders without it.
+    """
+    fm: dict[str, object] = {
+        "name": meta.description,  # placeholder; replaced by caller with real name
+    }
+    # The caller is expected to populate the ``name`` key with the agent
+    # identifier after this helper returns. Build the rest from *meta*.
+    fm.pop("name")  # remove the placeholder
+    fm["name"] = ""  # caller will overwrite with the agent name
+    fm["description"] = meta.description
+    model_claude = meta.model.get("claude")
+    if model_claude is None:
+        # Surface a clear error naming the agent — caller passes the name
+        # through the exception to make it debuggable.
+        raise ValueError(f"missing or invalid model.claude for {getattr(meta, 'description', '<unknown>')}")
+    fm["model"] = model_claude
+
+    # effort.claude = null → drop the field; absent → drop; string → emit.
+    if "claude" in meta.effort and meta.effort["claude"] is not None:
+        fm["effort"] = meta.effort["claude"]
+
+    # caps != AgentCaps() → render a Claude tools allow-list.
+    if meta.caps != AgentCaps():
+        fm["tools"] = ", ".join(_claude_tools(meta.caps))
+
+    return _yaml_dump_frontmatter(fm)
+
+
+def _render_claude_agent_artifact(name: str, meta: AgentMetadata) -> Artifact:
+    """Render a Claude subagent as an Artifact at ``.claude/agents/<name>.md``."""
+    body = _read_template_body(name)
+    fm: dict[str, object] = {
+        "name": name,
+        "description": meta.description,
+        "model": meta.model.get("claude"),
+    }
+    # ``model.claude`` is required for Claude rendering.
+    if not isinstance(fm["model"], str):
+        raise ValueError(f"Template {name}: missing or invalid model.claude")
+    if "claude" in meta.effort and meta.effort["claude"] is not None:
+        fm["effort"] = meta.effort["claude"]
+    if meta.caps != AgentCaps():
+        fm["tools"] = ", ".join(_claude_tools(meta.caps))
+    yaml_text = _yaml_dump_frontmatter(fm)
+    rendered = f"---\n{yaml_text}\n---\n{body}"
+    return Artifact(install_path=f"{_CLAUDE_AGENTS_DIR}/{name}.md", content=rendered)
+
+
+def _render_claude_skill_artifact(name: str, meta: AgentMetadata) -> Artifact:
+    """Render a primary Claude change agent as a skill Artifact.
+
+    Skills carry only ``description`` in frontmatter — no model, effort,
+    or tools. Overrides are intentionally ignored for skills: they run
+    on the session model and inherit the user's effort setting. If
+    ``caps.spawn`` is non-empty, append a spawn allowlist prose section
+    because Claude skill frontmatter cannot enforce spawn restrictions.
+    """
+    if meta.mode != "primary":
+        raise ValueError(f"Template {name}: mode must be primary for a skill, got {meta.mode!r}")
+    if not isinstance(meta.model.get("claude"), str):
+        raise ValueError(f"Template {name}: missing or invalid model.claude")
+    body = _read_template_body(name)
+    fm: dict[str, object] = {"description": meta.description}
+    spawn_note = ""
+    if meta.caps.spawn:
+        names = ", ".join(f"`{a}`" for a in meta.caps.spawn)
+        spawn_note = (
+            "\n\n## Subagent spawn allowlist\n\n"
+            "Claude skills cannot enforce spawn restrictions in frontmatter. "
+            "The following prose constraint replaces the OpenCode "
+            f"``permission.task`` allowlist:\n\n"
+            f"Only spawn these subagents: {names}.\n"
+        )
+    yaml_text = _yaml_dump_frontmatter(fm)
+    rendered = f"---\n{yaml_text}\n---\n{body}{spawn_note}"
+    return Artifact(install_path=f"{_CLAUDE_SKILLS_DIR}/{name}/SKILL.md", content=rendered)
