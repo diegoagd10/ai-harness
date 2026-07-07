@@ -322,7 +322,16 @@ class OpenCodeArtifactsAdministrator(ArtifactsAdministrator):
 
 
 class CopilotArtifactsAdministrator(ArtifactsAdministrator):
-    """Copilot provider administrator — stub populated in task 7."""
+    """Copilot provider administrator — owns the minimal Copilot frontmatter.
+
+    Hides the corrected ``.copilot/agents/<name>.agent.md`` install path
+    (the design correction from the PRD's ``.github/instructions/...``
+    text) and the intentionally minimal ``name`` + ``description``
+    frontmatter. Copilot CLI ignores ``model``, ``tools``,
+    ``user-invocable``, ``disable-model-invocation``, permission, mode,
+    and color — emitting more would write fields Copilot does not honor
+    (see ADR 0008).
+    """
 
     provider: Literal["claude", "opencode", "copilot"] = "copilot"
 
@@ -333,7 +342,13 @@ class CopilotArtifactsAdministrator(ArtifactsAdministrator):
         *,
         home: Path | None = None,
     ) -> list[Artifact]:
-        raise NotImplementedError("CopilotArtifactsAdministrator.render_artifacts lands in task 7")
+        """Render Copilot change agents to installable artifacts."""
+        resolved_names = list(names) if names is not None else self.discover_agent_names()
+        artifacts: list[Artifact] = []
+        for name in resolved_names:
+            metadata = self.get_agent_metadata(name, overrides=overrides, home=home)
+            artifacts.append(_render_copilot_agent_artifact(name, metadata))
+        return artifacts
 
     def get_agent_metadata(
         self,
@@ -342,7 +357,8 @@ class CopilotArtifactsAdministrator(ArtifactsAdministrator):
         *,
         home: Path | None = None,
     ) -> AgentMetadata:
-        raise NotImplementedError("CopilotArtifactsAdministrator.get_agent_metadata lands in task 7")
+        """Return Copilot-resolved metadata for *name* with overrides applied."""
+        return _resolve_agent_metadata(name, overrides=overrides, home=home)
 
     def discover_agent_names(self) -> list[str]:
         return discover_agent_names()
@@ -1308,3 +1324,24 @@ def _render_opencode_agent_artifact(name: str, meta: AgentMetadata) -> Artifact:
     yaml_text = _yaml_dump_frontmatter(fm)
     rendered = f"---\n{yaml_text}\n---\n{body}"
     return Artifact(install_path=f"{_OPENCODE_AGENT_DIR}/{name}.md", content=rendered)
+
+
+def _render_copilot_agent_artifact(name: str, meta: AgentMetadata) -> Artifact:
+    """Render a Copilot change agent as an Artifact at ``.copilot/agents/<name>.agent.md``.
+
+    Frontmatter is intentionally minimal — only ``name`` and ``description``.
+    Copilot CLI ignores ``model``, ``tools``, ``user-invocable``,
+    ``disable-model-invocation``, permission, mode, and color, so emitting
+    more would write fields Copilot does not honor. ``model.copilot``
+    is intentionally NOT required — the Copilot CLI's model is set
+    globally (via ``/model`` or ``~/.copilot/settings.json``), not
+    per-agent.
+    """
+    body = _read_template_body(name)
+    fm: dict[str, object] = {
+        "name": name,
+        "description": meta.description,
+    }
+    yaml_text = _yaml_dump_frontmatter(fm)
+    rendered = f"---\n{yaml_text}\n---\n{body}"
+    return Artifact(install_path=f"{_COPILOT_AGENT_DIR}/{name}.agent.md", content=rendered)

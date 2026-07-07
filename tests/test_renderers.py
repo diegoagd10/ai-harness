@@ -2353,26 +2353,22 @@ def test_administrators_provider_class_attributes_identify_the_provider() -> Non
     assert CopilotArtifactsAdministrator.provider == "copilot"
 
 
-def test_administrator_stubs_raise_for_task_7_only() -> None:
-    """Tasks 5 and 6 are wired (Claude + OpenCode); only Copilot (task 7) still raises."""
-    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+def test_all_three_administrators_render_polymorphically(tmp_path: Path) -> None:
+    """Every administrator's contract is fully wired (tasks 5/6/7 landed).
 
-    # Tasks 5 and 6 are wired — Claude and OpenCode contracts no longer raise.
-    artifacts = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts()
-    assert isinstance(artifacts, list)
-    meta = ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata("change-explorer")
-    assert meta.description
+    Locks the dispatch seam: any future addition must satisfy the same
+    polymorphic render contract; removing this test would let a future
+    regression reintroduce NotImplementedError on the public surface.
+    """
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS, Artifact
 
-    artifacts = ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts()
-    assert isinstance(artifacts, list)
-    meta = ADMINISTRATORS[AgentCli.OPENCODE].get_agent_metadata("change-explorer")
-    assert meta.description
-
-    # Task 7 (Copilot) is still pending.
-    with pytest.raises(NotImplementedError, match="task 7"):
-        ADMINISTRATORS[AgentCli.COPILOT].render_artifacts()
-    with pytest.raises(NotImplementedError, match="task 7"):
-        ADMINISTRATORS[AgentCli.COPILOT].get_agent_metadata("change-explorer")
+    for cli in (AgentCli.CLAUDE, AgentCli.OPENCODE, AgentCli.COPILOT):
+        admin = ADMINISTRATORS[cli]
+        artifacts = admin.render_artifacts(overrides={}, home=tmp_path)
+        assert isinstance(artifacts, list)
+        assert all(isinstance(a, Artifact) for a in artifacts)
+        meta = admin.get_agent_metadata("change-explorer")
+        assert meta.description
 
 
 # ---------------------------------------------------------------------------
@@ -3223,3 +3219,109 @@ def test_opencode_administrator_empty_permission_omitted(tmp_path: Path) -> None
     fm = yaml.safe_load(artifacts[0].content.split("---", 2)[1])
     assert "permission" not in fm
     assert "permission: {}" not in artifacts[0].content
+
+
+# ---------------------------------------------------------------------------
+# CopilotArtifactsAdministrator (task 7) — minimal frontmatter, install path
+# ---------------------------------------------------------------------------
+
+
+def test_copilot_administrator_renders_to_copilot_agent_dir(tmp_path: Path) -> None:
+    """Copilot admin writes every change agent to .copilot/agents/<name>.agent.md."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.COPILOT]
+    artifacts = admin.render_artifacts(overrides={}, home=tmp_path)
+
+    paths = [a.install_path for a in artifacts]
+    assert paths == [
+        ".copilot/agents/change-archiver.agent.md",
+        ".copilot/agents/change-design.agent.md",
+        ".copilot/agents/change-explorer.agent.md",
+        ".copilot/agents/change-implementor.agent.md",
+        ".copilot/agents/change-orchestrator.agent.md",
+        ".copilot/agents/change-propose.agent.md",
+        ".copilot/agents/change-specs.agent.md",
+        ".copilot/agents/change-tasks.agent.md",
+        ".copilot/agents/change-validator.agent.md",
+    ]
+
+
+def test_copilot_administrator_frontmatter_name_and_description_only(tmp_path: Path) -> None:
+    """Copilot frontmatter contains only ``name`` and ``description`` (intentionally minimal)."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.COPILOT]
+    artifacts = admin.render_artifacts(["change-explorer"], overrides={}, home=tmp_path)
+
+    fm = yaml.safe_load(artifacts[0].content.split("---", 2)[1])
+    assert fm["name"] == "change-explorer"
+    assert fm["description"].startswith("Change explorer")
+    for forbidden in (
+        "model",
+        "tools",
+        "user-invocable",
+        "disable-model-invocation",
+        "mode",
+        "permission",
+        "color",
+    ):
+        assert forbidden not in fm, f"{forbidden!r} leaked into Copilot frontmatter"
+
+
+def test_copilot_administrator_does_not_require_model_copilot(tmp_path: Path) -> None:
+    """A metadata file without ``model.copilot`` is accepted — Copilot ignores model anyway."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.COPILOT]
+    # No exception is raised even though no model.copilot entry exists in metadata.
+    artifacts = admin.render_artifacts(["change-explorer"], overrides={}, home=tmp_path)
+    assert len(artifacts) == 1
+
+
+def test_copilot_administrator_overrides_do_not_leak_extra_frontmatter(tmp_path: Path) -> None:
+    """Overrides on model/effort/caps/permission do not leak into Copilot frontmatter."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.COPILOT]
+    overrides = {
+        "change-explorer": {
+            "model": {"opencode": "openai/gpt-5.4"},
+            "effort": {"opencode": "high"},
+            "caps": {"write": False},
+            "permission": {"edit": "deny"},
+        }
+    }
+    artifacts = admin.render_artifacts(["change-explorer"], overrides=overrides, home=tmp_path)
+
+    fm = yaml.safe_load(artifacts[0].content.split("---", 2)[1])
+    assert fm == {"name": "change-explorer", "description": fm["description"]}
+
+
+def test_copilot_administrator_render_artifacts_byte_matches_old_renderer(tmp_path: Path) -> None:
+    """Copilot admin renders byte-identical output to legacy render_agents."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS, render_agents
+
+    admin = ADMINISTRATORS[AgentCli.COPILOT]
+    old = render_agents(AgentCli.COPILOT, overrides={}, home=tmp_path)
+    new = admin.render_artifacts(overrides={}, home=tmp_path)
+
+    assert len(old) == len(new)
+    for old_pair, new_art in zip(old, new, strict=True):
+        assert old_pair.filename == new_art.install_path
+        assert old_pair.content == new_art.content
+
+
+def test_copilot_administrator_get_agent_metadata_resolves_overrides(tmp_path: Path) -> None:
+    """Copilot admin's get_agent_metadata applies the override store semantics."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.COPILOT]
+    meta = admin.get_agent_metadata(
+        "change-explorer",
+        overrides={"change-explorer": {"description": "Updated explorer description."}},
+        home=tmp_path,
+    )
+
+    assert meta.description == "Updated explorer description."
+    assert meta.mode == "all"
