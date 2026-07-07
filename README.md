@@ -78,9 +78,9 @@ Five commands:
 
 - `ai-harness install` — **global** distribution. Copies `AGENTS.md` + skills
   into each Agent CLI's config dir, and renders the change agents into the native
-  agent directories of Claude Code and OpenCode. Generic (`~/.agents/`) is always
-  installed. The `-o` flag adds specific Agent CLIs on top. Reinstalling is
-  byte-identical — running `install` again produces exactly the same files, so
+  agent directories of Claude Code, OpenCode, and Copilot. Generic (`~/.agents/`)
+  is always installed. The `-o` flag adds specific Agent CLIs on top. Reinstalling
+  is byte-identical — running `install` again produces exactly the same files, so
   downstream tools don't churn on unchanged content.
 
 - `ai-harness uninstall` — removes exactly what `install` wrote, using a
@@ -272,11 +272,22 @@ The project is a uv-managed Python package. The main regions of the tree:
   operations (path mapping, resource enumeration, manifest persistence); the commands
   module is a thin typer adapter over them.
 - `src/ai_harness/resources/` — the bundled artifacts (`AGENTS.md`, `skills/`,
-  and `change-agent/`) that the installer copies into each Agent CLI's home
-  directory.
+  `change-agent/`, and `agent-metadata/`) that the installer copies into each Agent
+  CLI's home directory.
 - `src/ai_harness/resources/change-agent/` — the nine change agents
   (orchestrator, explorer, implementor, validator, and support agents) that drive
   the end-to-end change workflow.
+- `src/ai_harness/resources/agent-metadata/` — one JSON metadata file per change
+  agent (`<name>.json`); the renderer decodes these into typed metadata the
+  provider administrators translate into native frontmatter.
+- `src/ai_harness/modules/harness/renderers.py` — `ADMINISTRATORS` dispatch keyed by
+  `AgentCli`; each administrator (`ClaudeArtifactsAdministrator`,
+  `OpenCodeArtifactsAdministrator`, `CopilotArtifactsAdministrator`) owns its
+  provider's discovery, frontmatter, and install paths behind the shared
+  `render_artifacts(names, overrides, *, home) -> list[Artifact]` contract.
+- `src/ai_harness/modules/harness/override_store.py` — shared
+  `load_override_store`, `save_override_store`, and `deep_merge` helper used by
+  every administrator and the set-models wizard.
 - `tests/` — Python unit tests for the CLI package. Run with `uv run pytest`.
 - `e2e/` — end-to-end test suite and Docker sandbox (`e2e/docker-test.sh`).
 - `docs/adr/` — architecture decision records.

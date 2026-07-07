@@ -18,10 +18,9 @@ from typer.testing import CliRunner
 from ai_harness.main import app
 from ai_harness.modules.harness import AgentCli, InstallManifest, install_for_agent_clis, uninstall_for_agent_clis
 from ai_harness.modules.harness.renderers import (
+    ADMINISTRATORS,
     AgentCaps,
-    _claude_tools,
-    _opencode_permission,
-    get_agent_meta,
+    discover_agent_names,
 )
 from ai_harness.modules.wizard.pure import opencode_change_agents
 
@@ -341,22 +340,22 @@ def _read_frontmatter(path: Path) -> dict:
 def _build_expected_opencode(overrides: dict | None = None) -> dict[str, dict]:
     """Build OpenCode expected frontmatter from agent metadata.
 
-    *overrides* is threaded through ``get_agent_meta`` so the expected values
-    stay in sync with the same source the renderer uses. Pass ``{}`` (the
-    default at module import) to capture the template-default baseline —
-    this avoids reading the real ``~/.ai-harness/overrides.json`` at import.
+    *overrides* is threaded through ``ADMINISTRATORS[AgentCli.OPENCODE].get_agent_metadata``
+    so the expected values stay in sync with the same source the renderer uses.
+    Pass ``{}`` (the default at module import) to capture the template-default
+    baseline — this avoids reading the real ``~/.ai-harness/overrides.json`` at import.
     """
+
     result: dict[str, dict] = {}
     for name in _NATIVE_AGENT_NAMES:
-        meta = get_agent_meta(name, overrides=overrides)
+        meta = ADMINISTRATORS[AgentCli.OPENCODE].get_agent_metadata(name, overrides=overrides)
         entry: dict[str, object] = {
-            "description": meta["description"],
-            "mode": meta["mode"],
-            "model": meta["model"]["opencode"],
+            "description": meta.description,
+            "mode": meta.mode,
+            "model": meta.model["opencode"],
         }
-        caps = meta.get("caps")
-        if isinstance(caps, AgentCaps):
-            permission = _opencode_permission(caps)
+        if meta.caps != AgentCaps():
+            permission = _opencode_permission(meta.caps)
             if permission:
                 entry["permission"] = permission
         result[name] = entry
@@ -372,26 +371,26 @@ def _build_expected_claude(overrides: dict | None = None) -> dict[str, dict]:
     Read-only agents carry a ``tools`` allow-list translated from the
     OpenCode ``permission`` block.
 
-    *overrides* is threaded through ``get_agent_meta``; pass ``{}`` to
-    capture the template-default baseline without reading disk.
+    *overrides* is threaded through
+    ``ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata``; pass ``{}``
+    to capture the template-default baseline without reading disk.
     """
     from copy import deepcopy
 
     result: dict[str, dict] = {}
     for name in _NATIVE_AGENT_NAMES:
-        meta = get_agent_meta(name, overrides=overrides)
+        meta = ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata(name, overrides=overrides)
         entry: dict[str, object] = {
-            "description": meta["description"],
+            "description": meta.description,
         }
-        is_primary = meta.get("mode") == "primary"
+        is_primary = meta.mode == "primary"
         # Subagents carry name + model; skill (primary) does not
         if not is_primary:
             entry["name"] = name
-            entry["model"] = meta["model"]["claude"]
+            entry["model"] = meta.model["claude"]
         # Translate caps to a Claude tools allow-list (restricted agents only)
-        caps = meta.get("caps")
-        if not is_primary and isinstance(caps, AgentCaps) and caps != AgentCaps():
-            entry["tools"] = ", ".join(_claude_tools(caps))
+        if not is_primary and meta.caps != AgentCaps():
+            entry["tools"] = ", ".join(_claude_tools(meta.caps))
         result[name] = deepcopy(entry)
     return result
 
@@ -1318,11 +1317,10 @@ def test_re_render_claude_applies_overrides_from_store(tmp_path: Path) -> None:
 
 
 def test_discover_agents_excludes_underscore_files() -> None:
-    """_discover_agents returns change agents only, no _-prefixed files."""
-    from ai_harness.modules.harness.renderers import _discover_agents
+    """discover_agent_names returns change agents only, no _-prefixed files."""
     from ai_harness.modules.wizard.pure import opencode_change_agents
 
-    names = _discover_agents()
+    names = discover_agent_names()
     expected_change = sorted(opencode_change_agents())
     assert names == expected_change
     assert len(names) == 9

@@ -1,0 +1,8 @@
+{
+  "description": "Change archiver — runs ai-harness change-archive for the target Change and commits the resulting .ai-harness archive/spec movement as a single scoped docs commit.",
+  "mode": "all",
+  "model": {
+    "opencode": "minimax/MiniMax-M2.7-highspeed",
+    "claude": "sonnet"
+  }
+}

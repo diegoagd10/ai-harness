@@ -35,10 +35,8 @@ from rich.panel import Panel
 
 from ai_harness.modules.harness.models import AgentCli
 from ai_harness.modules.harness.operations import re_render_for_agent_clis
-from ai_harness.modules.harness.renderers import (
-    get_agent_meta,
-    write_override_store,
-)
+from ai_harness.modules.harness.override_store import save_override_store
+from ai_harness.modules.harness.renderers import ADMINISTRATORS
 from ai_harness.modules.wizard.pure import (
     AgentMode,
     ModelSelection,
@@ -449,29 +447,52 @@ def _print_header(title: str) -> None:
 
 
 def _current_claude_model(agent: str, home: Path) -> str:
-    """Return the current Claude model for *agent* (override wins, else template)."""
-    return get_agent_meta(agent, home=home).get("model", {}).get("claude", "sonnet")
+    """Return the current Claude model for *agent* (override wins, else template).
+
+    Reads through ``ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata``
+    so the override-store semantics (``overrides=None`` reads from
+    ``home/.ai-harness/overrides.json``) stay consistent with every
+    other call site. Returns ``"sonnet"`` as the fallback when the
+    resolved metadata lacks ``model.claude`` — matches the legacy
+    template-default contract.
+    """
+    metadata = ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata(agent, home=home)
+    return metadata.model.get("claude", "sonnet")
 
 
 def _current_claude_effort(agent: str, home: Path) -> str | None:
-    """Return the current Claude effort for *agent* (override wins, else None)."""
-    return get_agent_meta(agent, home=home).get("effort", {}).get("claude")
+    """Return the current Claude effort for *agent* (override wins, else None).
+
+    Routes through the Claude administrator's ``get_agent_metadata``
+    so the override-store semantics match the render path. A ``None``
+    return means no ``effort.claude`` is set, so the picker will not
+    pre-select anything.
+    """
+    metadata = ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata(agent, home=home)
+    return metadata.effort.get("claude")
 
 
 def _current_opencode_model(agent: str, home: Path) -> str | None:
     """Return the current OpenCode model for *agent* (override wins, else template).
 
-    Unlike Claude, the template defaults differ per agent
-    (e.g. ``loop-orchestrator`` defaults to ``openai/gpt-5.5``). A
-    ``None`` return means the agent has no default for opencode — the
+    Routes through ``ADMINISTRATORS[AgentCli.OPENCODE].get_agent_metadata``
+    so the override-store semantics (``overrides=None`` reads from
+    ``home/.ai-harness/overrides.json``) match the render path.
+    A ``None`` return means the agent has no ``model.opencode`` — the
     picker just won't pre-select anything in that case.
     """
-    return get_agent_meta(agent, home=home).get("model", {}).get("opencode")
+    metadata = ADMINISTRATORS[AgentCli.OPENCODE].get_agent_metadata(agent, home=home)
+    return metadata.model.get("opencode")
 
 
 def _current_opencode_effort(agent: str, home: Path) -> str | None:
-    """Return the current OpenCode effort for *agent* (override wins, else None)."""
-    return get_agent_meta(agent, home=home).get("effort", {}).get("opencode")
+    """Return the current OpenCode effort for *agent* (override wins, else None).
+
+    Routes through the OpenCode administrator's ``get_agent_metadata``
+    so the override-store semantics match the render path.
+    """
+    metadata = ADMINISTRATORS[AgentCli.OPENCODE].get_agent_metadata(agent, home=home)
+    return metadata.effort.get("opencode")
 
 
 # ---------------------------------------------------------------------------
@@ -753,7 +774,7 @@ def run_claude_wizard(*, home: Path, agent_mode: AgentMode = AgentMode.CHANGE) -
         # successfully, it just had nothing to write.
         _console.print("[green]No changes — overrides untouched.[/green]")
         return True
-    write_override_store(home, payload)
+    save_override_store(home, payload)
 
     # Re-render Claude's installed change agents with the fresh overrides.
     # ``re_render_for_agent_clis`` writes only the rendered-agent files and
@@ -1069,7 +1090,7 @@ def run_opencode_wizard(
         # successfully, it just had nothing to write.
         _console.print("[green]No changes — overrides untouched.[/green]")
         return True
-    write_override_store(home, payload)
+    save_override_store(home, payload)
 
     # Re-render OpenCode's installed change agents with the fresh overrides.
     # ``re_render_for_agent_clis`` writes only the rendered-agent files and

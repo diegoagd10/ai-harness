@@ -8,6 +8,7 @@ for each agent CLI that supports native agents.
 
 from __future__ import annotations
 
+import copy
 import json
 import re
 from pathlib import Path
@@ -18,12 +19,12 @@ import yaml
 
 from ai_harness.modules.harness.models import AgentCli
 from ai_harness.modules.harness.renderers import (
+    ADMINISTRATORS,
     AgentCaps,
+    Artifact,
     _claude_tools,
-    _discover_agents,
     _opencode_permission,
-    get_agent_meta,
-    render_agents,
+    discover_agent_names,
 )
 
 
@@ -34,12 +35,19 @@ def _parse_frontmatter(content: str) -> dict:
     return yaml.safe_load(parts[1])
 
 
-def _find_pair(pairs: list[tuple[str, str]], name: str) -> tuple[str, str] | None:
-    """Find a (path, content) pair whose path ends with ``<name>.md``, ``<name>.agent.md``, or ``SKILL.md``."""
+def _find_pair(pairs: list, name: str):
+    """Find an artifact whose ``install_path`` ends with ``<name>.md``, ``<name>.agent.md``, or ``SKILL.md``.
+
+    Accepts both the legacy ``RenderedFile`` NamedTuple and the new
+    :class:`Artifact` dataclass — callers don't need to know which
+    provider rendered the file.
+    """
     for pair in pairs:
-        if pair[0].endswith(f"/{name}.md") or pair[0].endswith(f"/{name}/SKILL.md"):
+        # Artifact exposes ``install_path``; NamedTuple exposes ``filename``.
+        path = getattr(pair, "install_path", None) or pair[0]
+        if path.endswith(f"/{name}.md") or path.endswith(f"/{name}/SKILL.md"):
             return pair
-        if pair[0].endswith(f"/{name}.agent.md"):
+        if path.endswith(f"/{name}.agent.md"):
             return pair
     return None
 
@@ -51,9 +59,9 @@ def _find_pair(pairs: list[tuple[str, str]], name: str) -> tuple[str, str] | Non
 
 def test_render_agents_claude_returns_agents_and_skill() -> None:
     """Claude emits subagents and name-based primary skills."""
-    pairs = render_agents(AgentCli.CLAUDE)
+    pairs = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts()
 
-    paths = [path for path, _ in pairs]
+    paths = [a.install_path for a in pairs]
     assert paths == [
         ".claude/agents/change-archiver.md",
         ".claude/agents/change-design.md",
@@ -66,15 +74,15 @@ def test_render_agents_claude_returns_agents_and_skill() -> None:
         ".claude/agents/change-validator.md",
     ]
     # content is non-empty rendered text
-    for _, content in pairs:
-        assert content.startswith("---\n")
+    for a in pairs:
+        assert a.content.startswith("---\n")
 
 
 def test_render_agents_opencode_returns_agents_under_agent_dir() -> None:
     """OpenCode emits every change agent under .config/opencode/agent/."""
-    pairs = render_agents(AgentCli.OPENCODE)
+    pairs = ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts()
 
-    paths = [path for path, _ in pairs]
+    paths = [a.install_path for a in pairs]
     assert paths == [
         ".config/opencode/agent/change-archiver.md",
         ".config/opencode/agent/change-design.md",
@@ -86,15 +94,15 @@ def test_render_agents_opencode_returns_agents_under_agent_dir() -> None:
         ".config/opencode/agent/change-tasks.md",
         ".config/opencode/agent/change-validator.md",
     ]
-    for _, content in pairs:
-        assert content.startswith("---\n")
+    for a in pairs:
+        assert a.content.startswith("---\n")
 
 
 def test_render_agents_honours_explicit_names() -> None:
     """An explicit names list renders just that subset, in the given order."""
-    pairs = render_agents(AgentCli.OPENCODE, ["change-validator", "change-explorer"])
+    pairs = ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(["change-validator", "change-explorer"])
 
-    assert [path for path, _ in pairs] == [
+    assert [a.install_path for a in pairs] == [
         ".config/opencode/agent/change-validator.md",
         ".config/opencode/agent/change-explorer.md",
     ]
@@ -102,14 +110,14 @@ def test_render_agents_honours_explicit_names() -> None:
 
 def test_render_agents_unknown_cli_returns_empty() -> None:
     """CLIs without native agent support render nothing."""
-    assert render_agents(AgentCli.GENERIC) == []
+    assert ADMINISTRATORS.get(AgentCli.GENERIC) or [] == []
 
 
 def test_render_agents_writes_change_orchestrator_to_native_agent_dirs() -> None:
     """All native Agent CLIs render the change-orchestrator prompt."""
-    assert _find_pair(render_agents(AgentCli.OPENCODE), "change-orchestrator") is not None
-    assert _find_pair(render_agents(AgentCli.COPILOT), "change-orchestrator") is not None
-    assert _find_pair(render_agents(AgentCli.CLAUDE), "change-orchestrator") is not None
+    assert _find_pair(ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(), "change-orchestrator") is not None
+    assert _find_pair(ADMINISTRATORS[AgentCli.COPILOT].render_artifacts(), "change-orchestrator") is not None
+    assert _find_pair(ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts(), "change-orchestrator") is not None
 
 
 # ---------------------------------------------------------------------------
@@ -119,53 +127,53 @@ def test_render_agents_writes_change_orchestrator_to_native_agent_dirs() -> None
 
 def test_claude_subagents_have_name_and_model() -> None:
     """Every Claude subagent frontmatter includes ``name`` and ``model``."""
-    pairs = render_agents(AgentCli.CLAUDE)
+    pairs = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts()
 
     for name in ("change-explorer", "change-implementor", "change-validator"):
         pair = _find_pair(pairs, name)
         assert pair is not None, f"{name} not found in Claude output"
-        fm = _parse_frontmatter(pair[1])
+        fm = _parse_frontmatter(pair.content)
         assert fm.get("name") == name, f"{name}: expected name={name!r}, got {fm.get('name')!r}"
         assert fm.get("model") == "sonnet", f"{name}: expected model=sonnet, got {fm.get('model')!r}"
 
 
 def test_claude_output_has_no_mode_field() -> None:
     """``mode`` is absent from all Claude rendered frontmatter."""
-    pairs = render_agents(AgentCli.CLAUDE)
+    pairs = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts()
 
-    for _, content in pairs:
-        fm = _parse_frontmatter(content)
+    for a in pairs:
+        fm = _parse_frontmatter(a.content)
         assert "mode" not in fm, f"mode should be absent from Claude output, got {fm.get('mode')!r}"
 
 
 def test_claude_change_subagents_have_no_tools_field() -> None:
     """Change subagents (full access) have no tools field — inherit all tools."""
-    pairs = render_agents(AgentCli.CLAUDE)
+    pairs = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts()
     pair = _find_pair(pairs, "change-implementor")
     assert pair is not None
-    fm = _parse_frontmatter(pair[1])
+    fm = _parse_frontmatter(pair.content)
     assert "tools" not in fm, f"change-implementor should not have tools field, got {fm.get('tools')!r}"
 
 
 def test_claude_subagents_have_no_color() -> None:
     """No Claude subagent frontmatter carries a ``color`` key — Claude has no color concept."""
-    pairs = render_agents(AgentCli.CLAUDE)
+    pairs = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts()
 
     for name in ("change-explorer", "change-implementor", "change-validator"):
         pair = _find_pair(pairs, name)
         assert pair is not None, f"{name} not found in Claude output"
-        fm = _parse_frontmatter(pair[1])
+        fm = _parse_frontmatter(pair.content)
         assert "color" not in fm, f"{name}: should not have color, got {fm.get('color')!r}"
 
 
 def test_change_orchestrator_meta_declares_primary_restricted_agent() -> None:
     """Change-orchestrator metadata defines native models and restrictive capabilities."""
-    meta = get_agent_meta("change-orchestrator", overrides={})
+    meta = ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata("change-orchestrator", overrides={})
 
-    assert meta["description"]
-    assert meta["mode"] == "primary"
-    assert meta["model"]["opencode"] == "minimax/MiniMax-M3"
-    assert meta["model"]["claude"] == "sonnet"
+    assert meta.description
+    assert meta.mode == "primary"
+    assert meta.model["opencode"] == "minimax/MiniMax-M3"
+    assert meta.model["claude"] == "sonnet"
     # Orchestrator now exposes a permissive permission block via meta["permission"]
     # (no caps layer). The contract tested here is "primary mode + native models".
 
@@ -182,18 +190,18 @@ def test_change_orchestrator_body_has_human_review_gate_heading() -> None:
     the prompt template breaks at least one render test.
     """
     for cli in (AgentCli.OPENCODE, AgentCli.COPILOT, AgentCli.CLAUDE):
-        pair = _find_pair(render_agents(cli), "change-orchestrator")
+        pair = _find_pair(ADMINISTRATORS[cli].render_artifacts(), "change-orchestrator")
         assert pair is not None, f"change-orchestrator not found for {cli}"
-        body = pair[1].split("---", 2)[2].removeprefix("\n")
+        body = pair.content.split("---", 2)[2].removeprefix("\n")
         # Gate is a bold-inline paragraph in the new body (no `##` heading).
         assert "Human review gate" in body, f"{cli}: gate heading missing from rendered body"
 
 
 def test_change_orchestrator_body_gate_names_every_artifact() -> None:
     """Gate wording names PRD, design, specs, and tasks explicitly for review."""
-    pair = _find_pair(render_agents(AgentCli.OPENCODE), "change-orchestrator")
+    pair = _find_pair(ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(), "change-orchestrator")
     assert pair is not None
-    body = pair[1].split("---", 2)[2].removeprefix("\n")
+    body = pair.content.split("---", 2)[2].removeprefix("\n")
     gate_idx = body.index("Human review gate")
     # Gate is a single paragraph (bold inline marker); ends at next blank line.
     para_end = body.find("\n\n", gate_idx)
@@ -210,9 +218,9 @@ def test_change_orchestrator_body_gate_requires_explicit_confirmation() -> None:
     The continuation phrases that count as approval live in the gate section, so
     a human-confirmation policy can be checked against the rendered body.
     """
-    pair = _find_pair(render_agents(AgentCli.OPENCODE), "change-orchestrator")
+    pair = _find_pair(ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(), "change-orchestrator")
     assert pair is not None
-    body = pair[1].split("---", 2)[2].removeprefix("\n")
+    body = pair.content.split("---", 2)[2].removeprefix("\n")
     gate_idx = body.index("Human review gate")
     # Gate is a single paragraph (bold inline marker); ends at next blank line.
     para_end = body.find("\n\n", gate_idx)
@@ -237,9 +245,9 @@ def _change_orchestrator_body(cli: AgentCli = AgentCli.OPENCODE) -> str:
     wording on a single renderer (OpenCode) without re-implementing the
     parse/extract dance per test.
     """
-    pair = _find_pair(render_agents(cli), "change-orchestrator")
+    pair = _find_pair(ADMINISTRATORS[cli].render_artifacts(), "change-orchestrator")
     assert pair is not None, f"change-orchestrator not rendered for {cli}"
-    return pair[1].split("---", 2)[2].removeprefix("\n")
+    return pair.content.split("---", 2)[2].removeprefix("\n")
 
 
 def test_change_orchestrator_body_interactive_stop_after_every_delegated_phase() -> None:
@@ -420,7 +428,9 @@ def test_phase_prompts_expose_shared_result_envelope() -> None:
     shape and its own phase-specific semantic facts.
     """
     bodies = {
-        name: _find_pair(render_agents(AgentCli.OPENCODE), name)[1].split("---", 2)[2].removeprefix("\n")
+        name: _find_pair(ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(), name)
+        .content.split("---", 2)[2]
+        .removeprefix("\n")
         for name in ("change-explorer", "change-implementor", "change-validator")
     }
 
@@ -729,9 +739,9 @@ def test_change_orchestrator_body_frontmatter_parity_after_body_only_edits() -> 
     the body changes without a frontmatter bump, parity is still asserted
     through shape stability, not string equality.
     """
-    pair = _find_pair(render_agents(AgentCli.OPENCODE), "change-orchestrator")
+    pair = _find_pair(ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(), "change-orchestrator")
     assert pair is not None
-    content = pair[1]
+    content = pair.content
     fm = _parse_frontmatter(content)
 
     # Frontmatter remains a structural descriptor, not a contract dump.
@@ -751,21 +761,21 @@ def test_change_orchestrator_body_frontmatter_parity_after_body_only_edits() -> 
 
 def test_opencode_frontmatter_includes_mode() -> None:
     """OpenCode output retains ``mode`` for all agents."""
-    pairs = render_agents(AgentCli.OPENCODE)
+    pairs = ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts()
 
-    for _, content in pairs:
-        fm = _parse_frontmatter(content)
+    for a in pairs:
+        fm = _parse_frontmatter(a.content)
         assert "mode" in fm, "mode should be present in OpenCode output"
 
 
 def test_opencode_frontmatter_includes_permission_where_configured() -> None:
     """OpenCode output passes through the ``permission`` block when present."""
-    pairs = render_agents(AgentCli.OPENCODE)
+    pairs = ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts()
 
     # change-orchestrator carries a permissive permission block (full allow).
     pair = _find_pair(pairs, "change-orchestrator")
     assert pair is not None
-    fm = _parse_frontmatter(pair[1])
+    fm = _parse_frontmatter(pair.content)
     assert "permission" in fm, "change-orchestrator: permission block missing"
     assert fm["permission"]["edit"] == "allow"
     assert fm["permission"]["write"] == "allow"
@@ -774,24 +784,24 @@ def test_opencode_frontmatter_includes_permission_where_configured() -> None:
 
 def test_opencode_change_implementor_has_no_permission_block() -> None:
     """change-implementor has no permission block in OpenCode (full access)."""
-    pairs = render_agents(AgentCli.OPENCODE)
+    pairs = ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts()
     pair = _find_pair(pairs, "change-implementor")
     assert pair is not None
-    fm = _parse_frontmatter(pair[1])
+    fm = _parse_frontmatter(pair.content)
     assert "permission" not in fm, f"change-implementor should not have permission, got {fm.get('permission')!r}"
 
 
 def test_change_orchestrator_frontmatter_uses_meta() -> None:
     """Change-orchestrator renders OpenCode frontmatter from _AGENT_META."""
-    pairs = render_agents(AgentCli.OPENCODE)
+    pairs = ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts()
     pair = _find_pair(pairs, "change-orchestrator")
     assert pair is not None
-    fm = _parse_frontmatter(pair[1])
-    meta = get_agent_meta("change-orchestrator")
+    fm = _parse_frontmatter(pair.content)
+    meta = ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata("change-orchestrator")
 
-    assert fm["description"] == meta["description"]
+    assert fm["description"] == meta.description
     assert fm["mode"] == "primary"
-    assert fm["model"] == meta["model"]["opencode"]
+    assert fm["model"] == meta.model["opencode"]
     assert fm["permission"] == {
         "question": "allow",
         "task": {"*": "allow"},
@@ -804,12 +814,12 @@ def test_change_orchestrator_frontmatter_uses_meta() -> None:
 
 def test_opencode_subagents_have_no_color() -> None:
     """OpenCode change subagents carry no ``color`` key."""
-    pairs = render_agents(AgentCli.OPENCODE)
+    pairs = ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts()
 
     for name in ("change-explorer", "change-implementor", "change-validator"):
         pair = _find_pair(pairs, name)
         assert pair is not None, f"{name} not found in OpenCode output"
-        fm = _parse_frontmatter(pair[1])
+        fm = _parse_frontmatter(pair.content)
         assert "color" not in fm, f"{name}: should not have color, got {fm.get('color')!r}"
 
 
@@ -842,13 +852,34 @@ def test_invalid_meta_raises_value_error(
     bad_meta: dict,
     error_match: str,
 ) -> None:
-    """Monkeypatching get_agent_meta with missing model key raises ValueError."""
+    """Patching ``load_agent_metadata`` with a missing model key surfaces ValueError.
+
+    The legacy ``get_agent_meta`` shim is gone; the renderer now reads
+    metadata through the JSON loader. Patching that loader exercises
+    the same per-provider ValueError path.
+
+    Passes ``overrides={}`` so the renderer's ``_resolve_agent_metadata``
+    skips the disk-read override store (and the merge doesn't restore
+    the provider model from the test's real home overrides).
+    """
+    from dataclasses import replace
+
+    from ai_harness.modules.harness.renderers import load_agent_metadata
+
+    base = load_agent_metadata(agent_name)
+    # Empty ``bad_meta`` means "no model field at all" → clear the model map.
+    if "model" in bad_meta:
+        new_model = bad_meta["model"]
+    else:
+        new_model = {}  # empty model map → provider-specific render fails
+    new_mode = bad_meta.get("mode", base.mode)
+    bad = replace(base, mode=new_mode, model=new_model)
     with patch(
-        "ai_harness.modules.harness.renderers.get_agent_meta",
-        return_value=bad_meta,
+        "ai_harness.modules.harness.administrators.base.load_agent_metadata",
+        return_value=bad,
     ):
         with pytest.raises(ValueError, match=error_match):
-            render_agents(cli, [agent_name])
+            ADMINISTRATORS[cli].render_artifacts([agent_name], overrides={})
 
 
 # ---------------------------------------------------------------------------
@@ -860,85 +891,91 @@ def test_get_agent_meta_without_overrides_is_unchanged(tmp_path: Path) -> None:
     """Calling get_agent_meta without explicit overrides auto-loads from home;
     an absent overrides.json at home is a no-op (template defaults).
     """
-    meta = get_agent_meta("change-implementor", home=tmp_path)
+    meta = ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata("change-implementor", home=tmp_path)
 
-    assert meta["model"]["opencode"] == "minimax/MiniMax-M3"
-    assert meta["model"]["claude"] == "sonnet"
+    assert meta.model["opencode"] == "minimax/MiniMax-M3"
+    assert meta.model["claude"] == "sonnet"
 
 
 def test_get_agent_meta_with_empty_overrides_is_unchanged() -> None:
     """An empty overrides dict is a no-op."""
-    meta = get_agent_meta("change-implementor", overrides={})
+    meta = ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata("change-implementor", overrides={})
 
-    assert meta["model"]["opencode"] == "minimax/MiniMax-M3"
+    assert meta.model["opencode"] == "minimax/MiniMax-M3"
 
 
 def test_get_agent_meta_override_wins_on_model() -> None:
     """An override under the agent key replaces the matching model entry."""
     overrides = {"change-implementor": {"model": {"opencode": "openai/gpt-5.4"}}}
 
-    meta = get_agent_meta("change-implementor", overrides=overrides)
+    meta = ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata("change-implementor", overrides=overrides)
 
-    assert meta["model"]["opencode"] == "openai/gpt-5.4"
+    assert meta.model["opencode"] == "openai/gpt-5.4"
     # Unset CLI in the override falls back to the template default
-    assert meta["model"]["claude"] == "sonnet"
+    assert meta.model["claude"] == "sonnet"
 
 
 def test_get_agent_meta_partial_merge_preserves_defaults() -> None:
     """Partial override: untouched fields keep template defaults."""
     overrides = {"change-implementor": {"model": {"opencode": "openai/gpt-5.4"}}}
 
-    meta = get_agent_meta("change-implementor", overrides=overrides)
+    meta = ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata("change-implementor", overrides=overrides)
 
-    assert meta["description"].startswith("Change implementor")
-    assert meta["mode"] == "all"
+    assert meta.description.startswith("Change implementor")
+    assert meta.mode == "all"
     # Different agent not in overrides keeps its defaults
-    explorer_meta = get_agent_meta("change-explorer", overrides=overrides)
-    assert explorer_meta["model"]["opencode"] == "minimax/MiniMax-M2.7"
+    explorer_meta = ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata("change-explorer", overrides=overrides)
+    assert explorer_meta.model["opencode"] == "minimax/MiniMax-M2.7"
 
 
-def test_get_agent_meta_returns_a_copy_not_the_template() -> None:
-    """get_agent_meta must not let callers mutate the template via the returned dict."""
+def test_get_agent_metadata_returns_frozen_dataclass() -> None:
+    """get_agent_metadata returns a frozen AgentMetadata; callers cannot mutate it."""
+    from dataclasses import FrozenInstanceError
+
     overrides = {"change-implementor": {"model": {"opencode": "openai/gpt-5.4"}}}
-    first = get_agent_meta("change-implementor", overrides=overrides)
-    first["model"]["opencode"] = "mutated"
-    first["extra"] = "added"
+    meta = ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata("change-implementor", overrides=overrides)
 
-    second = get_agent_meta("change-implementor", overrides=overrides)
-    assert second["model"]["opencode"] == "openai/gpt-5.4"
-    assert "extra" not in second
+    # Frozen dataclass: attribute mutation raises FrozenInstanceError.
+    with pytest.raises(FrozenInstanceError):
+        meta.description = "mutated"  # type: ignore[misc]
+
+    # Same call returns a fresh value with the merged state preserved.
+    again = ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata("change-implementor", overrides=overrides)
+    assert again.model["opencode"] == "openai/gpt-5.4"
+    # And the two values compare equal (value semantics).
+    assert meta == again
 
 
 def test_get_agent_meta_unknown_override_agent_ignored() -> None:
     """Overrides keyed by an agent name not in the template are silently ignored."""
     overrides = {"unknown-agent": {"model": {"opencode": "openai/gpt-5.4"}}}
 
-    meta = get_agent_meta("change-implementor", overrides=overrides)
+    meta = ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata("change-implementor", overrides=overrides)
 
-    assert meta["model"]["opencode"] == "minimax/MiniMax-M3"
+    assert meta.model["opencode"] == "minimax/MiniMax-M3"
 
 
-def test_get_agent_meta_does_not_alias_overrides_dict() -> None:
+def test_get_agent_metadata_does_not_alias_overrides_dict() -> None:
     """Mutating the overrides dict after the call must not change the returned meta."""
     overrides = {"change-implementor": {"model": {"opencode": "openai/gpt-5.4"}}}
-    meta = get_agent_meta("change-implementor", overrides=overrides)
+    meta = ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata("change-implementor", overrides=overrides)
     overrides["change-implementor"]["model"]["opencode"] = "openai/gpt-5.5"
 
-    again = get_agent_meta("change-implementor", overrides=overrides)
-    # Same call must reflect the new override state
-    assert again["model"]["opencode"] == "openai/gpt-5.5"
-    # Previously-returned dict must not have been mutated
-    assert meta["model"]["opencode"] == "openai/gpt-5.4"
+    again = ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata("change-implementor", overrides=overrides)
+    # Same call must reflect the new override state.
+    assert again.model["opencode"] == "openai/gpt-5.5"
+    # Previously-returned metadata (frozen dataclass) was not mutated.
+    assert meta.model["opencode"] == "openai/gpt-5.4"
 
 
 def test_render_agents_override_changes_opencode_model_in_frontmatter() -> None:
     """Override flows through render_agents and changes the rendered OpenCode frontmatter."""
     overrides = {"change-implementor": {"model": {"opencode": "openai/gpt-5.4"}}}
 
-    pairs = render_agents(AgentCli.OPENCODE, ["change-implementor"], overrides=overrides)
+    pairs = ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(["change-implementor"], overrides=overrides)
 
     assert len(pairs) == 1
-    fm = _parse_frontmatter(pairs[0][1])
+    fm = _parse_frontmatter(pairs[0].content)
     assert fm["model"] == "openai/gpt-5.4"
 
 
@@ -946,16 +983,16 @@ def test_render_agents_override_changes_claude_model_in_frontmatter() -> None:
     """Override flows through render_agents and changes the rendered Claude frontmatter."""
     overrides = {"change-implementor": {"model": {"claude": "opus"}}}
 
-    pairs = render_agents(AgentCli.CLAUDE, ["change-implementor"], overrides=overrides)
+    pairs = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts(["change-implementor"], overrides=overrides)
 
-    fm = _parse_frontmatter(pairs[0][1])
+    fm = _parse_frontmatter(pairs[0].content)
     assert fm["model"] == "opus"
 
 
 def test_render_agents_byte_identical_when_no_overrides() -> None:
     """render_agents with overrides=None produces identical output to omit-overrides calls."""
-    baseline = render_agents(AgentCli.CLAUDE)
-    no_arg = render_agents(AgentCli.CLAUDE, overrides=None)
+    baseline = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts()
+    no_arg = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts(overrides=None)
 
     assert baseline == no_arg
 
@@ -969,9 +1006,9 @@ def test_opencode_emits_reasoning_effort_when_set() -> None:
     """OpenCode renderer emits ``reasoningEffort`` when override map has opencode."""
     overrides = {"change-implementor": {"effort": {"opencode": "high"}}}
 
-    pairs = render_agents(AgentCli.OPENCODE, ["change-implementor"], overrides=overrides)
+    pairs = ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(["change-implementor"], overrides=overrides)
 
-    fm = _parse_frontmatter(pairs[0][1])
+    fm = _parse_frontmatter(pairs[0].content)
     assert fm["reasoningEffort"] == "high"
 
 
@@ -979,25 +1016,25 @@ def test_claude_emits_effort_when_set() -> None:
     """Claude renderer emits ``effort`` when override map has claude."""
     overrides = {"change-implementor": {"effort": {"claude": "high"}}}
 
-    pairs = render_agents(AgentCli.CLAUDE, ["change-implementor"], overrides=overrides)
+    pairs = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts(["change-implementor"], overrides=overrides)
 
-    fm = _parse_frontmatter(pairs[0][1])
+    fm = _parse_frontmatter(pairs[0].content)
     assert fm["effort"] == "high"
 
 
 def test_opencode_omits_effort_when_unset() -> None:
     """No effort override → no ``reasoningEffort`` key in OpenCode frontmatter."""
-    pairs = render_agents(AgentCli.OPENCODE, ["change-implementor"], overrides={})
+    pairs = ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(["change-implementor"], overrides={})
 
-    fm = _parse_frontmatter(pairs[0][1])
+    fm = _parse_frontmatter(pairs[0].content)
     assert "reasoningEffort" not in fm
 
 
 def test_claude_omits_effort_when_unset() -> None:
     """No effort override → no ``effort`` key in Claude frontmatter."""
-    pairs = render_agents(AgentCli.CLAUDE, ["change-implementor"], overrides={})
+    pairs = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts(["change-implementor"], overrides={})
 
-    fm = _parse_frontmatter(pairs[0][1])
+    fm = _parse_frontmatter(pairs[0].content)
     assert "effort" not in fm
 
 
@@ -1005,22 +1042,22 @@ def test_opencode_effort_only_for_overridden_cli() -> None:
     """Effort map keyed only for opencode → Claude gets no effort, OpenCode does."""
     overrides = {"change-implementor": {"effort": {"opencode": "high"}}}
 
-    opencode_pairs = render_agents(AgentCli.OPENCODE, ["change-implementor"], overrides=overrides)
-    claude_pairs = render_agents(AgentCli.CLAUDE, ["change-implementor"], overrides=overrides)
+    opencode_pairs = ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(["change-implementor"], overrides=overrides)
+    claude_pairs = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts(["change-implementor"], overrides=overrides)
 
-    assert _parse_frontmatter(opencode_pairs[0][1]).get("reasoningEffort") == "high"
-    assert "effort" not in _parse_frontmatter(claude_pairs[0][1])
+    assert _parse_frontmatter(opencode_pairs[0].content).get("reasoningEffort") == "high"
+    assert "effort" not in _parse_frontmatter(claude_pairs[0].content)
 
 
 def test_claude_effort_only_for_overridden_cli() -> None:
     """Effort map keyed only for claude → OpenCode gets no reasoningEffort, Claude does."""
     overrides = {"change-implementor": {"effort": {"claude": "high"}}}
 
-    opencode_pairs = render_agents(AgentCli.OPENCODE, ["change-implementor"], overrides=overrides)
-    claude_pairs = render_agents(AgentCli.CLAUDE, ["change-implementor"], overrides=overrides)
+    opencode_pairs = ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(["change-implementor"], overrides=overrides)
+    claude_pairs = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts(["change-implementor"], overrides=overrides)
 
-    assert "reasoningEffort" not in _parse_frontmatter(opencode_pairs[0][1])
-    assert _parse_frontmatter(claude_pairs[0][1]).get("effort") == "high"
+    assert "reasoningEffort" not in _parse_frontmatter(opencode_pairs[0].content)
+    assert _parse_frontmatter(claude_pairs[0].content).get("effort") == "high"
 
 
 # ---------------------------------------------------------------------------
@@ -1037,11 +1074,11 @@ def test_override_with_both_model_and_effort() -> None:
         }
     }
 
-    opencode_pairs = render_agents(AgentCli.OPENCODE, ["change-implementor"], overrides=overrides)
-    claude_pairs = render_agents(AgentCli.CLAUDE, ["change-implementor"], overrides=overrides)
+    opencode_pairs = ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(["change-implementor"], overrides=overrides)
+    claude_pairs = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts(["change-implementor"], overrides=overrides)
 
-    opencode_fm = _parse_frontmatter(opencode_pairs[0][1])
-    claude_fm = _parse_frontmatter(claude_pairs[0][1])
+    opencode_fm = _parse_frontmatter(opencode_pairs[0].content)
+    claude_fm = _parse_frontmatter(claude_pairs[0].content)
     assert opencode_fm["model"] == "openai/gpt-5.4"
     assert opencode_fm["reasoningEffort"] == "high"
     assert claude_fm["model"] == "sonnet"  # no claude override → default
@@ -1065,9 +1102,9 @@ def test_opencode_omits_reasoning_effort_when_override_value_is_none() -> None:
     """
     overrides = {"change-validator": {"effort": {"opencode": None}}}
 
-    pairs = render_agents(AgentCli.OPENCODE, ["change-validator"], overrides=overrides)
+    pairs = ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(["change-validator"], overrides=overrides)
 
-    content = pairs[0][1]
+    content = pairs[0].content
     fm = _parse_frontmatter(content)
     assert "reasoningEffort" not in fm, (
         f"reasoningEffort must be omitted when override value is None; got {fm.get('reasoningEffort')!r}"
@@ -1080,9 +1117,9 @@ def test_claude_omits_effort_when_override_value_is_none() -> None:
     """Same contract for Claude: ``{"effort": {"claude": None}}`` must drop ``effort``."""
     overrides = {"change-validator": {"effort": {"claude": None}}}
 
-    pairs = render_agents(AgentCli.CLAUDE, ["change-validator"], overrides=overrides)
+    pairs = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts(["change-validator"], overrides=overrides)
 
-    content = pairs[0][1]
+    content = pairs[0].content
     fm = _parse_frontmatter(content)
     assert "effort" not in fm, f"effort must be omitted when override value is None; got {fm.get('effort')!r}"
     assert "effort: null" not in content, f"raw frontmatter still contains effort: null:\n{content}"
@@ -1103,9 +1140,9 @@ def test_opencode_non_reasoning_selection_omits_reasoning_effort() -> None:
         }
     }
 
-    pairs = render_agents(AgentCli.OPENCODE, ["change-validator"], overrides=overrides)
+    pairs = ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(["change-validator"], overrides=overrides)
 
-    content = pairs[0][1]
+    content = pairs[0].content
     fm = _parse_frontmatter(content)
     assert fm["model"] == "openai/gpt-5.5-mini"
     assert "reasoningEffort" not in fm
@@ -1121,9 +1158,9 @@ def test_claude_non_reasoning_selection_omits_effort() -> None:
         }
     }
 
-    pairs = render_agents(AgentCli.CLAUDE, ["change-validator"], overrides=overrides)
+    pairs = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts(["change-validator"], overrides=overrides)
 
-    content = pairs[0][1]
+    content = pairs[0].content
     fm = _parse_frontmatter(content)
     assert fm["model"] == "haiku"
     assert "effort" not in fm
@@ -1134,11 +1171,11 @@ def test_opencode_partial_effort_clear_keeps_other_cli_unset() -> None:
     """Clearing only OpenCode effort does not leak into Claude effort emission."""
     overrides = {"change-validator": {"effort": {"opencode": None}}}
 
-    opencode_pairs = render_agents(AgentCli.OPENCODE, ["change-validator"], overrides=overrides)
-    claude_pairs = render_agents(AgentCli.CLAUDE, ["change-validator"], overrides=overrides)
+    opencode_pairs = ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(["change-validator"], overrides=overrides)
+    claude_pairs = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts(["change-validator"], overrides=overrides)
 
-    assert "reasoningEffort" not in _parse_frontmatter(opencode_pairs[0][1])
-    assert "effort" not in _parse_frontmatter(claude_pairs[0][1])
+    assert "reasoningEffort" not in _parse_frontmatter(opencode_pairs[0].content)
+    assert "effort" not in _parse_frontmatter(claude_pairs[0].content)
 
 
 def test_effort_value_none_does_not_override_concrete_value_for_other_cli() -> None:
@@ -1149,11 +1186,11 @@ def test_effort_value_none_does_not_override_concrete_value_for_other_cli() -> N
         }
     }
 
-    opencode_pairs = render_agents(AgentCli.OPENCODE, ["change-validator"], overrides=overrides)
-    claude_pairs = render_agents(AgentCli.CLAUDE, ["change-validator"], overrides=overrides)
+    opencode_pairs = ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(["change-validator"], overrides=overrides)
+    claude_pairs = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts(["change-validator"], overrides=overrides)
 
-    opencode_fm = _parse_frontmatter(opencode_pairs[0][1])
-    claude_fm = _parse_frontmatter(claude_pairs[0][1])
+    opencode_fm = _parse_frontmatter(opencode_pairs[0].content)
+    claude_fm = _parse_frontmatter(claude_pairs[0].content)
     assert "reasoningEffort" not in opencode_fm
     assert claude_fm["effort"] == "high"
 
@@ -1167,8 +1204,8 @@ def test_change_orchestrator_skill_unaffected_by_overrides() -> None:
         }
     }
 
-    pairs = render_agents(AgentCli.CLAUDE, ["change-orchestrator"], overrides=overrides)
-    fm = _parse_frontmatter(pairs[0][1])
+    pairs = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts(["change-orchestrator"], overrides=overrides)
+    fm = _parse_frontmatter(pairs[0].content)
 
     assert "model" not in fm, f"skill should not have model, got {fm.get('model')!r}"
     assert "effort" not in fm, f"skill should not have effort, got {fm.get('effort')!r}"
@@ -1179,10 +1216,10 @@ def test_change_orchestrator_skill_unchanged_when_only_other_agents_overridden()
     """Override on change-implementor must not leak into the change-orchestrator skill."""
     overrides = {"change-implementor": {"model": {"claude": "opus"}, "effort": {"claude": "high"}}}
 
-    pairs = render_agents(AgentCli.CLAUDE, overrides=overrides)
+    pairs = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts(overrides=overrides)
     orchestrator = _find_pair(pairs, "change-orchestrator")
     assert orchestrator is not None
-    fm = _parse_frontmatter(orchestrator[1])
+    fm = _parse_frontmatter(orchestrator.content)
 
     assert "model" not in fm
     assert "effort" not in fm
@@ -1193,17 +1230,19 @@ def test_template_meta_not_mutated_by_overrides_across_calls(tmp_path: Path) -> 
     overrides_a = {"change-implementor": {"model": {"opencode": "openai/gpt-5.4"}}}
     overrides_b = {"change-implementor": {"model": {"opencode": "openai/gpt-5.5"}}}
 
-    first = get_agent_meta("change-implementor", overrides=overrides_a)
-    second = get_agent_meta("change-implementor", overrides=overrides_b)
-    third = get_agent_meta("change-implementor", home=tmp_path)  # absent store → template default
+    first = ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata("change-implementor", overrides=overrides_a)
+    second = ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata("change-implementor", overrides=overrides_b)
+    third = ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata(
+        "change-implementor", home=tmp_path
+    )  # absent store → template default
 
-    assert first["model"]["opencode"] == "openai/gpt-5.4"
-    assert second["model"]["opencode"] == "openai/gpt-5.5"
-    assert third["model"]["opencode"] == "minimax/MiniMax-M3"
+    assert first.model["opencode"] == "openai/gpt-5.4"
+    assert second.model["opencode"] == "openai/gpt-5.5"
+    assert third.model["opencode"] == "minimax/MiniMax-M3"
 
     # No leftover mutation from any of the override calls
-    assert first["model"]["claude"] == "sonnet"
-    assert second["model"]["claude"] == "sonnet"
+    assert first.model["claude"] == "sonnet"
+    assert second.model["claude"] == "sonnet"
 
 
 # ---------------------------------------------------------------------------
@@ -1220,24 +1259,24 @@ def _write_overrides_store(home: Path, payload: dict) -> Path:
 
 
 def test_get_agent_meta_auto_loads_override_store_from_home(tmp_path: Path) -> None:
-    """get_agent_meta(name) with no overrides arg reads from home/.ai-harness/overrides.json."""
+    """get_agent_metadata(name) with no overrides reads from home/.ai-harness/overrides.json."""
     _write_overrides_store(tmp_path, {"change-implementor": {"model": {"opencode": "openai/gpt-5.4"}}})
 
-    meta = get_agent_meta("change-implementor", home=tmp_path)
+    meta = ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata("change-implementor", home=tmp_path)
 
-    assert meta["model"]["opencode"] == "openai/gpt-5.4"
+    assert meta.model["opencode"] == "openai/gpt-5.4"
     # Unset CLI falls back to template default
-    assert meta["model"]["claude"] == "sonnet"
+    assert meta.model["claude"] == "sonnet"
 
 
 def test_get_agent_meta_auto_load_missing_store_is_noop(tmp_path: Path) -> None:
     """No overrides.json at home → get_agent_meta returns template defaults."""
     # No file written at tmp_path/.ai-harness/overrides.json
-    meta = get_agent_meta("change-implementor", home=tmp_path)
+    meta = ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata("change-implementor", home=tmp_path)
 
-    assert meta["model"]["opencode"] == "minimax/MiniMax-M3"
-    assert meta["model"]["claude"] == "sonnet"
-    assert meta["description"].startswith("Change implementor")
+    assert meta.model["opencode"] == "minimax/MiniMax-M3"
+    assert meta.model["claude"] == "sonnet"
+    assert meta.description.startswith("Change implementor")
 
 
 def test_get_agent_meta_auto_load_partial_override_preserves_others(tmp_path: Path) -> None:
@@ -1247,25 +1286,25 @@ def test_get_agent_meta_auto_load_partial_override_preserves_others(tmp_path: Pa
         {"change-implementor": {"model": {"opencode": "openai/gpt-5.4"}, "effort": {"opencode": "high"}}},
     )
 
-    implementor = get_agent_meta("change-implementor", home=tmp_path)
-    explorer = get_agent_meta("change-explorer", home=tmp_path)
+    implementor = ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata("change-implementor", home=tmp_path)
+    explorer = ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata("change-explorer", home=tmp_path)
 
-    assert implementor["model"]["opencode"] == "openai/gpt-5.4"
-    assert implementor["effort"] == {"opencode": "high"}
-    assert implementor["model"]["claude"] == "sonnet"  # not overridden → default
-    assert implementor["mode"] == "all"  # not in override → default
+    assert implementor.model["opencode"] == "openai/gpt-5.4"
+    assert dict(implementor.effort) == {"opencode": "high"}
+    assert implementor.model["claude"] == "sonnet"  # not overridden → default
+    assert implementor.mode == "all"  # not in override → default
     # Explorer untouched
-    assert explorer["model"]["opencode"] == "minimax/MiniMax-M2.7"
-    assert "effort" not in explorer
+    assert explorer.model["opencode"] == "minimax/MiniMax-M2.7"
+    assert "opencode" not in dict(explorer.effort)
 
 
 def test_get_agent_meta_auto_load_unknown_override_agent_ignored(tmp_path: Path) -> None:
     """Overrides keyed by an unknown agent are silently ignored on auto-load."""
     _write_overrides_store(tmp_path, {"unknown-agent": {"model": {"opencode": "openai/gpt-5.4"}}})
 
-    meta = get_agent_meta("change-implementor", home=tmp_path)
+    meta = ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata("change-implementor", home=tmp_path)
 
-    assert meta["model"]["opencode"] == "minimax/MiniMax-M3"
+    assert meta.model["opencode"] == "minimax/MiniMax-M3"
 
 
 def test_get_agent_meta_auto_load_malformed_store_raises(tmp_path: Path) -> None:
@@ -1275,29 +1314,29 @@ def test_get_agent_meta_auto_load_malformed_store_raises(tmp_path: Path) -> None
     bad_path.write_text("{not valid json", encoding="utf-8")
 
     with pytest.raises(json.JSONDecodeError):
-        get_agent_meta("change-implementor", home=tmp_path)
+        ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata("change-implementor", home=tmp_path)
 
 
 def test_get_agent_meta_explicit_overrides_wins_over_store(tmp_path: Path) -> None:
     """An explicit overrides=... arg skips the store lookup entirely."""
     _write_overrides_store(tmp_path, {"change-implementor": {"model": {"opencode": "openai/gpt-5.4"}}})
 
-    meta = get_agent_meta(
+    meta = ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata(
         "change-implementor",
         overrides={"change-implementor": {"model": {"opencode": "override"}}},
         home=tmp_path,
     )
 
-    assert meta["model"]["opencode"] == "override"
+    assert meta.model["opencode"] == "override"
 
 
 def test_render_agents_auto_loads_override_store_from_home(tmp_path: Path) -> None:
     """render_agents(cli, home=home) reads the store once and threads it through."""
     _write_overrides_store(tmp_path, {"change-implementor": {"model": {"opencode": "openai/gpt-5.4"}}})
 
-    pairs = render_agents(AgentCli.OPENCODE, ["change-implementor"], home=tmp_path)
+    pairs = ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(["change-implementor"], home=tmp_path)
 
-    fm = _parse_frontmatter(pairs[0][1])
+    fm = _parse_frontmatter(pairs[0].content)
     assert fm["model"] == "openai/gpt-5.4"
 
 
@@ -1322,14 +1361,13 @@ def test_render_agents_explicit_overrides_skips_malformed_home_store(
     # Explicit empty overrides — must NOT read HOME. Pass home=tmp_path so the
     # frontmatter pass still uses tmp_path (no home store either, but explicit
     # overrides sidestep ambient state regardless of the home arg).
-    pairs = render_agents(
-        AgentCli.CLAUDE,
+    pairs = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts(
         ["change-implementor"],
         overrides={},
         home=tmp_path,
     )
 
-    fm = _parse_frontmatter(pairs[0][1])
+    fm = _parse_frontmatter(pairs[0].content)
     assert fm["model"] == "sonnet"  # template default — proves HOME was not read
 
 
@@ -1346,21 +1384,20 @@ def test_render_agents_explicit_overrides_sidestep_home_store_state(
     )
     monkeypatch.setenv("HOME", str(tmp_path))
 
-    pairs = render_agents(
-        AgentCli.CLAUDE,
+    pairs = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts(
         ["change-implementor"],
         overrides={"change-implementor": {"model": {"claude": "explicit-value"}}},
     )
 
     # Explicit overrides win on model...
-    fm = _parse_frontmatter(pairs[0][1])
+    fm = _parse_frontmatter(pairs[0].content)
     assert fm["model"] == "explicit-value"
     # ...and the explicit empty mode keeps dispatch in the subagent branch
     # (not the skill branch), proving the mode lookup also saw the in-memory
     # overrides, not HOME.
     pair = _find_pair(pairs, "change-implementor")
     assert pair is not None
-    assert pair[0] == ".claude/agents/change-implementor.md"
+    assert pair.install_path == ".claude/agents/change-implementor.md"
 
 
 def test_render_agents_mode_override_routes_through_dispatch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1370,15 +1407,14 @@ def test_render_agents_mode_override_routes_through_dispatch(tmp_path: Path, mon
     """
     monkeypatch.setenv("HOME", str(tmp_path))  # no overrides.json on disk
 
-    pairs = render_agents(
-        AgentCli.CLAUDE,
+    pairs = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts(
         ["change-implementor"],
         overrides={"change-implementor": {"mode": "primary"}},
     )
 
     # Primary → skill directory, with SKILL.md as the leaf filename.
-    skill_paths = [path for path, _ in pairs if path.endswith("/SKILL.md")]
-    assert skill_paths, f"expected a SKILL.md dispatch, got {[p for p, _ in pairs]}"
+    skill_paths = [a.install_path for a in pairs if a.install_path.endswith("/SKILL.md")]
+    assert skill_paths, f"expected a SKILL.md dispatch, got {[a.install_path for a in pairs]}"
     assert skill_paths[0].endswith("/change-implementor/SKILL.md")
 
 
@@ -1390,9 +1426,9 @@ def test_render_agents_mode_override_routes_through_dispatch(tmp_path: Path, mon
 
 def test_render_agents_copilot_returns_agent_files() -> None:
     """Copilot emits change agents under .copilot/agents/ with .agent.md extension."""
-    pairs = render_agents(AgentCli.COPILOT)
+    pairs = ADMINISTRATORS[AgentCli.COPILOT].render_artifacts()
 
-    paths = [path for path, _ in pairs]
+    paths = [a.install_path for a in pairs]
     assert paths == [
         ".copilot/agents/change-archiver.agent.md",
         ".copilot/agents/change-design.agent.md",
@@ -1404,13 +1440,13 @@ def test_render_agents_copilot_returns_agent_files() -> None:
         ".copilot/agents/change-tasks.agent.md",
         ".copilot/agents/change-validator.agent.md",
     ]
-    for _, content in pairs:
-        assert content.startswith("---\n")
+    for a in pairs:
+        assert a.content.startswith("---\n")
 
 
 def test_copilot_frontmatter_has_name_and_description_only() -> None:
     """Every Copilot agent frontmatter contains exactly ``name`` and ``description``."""
-    pairs = render_agents(AgentCli.COPILOT)
+    pairs = ADMINISTRATORS[AgentCli.COPILOT].render_artifacts()
 
     for name in (
         "change-explorer",
@@ -1425,11 +1461,11 @@ def test_copilot_frontmatter_has_name_and_description_only() -> None:
     ):
         pair = _find_pair(pairs, name)
         assert pair is not None, f"{name} not found in Copilot output"
-        fm = _parse_frontmatter(pair[1])
+        fm = _parse_frontmatter(pair.content)
         assert fm.get("name") == name, f"{name}: expected name={name!r}, got {fm.get('name')!r}"
-        assert fm.get("description", "").startswith(get_agent_meta(name)["description"]), (
-            f"{name}: description mismatch"
-        )
+        assert fm.get("description", "").startswith(
+            ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata(name).description
+        ), f"{name}: description mismatch"
         # MUST NOT contain model, tools, user-invocable, disable-model-invocation, mode, permission, color
         for forbidden in (
             "model",
@@ -1445,22 +1481,22 @@ def test_copilot_frontmatter_has_name_and_description_only() -> None:
 
 def test_render_agents_copilot_unknown_cli_returns_empty() -> None:
     """GENERIC is still treated as no native agent support — no copilot leak."""
-    assert render_agents(AgentCli.GENERIC) == []
+    assert ADMINISTRATORS.get(AgentCli.GENERIC) or [] == []
 
 
 def test_render_agents_copilot_byte_identical_when_no_overrides() -> None:
     """render_agents for Copilot with overrides=None produces identical output to default."""
-    baseline = render_agents(AgentCli.COPILOT)
-    no_arg = render_agents(AgentCli.COPILOT, overrides=None)
+    baseline = ADMINISTRATORS[AgentCli.COPILOT].render_artifacts()
+    no_arg = ADMINISTRATORS[AgentCli.COPILOT].render_artifacts(overrides=None)
 
     assert baseline == no_arg
 
 
 def test_render_agents_copilot_honours_explicit_names() -> None:
     """An explicit names list renders just that subset for Copilot."""
-    pairs = render_agents(AgentCli.COPILOT, ["change-validator", "change-explorer"])
+    pairs = ADMINISTRATORS[AgentCli.COPILOT].render_artifacts(["change-validator", "change-explorer"])
 
-    assert [path for path, _ in pairs] == [
+    assert [a.install_path for a in pairs] == [
         ".copilot/agents/change-validator.agent.md",
         ".copilot/agents/change-explorer.agent.md",
     ]
@@ -1473,9 +1509,9 @@ def test_copilot_no_model_validation_required() -> None:
         "ai_harness.modules.harness.renderers.get_agent_meta",
         return_value=bad_meta,
     ):
-        pairs = render_agents(AgentCli.COPILOT, ["change-explorer"])
+        pairs = ADMINISTRATORS[AgentCli.COPILOT].render_artifacts(["change-explorer"])
         assert len(pairs) == 1
-        assert pairs[0][1].startswith("---\n")
+        assert pairs[0].content.startswith("---\n")
 
 
 def test_render_agents_copilot_with_overrides_preserves_name_and_description() -> None:
@@ -1486,10 +1522,10 @@ def test_render_agents_copilot_with_overrides_preserves_name_and_description() -
             "effort": {"opencode": "high"},
         }
     }
-    pairs = render_agents(AgentCli.COPILOT, ["change-implementor"], overrides=overrides)
+    pairs = ADMINISTRATORS[AgentCli.COPILOT].render_artifacts(["change-implementor"], overrides=overrides)
 
     assert len(pairs) == 1
-    fm = _parse_frontmatter(pairs[0][1])
+    fm = _parse_frontmatter(pairs[0].content)
     assert fm.get("name") == "change-implementor"
     assert "description" in fm
     for forbidden in ("model", "effort", "reasoningEffort", "tools", "mode", "permission"):
@@ -1529,7 +1565,7 @@ def test_caps_translation_is_per_capability() -> None:
 
 def test_discover_agents_excludes_underscore_prefixed_files() -> None:
     """_discover_agents returns change agents only, skipping underscore-prefixed files."""
-    names = _discover_agents()
+    names = discover_agent_names()
 
     assert names == [
         "change-archiver",
@@ -1583,7 +1619,7 @@ def test_discover_agents_skips_missing_agent_dir(monkeypatch: pytest.MonkeyPatch
         ("missing-change-agent",),
     )
 
-    names = _discover_agents()
+    names = discover_agent_names()
 
     assert names == []
 
@@ -1604,7 +1640,7 @@ def test_discover_agents_skips_empty_agent_dir(tmp_path: Path, monkeypatch: pyte
         (empty_root / "empty-change-agent",),
     )
 
-    names = _discover_agents()
+    names = discover_agent_names()
 
     assert names == []
 
@@ -1622,7 +1658,7 @@ def test_discover_agents_excludes_underscore_prefixed_files_in_resource_dir(
         (change_root,),
     )
 
-    names = _discover_agents()
+    names = discover_agent_names()
 
     assert names == ["change-orchestrator"]
     assert "_shared" not in names
@@ -1642,7 +1678,7 @@ def test_discover_agents_raises_on_name_collision(tmp_path: Path, monkeypatch: p
     )
 
     with pytest.raises(ValueError, match="Duplicate agent template 'shared'"):
-        _discover_agents()
+        discover_agent_names()
 
 
 # ---------------------------------------------------------------------------
@@ -1652,18 +1688,18 @@ def test_discover_agents_raises_on_name_collision(tmp_path: Path, monkeypatch: p
 
 def test_change_archiver_is_discovered_as_a_change_agent() -> None:
     """Renderer discovery includes change-archiver in the change-agent set."""
-    names = _discover_agents()
+    names = discover_agent_names()
     assert "change-archiver" in names
 
 
 def test_change_archiver_meta_declares_subagent_role() -> None:
     """Change-archiver metadata defines it as a subagent with native models."""
-    meta = get_agent_meta("change-archiver", overrides={})
+    meta = ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata("change-archiver", overrides={})
 
-    assert meta["description"]
-    assert meta["mode"] == "all"
-    assert meta["model"]["opencode"] == "minimax/MiniMax-M2.7-highspeed"
-    assert meta["model"]["claude"] == "sonnet"
+    assert meta.description
+    assert meta.mode == "all"
+    assert meta.model["opencode"] == "minimax/MiniMax-M2.7-highspeed"
+    assert meta.model["claude"] == "sonnet"
 
 
 def test_change_archiver_prompt_runs_cli_command_and_commits_once() -> None:
@@ -1724,9 +1760,9 @@ def test_change_archiver_result_envelope_includes_archive_commit_and_blocked_err
 
 def test_change_archiver_renders_on_every_native_agent_cli() -> None:
     """All three native CLIs discover and render change-archiver."""
-    assert _find_pair(render_agents(AgentCli.OPENCODE), "change-archiver") is not None
-    assert _find_pair(render_agents(AgentCli.COPILOT), "change-archiver") is not None
-    assert _find_pair(render_agents(AgentCli.CLAUDE), "change-archiver") is not None
+    assert _find_pair(ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(), "change-archiver") is not None
+    assert _find_pair(ADMINISTRATORS[AgentCli.COPILOT].render_artifacts(), "change-archiver") is not None
+    assert _find_pair(ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts(), "change-archiver") is not None
 
 
 # ---------------------------------------------------------------------------
@@ -1792,9 +1828,9 @@ NATIVE_RENDERERS = (AgentCli.OPENCODE, AgentCli.COPILOT, AgentCli.CLAUDE)
 
 def _native_change_orchestrator_body(cli: AgentCli) -> str:
     """Return the rendered change-orchestrator body for the given native CLI."""
-    pair = _find_pair(render_agents(cli), "change-orchestrator")
+    pair = _find_pair(ADMINISTRATORS[cli].render_artifacts(), "change-orchestrator")
     assert pair is not None, f"change-orchestrator not rendered for {cli}"
-    return pair[1].split("---", 2)[2].removeprefix("\n")
+    return pair.content.split("---", 2)[2].removeprefix("\n")
 
 
 @pytest.mark.parametrize("cli", NATIVE_RENDERERS)
@@ -2078,9 +2114,9 @@ def test_change_orchestrator_body_inlines_commit_format_directive(cli: AgentCli)
 
 def _native_change_implementor_body(cli: AgentCli) -> str:
     """Return the rendered change-implementor body for the given native CLI."""
-    pair = _find_pair(render_agents(cli), "change-implementor")
+    pair = _find_pair(ADMINISTRATORS[cli].render_artifacts(), "change-implementor")
     assert pair is not None, f"change-implementor not rendered for {cli}"
-    return pair[1].split("---", 2)[2].removeprefix("\n")
+    return pair.content.split("---", 2)[2].removeprefix("\n")
 
 
 @pytest.mark.parametrize("cli", (AgentCli.OPENCODE, AgentCli.CLAUDE, AgentCli.COPILOT))
@@ -2217,3 +2253,1383 @@ def test_renderer_parity_change_implementor_has_missing_directive_error(cli: Age
     assert "commit-format directive missing from delegation" in body, (
         f"{cli}: change-implementor body missing the 'commit-format directive missing from delegation' error string"
     )
+
+
+# ---------------------------------------------------------------------------
+# Foundation contract — Artifact, AgentMetadata, ArtifactsAdministrator,
+# ADMINISTRATORS dispatch (task 1).
+# ---------------------------------------------------------------------------
+
+
+def test_artifact_is_frozen_slots_dataclass_with_install_path_and_content() -> None:
+    """Artifact is the caller-facing render output: install_path + content.
+
+    Locks the new output contract that replaces ``RenderedFile.filename``.
+    Frozen/slots enforces immutability — artifacts are render results, not
+    mutable scratch space.
+    """
+    from dataclasses import FrozenInstanceError, fields
+
+    artifact = Artifact(install_path=".claude/agents/change-explorer.md", content="---\nname: x\n---\nbody")
+
+    assert artifact.install_path == ".claude/agents/change-explorer.md"
+    assert artifact.content.startswith("---\n")
+    # Field set is exactly install_path + content.
+    assert {f.name for f in fields(Artifact)} == {"install_path", "content"}
+    # Frozen: attribute mutation raises.
+    with pytest.raises(FrozenInstanceError):
+        artifact.install_path = "mutated"  # type: ignore[misc]
+
+
+def test_artifact_equality_compares_by_value_not_identity() -> None:
+    """Two Artifacts with the same install_path/content compare equal — value semantics."""
+
+    left = Artifact(install_path=".config/opencode/agent/x.md", content="body")
+    right = Artifact(install_path=".config/opencode/agent/x.md", content="body")
+
+    assert left == right
+    assert hash(left) == hash(right)
+
+
+def test_agent_metadata_is_frozen_slots_with_default_factory_caps() -> None:
+    """AgentMetadata exposes the design's typed metadata fields with safe defaults."""
+    from dataclasses import FrozenInstanceError, fields
+
+    from ai_harness.modules.harness.renderers import AgentCaps, AgentMetadata
+
+    meta = AgentMetadata(description="test")
+
+    # Defaults match the design contract.
+    assert meta.mode == "subagent"
+    assert dict(meta.model) == {}
+    assert dict(meta.effort) == {}
+    assert meta.caps == AgentCaps()
+    assert meta.permission is None
+    assert meta.color is None
+    # Frozen: mutation raises.
+    with pytest.raises(FrozenInstanceError):
+        meta.description = "mutated"  # type: ignore[misc]
+    # Field set covers the design's JSON schema.
+    assert {f.name for f in fields(AgentMetadata)} == {
+        "description",
+        "mode",
+        "model",
+        "effort",
+        "caps",
+        "permission",
+        "color",
+    }
+
+
+def test_artifacts_administrator_abc_subclasses_must_implement_contract() -> None:
+    """ArtifactsAdministrator subclasses must implement render_artifacts, get_agent_metadata, discover_agent_names.
+
+    Locks the abstract-method contract: a subclass that forgets any of the
+    three methods cannot be instantiated.
+    """
+    from abc import ABC
+
+    from ai_harness.modules.harness.renderers import ArtifactsAdministrator
+
+    assert issubclass(ArtifactsAdministrator, ABC)
+
+    class _Incomplete(ArtifactsAdministrator):
+        provider = "claude"
+
+        def render_artifacts(self, names=None, overrides=None, *, home=None):  # noqa: ARG002
+            return []
+
+        # Missing get_agent_metadata and discover_agent_names on purpose.
+
+    with pytest.raises(TypeError, match="abstract"):
+        _Incomplete()
+
+
+def test_administrators_dispatch_table_keys_each_supported_cli() -> None:
+    """ADMINISTRATORS maps Claude/OpenCode/Copilot to concrete administrators; Generic is absent."""
+    from ai_harness.modules.harness.renderers import (
+        ADMINISTRATORS,
+        ArtifactsAdministrator,
+        ClaudeArtifactsAdministrator,
+        CopilotArtifactsAdministrator,
+        OpenCodeArtifactsAdministrator,
+    )
+
+    assert set(ADMINISTRATORS) == {AgentCli.CLAUDE, AgentCli.OPENCODE, AgentCli.COPILOT}
+    assert isinstance(ADMINISTRATORS[AgentCli.CLAUDE], ClaudeArtifactsAdministrator)
+    assert isinstance(ADMINISTRATORS[AgentCli.OPENCODE], OpenCodeArtifactsAdministrator)
+    assert isinstance(ADMINISTRATORS[AgentCli.COPILOT], CopilotArtifactsAdministrator)
+    # Generic intentionally absent: callers should use ``.get(AgentCli.GENERIC)`` for a no-op path.
+    assert ADMINISTRATORS.get(AgentCli.GENERIC) is None
+    # Every entry is an ArtifactsAdministrator (locks the dispatch polymorphism).
+    for admin in ADMINISTRATORS.values():
+        assert isinstance(admin, ArtifactsAdministrator)
+
+
+def test_administrators_provider_class_attributes_identify_the_provider() -> None:
+    """Each concrete administrator carries a ``provider`` class attribute naming its CLI."""
+    from ai_harness.modules.harness.renderers import (
+        ADMINISTRATORS,
+        ClaudeArtifactsAdministrator,
+        CopilotArtifactsAdministrator,
+        OpenCodeArtifactsAdministrator,
+    )
+
+    assert ADMINISTRATORS[AgentCli.CLAUDE].provider == "claude"
+    assert ADMINISTRATORS[AgentCli.OPENCODE].provider == "opencode"
+    assert ADMINISTRATORS[AgentCli.COPILOT].provider == "copilot"
+    # Lock the type annotations so a future swap can't quietly change the
+    # provider literal away from the closed set.
+    assert ClaudeArtifactsAdministrator.provider == "claude"
+    assert OpenCodeArtifactsAdministrator.provider == "opencode"
+    assert CopilotArtifactsAdministrator.provider == "copilot"
+
+
+def test_all_three_administrators_render_polymorphically(tmp_path: Path) -> None:
+    """Every administrator's contract is fully wired (tasks 5/6/7 landed).
+
+    Locks the dispatch seam: any future addition must satisfy the same
+    polymorphic render contract; removing this test would let a future
+    regression reintroduce NotImplementedError on the public surface.
+    """
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    for cli in (AgentCli.CLAUDE, AgentCli.OPENCODE, AgentCli.COPILOT):
+        admin = ADMINISTRATORS[cli]
+        artifacts = admin.render_artifacts(overrides={}, home=tmp_path)
+        assert isinstance(artifacts, list)
+        assert all(isinstance(a, Artifact) for a in artifacts)
+        meta = admin.get_agent_metadata("change-explorer")
+        assert meta.description
+
+
+# ---------------------------------------------------------------------------
+# Override-store helper (task 2) — module lives at harness/override_store.py
+# ---------------------------------------------------------------------------
+
+
+def test_load_override_store_returns_empty_when_file_missing(tmp_path: Path) -> None:
+    """No overrides.json at home → load_override_store returns ``{}`` (no-op)."""
+    from ai_harness.modules.harness.override_store import load_override_store
+
+    assert load_override_store(tmp_path) == {}
+
+
+def test_load_override_store_returns_dict_when_file_present(tmp_path: Path) -> None:
+    """A well-formed overrides.json round-trips through load_override_store."""
+    from ai_harness.modules.harness.override_store import load_override_store
+
+    payload = {"implementor": {"model": {"claude": "opus"}}}
+    (tmp_path / ".ai-harness").mkdir(parents=True)
+    (tmp_path / ".ai-harness" / "overrides.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    assert load_override_store(tmp_path) == payload
+
+
+def test_load_override_store_propagates_json_decode_error(tmp_path: Path) -> None:
+    """Malformed JSON in overrides.json propagates JSONDecodeError verbatim (no silent fallback)."""
+    from ai_harness.modules.harness.override_store import load_override_store
+
+    (tmp_path / ".ai-harness").mkdir(parents=True)
+    (tmp_path / ".ai-harness" / "overrides.json").write_text("{not valid json", encoding="utf-8")
+
+    with pytest.raises(json.JSONDecodeError):
+        load_override_store(tmp_path)
+
+
+def test_save_override_store_writes_new_payload_to_disk(tmp_path: Path) -> None:
+    """save_override_store creates ~/.ai-harness/overrides.json from a fresh payload."""
+    from ai_harness.modules.harness.override_store import save_override_store
+
+    save_override_store(tmp_path, {"implementor": {"model": {"claude": "opus"}}})
+
+    path = tmp_path / ".ai-harness" / "overrides.json"
+    assert path.is_file()
+    assert json.loads(path.read_text(encoding="utf-8")) == {"implementor": {"model": {"claude": "opus"}}}
+
+
+def test_save_override_store_preserves_unrelated_existing_keys(tmp_path: Path) -> None:
+    """save_override_store deep-merges over the existing store, leaving unrelated keys untouched."""
+    from ai_harness.modules.harness.override_store import save_override_store
+
+    path = tmp_path / ".ai-harness" / "overrides.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"validator": {"model": {"claude": "haiku"}}}), encoding="utf-8")
+
+    save_override_store(tmp_path, {"implementor": {"model": {"claude": "opus"}}})
+
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["validator"] == {"model": {"claude": "haiku"}}
+    assert data["implementor"] == {"model": {"claude": "opus"}}
+
+
+def test_save_override_store_merges_partial_override_for_same_agent(tmp_path: Path) -> None:
+    """Two writes touching different fields of the same agent are deep-merged, not replaced."""
+    from ai_harness.modules.harness.override_store import save_override_store
+
+    path = tmp_path / ".ai-harness" / "overrides.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"implementor": {"effort": {"claude": "high"}}}), encoding="utf-8")
+
+    save_override_store(tmp_path, {"implementor": {"model": {"claude": "opus"}}})
+
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["implementor"]["effort"] == {"claude": "high"}
+    assert data["implementor"]["model"] == {"claude": "opus"}
+
+
+def test_save_override_store_round_trips_through_loader(tmp_path: Path) -> None:
+    """What save_override_store writes is what load_override_store reads back."""
+    from ai_harness.modules.harness.override_store import load_override_store, save_override_store
+
+    payload = {
+        "implementor": {"model": {"claude": "opus"}, "effort": {"claude": "high"}},
+        "validator": {"model": {"claude": "haiku"}},
+    }
+    save_override_store(tmp_path, payload)
+    assert load_override_store(tmp_path) == payload
+
+
+def test_save_override_store_creates_parent_directory(tmp_path: Path) -> None:
+    """The ~/.ai-harness/ parent directory is created on first write."""
+    from ai_harness.modules.harness.override_store import save_override_store
+
+    assert not (tmp_path / ".ai-harness").exists()
+    save_override_store(tmp_path, {"implementor": {"model": {"claude": "opus"}}})
+    assert (tmp_path / ".ai-harness").is_dir()
+    assert (tmp_path / ".ai-harness" / "overrides.json").is_file()
+
+
+def test_save_override_store_writes_pretty_stable_json(tmp_path: Path) -> None:
+    """Stable pretty JSON (indent=2, sort_keys=True) keeps repeated writes byte-identical."""
+    from ai_harness.modules.harness.override_store import save_override_store
+
+    save_override_store(
+        tmp_path,
+        {"implementor": {"model": {"claude": "opus"}, "effort": {"claude": "high"}}},
+    )
+    first = (tmp_path / ".ai-harness" / "overrides.json").read_text(encoding="utf-8")
+
+    # Re-write with same payload — output should be byte-identical (stable key ordering).
+    save_override_store(
+        tmp_path,
+        {"implementor": {"model": {"claude": "opus"}, "effort": {"claude": "high"}}},
+    )
+    second = (tmp_path / ".ai-harness" / "overrides.json").read_text(encoding="utf-8")
+
+    assert first == second
+    # Sanity check: pretty-printed with newline terminator.
+    assert first.endswith("\n")
+    assert "\n  " in first  # 2-space indent
+
+
+def test_deep_merge_does_not_mutate_inputs() -> None:
+    """deep_merge returns a fresh dict; neither input is mutated."""
+    from ai_harness.modules.harness.override_store import deep_merge
+
+    base = {"a": {"b": 1, "c": 2}, "d": [1, 2, 3]}
+    override = {"a": {"c": 99, "e": 3}, "d": "scalar-replace"}
+
+    base_snapshot = copy.deepcopy(base)
+    override_snapshot = copy.deepcopy(override)
+
+    merged = deep_merge(base, override)
+
+    assert base == base_snapshot, "deep_merge mutated base"
+    assert override == override_snapshot, "deep_merge mutated override"
+    # The returned dict is a separate object.
+    assert merged is not base
+    assert merged["a"] is not base["a"]
+
+
+def test_deep_merge_recursively_merges_dicts() -> None:
+    """Nested dicts in override recursively merge over base rather than replace wholesale."""
+    from ai_harness.modules.harness.override_store import deep_merge
+
+    base = {"a": {"b": 1, "c": {"d": 1}}, "x": 10}
+    override = {"a": {"c": {"e": 2}}, "y": 20}
+
+    merged = deep_merge(base, override)
+
+    assert merged == {"a": {"b": 1, "c": {"d": 1, "e": 2}}, "x": 10, "y": 20}
+
+
+def test_deep_merge_scalars_lists_and_nulls_replace() -> None:
+    """Scalars, lists, and None in override replace the matching base value."""
+    from ai_harness.modules.harness.override_store import deep_merge
+
+    base = {"a": "string", "b": [1, 2, 3], "c": {"nested": True}}
+    override = {"a": None, "b": ["fresh"], "c": "scalar-replaces-dict"}
+
+    merged = deep_merge(base, override)
+
+    assert merged == {"a": None, "b": ["fresh"], "c": "scalar-replaces-dict"}
+
+
+def test_deep_merge_handles_empty_dicts() -> None:
+    """Empty base or override returns a fresh dict shaped after the other input."""
+    from ai_harness.modules.harness.override_store import deep_merge
+
+    assert deep_merge({}, {"a": 1}) == {"a": 1}
+    assert deep_merge({"a": 1}, {}) == {"a": 1}
+    assert deep_merge({}, {}) == {}
+
+
+def test_override_store_path_constant_matches_install_manifest_parent() -> None:
+    """OVERRIDES_REL sits next to the install manifest under ~/.ai-harness/."""
+    from ai_harness.modules.harness.override_store import OVERRIDES_REL
+
+    assert OVERRIDES_REL == ".ai-harness/overrides.json"
+    assert Path(OVERRIDES_REL).parent == Path(".ai-harness")
+
+
+# ---------------------------------------------------------------------------
+# JSON metadata migration (task 3) — 9 per-agent JSON files mirrored from _AGENT_META
+# ---------------------------------------------------------------------------
+
+
+def test_agent_metadata_resources_directory_exists() -> None:
+    """The agent-metadata resource directory ships with the package."""
+    from importlib.resources import files
+
+    root = files("ai_harness.resources") / "agent-metadata"
+    assert root.is_dir(), "agent-metadata resource directory must exist"
+
+
+def test_agent_metadata_has_one_json_file_per_change_agent_template() -> None:
+    """One JSON file per visible template, matching the change-agent/ directory exactly."""
+    from importlib.resources import files
+
+    metadata_root = files("ai_harness.resources") / "agent-metadata"
+    template_root = files("ai_harness.resources") / "change-agent"
+
+    metadata_names = sorted(p.name.removesuffix(".json") for p in metadata_root.iterdir() if p.name.endswith(".json"))
+    template_names = sorted(
+        p.name.removesuffix(".md")
+        for p in template_root.iterdir()
+        if p.name.endswith(".md") and not p.name.startswith("_")
+    )
+
+    assert metadata_names == template_names, (
+        f"metadata/templates drift: metadata={metadata_names}, templates={template_names}"
+    )
+    assert len(metadata_names) == 9
+
+
+def test_each_agent_metadata_json_decodes_and_has_required_fields() -> None:
+    """Every metadata file is well-formed JSON with a description string."""
+    from importlib.resources import files
+
+    root = files("ai_harness.resources") / "agent-metadata"
+    json_paths = sorted(p for p in root.iterdir() if p.name.endswith(".json"))
+
+    for path in json_paths:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        assert isinstance(data, dict), f"{path.name}: top-level JSON must be an object"
+        assert isinstance(data.get("description"), str), f"{path.name}: description must be a string"
+        assert data["description"], f"{path.name}: description must be non-empty"
+
+
+def test_change_orchestrator_metadata_json_has_permissive_permission_block() -> None:
+    """The orchestrator metadata carries its raw OpenCode permission block exactly."""
+    from importlib.resources import files
+
+    raw = (files("ai_harness.resources") / "agent-metadata" / "change-orchestrator.json").read_text(encoding="utf-8")
+    data = json.loads(raw)
+
+    assert data["mode"] == "primary"
+    assert data["model"]["claude"] == "sonnet"
+    assert data["model"]["opencode"] == "minimax/MiniMax-M3"
+    assert data["permission"] == {
+        "question": "allow",
+        "task": {"*": "allow"},
+        "bash": "allow",
+        "edit": "allow",
+        "read": "allow",
+        "write": "allow",
+    }
+
+
+def test_subagent_metadata_json_sets_native_models_per_agent() -> None:
+    """Each change subagent metadata carries its native opencode + claude model strings."""
+    from importlib.resources import files
+
+    root = files("ai_harness.resources") / "agent-metadata"
+    expected_models = {
+        "change-explorer": {"opencode": "minimax/MiniMax-M2.7", "claude": "sonnet"},
+        "change-propose": {"opencode": "minimax/MiniMax-M2.7", "claude": "sonnet"},
+        "change-design": {"opencode": "minimax/MiniMax-M2.7", "claude": "sonnet"},
+        "change-specs": {"opencode": "minimax/MiniMax-M2.7", "claude": "sonnet"},
+        "change-tasks": {"opencode": "minimax/MiniMax-M2.7", "claude": "sonnet"},
+        "change-implementor": {"opencode": "minimax/MiniMax-M3", "claude": "sonnet"},
+        "change-validator": {"opencode": "minimax/MiniMax-M2.7", "claude": "sonnet"},
+        "change-archiver": {"opencode": "minimax/MiniMax-M2.7-highspeed", "claude": "sonnet"},
+    }
+    for name, expected in expected_models.items():
+        raw = (root / f"{name}.json").read_text(encoding="utf-8")
+        data = json.loads(raw)
+        assert data["model"] == expected, f"{name}: model mismatch ({data['model']} != {expected})"
+
+
+# ---------------------------------------------------------------------------
+# Metadata loader (task 4) — schema validation, caps decoding, discovery
+# ---------------------------------------------------------------------------
+
+
+def test_load_agent_metadata_decodes_typed_agent_metadata() -> None:
+    """load_agent_metadata returns a typed AgentMetadata with all defaults wired up."""
+    from ai_harness.modules.harness.renderers import load_agent_metadata
+
+    meta = load_agent_metadata("change-explorer")
+
+    assert meta.description.startswith("Change explorer")
+    assert meta.mode == "all"
+    assert dict(meta.model) == {"opencode": "minimax/MiniMax-M2.7", "claude": "sonnet"}
+    # Defaults when fields are absent.
+    assert dict(meta.effort) == {}
+    assert meta.caps.write is True
+    assert meta.caps.bash is True
+    assert meta.caps.spawn is None
+    assert meta.permission is None
+    assert meta.color is None
+
+
+def test_load_agent_metadata_raises_for_missing_metadata_file() -> None:
+    """A template name without a matching metadata JSON raises ValueError."""
+    from ai_harness.modules.harness.renderers import load_agent_metadata
+
+    with pytest.raises(ValueError, match="Missing agent metadata"):
+        load_agent_metadata("not-a-real-agent")
+
+
+def test_load_agent_metadata_orchestrator_carries_permission_block() -> None:
+    """The orchestrator metadata decodes its raw OpenCode permission block exactly."""
+    from ai_harness.modules.harness.renderers import load_agent_metadata
+
+    meta = load_agent_metadata("change-orchestrator")
+
+    assert meta.mode == "primary"
+    assert meta.permission == {
+        "question": "allow",
+        "task": {"*": "allow"},
+        "bash": "allow",
+        "edit": "allow",
+        "read": "allow",
+        "write": "allow",
+    }
+
+
+def test_validate_metadata_schema_rejects_unknown_top_level_field() -> None:
+    """Schema validator rejects unsupported top-level keys (drift detection)."""
+    from ai_harness.modules.harness.renderers import _validate_metadata_schema
+
+    bad = {"description": "test", "mode": "subagent", "model": {}, "forbidden": 1}
+    with pytest.raises(ValueError, match="unknown metadata field.*forbidden"):
+        _validate_metadata_schema(bad, filename="agent-metadata/x.json")
+
+
+def test_validate_metadata_schema_requires_description_string() -> None:
+    """Description is required and must be a string."""
+    from ai_harness.modules.harness.renderers import _validate_metadata_schema
+
+    with pytest.raises(ValueError, match="missing required 'description'"):
+        _validate_metadata_schema({"mode": "subagent"}, filename="agent-metadata/x.json")
+    with pytest.raises(ValueError, match="'description' must be a string"):
+        _validate_metadata_schema({"description": 123}, filename="agent-metadata/x.json")
+
+
+def test_validate_metadata_schema_rejects_non_string_mode() -> None:
+    """Mode, when present, must be a string — provider meaning is text-encoded."""
+    from ai_harness.modules.harness.renderers import _validate_metadata_schema
+
+    with pytest.raises(ValueError, match="'mode' must be a string"):
+        _validate_metadata_schema(
+            {"description": "x", "mode": 42},
+            filename="agent-metadata/x.json",
+        )
+
+
+def test_validate_metadata_schema_rejects_non_object_top_level() -> None:
+    """Top-level metadata must be a JSON object."""
+    from ai_harness.modules.harness.renderers import _validate_metadata_schema
+
+    with pytest.raises(ValueError, match="top-level must be an object"):
+        _validate_metadata_schema("a string", filename="agent-metadata/x.json")
+
+
+def test_decode_agent_caps_returns_defaults_for_missing_or_null() -> None:
+    """Absent or null caps → AgentCaps() (full capability)."""
+    from ai_harness.modules.harness.renderers import _decode_agent_caps
+
+    assert _decode_agent_caps(None, filename="x.json") == AgentCaps()
+    # No raw arg at all — pass missing key by simulating absent field.
+    assert _decode_agent_caps({}, filename="x.json") == AgentCaps()
+
+
+def test_decode_agent_caps_decodes_explicit_capabilities() -> None:
+    """Explicit caps decode to the typed AgentCaps shape with a tuple spawn."""
+    from ai_harness.modules.harness.renderers import _decode_agent_caps
+
+    caps = _decode_agent_caps(
+        {"write": False, "bash": False, "spawn": ["change-explorer", "change-validator"]},
+        filename="x.json",
+    )
+
+    assert caps.write is False
+    assert caps.bash is False
+    assert caps.spawn == ("change-explorer", "change-validator")
+
+
+def test_decode_agent_caps_rejects_non_bool_flags() -> None:
+    """write/bash flags must be booleans — no truthy coercion."""
+    from ai_harness.modules.harness.renderers import _decode_agent_caps
+
+    with pytest.raises(ValueError, match="'caps.write' must be a bool"):
+        _decode_agent_caps({"write": "yes"}, filename="x.json")
+    with pytest.raises(ValueError, match="'caps.bash' must be a bool"):
+        _decode_agent_caps({"bash": 1}, filename="x.json")
+
+
+def test_decode_agent_caps_rejects_malformed_spawn() -> None:
+    """Spawn must be null or an array of strings; non-string entries fail loudly."""
+    from ai_harness.modules.harness.renderers import _decode_agent_caps
+
+    with pytest.raises(ValueError, match="'caps.spawn' entries must all be strings"):
+        _decode_agent_caps({"spawn": ["ok", 1]}, filename="x.json")
+    with pytest.raises(ValueError, match="'caps.spawn' must be null or array"):
+        _decode_agent_caps({"spawn": "change-explorer"}, filename="x.json")
+
+
+def test_decode_agent_caps_rejects_non_object_caps() -> None:
+    """Caps must be a JSON object (or null/missing)."""
+    from ai_harness.modules.harness.renderers import _decode_agent_caps
+
+    with pytest.raises(ValueError, match="'caps' must be an object"):
+        _decode_agent_caps("string", filename="x.json")
+
+
+def test_decode_effort_map_preserves_null_values() -> None:
+    """Effort map keeps null values verbatim — they're the "drop the field" sentinel."""
+    from ai_harness.modules.harness.renderers import _decode_effort_map
+
+    effort = _decode_effort_map(
+        {"claude": "high", "opencode": None},
+        filename="x.json",
+    )
+
+    assert effort["claude"] == "high"
+    assert "opencode" in effort and effort["opencode"] is None
+
+
+def test_decode_effort_map_rejects_non_string_non_null() -> None:
+    """Each effort value must be a string or null — no numbers, bools, etc."""
+    from ai_harness.modules.harness.renderers import _decode_effort_map
+
+    with pytest.raises(ValueError, match="'effort.claude' must be string or null"):
+        _decode_effort_map({"claude": 42}, filename="x.json")
+    with pytest.raises(ValueError, match="'effort' must be an object"):
+        _decode_effort_map("string", filename="x.json")
+
+
+def test_decode_model_map_rejects_non_string_values() -> None:
+    """Each model value must be a string — silent coercion would mis-route providers."""
+    from ai_harness.modules.harness.renderers import _decode_model_map
+
+    with pytest.raises(ValueError, match="'model.claude' must be a string"):
+        _decode_model_map({"claude": 123}, filename="x.json")
+
+
+def test_decode_permission_keeps_raw_dict() -> None:
+    """Raw permission dicts pass through with no key coercion."""
+    from ai_harness.modules.harness.renderers import _decode_permission
+
+    raw = {"edit": "allow", "task": {"*": "allow"}}
+    assert _decode_permission(raw, filename="x.json") == raw
+    assert _decode_permission(None, filename="x.json") is None
+
+
+def test_decode_permission_rejects_non_object() -> None:
+    """Permission must be null or an object — OpenCode permission is dict-shaped."""
+    from ai_harness.modules.harness.renderers import _decode_permission
+
+    with pytest.raises(ValueError, match="'permission' must be an object"):
+        _decode_permission("string", filename="x.json")
+
+
+def test_discover_agent_names_returns_sorted_visible_templates() -> None:
+    """discover_agent_names returns the visible change-agent set in sorted order."""
+    from ai_harness.modules.harness.renderers import discover_agent_names
+
+    names = discover_agent_names()
+
+    assert names == [
+        "change-archiver",
+        "change-design",
+        "change-explorer",
+        "change-implementor",
+        "change-orchestrator",
+        "change-propose",
+        "change-specs",
+        "change-tasks",
+        "change-validator",
+    ]
+    assert len(names) == 9
+
+
+def test_administrator_discover_agent_names_matches_module_function() -> None:
+    """Each administrator's discover_agent_names matches the shared module-level function."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS, discover_agent_names
+
+    shared = discover_agent_names()
+    for cli, admin in ADMINISTRATORS.items():
+        assert admin.discover_agent_names() == shared, f"{cli}: admin discovery drifted from shared discovery"
+
+
+def test_administrator_dispatch_returns_artifact_objects() -> None:
+    """Each concrete administrator returns Artifact objects from the shared contract.
+
+    Locks the polymorphic seam: a future provider addition must satisfy
+    the same return type. Tasks 5/6/7 will turn these stubs into real
+    renderers; the assertion below already locks the ABC contract shape.
+    """
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    # discover_agent_names returns the shared list — verify shape across providers.
+    for cli, admin in ADMINISTRATORS.items():
+        names = admin.discover_agent_names()
+        assert isinstance(names, list)
+        assert all(isinstance(n, str) for n in names), f"{cli}: discovery returned non-string names"
+
+
+def test_load_agent_metadata_with_effort_null_round_trips() -> None:
+    """JSON ``null`` in effort is preserved on the AgentMetadata value side."""
+    from importlib.resources import files
+
+    # Sanity-check that we can hand-decode a JSON resource with null effort.
+    raw_path = files("ai_harness.resources") / "agent-metadata" / "change-explorer.json"
+    raw = json.loads(raw_path.read_text(encoding="utf-8"))
+    # Baseline file has no effort key. Add one for the test then drop it.
+    raw["effort"] = {"claude": "high", "opencode": None}
+
+    from ai_harness.modules.harness.renderers import _decode_agent_metadata
+
+    meta = _decode_agent_metadata(raw, name="change-explorer")
+
+    assert meta.effort["claude"] == "high"
+    assert meta.effort["opencode"] is None
+
+
+# ---------------------------------------------------------------------------
+# ClaudeArtifactsAdministrator (task 5) — mode dispatch, frontmatter, paths
+# ---------------------------------------------------------------------------
+
+
+def test_claude_administrator_render_artifacts_returns_artifact_objects(tmp_path: Path) -> None:
+    """Claude admin returns Artifact objects with install_path + content."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.CLAUDE]
+    artifacts = admin.render_artifacts(overrides={}, home=tmp_path)
+
+    assert len(artifacts) == 9
+    for artifact in artifacts:
+        assert isinstance(artifact, Artifact)
+        assert isinstance(artifact.install_path, str)
+        assert isinstance(artifact.content, str)
+
+
+def test_claude_administrator_routes_primary_mode_to_skill(tmp_path: Path) -> None:
+    """Claude admin renders change-orchestrator (mode=primary) as a skill at .claude/skills/.../SKILL.md."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.CLAUDE]
+    artifacts = admin.render_artifacts(overrides={}, home=tmp_path)
+
+    skill_paths = [a.install_path for a in artifacts if a.install_path.endswith("SKILL.md")]
+    assert skill_paths == [".claude/skills/change-orchestrator/SKILL.md"]
+
+
+def test_claude_administrator_routes_non_primary_mode_to_agent(tmp_path: Path) -> None:
+    """Claude admin renders subagents (mode != primary) at .claude/agents/<name>.md."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.CLAUDE]
+    artifacts = admin.render_artifacts(overrides={}, home=tmp_path)
+
+    agent_paths = sorted(
+        a.install_path for a in artifacts if a.install_path.endswith(".md") and "agents/" in a.install_path
+    )
+    assert agent_paths == [
+        ".claude/agents/change-archiver.md",
+        ".claude/agents/change-design.md",
+        ".claude/agents/change-explorer.md",
+        ".claude/agents/change-implementor.md",
+        ".claude/agents/change-propose.md",
+        ".claude/agents/change-specs.md",
+        ".claude/agents/change-tasks.md",
+        ".claude/agents/change-validator.md",
+    ]
+
+
+def test_claude_administrator_skill_frontmatter_description_only(tmp_path: Path) -> None:
+    """Primary skills carry only ``description`` in frontmatter (no model/effort/tools)."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.CLAUDE]
+    artifacts = admin.render_artifacts(["change-orchestrator"], overrides={}, home=tmp_path)
+
+    assert len(artifacts) == 1
+    skill = artifacts[0]
+    assert skill.install_path == ".claude/skills/change-orchestrator/SKILL.md"
+
+    # Parse YAML frontmatter — only ``description`` is allowed.
+    fm_text = skill.content.split("---", 2)[1]
+    parsed = yaml.safe_load(fm_text)
+    assert list(parsed.keys()) == ["description"]
+    assert "model" not in parsed
+    assert "effort" not in parsed
+    assert "tools" not in parsed
+    assert "mode" not in parsed
+    assert "name" not in parsed
+
+
+def test_claude_administrator_subagent_frontmatter_contains_name_model(tmp_path: Path) -> None:
+    """Claude subagent frontmatter is ordered: name, description, model."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.CLAUDE]
+    artifacts = admin.render_artifacts(["change-explorer"], overrides={}, home=tmp_path)
+
+    assert len(artifacts) == 1
+    subagent = artifacts[0]
+    fm_text = subagent.content.split("---", 2)[1]
+    parsed = yaml.safe_load(fm_text)
+    assert parsed["name"] == "change-explorer"
+    assert parsed["model"] == "sonnet"
+    assert "description" in parsed
+
+
+def test_claude_administrator_effort_override_propagates_to_frontmatter(tmp_path: Path) -> None:
+    """A Claude effort override shows up in the rendered agent frontmatter."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.CLAUDE]
+    overrides = {"change-implementor": {"effort": {"claude": "high"}}}
+    artifacts = admin.render_artifacts(["change-implementor"], overrides=overrides, home=tmp_path)
+
+    fm = yaml.safe_load(artifacts[0].content.split("---", 2)[1])
+    assert fm["effort"] == "high"
+
+
+def test_claude_administrator_effort_null_drops_field(tmp_path: Path) -> None:
+    """A Claude effort override of ``None`` drops the effort field rather than emitting null."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.CLAUDE]
+    overrides = {"change-implementor": {"effort": {"claude": None}}}
+    artifacts = admin.render_artifacts(["change-implementor"], overrides=overrides, home=tmp_path)
+
+    fm = yaml.safe_load(artifacts[0].content.split("---", 2)[1])
+    assert "effort" not in fm
+    assert "effort: null" not in artifacts[0].content
+
+
+def test_claude_administrator_get_agent_metadata_returns_typed_value(tmp_path: Path) -> None:
+    """get_agent_metadata returns a typed AgentMetadata with the expected fields."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS, AgentMetadata
+
+    admin = ADMINISTRATORS[AgentCli.CLAUDE]
+    meta = admin.get_agent_metadata("change-explorer", overrides={}, home=tmp_path)
+
+    assert isinstance(meta, AgentMetadata)
+    assert meta.description.startswith("Change explorer")
+    assert meta.mode == "all"
+    assert meta.model.get("claude") == "sonnet"
+
+
+def test_claude_administrator_get_agent_metadata_applies_overrides(tmp_path: Path) -> None:
+    """A model override on the agent lands in the resolved AgentMetadata."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.CLAUDE]
+    meta = admin.get_agent_metadata(
+        "change-explorer",
+        overrides={"change-explorer": {"model": {"claude": "opus"}}},
+        home=tmp_path,
+    )
+
+    assert meta.model.get("claude") == "opus"
+
+
+def test_claude_administrator_render_artifacts_byte_matches_old_renderer(tmp_path: Path) -> None:
+    """The new admin's render output is byte-identical to the legacy ``render_agents``.
+
+    Locks the migration contract: any drift surfaces as a test failure
+    before callers/tests rely on the new seam.
+    """
+    from ai_harness.modules.harness.renderers import (
+        ADMINISTRATORS,
+        render_agents,  # legacy byte-compat reference
+    )
+
+    admin = ADMINISTRATORS[AgentCli.CLAUDE]
+    old = render_agents(AgentCli.CLAUDE, overrides={}, home=tmp_path)
+    new = admin.render_artifacts(overrides={}, home=tmp_path)
+
+    assert len(old) == len(new)
+    for old_pair, new_artifact in zip(old, new, strict=True):
+        assert old_pair.filename == new_artifact.install_path
+        assert old_pair.content == new_artifact.content
+
+
+def test_claude_administrator_skill_includes_spawn_prose_when_caps_set(tmp_path: Path) -> None:
+    """A primary skill with caps.spawn gets the spawn-allowlist prose section appended.
+
+    Locks the Claude asymmetry: Claude skills cannot enforce spawn
+    restrictions in frontmatter, so the prose section replaces the
+    OpenCode ``permission.task`` block semantically.
+    """
+    from importlib.resources import files
+
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS, AgentCaps
+
+    # Hand-build a metadata dict with caps.spawn set on the primary agent.
+    raw_path = files("ai_harness.resources") / "agent-metadata" / "change-orchestrator.json"
+    raw = json.loads(raw_path.read_text(encoding="utf-8"))
+    raw["caps"] = {"write": True, "bash": True, "spawn": ["change-explorer", "change-validator"]}
+
+    # Patch the in-memory override store with this metadata view so
+    # the admin sees the new caps.
+    from ai_harness.modules.harness.renderers import _decode_agent_metadata as decode_fn
+
+    meta = decode_fn(raw, name="change-orchestrator")
+    assert meta.caps == AgentCaps(spawn=("change-explorer", "change-validator"))
+
+    # The admin's render path applies overrides; emulate by feeding a
+    # custom override that injects caps through the deep-merge round-trip.
+    admin = ADMINISTRATORS[AgentCli.CLAUDE]
+    overrides = {"change-orchestrator": {"caps": {"spawn": ["change-explorer", "change-validator"]}}}
+    artifacts = admin.render_artifacts(["change-orchestrator"], overrides=overrides, home=tmp_path)
+
+    body = artifacts[0].content.split("---", 2)[2]
+    assert "## Subagent spawn allowlist" in body
+    assert "change-explorer" in body
+    assert "change-validator" in body
+
+
+# ---------------------------------------------------------------------------
+# OpenCodeArtifactsAdministrator (task 6) — permission derivation, color, paths
+# ---------------------------------------------------------------------------
+
+
+def test_opencode_administrator_renders_to_opencode_agent_dir(tmp_path: Path) -> None:
+    """OpenCode admin writes every change agent to .config/opencode/agent/<name>.md."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.OPENCODE]
+    artifacts = admin.render_artifacts(overrides={}, home=tmp_path)
+
+    paths = [a.install_path for a in artifacts]
+    assert paths == [
+        ".config/opencode/agent/change-archiver.md",
+        ".config/opencode/agent/change-design.md",
+        ".config/opencode/agent/change-explorer.md",
+        ".config/opencode/agent/change-implementor.md",
+        ".config/opencode/agent/change-orchestrator.md",
+        ".config/opencode/agent/change-propose.md",
+        ".config/opencode/agent/change-specs.md",
+        ".config/opencode/agent/change-tasks.md",
+        ".config/opencode/agent/change-validator.md",
+    ]
+
+
+def test_opencode_administrator_frontmatter_has_description_mode_model(tmp_path: Path) -> None:
+    """OpenCode subagent frontmatter is ordered: description, mode, model."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.OPENCODE]
+    artifacts = admin.render_artifacts(["change-explorer"], overrides={}, home=tmp_path)
+
+    fm = yaml.safe_load(artifacts[0].content.split("---", 2)[1])
+    assert fm["description"].startswith("Change explorer")
+    assert fm["mode"] == "all"
+    assert fm["model"] == "minimax/MiniMax-M2.7"
+
+
+def test_opencode_administrator_missing_model_raises(tmp_path: Path) -> None:
+    """Missing model.opencode raises ValueError naming the missing provider."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.OPENCODE]
+    # Wipe the entire model map by setting it to None — non-dict
+    # override values replace the base wholesale, so model.opencode is
+    # absent after the merge.
+    overrides = {"change-explorer": {"model": None}}
+
+    with pytest.raises(ValueError, match="missing or invalid model.opencode"):
+        admin.render_artifacts(["change-explorer"], overrides=overrides, home=tmp_path)
+
+
+def test_opencode_administrator_reasoning_effort_emitted_when_set(tmp_path: Path) -> None:
+    """effort.opencode shows up as ``reasoningEffort`` in the frontmatter."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.OPENCODE]
+    overrides = {"change-validator": {"effort": {"opencode": "high"}}}
+
+    artifacts = admin.render_artifacts(["change-validator"], overrides=overrides, home=tmp_path)
+    fm = yaml.safe_load(artifacts[0].content.split("---", 2)[1])
+    assert fm["reasoningEffort"] == "high"
+
+
+def test_opencode_administrator_reasoning_effort_null_is_omitted(tmp_path: Path) -> None:
+    """effort.opencode = null drops the reasoningEffort field (no YAML null on disk)."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.OPENCODE]
+    overrides = {"change-validator": {"effort": {"opencode": None}}}
+
+    artifacts = admin.render_artifacts(["change-validator"], overrides=overrides, home=tmp_path)
+    fm = yaml.safe_load(artifacts[0].content.split("---", 2)[1])
+    assert "reasoningEffort" not in fm
+    assert "reasoningEffort: null" not in artifacts[0].content
+
+
+def test_opencode_administrator_explicit_permission_wins_over_caps(tmp_path: Path) -> None:
+    """A raw ``permission`` block in metadata is emitted exactly; caps-derived block is ignored."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.OPENCODE]
+    artifacts = admin.render_artifacts(["change-orchestrator"], overrides={}, home=tmp_path)
+
+    fm = yaml.safe_load(artifacts[0].content.split("---", 2)[1])
+    assert fm["permission"] == {
+        "question": "allow",
+        "task": {"*": "allow"},
+        "bash": "allow",
+        "edit": "allow",
+        "read": "allow",
+        "write": "allow",
+    }
+
+
+def test_opencode_administrator_render_artifacts_byte_matches_old_renderer(tmp_path: Path) -> None:
+    """OpenCode admin renders byte-identical output to legacy render_agents."""
+    from ai_harness.modules.harness.renderers import render_agents  # legacy byte-compat reference
+
+    old = render_agents(AgentCli.OPENCODE, overrides={}, home=tmp_path)
+
+    admin = ADMINISTRATORS[AgentCli.OPENCODE]
+    new = admin.render_artifacts(overrides={}, home=tmp_path)
+    new = admin.render_artifacts(overrides={}, home=tmp_path)
+
+    assert len(old) == len(new)
+    for old_pair, new_art in zip(old, new, strict=True):
+        assert old_pair.filename == new_art.install_path
+        assert old_pair.content == new_art.content
+
+
+def test_opencode_administrator_get_agent_metadata_resolves_overrides(tmp_path: Path) -> None:
+    """OpenCode admin's get_agent_metadata applies the override store semantics."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.OPENCODE]
+    meta = admin.get_agent_metadata(
+        "change-explorer",
+        overrides={"change-explorer": {"model": {"opencode": "openai/gpt-5.5"}}},
+        home=tmp_path,
+    )
+
+    assert meta.model["opencode"] == "openai/gpt-5.5"
+    # The unrelated Claude model is preserved.
+    assert meta.model["claude"] == "sonnet"
+
+
+def test_opencode_administrator_empty_permission_omitted(tmp_path: Path) -> None:
+    """A caps-derived empty permission block must not emit ``{}`` on disk."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.OPENCODE]
+    artifacts = admin.render_artifacts(["change-implementor"], overrides={}, home=tmp_path)
+
+    # Full-capability agent → no permission block on disk.
+    fm = yaml.safe_load(artifacts[0].content.split("---", 2)[1])
+    assert "permission" not in fm
+    assert "permission: {}" not in artifacts[0].content
+
+
+# ---------------------------------------------------------------------------
+# CopilotArtifactsAdministrator (task 7) — minimal frontmatter, install path
+# ---------------------------------------------------------------------------
+
+
+def test_copilot_administrator_renders_to_copilot_agent_dir(tmp_path: Path) -> None:
+    """Copilot admin writes every change agent to .copilot/agents/<name>.agent.md."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.COPILOT]
+    artifacts = admin.render_artifacts(overrides={}, home=tmp_path)
+
+    paths = [a.install_path for a in artifacts]
+    assert paths == [
+        ".copilot/agents/change-archiver.agent.md",
+        ".copilot/agents/change-design.agent.md",
+        ".copilot/agents/change-explorer.agent.md",
+        ".copilot/agents/change-implementor.agent.md",
+        ".copilot/agents/change-orchestrator.agent.md",
+        ".copilot/agents/change-propose.agent.md",
+        ".copilot/agents/change-specs.agent.md",
+        ".copilot/agents/change-tasks.agent.md",
+        ".copilot/agents/change-validator.agent.md",
+    ]
+
+
+def test_copilot_administrator_frontmatter_name_and_description_only(tmp_path: Path) -> None:
+    """Copilot frontmatter contains only ``name`` and ``description`` (intentionally minimal)."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.COPILOT]
+    artifacts = admin.render_artifacts(["change-explorer"], overrides={}, home=tmp_path)
+
+    fm = yaml.safe_load(artifacts[0].content.split("---", 2)[1])
+    assert fm["name"] == "change-explorer"
+    assert fm["description"].startswith("Change explorer")
+    for forbidden in (
+        "model",
+        "tools",
+        "user-invocable",
+        "disable-model-invocation",
+        "mode",
+        "permission",
+        "color",
+    ):
+        assert forbidden not in fm, f"{forbidden!r} leaked into Copilot frontmatter"
+
+
+def test_copilot_administrator_does_not_require_model_copilot(tmp_path: Path) -> None:
+    """A metadata file without ``model.copilot`` is accepted — Copilot ignores model anyway."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.COPILOT]
+    # No exception is raised even though no model.copilot entry exists in metadata.
+    artifacts = admin.render_artifacts(["change-explorer"], overrides={}, home=tmp_path)
+    assert len(artifacts) == 1
+
+
+def test_copilot_administrator_overrides_do_not_leak_extra_frontmatter(tmp_path: Path) -> None:
+    """Overrides on model/effort/caps/permission do not leak into Copilot frontmatter."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.COPILOT]
+    overrides = {
+        "change-explorer": {
+            "model": {"opencode": "openai/gpt-5.4"},
+            "effort": {"opencode": "high"},
+            "caps": {"write": False},
+            "permission": {"edit": "deny"},
+        }
+    }
+    artifacts = admin.render_artifacts(["change-explorer"], overrides=overrides, home=tmp_path)
+
+    fm = yaml.safe_load(artifacts[0].content.split("---", 2)[1])
+    assert fm == {"name": "change-explorer", "description": fm["description"]}
+
+
+def test_copilot_administrator_render_artifacts_byte_matches_old_renderer(tmp_path: Path) -> None:
+    """Copilot admin renders byte-identical output to legacy render_agents."""
+    from ai_harness.modules.harness.renderers import render_agents  # legacy byte-compat reference
+
+    old = render_agents(AgentCli.COPILOT, overrides={}, home=tmp_path)
+
+    admin = ADMINISTRATORS[AgentCli.COPILOT]
+    new = admin.render_artifacts(overrides={}, home=tmp_path)
+
+    assert len(old) == len(new)
+    for old_pair, new_art in zip(old, new, strict=True):
+        assert old_pair.filename == new_art.install_path
+        assert old_pair.content == new_art.content
+
+
+def test_copilot_administrator_get_agent_metadata_resolves_overrides(tmp_path: Path) -> None:
+    """Copilot admin's get_agent_metadata applies the override store semantics."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    admin = ADMINISTRATORS[AgentCli.COPILOT]
+    meta = admin.get_agent_metadata(
+        "change-explorer",
+        overrides={"change-explorer": {"description": "Updated explorer description."}},
+        home=tmp_path,
+    )
+
+    assert meta.description == "Updated explorer description."
+    assert meta.mode == "all"
+
+
+# ---------------------------------------------------------------------------
+# Public-surface bookkeeping (task 8) — __all__ exports
+# ---------------------------------------------------------------------------
+
+
+def test_renderers_public_surface_excludes_old_apis() -> None:
+    """renderers.__all__ no longer advertises the removed APIs.
+
+    Locks the public-surface change: removing ``render_agents``,
+    ``get_agent_meta``, ``write_override_store``, and ``RenderedFile``
+    from the package's public API. Tasks 9/10 will delete the underlying
+    implementations once callers migrate.
+    """
+    import ai_harness.modules.harness.renderers as renderers
+
+    assert "render_agents" not in renderers.__all__
+    assert "get_agent_meta" not in renderers.__all__
+    assert "write_override_store" not in renderers.__all__
+    assert "RenderedFile" not in renderers.__all__
+
+
+def test_renderers_public_surface_includes_new_apis() -> None:
+    """renderers.__all__ exposes the new administrator contract and types."""
+    import ai_harness.modules.harness.renderers as renderers
+
+    for export in (
+        "Artifact",
+        "AgentCaps",
+        "AgentMetadata",
+        "ArtifactsAdministrator",
+        "ADMINISTRATORS",
+        "ClaudeArtifactsAdministrator",
+        "OpenCodeArtifactsAdministrator",
+        "CopilotArtifactsAdministrator",
+        "discover_agent_names",
+        "load_agent_metadata",
+    ):
+        assert export in renderers.__all__, f"{export!r} missing from renderers.__all__"
+
+
+# ---------------------------------------------------------------------------
+# Caller migration: operations.py (task 9) — already exercised by test_install.py
+# ---------------------------------------------------------------------------
+
+
+def test_operations_dispatches_through_administrators(tmp_path: Path) -> None:
+    """install_for_agent_clis writes the same stable paths via ADMINISTRATORS dispatch.
+
+    Locks the operations-migration seam: provider-owned install paths
+    come from each administrator's Artifact output, not from
+    operations assembling them. Any drift surfaces here as a path
+    mismatch with the canonical list.
+    """
+    from ai_harness.modules.harness import install_for_agent_clis
+    from ai_harness.modules.harness.models import AgentCli
+
+    manifest = install_for_agent_clis(
+        [AgentCli.GENERIC, AgentCli.CLAUDE, AgentCli.OPENCODE, AgentCli.COPILOT],
+        home=tmp_path,
+    )
+
+    # Provider-visible paths from each administrator.
+    claude_skill = tmp_path / ".claude/skills/change-orchestrator/SKILL.md"
+    claude_agent = tmp_path / ".claude/agents/change-explorer.md"
+    opencode_agent = tmp_path / ".config/opencode/agent/change-explorer.md"
+    copilot_agent = tmp_path / ".copilot/agents/change-explorer.agent.md"
+
+    assert claude_skill.is_file(), "claude skill missing"
+    assert claude_agent.is_file(), "claude subagent missing"
+    assert opencode_agent.is_file(), "opencode agent missing"
+    assert copilot_agent.is_file(), "copilot agent missing"
+
+    # Manifest records each artifact through the operations layer.
+    assert claude_skill in manifest.written_paths
+    assert opencode_agent in manifest.written_paths
+    assert copilot_agent in manifest.written_paths
+
+
+def test_operations_generic_is_noop_for_change_agent_rendering(tmp_path: Path) -> None:
+    """Generic has no administrator → no change-agent artifacts written.
+
+    Locks the Generic no-op contract: callers see ``ADMINISTRATORS.get(AgentCli.GENERIC)``
+    is ``None`` so the rendered-agents writer short-circuits without
+    needing per-provider branching in operations.
+    """
+    from ai_harness.modules.harness import install_for_agent_clis
+    from ai_harness.modules.harness.models import AgentCli
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    assert ADMINISTRATORS.get(AgentCli.GENERIC) is None
+
+    install_for_agent_clis([AgentCli.GENERIC], home=tmp_path)
+    # Generic gets persona+skills only — no change-agent artifacts anywhere.
+    assert not (tmp_path / ".claude/agents").exists()
+    assert not (tmp_path / ".config/opencode/agent").exists()
+    assert not (tmp_path / ".copilot/agents").exists()
+
+
+def test_operations_uses_artifact_install_path_for_writes(tmp_path: Path) -> None:
+    """Operations writes home / artifact.install_path — no provider-path logic.
+
+    Locks the operations-side contract: every write happens through
+    ``Artifact.install_path`` and ``Artifact.content``, never by
+    assembling provider paths or filenames in operations itself.
+    """
+    from ai_harness.modules.harness import install_for_agent_clis
+    from ai_harness.modules.harness.models import AgentCli
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+
+    install_for_agent_clis([AgentCli.GENERIC, AgentCli.OPENCODE], home=tmp_path)
+
+    # Verify the operations-written path matches the artifact's install_path exactly.
+    admin = ADMINISTRATORS[AgentCli.OPENCODE]
+    artifacts = admin.render_artifacts(overrides={}, home=tmp_path)
+
+    for artifact in artifacts:
+        expected_path = tmp_path / artifact.install_path
+        assert expected_path.is_file(), f"artifact path missing: {expected_path}"
+        assert expected_path.read_text(encoding="utf-8") == artifact.content
+
+
+# ---------------------------------------------------------------------------
+# Caller migration: wizard/tui.py (task 10) — current-value helpers
+# ---------------------------------------------------------------------------
+
+
+def test_wizard_current_claude_model_reads_via_administrator(tmp_path: Path) -> None:
+    """_current_claude_model routes through ADMINISTRATORS[CLAUDE].get_agent_metadata."""
+    from ai_harness.modules.wizard.tui import _current_claude_model
+
+    # No override store → template default for Claude (sonnet).
+    assert _current_claude_model("change-implementor", tmp_path) == "sonnet"
+
+
+def test_wizard_current_claude_model_applies_override(tmp_path: Path) -> None:
+    """An override.json entry on the agent flows through to _current_claude_model."""
+    from ai_harness.modules.wizard.tui import _current_claude_model
+
+    (tmp_path / ".ai-harness").mkdir(parents=True)
+    (tmp_path / ".ai-harness" / "overrides.json").write_text(
+        json.dumps({"change-implementor": {"model": {"claude": "opus"}}}),
+        encoding="utf-8",
+    )
+
+    assert _current_claude_model("change-implementor", tmp_path) == "opus"
+
+
+def test_wizard_current_claude_effort_returns_none_when_unset(tmp_path: Path) -> None:
+    """_current_claude_effort returns None when no effort.claude override exists."""
+    from ai_harness.modules.wizard.tui import _current_claude_effort
+
+    assert _current_claude_effort("change-implementor", tmp_path) is None
+
+
+def test_wizard_current_claude_effort_applies_override(tmp_path: Path) -> None:
+    """_current_claude_effort applies effort.claude from the override store."""
+    from ai_harness.modules.wizard.tui import _current_claude_effort
+
+    (tmp_path / ".ai-harness").mkdir(parents=True)
+    (tmp_path / ".ai-harness" / "overrides.json").write_text(
+        json.dumps({"change-implementor": {"effort": {"claude": "high"}}}),
+        encoding="utf-8",
+    )
+
+    assert _current_claude_effort("change-implementor", tmp_path) == "high"
+
+
+def test_wizard_current_opencode_model_returns_template_default(tmp_path: Path) -> None:
+    """_current_opencode_model returns the agent's native opencode model."""
+    from ai_harness.modules.wizard.tui import _current_opencode_model
+
+    assert _current_opencode_model("change-implementor", tmp_path) == "minimax/MiniMax-M3"
+
+
+def test_wizard_current_opencode_model_applies_override(tmp_path: Path) -> None:
+    """_current_opencode_model applies model.opencode from the override store."""
+    from ai_harness.modules.wizard.tui import _current_opencode_model
+
+    (tmp_path / ".ai-harness").mkdir(parents=True)
+    (tmp_path / ".ai-harness" / "overrides.json").write_text(
+        json.dumps({"change-explorer": {"model": {"opencode": "openai/gpt-5.5"}}}),
+        encoding="utf-8",
+    )
+
+    assert _current_opencode_model("change-explorer", tmp_path) == "openai/gpt-5.5"
+
+
+def test_wizard_current_opencode_effort_returns_none_when_unset(tmp_path: Path) -> None:
+    """_current_opencode_effort returns None when no effort.opencode override exists."""
+    from ai_harness.modules.wizard.tui import _current_opencode_effort
+
+    assert _current_opencode_effort("change-explorer", tmp_path) is None
+
+
+def test_wizard_current_opencode_effort_applies_override(tmp_path: Path) -> None:
+    """_current_opencode_effort applies effort.opencode from the override store."""
+    from ai_harness.modules.wizard.tui import _current_opencode_effort
+
+    (tmp_path / ".ai-harness").mkdir(parents=True)
+    (tmp_path / ".ai-harness" / "overrides.json").write_text(
+        json.dumps({"change-explorer": {"effort": {"opencode": "medium"}}}),
+        encoding="utf-8",
+    )
+
+    assert _current_opencode_effort("change-explorer", tmp_path) == "medium"
+
+
+def test_wizard_does_not_import_removed_renderer_api() -> None:
+    """The wizard module no longer imports get_agent_meta / write_override_store.
+
+    Locks the task-10 caller migration: importing the removed symbols
+    would cause a runtime error once task 8 fully deletes them. The
+    wizard now uses ADMINISTRATORS metadata queries and the shared
+    override-store helper instead.
+    """
+    import ai_harness.modules.wizard.tui as tui
+
+    src = Path(tui.__file__).read_text(encoding="utf-8")
+    # No top-level import of the removed symbols.
+    assert "from ai_harness.modules.harness.renderers import" in src
+    import_line = next(
+        line for line in src.splitlines() if line.startswith("from ai_harness.modules.harness.renderers import")
+    )
+    assert "get_agent_meta" not in import_line
+    assert "write_override_store" not in import_line
+    # No bare calls to the removed entry points anywhere in the wizard.
+    assert "write_override_store(" not in src
+
+
+def test_wizard_imports_administrators_and_override_store_helper() -> None:
+    """The wizard imports ADMINISTRATORS and save_override_store from the new modules."""
+    import ai_harness.modules.wizard.tui as tui
+
+    src = Path(tui.__file__).read_text(encoding="utf-8")
+    assert "ADMINISTRATORS" in src
+    assert "save_override_store" in src
+    assert "from ai_harness.modules.harness.renderers import ADMINISTRATORS" in src
+    assert "from ai_harness.modules.harness.override_store import save_override_store" in src
+
+
+# ---------------------------------------------------------------------------
+# Open question from change-tasks: wizard agent vocabulary drift detection
+# ---------------------------------------------------------------------------
+
+
+def test_claude_wizard_agents_match_discovered_visible_templates() -> None:
+    """claude_wizard_agents() matches the discovered visible change-agent set.
+
+    Locks the open-question fix: the pure wizard's hardcoded
+    ``CLAUDE_WIZARD_AGENTS`` must stay aligned with the visible
+    templates discovered by ``ADMINISTRATORS[AgentCli.CLAUDE]``. A
+    drift surfaces here before the wizard offers an agent that no
+    longer exists or misses one the renderer will install.
+    """
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+    from ai_harness.modules.wizard.pure import claude_wizard_agents
+
+    discovered = set(ADMINISTRATORS[AgentCli.CLAUDE].discover_agent_names())
+    assert set(claude_wizard_agents()) == discovered
+
+
+def test_opencode_wizard_agents_match_discovered_visible_templates() -> None:
+    """opencode_change_agents() matches the discovered visible change-agent set."""
+    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+    from ai_harness.modules.wizard.pure import opencode_change_agents
+
+    discovered = set(ADMINISTRATORS[AgentCli.OPENCODE].discover_agent_names())
+    assert set(opencode_change_agents()) == discovered

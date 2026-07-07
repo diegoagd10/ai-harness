@@ -1,94 +1,123 @@
-"""Per-provider agent renderers — transform a CLI-neutral agent template into a native agent file.
+"""DEPRECATED shim — backward-compat surface for the renderer module.
 
-Each render function takes a template name and returns the rendered string with
-CLI-specific frontmatter injected from code constants. Resource template files
-contain only the shared prompt body — all metadata (description, mode, model,
-permissions) lives in ``_AGENT_META``.
+This module is the deprecated home of ``render_agents``, ``get_agent_meta``,
+``write_override_store``, and ``RenderedFile``. The load-bearing public
+seam now lives in
+:mod:`ai_harness.modules.harness.administrators`; new code MUST select an
+administrator from ``ADMINISTRATORS`` and call
+:meth:`render_artifacts` polymorphically.
 
-Public surface
---------------
-AgentCaps              What an agent may do, in CLI-neutral terms.
-RenderedFile           One rendered agent file: a home-relative path and the file's full content.
-render_agents          Render change agents for a CLI as home-relative ``RenderedFile`` records.
-get_agent_meta         Return the metadata dict for a named agent.
-write_override_store   Deep-merge into the per-agent override store at ``~/.ai-harness/overrides.json``.
+This module is kept for the migration window so internal legacy callers
+and external users can continue to import the deprecated symbols. The
+legacy code path (``_render_*`` returning ``RenderedFile``) is fully
+self-contained below — it does NOT depend on the new administrator
+subpackage — so a future cleanup that removes the deprecation entirely
+won't cascade into the new package.
 
-All other render mechanics (per-CLI render functions, discovery, mode dispatch,
-destination layout) are private and owned by ``render_agents``.
+Re-exports from administrators (back-compat)
+--------------------------------------------
+The following are re-imported from the new administrator package so
+existing ``from ai_harness.modules.harness.renderers import X`` imports
+keep working:
+
+- Public types: ``Artifact``, ``AgentMetadata``, ``AgentCaps``,
+  ``ArtifactsAdministrator``
+- Concrete administrators and dispatch:
+  ``ClaudeArtifactsAdministrator``, ``OpenCodeArtifactsAdministrator``,
+  ``CopilotArtifactsAdministrator``, ``ADMINISTRATORS``
+- Public loaders/discovery: ``load_agent_metadata``,
+  ``discover_agent_names``
+- Per-provider helpers used by the legacy ``_render_*`` paths:
+  ``_claude_tools`` (re-exported from
+  :mod:`ai_harness.modules.harness.administrators.claude`),
+  ``_opencode_permission`` (re-exported from
+  :mod:`ai_harness.modules.harness.administrators.opencode`)
+- Shared rendering helpers used by the legacy ``_render_*`` paths:
+  ``_yaml_dump_frontmatter``, ``_read_template_body`` (re-exported from
+  :mod:`ai_harness.modules.harness.administrators.base`)
 """
 
 from __future__ import annotations
 
 import copy
 import json
-from dataclasses import dataclass
 from importlib.resources import files
-from importlib.resources.abc import Traversable
 from pathlib import Path
 from typing import NamedTuple
 
-import yaml
-
+from ai_harness.modules.harness.administrators import (
+    ADMINISTRATORS,
+    AgentCaps,
+    AgentMetadata,
+    Artifact,
+    ArtifactsAdministrator,
+    ClaudeArtifactsAdministrator,
+    CopilotArtifactsAdministrator,
+    OpenCodeArtifactsAdministrator,
+)
+from ai_harness.modules.harness.administrators import base as _admin_base
+from ai_harness.modules.harness.administrators.base import (  # noqa: F401  re-exported for tests/mock paths
+    _agent_metadata_root,
+    _decode_agent_caps,
+    _decode_agent_metadata,
+    _decode_effort_map,
+    _decode_model_map,
+    _decode_permission,
+    _load_agent_metadata,
+    _read_template_body,
+    _validate_metadata_schema,
+    _yaml_dump_frontmatter,
+)
+from ai_harness.modules.harness.administrators.claude import _claude_tools
+from ai_harness.modules.harness.administrators.opencode import _opencode_permission
 from ai_harness.modules.harness.models import AgentCli
 
 __all__ = [
+    "ADMINISTRATORS",
     "AgentCaps",
-    "RenderedFile",
-    "get_agent_meta",
-    "render_agents",
-    "write_override_store",
+    "AgentMetadata",
+    "Artifact",
+    "ArtifactsAdministrator",
+    "ClaudeArtifactsAdministrator",
+    "CopilotArtifactsAdministrator",
+    "OpenCodeArtifactsAdministrator",
+    "discover_agent_names",
+    "load_agent_metadata",
 ]
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-_AGENT_RESOURCE_DIRS: tuple[str | Traversable, ...] = ("change-agent",)
-
-_OVERRIDES_REL = ".ai-harness/overrides.json"
-
 
 # ---------------------------------------------------------------------------
-# Public types
+# Legacy deprecated types and constants
 # ---------------------------------------------------------------------------
 
 
 class RenderedFile(NamedTuple):
     """One rendered agent file: a home-relative path and the file's full content.
 
-    Every renderer in this module returns a ``RenderedFile`` so callers can
-    read ``.filename`` and ``.content`` without remembering positional order.
-    The single public entry :func:`render_agents` yields a list of these.
+    Every renderer in this module's legacy code path returns a
+    :class:`RenderedFile` so callers can read ``.filename`` and ``.content``
+    without remembering positional order. The single legacy entry
+    :func:`render_agents` yields a list of these — kept for the migration
+    window only.
     """
 
     filename: str
     content: str
 
 
-# Agent metadata — single source of truth for description, mode, per-CLI
-# models, and permission blocks. Resource templates carry only the prompt
-# body; ``_AGENT_META`` is what the render functions read.
-
-
-@dataclass(frozen=True, slots=True)
-class AgentCaps:
-    """What an agent may do, in CLI-neutral terms. Reading files is always
-    allowed; these gate the rest. Each renderer translates *from* this — no
-    single CLI's permission schema is the canonical form.
-
-    ``write`` collapses OpenCode's edit+write into one knob: in practice an
-    agent is either allowed to touch the filesystem or not. Split into two
-    fields only if an agent ever needs to edit existing files but not create
-    new ones.
-    """
-
-    write: bool = True  # may modify the filesystem (edit + create)
-    bash: bool = True  # may run shell commands
-    spawn: tuple[str, ...] | None = None  # None = cannot spawn; tuple = subagent allowlist
+# Local copy of ``_AGENT_RESOURCE_DIRS`` — kept independent of the
+# canonical :data:`administrators.base._AGENT_RESOURCE_DIRS` so test
+# mocks targeting ``renderers._AGENT_RESOURCE_DIRS`` continue to affect
+# this module's legacy discovery without re-importing the canonical
+# tuple (which the new admin package owns).
+_AGENT_RESOURCE_DIRS: tuple[str | _admin_base.Traversable, ...] = ("change-agent",)
+_OVERRIDES_REL = ".ai-harness/overrides.json"
 
 
 # ---------------------------------------------------------------------------
-# Public functions
+# Legacy deprecated entry points — kept importable so internal callers and
+# external users have a migration window. Will be deleted in a future
+# cleanup that drops the deprecated API entirely.
 # ---------------------------------------------------------------------------
 
 
@@ -98,20 +127,12 @@ def render_agents(
     overrides: dict | None = None,
     *,
     home: Path | None = None,
-) -> list[RenderedFile]:
-    """Render the change agents for *cli* as home-relative ``RenderedFile`` records.
+) -> list[RenderedFile]:  # pragma: no cover - removed in next cleanup pass
+    """DEPRECATED: use ``ADMINISTRATORS[cli].render_artifacts`` instead.
 
-    The sole public agent-render entry. Owns skill-vs-agent mode dispatch,
-    destination directory layout, and filename. Returns POSIX home-relative
-    paths in discovery (sorted) order so output is byte-identical to the prior
-    inline emission.
-
-    *names* defaults to the discovered change agents; pass an explicit list to
-    render a subset. *overrides* is an optional per-agent partial overlay
-    deep-merged over the template defaults; ``None`` loads the override
-    store from ``home/.ai-harness/overrides.json`` (default
-    ``Path.home()``), ``{}`` is an explicit no-op. CLIs without native
-    agent support return an empty list.
+    Internal-only: kept so legacy callers can migrate to the administrator
+    contract in their own time. Will be deleted once every internal caller
+    migrates.
     """
     if names is None:
         names = _discover_agents()
@@ -128,21 +149,11 @@ def render_agents(
     return []
 
 
-def get_agent_meta(name: str, overrides: dict | None = None, *, home: Path | None = None) -> dict:
-    """Return the metadata dict for a named agent (from ``_AGENT_META``).
+def get_agent_meta(name: str, overrides: dict | None = None, *, home: Path | None = None) -> dict:  # pragma: no cover
+    """DEPRECATED: use ``ADMINISTRATORS[AgentCli.X].get_agent_metadata`` instead.
 
-    *overrides* is an optional per-agent partial overlay (see project docs).
-    When ``None`` (the default), the override store is loaded from
-    ``home/.ai-harness/overrides.json`` (``Path.home()`` when *home* is
-    ``None``); an absent file is a no-op, a malformed file raises
-    ``json.JSONDecodeError``. When provided, the dict is used verbatim —
-    callers can pass ``{}`` for an explicit empty store, sidestepping the
-    disk lookup. The override entry for *name* is deep-merged over the
-    template defaults; absent or unknown agents keep their template values.
-    The returned dict is always a fresh copy so callers cannot mutate the
-    shared template state.
-
-    Public so tests can derive expected frontmatter from the same source.
+    Internal-only: kept so the wizard can migrate to the administrator
+    metadata query in its own time.
     """
     meta = _AGENT_META.get(name)
     if meta is None:
@@ -153,16 +164,8 @@ def get_agent_meta(name: str, overrides: dict | None = None, *, home: Path | Non
     return _deep_merge(meta, override_entry)
 
 
-def write_override_store(home: Path, payload: dict) -> None:
-    """Deep-merge *payload* into the per-agent override store and write it back.
-
-    Public so the ``set-models`` wizard can persist user choices without
-    re-implementing the store path. Existing entries for other agents, or
-    for the same agent under different fields, are preserved — only the
-    keys present in *payload* change. The file is written atomically: an
-    in-memory merge, then a single write to ``~/.ai-harness/overrides.json``.
-    Malformed existing JSON is raised as-is (matching the loader's contract).
-    """
+def write_override_store(home: Path, payload: dict) -> None:  # pragma: no cover
+    """DEPRECATED: use ``override_store.save_override_store`` instead."""
     existing = _load_override_store(home)
     merged = _deep_merge(existing, payload)
     path = home / _OVERRIDES_REL
@@ -171,41 +174,9 @@ def write_override_store(home: Path, payload: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Private helpers
+# Legacy deprecated template metadata (Python dict — replaced by JSON metadata
+# for the new admin path; kept for the deprecated ``get_agent_meta``).
 # ---------------------------------------------------------------------------
-
-
-def _opencode_permission(caps: AgentCaps) -> dict:
-    """Translate caps into OpenCode's ``permission`` block.
-
-    Only deviations from OpenCode's allow-by-default are emitted, so a
-    full-capability agent yields ``{}`` (no permission block).
-    """
-    perm: dict = {}
-    if not caps.write:
-        perm["edit"] = "deny"
-        perm["write"] = "deny"
-    if not caps.bash:
-        perm["bash"] = "deny"
-    if caps.spawn is not None:
-        perm["task"] = {"*": "deny", **{name: "allow" for name in caps.spawn}}
-    return perm
-
-
-# ponytail: Claude's ``tools`` is a closed allow-list — set it and the agent
-# gets ONLY these, nothing else. So this translation is necessarily coarse:
-# it expresses "restricted minimal set" vs "everything" (omit tools), not
-# fine-grained subtractions from Claude's full toolset. ``spawn`` is not
-# reflected here — every spawn-capable agent is mode=primary and renders via
-# _render_claude_skill, never the agent renderer.
-def _claude_tools(caps: AgentCaps) -> list[str]:
-    """Translate caps into a Claude ``tools`` allow-list."""
-    tools = ["Read", "Grep", "Glob"]
-    if caps.write:
-        tools += ["Edit", "Write"]
-    if caps.bash:
-        tools.append("Bash")
-    return tools
 
 
 _AGENT_META: dict[str, dict] = {
@@ -309,33 +280,16 @@ _AGENT_META: dict[str, dict] = {
 }
 
 
-def _agent_resource_dirs() -> list[Traversable]:
-    """Return existing agent resource directories in render order."""
-    package_root = files("ai_harness.resources")
-    roots: list[Traversable] = []
-    for entry in _AGENT_RESOURCE_DIRS:
-        root = package_root / entry if isinstance(entry, str) else entry
-        if root.is_dir():
-            roots.append(root)
-    return roots
-
-
-def _agent_template_files(root: Traversable) -> list[Traversable]:
-    """Return visible markdown template files from *root* in stable order."""
-    return sorted(
-        (p for p in root.iterdir() if p.is_file() and p.name.endswith(".md") and not p.name.startswith("_")),
-        key=lambda p: p.name,
-    )
+# ---------------------------------------------------------------------------
+# Legacy deprecated private helpers — self-contained so the legacy code path
+# remains functional without depending on the new administrator package.
+# These exist solely so ``render_agents`` / ``get_agent_meta`` /
+# ``write_override_store`` keep working for the migration window.
+# ---------------------------------------------------------------------------
 
 
 def _load_override_store(home: Path) -> dict:
-    """Return the per-agent override store at ``home/.ai-harness/overrides.json``.
-
-    Returns ``{}`` when the file is missing (no-op override). Malformed JSON
-    is raised as-is so the user can fix it instead of silently rendering
-    template defaults. Owned here — next to the merge logic that consumes
-    it — so the operations layer doesn't need to know about the store path.
-    """
+    """Legacy ``~/.ai-harness/overrides.json`` loader used by the deprecated entry points."""
     path = home / _OVERRIDES_REL
     if not path.is_file():
         return {}
@@ -343,12 +297,7 @@ def _load_override_store(home: Path) -> dict:
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
-    """Return a fresh dict with *override* recursively merged over *base*.
-
-    Dicts merge key-by-key (recursively); scalars and lists in *override*
-    replace those in *base*. The original *base* is never mutated; the
-    returned dict (and any nested dicts inside it) are fresh copies.
-    """
+    """Legacy recursive merge used by :func:`get_agent_meta` and :func:`write_override_store`."""
     result = copy.deepcopy(base)
     for key, value in override.items():
         base_value = result.get(key)
@@ -365,37 +314,41 @@ def _get_agent_mode(
     *,
     home: Path | None = None,
 ) -> str:
-    """Return the mode (subagent|primary) for a named agent.
-
-    Threads *overrides* and *home* through to :func:`get_agent_meta` so the
-    mode lookup shares the same resolution path as the frontmatter pass — an
-    explicit ``overrides=`` arg (including ``{}``) must NOT fall through to a
-    ``~/.ai-harness/overrides.json`` read at the ambient ``$HOME``.
-    """
+    """Legacy mode lookup used by :func:`render_agents` Claude dispatch."""
     return get_agent_meta(name, overrides=overrides, home=home).get("mode", "subagent")
 
 
-def _discover_agents() -> list[str]:
-    """Return list of agent template names (without .md extension) in resource-set order.
+# ---------------------------------------------------------------------------
+# Legacy resource-discovery helpers — local duplicates of the canonical
+# helpers in :mod:`ai_harness.modules.harness.administrators.base`. Kept
+# here so test mocks targeting ``renderers._AGENT_RESOURCE_DIRS``,
+# ``renderers.discover_agent_names``, etc. continue to work without
+# touching every call site.
+# ---------------------------------------------------------------------------
 
-    Files whose name starts with ``_`` are excluded — they are bundled
-    resources, not agents.
-    """
-    names: list[str] = []
-    seen: dict[str, str] = {}
-    for root in _agent_resource_dirs():
-        for p in _agent_template_files(root):
-            name = Path(p.name).stem
-            if name in seen:
-                raise ValueError(f"Duplicate agent template {name!r} in {seen[name]} and {root}")
-            seen[name] = str(root)
-            names.append(name)
-    return names
+
+def _agent_resource_dirs() -> list[_admin_base.Traversable]:
+    """Legacy resource-dir resolution used by :func:`_discover_agents`."""
+    package_root = files("ai_harness.resources")
+    roots: list[_admin_base.Traversable] = []
+    for entry in _AGENT_RESOURCE_DIRS:
+        root = package_root / entry if isinstance(entry, str) else entry
+        if root.is_dir():
+            roots.append(root)
+    return roots
+
+
+def _agent_template_files(root: _admin_base.Traversable) -> list[_admin_base.Traversable]:
+    """Legacy visible-template filter used by :func:`_discover_agents`."""
+    return sorted(
+        (p for p in root.iterdir() if p.is_file() and p.name.endswith(".md") and not p.name.startswith("_")),
+        key=lambda p: p.name,
+    )
 
 
 def _read_template_source(name: str) -> str:
-    """Return the raw template text for a named agent (e.g. 'explorer')."""
-    matches: list[Traversable] = []
+    """Legacy template lookup used by :func:`_read_template_body`."""
+    matches: list[_admin_base.Traversable] = []
     for root in _agent_resource_dirs():
         path = root / f"{name}.md"
         if path.is_file():
@@ -408,42 +361,61 @@ def _read_template_source(name: str) -> str:
     return matches[0].read_text(encoding="utf-8")
 
 
-def _read_template_body(name: str) -> str:
-    """Return the prompt body for a named agent (full template text — no frontmatter)."""
-    return _read_template_source(name)
+def _discover_agents() -> list[str]:
+    """Legacy change-agent discovery used by :func:`render_agents`."""
+    names: list[str] = []
+    seen: dict[str, str] = {}
+    for root in _agent_resource_dirs():
+        for p in _agent_template_files(root):
+            name = Path(p.name).stem
+            if name in seen:
+                raise ValueError(f"Duplicate agent template {name!r} in {seen[name]} and {root}")
+            seen[name] = str(root)
+            names.append(name)
+    return names
 
 
-def _yaml_dump_frontmatter(data: dict[str, object]) -> str:
-    """Deterministic YAML dump for frontmatter blocks.
+def load_agent_metadata(name: str) -> AgentMetadata:
+    """Local copy of :func:`ai_harness...administrators.base.load_agent_metadata`.
 
-    Key order is preserved as-is so that nested ``permission`` blocks and
-    similar structures emit in the order declared by ``_AGENT_META`` —
-    callers put things in the order they want shown on disk.
+    Kept here so mocks targeting ``renderers.load_agent_metadata`` (a
+    pattern the test suite uses for the legacy code path) continue to
+    affect calls within this module's deprecated entry points. The
+    canonical implementation lives in the administrator subpackage; new
+    code MUST use that one.
     """
-    return yaml.dump(
-        data,
-        sort_keys=False,
-        default_flow_style=False,
-        explicit_start=False,
-        explicit_end=False,
-        allow_unicode=True,
-    ).rstrip("\n")
+    raw = _load_agent_metadata(name)
+    return _decode_agent_metadata(raw, name=name)
+
+
+def discover_agent_names() -> list[str]:
+    """Local copy of :func:`ai_harness...administrators.base.discover_agent_names`.
+
+    Kept here so mocks targeting ``renderers.discover_agent_names``
+    continue to affect calls within this module's deprecated entry points.
+    The canonical implementation lives in the administrator subpackage;
+    new code MUST use that one.
+    """
+    return _discover_agents()
 
 
 # ---------------------------------------------------------------------------
-# Render functions — each builds CLI-specific frontmatter from _AGENT_META
-# and concatenates it with the shared template body.
 # ---------------------------------------------------------------------------
+# Legacy deprecated per-CLI render helpers — produce ``RenderedFile``
+# records for the deprecated ``render_agents`` entry point. The new
+# administrator code in :mod:`ai_harness.modules.harness.administrators`
+# owns the modern Artifact contract and the JSON metadata pipeline.
+# ---------------------------------------------------------------------------
+
+
+_CLAUDE_AGENTS_DIR = ".claude/agents"
+_CLAUDE_SKILLS_DIR = ".claude/skills"
+_COPILOT_AGENT_DIR = ".copilot/agents"
+_OPENCODE_AGENT_DIR = ".config/opencode/agent"
 
 
 def _render_opencode_agent(name: str, overrides: dict | None = None) -> RenderedFile:
-    """Render a change agent template into an OpenCode agent file.
-
-    Returns a :class:`RenderedFile` whose ``filename`` is ``<name>.md`` and
-    whose ``content`` is the full rendered frontmatter + body.
-
-    Raises ValueError if the agent's metadata lacks ``model.opencode``.
-    """
+    """Legacy OpenCode renderer used by :func:`_render_opencode`."""
     meta = get_agent_meta(name, overrides=overrides)
     body = _read_template_body(name)
 
@@ -457,20 +429,12 @@ def _render_opencode_agent(name: str, overrides: dict | None = None) -> Rendered
         "model": model_map["opencode"],
     }
 
-    # Emit effort as OpenCode's ``reasoningEffort`` only when configured for this CLI.
-    # ``None`` means the wizard deliberately cleared a stale override (e.g. when
-    # switching to a non-reasoning model); rendering that as ``null`` would
-    # leave stale frontmatter on disk, so we treat ``None`` the same as unset.
     effort_map = meta.get("effort")
     if isinstance(effort_map, dict):
         opencode_effort = effort_map.get("opencode")
         if opencode_effort is not None:
             opencode_frontmatter["reasoningEffort"] = opencode_effort
 
-    # Translate caps into OpenCode's permission block (omitted when empty).
-    # An explicit ``meta["permission"]`` overrides the caps-derived block —
-    # used by orchestrator where the desired stance is permissive rather
-    # than deny-by-default.
     caps = meta.get("caps")
     explicit_permission = meta.get("permission")
     if isinstance(explicit_permission, dict):
@@ -480,8 +444,6 @@ def _render_opencode_agent(name: str, overrides: dict | None = None) -> Rendered
         if permission:
             opencode_frontmatter["permission"] = permission
 
-    # Pass through color if present — OpenCode accepts a hex value or one of
-    # primary, secondary, accent, success, warning, error, info.
     if "color" in meta:
         opencode_frontmatter["color"] = meta["color"]
 
@@ -491,13 +453,7 @@ def _render_opencode_agent(name: str, overrides: dict | None = None) -> Rendered
 
 
 def _render_claude_agent(name: str, overrides: dict | None = None) -> RenderedFile:
-    """Render a change agent template into a Claude Code agent file.
-
-    Returns a :class:`RenderedFile` whose ``filename`` is ``<name>.md`` and
-    whose ``content`` is the full rendered frontmatter + body.
-
-    Raises ValueError if the agent lacks ``model.claude`` or has ``mode: primary``.
-    """
+    """Legacy Claude subagent renderer used by :func:`_render_claude`."""
     meta = get_agent_meta(name, overrides=overrides)
     body = _read_template_body(name)
 
@@ -515,18 +471,12 @@ def _render_claude_agent(name: str, overrides: dict | None = None) -> RenderedFi
         "model": model_map["claude"],
     }
 
-    # Emit effort as Claude's ``effort`` only when configured for this CLI.
-    # ``None`` means the wizard deliberately cleared a stale override; rendering
-    # that as ``null`` would leave stale frontmatter on disk, so we treat
-    # ``None`` the same as unset.
     effort_map = meta.get("effort")
     if isinstance(effort_map, dict):
         claude_effort = effort_map.get("claude")
         if claude_effort is not None:
             claude_frontmatter["effort"] = claude_effort
 
-    # Emit a Claude tools allow-list only when caps restrict the agent; a
-    # full-capability agent omits `tools` entirely (which means "all tools").
     caps = meta.get("caps")
     if isinstance(caps, AgentCaps) and caps != AgentCaps():
         claude_frontmatter["tools"] = ", ".join(_claude_tools(caps))
@@ -537,17 +487,7 @@ def _render_claude_agent(name: str, overrides: dict | None = None) -> RenderedFi
 
 
 def _render_claude_skill(name: str, overrides: dict | None = None) -> RenderedFile:
-    """Render the primary change agent template into a Claude Code skill file.
-
-    Returns a :class:`RenderedFile` whose ``filename`` is ``SKILL.md`` and
-    whose ``content`` is the full rendered frontmatter + body.
-
-    The skill carries only ``description`` in frontmatter — no model, effort,
-    or tools. Overrides are intentionally ignored: skills run on the session
-    model and inherit the user's effort setting.
-
-    Raises ValueError if the agent lacks ``model.claude`` or has mode other than ``primary``.
-    """
+    """Legacy Claude primary-skill renderer used by :func:`_render_claude`."""
     meta = get_agent_meta(name, overrides=overrides)
     body = _read_template_body(name)
 
@@ -562,20 +502,6 @@ def _render_claude_skill(name: str, overrides: dict | None = None) -> RenderedFi
     claude_frontmatter: dict[str, object] = {
         "description": meta.get("description", ""),
     }
-    # No name field — skills aren't spawned by name.
-    # No model field — skills run on the session model.
-    # No effort field — skills inherit the user's session effort setting.
-    # No tools field — unrestricted.
-    # No mode field — Claude has no mode concept; skill-vs-agent is determined
-    # by destination directory, not frontmatter.
-    # No agents/permission field — Claude skills cannot carry an agents
-    # allowlist in frontmatter (the Claude skill spec has no ``agents``
-    # key). The OpenCode ``permission.task`` spawn allowlist is therefore
-    # rendered as a prose constraint injected into the body below.
-
-    # Inject the spawn allowlist as a prose section — Claude skills have no
-    # frontmatter field to restrict subagent spawning, so we convert
-    # permission.task into a conversational constraint.
     spawn_note = ""
     caps = meta.get("caps")
     if isinstance(caps, AgentCaps) and caps.spawn:
@@ -593,28 +519,13 @@ def _render_claude_skill(name: str, overrides: dict | None = None) -> RenderedFi
     return RenderedFile("SKILL.md", rendered)
 
 
-# ---------------------------------------------------------------------------
-# Agent-render seam — per-CLI dispatch helpers that own skill-vs-agent mode
-# dispatch, destination directory layout, and filename.  Callers state the
-# CLI; they never assemble paths themselves.
-# ---------------------------------------------------------------------------
-
-_CLAUDE_AGENTS_DIR = ".claude/agents"
-_CLAUDE_SKILLS_DIR = ".claude/skills"
-_COPILOT_AGENT_DIR = ".copilot/agents"
-_OPENCODE_AGENT_DIR = ".config/opencode/agent"
-
-
 def _render_claude(
     name: str,
     overrides: dict | None = None,
     *,
     home: Path | None = None,
 ) -> RenderedFile:
-    """Render one Claude change agent as a home-relative ``RenderedFile`` record.
-
-    Primary agents become the orchestrator skill; all others become subagents.
-    """
+    """Legacy Claude dispatch used by :func:`render_agents`."""
     if _get_agent_mode(name, overrides=overrides, home=home) == "primary":
         rendered = _render_claude_skill(name, overrides=overrides)
         return RenderedFile(f"{_CLAUDE_SKILLS_DIR}/{name}/{rendered.filename}", rendered.content)
@@ -623,24 +534,13 @@ def _render_claude(
 
 
 def _render_opencode(name: str, overrides: dict | None = None) -> RenderedFile:
-    """Render one OpenCode change agent as a home-relative ``RenderedFile`` record."""
+    """Legacy OpenCode dispatch used by :func:`render_agents`."""
     rendered = _render_opencode_agent(name, overrides=overrides)
     return RenderedFile(f"{_OPENCODE_AGENT_DIR}/{rendered.filename}", rendered.content)
 
 
 def _render_copilot_agent(name: str, overrides: dict | None = None) -> RenderedFile:
-    """Render a change agent template into a Copilot agent file.
-
-    Returns a :class:`RenderedFile` whose ``filename`` is ``<name>.agent.md``
-    and whose ``content`` is the full rendered frontmatter + body.
-
-    Frontmatter carries only ``name`` and ``description`` — no ``model``, ``tools``,
-    ``user-invocable``, or ``disable-model-invocation``. The Copilot CLI ignores
-    the agent ``model`` field (github/copilot-cli#1354, #2758) and its frontmatter
-    support lags VS Code, so emitting more would write fields the CLI does not honor.
-    This renderer intentionally does not read or require a copilot model entry in
-    ``_AGENT_META`` (unlike the opencode/claude renderers).
-    """
+    """Legacy Copilot renderer used by :func:`_render_copilot`."""
     meta = get_agent_meta(name, overrides=overrides)
     body = _read_template_body(name)
 
@@ -660,6 +560,6 @@ def _render_copilot(
     *,
     home: Path | None = None,
 ) -> RenderedFile:
-    """Render one Copilot change agent as a home-relative ``RenderedFile`` record."""
+    """Legacy Copilot dispatch used by :func:`render_agents`."""
     rendered = _render_copilot_agent(name, overrides=overrides)
     return RenderedFile(f"{_COPILOT_AGENT_DIR}/{rendered.filename}", rendered.content)

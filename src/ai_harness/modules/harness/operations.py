@@ -33,8 +33,8 @@ from functools import partial
 from importlib.resources import files
 from pathlib import Path
 
+from ai_harness.modules.harness.administrators import ADMINISTRATORS
 from ai_harness.modules.harness.models import AgentCli
-from ai_harness.modules.harness.renderers import render_agents
 
 __all__ = [
     "InitResult",
@@ -319,15 +319,26 @@ def _write_persona_and_skills(home: Path, *, config_dest_rel: str, tree_dest_rel
 def _write_rendered_agents(home: Path, *, cli: AgentCli) -> list[Path]:
     """Render the change agents for *cli* into *home*; return absolute paths written.
 
-    Delegates override-store loading to ``render_agents`` (which reads
-    ``~/.ai-harness/overrides.json`` itself), so a missing file is a no-op
-    and a malformed file fails loudly — no pre-loading duplication here.
+    Dispatches through ``ADMINISTRATORS.get(cli)`` so each provider
+    administrator owns discovery, override merging, frontmatter shape,
+    and install-path layout. CLIs without an administrator (e.g.
+    ``AgentCli.GENERIC``) write nothing — the generic install covers
+    persona+skills only, no change-agent artifacts.
+
+    Override-store loading lives inside the administrator's
+    ``render_artifacts`` call: ``None`` reads from
+    ``home/.ai-harness/overrides.json``, ``{}`` is an explicit no-disk-read,
+    and malformed JSON propagates ``json.JSONDecodeError`` — no
+    pre-loading duplication here.
     """
+    admin = ADMINISTRATORS.get(cli)
+    if admin is None:
+        return []
     written: list[Path] = []
-    for rendered in render_agents(cli, home=home):
-        dest = home / rendered.filename
+    for artifact in admin.render_artifacts(home=home):
+        dest = home / artifact.install_path
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(rendered.content, encoding="utf-8")
+        dest.write_text(artifact.content, encoding="utf-8")
         written.append(dest)
     return written
 
