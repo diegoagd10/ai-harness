@@ -54,10 +54,11 @@ null
 ### `task-done`
 
 How it works — marks one task or subtask done and prints the
-*containing* Task JSON. Pass a top-level id (`"3"`) to mark the whole
-task done; pass a dotted subtask id (`"3.2"`) to mark only that
-subtask. When the last undone subtask of a parent completes, the parent
-is auto-marked done.
+*containing* Task JSON. The `-i` input is a JSON object with an `"id"`
+field — NOT a bare id. Pass a top-level id (`{"id": "3"}`) to mark the
+whole task done; pass a dotted subtask id (`{"id": "3.2"}`) to mark
+only that subtask. When the last undone subtask of a parent completes,
+the parent is auto-marked done.
 
 Use it to — close out a task or subtask after the commit lands.
 
@@ -77,19 +78,23 @@ Expected success response:
 }
 ```
 
-## Commit-format directive (defensive gate)
+## Commit-format directive (defensive gate — CHECK FIRST)
 
-Before reaching loop step 6, locate the `commit-format:` directive in the
-delegation block above. The orchestrator injects this directive per
-delegation by calling `resolve_commit_format(repo_root)` from
-`ai_harness.modules.commit`; the implementor never reads the standards
-file itself.
+**This gate is your step zero.** Before running `task-next`, before
+reading any artifact, before writing any file: locate the
+`commit-format:` directive in the delegation block above. The
+orchestrator injects this directive per delegation by calling
+`resolve_commit_format(repo_root)` from `ai_harness.modules.commit`;
+the implementor never reads the standards file itself, never invents a
+format, and never substitutes a "reasonable default".
 
 - **Missing directive.** If the `commit-format:` directive is absent from
   the delegation block (an orchestrator-level bug, not the normal flow),
   return `status: blocked` with
   `semantic_facts.blocked_reason: commit-format directive missing from delegation`
-  immediately. MUST NOT attempt `git commit`. The Blocking rule envelope
+  as your ONLY action — no `task-next`, no implementation, and above
+  all MUST NOT attempt `git commit`. Work you cannot commit under the
+  contract is work you must not start. The Blocking rule envelope
   below applies.
 - **Unknown placeholder.** After substituting `{change_name}`, `{task_id}`,
   and `{slug}` in that fixed order, scan the result with the regex
@@ -102,6 +107,16 @@ file itself.
 
 ## Loop
 
+0. **Directive check (hard gate).** Find the line starting with
+   `commit-format:` in the delegation message and quote it verbatim in
+   your first reply text, before any tool call. If there is no such
+   line to quote, STOP HERE as your only action: emit the blocked
+   envelope with
+   `blocked_reason: commit-format directive missing from delegation`
+   and end your turn — no `task-next`, no file writes, no `git commit`.
+   Committing with a format you made up (`chore(...)`, `feat(...)`,
+   anything not quoted from the delegation) is the exact failure this
+   gate exists to prevent.
 1. Run:
 
 ```bash
@@ -116,7 +131,7 @@ ai-harness task-next -c {change}
 5. Mark each completed subtask with:
 
 ```bash
-ai-harness task-done -c {change} -i <id>
+ai-harness task-done -c {change} -i '{"id": "<id>"}'
 ```
 
 6. Make one commit for the task. **Apply the `commit-format` directive

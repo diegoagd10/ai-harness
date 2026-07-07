@@ -15,8 +15,13 @@ decompose specs/design into task records and call the CLI; never hand-write
 ## CLI contracts
 
 The tasks SUBAGENT owns one CLI command: `task-create`. Its input shape
-and expected response are local so the prompt never probes
-`ai-harness --help`.
+and expected response below are COMPLETE and AUTHORITATIVE.
+
+**No CLI discovery.** Never run `ai-harness --help`,
+`ai-harness task-create --help`, `which ai-harness`,
+`ai-harness --version`, or any other discovery command — the tool is
+installed and this contract is everything you need. Go straight to
+`ai-harness task-create` with the input shape below.
 
 ### `task-create`
 

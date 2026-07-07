@@ -5,17 +5,11 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # assert_container_required — host-mutation guard.
 #
-# Closes Track B of fix-tests-prompts-assertions at its source for the
-# e2e suite. Sourcing e2e/lib.sh on the host (without going through
+# Sourcing e2e/lib.sh on the host (without going through
 # e2e/docker-test.sh) means the e2e entrypoint code below runs and may
 # mutate $HOME/.ai-harness / $HOME/.config/opencode / etc. via
 # `cleanup_test_env`. Refusing to source at all on a non-container host
 # closes that bug class at its source.
-#
-# Two copies of this guard exist (this one and tests-prompts/run.sh).
-# The duplication is intentional: e2e_test.sh and tests-prompts run.sh
-# do not share a library; a shared lib for one function would be heavier
-# than the 24 lines it would save.
 #
 # Container signals (passes if ANY is true, evaluated in order):
 #   1. $CONTAINER_REQUIRED_OK == "1"             — escape hatch for host

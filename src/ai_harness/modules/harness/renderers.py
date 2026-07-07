@@ -210,53 +210,45 @@ def _claude_tools(caps: AgentCaps) -> list[str]:
 
 _AGENT_META: dict[str, dict] = {
     "change-orchestrator": {
-        "description": (
-            "Change orchestrator — coordinates file-backed change sets through explore, planning, "
-            "task creation, implementation, validation, and archive routing."
-        ),
+        "description": ("Change orchestrator — coordinates work via sub-agents; stays thin."),
         "mode": "primary",
         "model": {
             "opencode": "minimax/MiniMax-M3",
             "claude": "sonnet",
         },
-        "caps": AgentCaps(
-            write=False,
-            spawn=(
-                "change-explorer",
-                "change-propose",
-                "change-design",
-                "change-specs",
-                "change-tasks",
-                "change-implementor",
-                "change-validator",
-                "change-archiver",
-            ),
-        ),
+        "permission": {
+            "question": "allow",
+            "task": {"*": "allow"},
+            "bash": "allow",
+            "edit": "allow",
+            "read": "allow",
+            "write": "allow",
+        },
     },
     "change-explorer": {
         "description": (
             "Change explorer — read-only phase-1 investigator for file-backed changes. "
             "Estimates LOC budget, writes exploration.md, and reports affected files, plan, and risks."
         ),
-        "mode": "subagent",
+        "mode": "all",
         "model": {
-            "opencode": "minimax/MiniMax-M3",
+            "opencode": "minimax/MiniMax-M2.7",
             "claude": "sonnet",
         },
     },
     "change-propose": {
         "description": "Change PRD author — writes prd.md in the sdd-propose structure without publishing anywhere.",
-        "mode": "subagent",
+        "mode": "all",
         "model": {
-            "opencode": "minimax/MiniMax-M3",
+            "opencode": "minimax/MiniMax-M2.7",
             "claude": "sonnet",
         },
     },
     "change-design": {
         "description": "Change design author — writes design.md using the to-design deep-module structure.",
-        "mode": "subagent",
+        "mode": "all",
         "model": {
-            "opencode": "minimax/MiniMax-M3",
+            "opencode": "minimax/MiniMax-M2.7",
             "claude": "sonnet",
         },
     },
@@ -265,9 +257,9 @@ _AGENT_META: dict[str, dict] = {
             "Change specs author — writes tracer-bullet specs from prd.md capabilities with RFC 2119 "
             "requirements and GIVEN/WHEN/THEN scenarios."
         ),
-        "mode": "subagent",
+        "mode": "all",
         "model": {
-            "opencode": "minimax/MiniMax-M3",
+            "opencode": "minimax/MiniMax-M2.7",
             "claude": "sonnet",
         },
     },
@@ -275,9 +267,9 @@ _AGENT_META: dict[str, dict] = {
         "description": (
             "Change task author — decomposes specs and design, then creates tasks through ai-harness task-create."
         ),
-        "mode": "subagent",
+        "mode": "all",
         "model": {
-            "opencode": "minimax/MiniMax-M3",
+            "opencode": "minimax/MiniMax-M2.7",
             "claude": "sonnet",
         },
     },
@@ -286,7 +278,7 @@ _AGENT_META: dict[str, dict] = {
             "Change implementor — drains file-backed tasks through task-next and task-done, "
             "making one commit per task on the current branch."
         ),
-        "mode": "subagent",
+        "mode": "all",
         "model": {
             "opencode": "minimax/MiniMax-M3",
             "claude": "sonnet",
@@ -297,9 +289,9 @@ _AGENT_META: dict[str, dict] = {
             "Change validator — read-only verdict-bearing reviewer that uses task-list, writes validation.md, "
             "and reports pass, pass-with-warnings, or fail with critical count."
         ),
-        "mode": "subagent",
+        "mode": "all",
         "model": {
-            "opencode": "minimax/MiniMax-M3",
+            "opencode": "minimax/MiniMax-M2.7",
             "claude": "sonnet",
         },
     },
@@ -308,9 +300,9 @@ _AGENT_META: dict[str, dict] = {
             "Change archiver — runs ai-harness change-archive for the target Change and commits "
             "the resulting .ai-harness archive/spec movement as a single scoped docs commit."
         ),
-        "mode": "subagent",
+        "mode": "all",
         "model": {
-            "opencode": "minimax/MiniMax-M3",
+            "opencode": "minimax/MiniMax-M2.7-highspeed",
             "claude": "sonnet",
         },
     },
@@ -422,10 +414,15 @@ def _read_template_body(name: str) -> str:
 
 
 def _yaml_dump_frontmatter(data: dict[str, object]) -> str:
-    """Deterministic YAML dump for frontmatter blocks."""
+    """Deterministic YAML dump for frontmatter blocks.
+
+    Key order is preserved as-is so that nested ``permission`` blocks and
+    similar structures emit in the order declared by ``_AGENT_META`` —
+    callers put things in the order they want shown on disk.
+    """
     return yaml.dump(
         data,
-        sort_keys=True,
+        sort_keys=False,
         default_flow_style=False,
         explicit_start=False,
         explicit_end=False,
@@ -471,8 +468,14 @@ def _render_opencode_agent(name: str, overrides: dict | None = None) -> Rendered
             opencode_frontmatter["reasoningEffort"] = opencode_effort
 
     # Translate caps into OpenCode's permission block (omitted when empty).
+    # An explicit ``meta["permission"]`` overrides the caps-derived block —
+    # used by orchestrator where the desired stance is permissive rather
+    # than deny-by-default.
     caps = meta.get("caps")
-    if isinstance(caps, AgentCaps):
+    explicit_permission = meta.get("permission")
+    if isinstance(explicit_permission, dict):
+        opencode_frontmatter["permission"] = explicit_permission
+    elif isinstance(caps, AgentCaps):
         permission = _opencode_permission(caps)
         if permission:
             opencode_frontmatter["permission"] = permission

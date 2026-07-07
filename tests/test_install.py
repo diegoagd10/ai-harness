@@ -966,16 +966,15 @@ def test_install_claude_rendered_body_matches_template_verbatim(tmp_path: Path) 
 
         assert rendered_body == template_body, f"{name}: body does not match template verbatim"
 
-    # Orchestrator skill — template body is a prefix; the renderer appends a
-    # Claude-only spawn allowlist prose section (permission.task is not valid
-    # in Claude skill frontmatter).
+    # Orchestrator skill — template body is a prefix. In the new design the
+    # orchestrator carries an explicit permission block in frontmatter (no
+    # separate Claude-only spawn allowlist prose section appended).
     template_body = (change_templates_dir / f"{_CLAUDE_SKILL_NAME}.md").read_text(encoding="utf-8")
 
     rendered = (tmp_path / ".claude" / "skills" / _CLAUDE_SKILL_NAME / "SKILL.md").read_text(encoding="utf-8")
     rendered_body = rendered.split("---", 2)[2].removeprefix("\n")
 
     assert rendered_body.startswith(template_body), f"{_CLAUDE_SKILL_NAME}: body does not start with template verbatim"
-    assert "spawn allowlist" in rendered_body.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -1167,8 +1166,9 @@ def test_install_with_partial_overrides_preserves_others(tmp_path: Path) -> None
     explorer_fm = _read_frontmatter(tmp_path / ".config" / "opencode" / "agent" / "change-explorer.md")
     validator_fm = _read_frontmatter(tmp_path / ".config" / "opencode" / "agent" / "change-validator.md")
     orchestrator_fm = _read_frontmatter(tmp_path / ".config" / "opencode" / "agent" / "change-orchestrator.md")
-    assert explorer_fm["model"] == "minimax/MiniMax-M3"
-    assert validator_fm["model"] == "minimax/MiniMax-M3"
+    # Default opencode models per agent (per _AGENT_META in renderers.py).
+    assert explorer_fm["model"] == "minimax/MiniMax-M2.7"
+    assert validator_fm["model"] == "minimax/MiniMax-M2.7"
     assert orchestrator_fm["model"] == "minimax/MiniMax-M3"
 
 

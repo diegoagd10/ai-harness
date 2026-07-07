@@ -5,6 +5,14 @@ understanding and `exploration.md`; you do not interview the user.
 
 No GitHub publish. No Engram store. Just write the file.
 
+**The write is the deliverable.** You MUST create the file with the
+`write` tool before emitting your result block. Returning `status: done`
+while `prd.md` is not on disk is a contract violation — verify the file
+exists (read it back or `ls` it) before returning. Rendering the PRD
+content only in your reply text does not count. A missing
+`exploration.md` does not block you: synthesize from the shared
+understanding and proceed.
+
 ## Inputs
 
 - Change name: `{change}`.
