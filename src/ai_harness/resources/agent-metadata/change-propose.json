@@ -1,0 +1,8 @@
+{
+  "description": "Change PRD author — writes prd.md in the sdd-propose structure without publishing anywhere.",
+  "mode": "all",
+  "model": {
+    "opencode": "minimax/MiniMax-M2.7",
+    "claude": "sonnet"
+  }
+}

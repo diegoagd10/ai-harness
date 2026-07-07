@@ -1,0 +1,16 @@
+{
+  "description": "Change orchestrator — coordinates work via sub-agents; stays thin.",
+  "mode": "primary",
+  "model": {
+    "opencode": "minimax/MiniMax-M3",
+    "claude": "sonnet"
+  },
+  "permission": {
+    "question": "allow",
+    "task": {"*": "allow"},
+    "bash": "allow",
+    "edit": "allow",
+    "read": "allow",
+    "write": "allow"
+  }
+}

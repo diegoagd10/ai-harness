@@ -1,0 +1,8 @@
+{
+  "description": "Change implementor — drains file-backed tasks through task-next and task-done, making one commit per task on the current branch.",
+  "mode": "all",
+  "model": {
+    "opencode": "minimax/MiniMax-M3",
+    "claude": "sonnet"
+  }
+}

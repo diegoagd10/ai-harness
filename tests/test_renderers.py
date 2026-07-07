@@ -2565,3 +2565,91 @@ def test_override_store_path_constant_matches_install_manifest_parent() -> None:
 
     assert OVERRIDES_REL == ".ai-harness/overrides.json"
     assert Path(OVERRIDES_REL).parent == Path(".ai-harness")
+
+
+# ---------------------------------------------------------------------------
+# JSON metadata migration (task 3) — 9 per-agent JSON files mirrored from _AGENT_META
+# ---------------------------------------------------------------------------
+
+
+def test_agent_metadata_resources_directory_exists() -> None:
+    """The agent-metadata resource directory ships with the package."""
+    from importlib.resources import files
+
+    root = files("ai_harness.resources") / "agent-metadata"
+    assert root.is_dir(), "agent-metadata resource directory must exist"
+
+
+def test_agent_metadata_has_one_json_file_per_change_agent_template() -> None:
+    """One JSON file per visible template, matching the change-agent/ directory exactly."""
+    from importlib.resources import files
+
+    metadata_root = files("ai_harness.resources") / "agent-metadata"
+    template_root = files("ai_harness.resources") / "change-agent"
+
+    metadata_names = sorted(p.name.removesuffix(".json") for p in metadata_root.iterdir() if p.name.endswith(".json"))
+    template_names = sorted(
+        p.name.removesuffix(".md")
+        for p in template_root.iterdir()
+        if p.name.endswith(".md") and not p.name.startswith("_")
+    )
+
+    assert metadata_names == template_names, (
+        f"metadata/templates drift: metadata={metadata_names}, templates={template_names}"
+    )
+    assert len(metadata_names) == 9
+
+
+def test_each_agent_metadata_json_decodes_and_has_required_fields() -> None:
+    """Every metadata file is well-formed JSON with a description string."""
+    from importlib.resources import files
+
+    root = files("ai_harness.resources") / "agent-metadata"
+    json_paths = sorted(p for p in root.iterdir() if p.name.endswith(".json"))
+
+    for path in json_paths:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        assert isinstance(data, dict), f"{path.name}: top-level JSON must be an object"
+        assert isinstance(data.get("description"), str), f"{path.name}: description must be a string"
+        assert data["description"], f"{path.name}: description must be non-empty"
+
+
+def test_change_orchestrator_metadata_json_has_permissive_permission_block() -> None:
+    """The orchestrator metadata carries its raw OpenCode permission block exactly."""
+    from importlib.resources import files
+
+    raw = (files("ai_harness.resources") / "agent-metadata" / "change-orchestrator.json").read_text(encoding="utf-8")
+    data = json.loads(raw)
+
+    assert data["mode"] == "primary"
+    assert data["model"]["claude"] == "sonnet"
+    assert data["model"]["opencode"] == "minimax/MiniMax-M3"
+    assert data["permission"] == {
+        "question": "allow",
+        "task": {"*": "allow"},
+        "bash": "allow",
+        "edit": "allow",
+        "read": "allow",
+        "write": "allow",
+    }
+
+
+def test_subagent_metadata_json_sets_native_models_per_agent() -> None:
+    """Each change subagent metadata carries its native opencode + claude model strings."""
+    from importlib.resources import files
+
+    root = files("ai_harness.resources") / "agent-metadata"
+    expected_models = {
+        "change-explorer": {"opencode": "minimax/MiniMax-M2.7", "claude": "sonnet"},
+        "change-propose": {"opencode": "minimax/MiniMax-M2.7", "claude": "sonnet"},
+        "change-design": {"opencode": "minimax/MiniMax-M2.7", "claude": "sonnet"},
+        "change-specs": {"opencode": "minimax/MiniMax-M2.7", "claude": "sonnet"},
+        "change-tasks": {"opencode": "minimax/MiniMax-M2.7", "claude": "sonnet"},
+        "change-implementor": {"opencode": "minimax/MiniMax-M3", "claude": "sonnet"},
+        "change-validator": {"opencode": "minimax/MiniMax-M2.7", "claude": "sonnet"},
+        "change-archiver": {"opencode": "minimax/MiniMax-M2.7-highspeed", "claude": "sonnet"},
+    }
+    for name, expected in expected_models.items():
+        raw = (root / f"{name}.json").read_text(encoding="utf-8")
+        data = json.loads(raw)
+        assert data["model"] == expected, f"{name}: model mismatch ({data['model']} != {expected})"
