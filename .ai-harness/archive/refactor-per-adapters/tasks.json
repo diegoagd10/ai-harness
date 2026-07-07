@@ -1,0 +1,442 @@
+{
+  "tasks": [
+    {
+      "id": "1",
+      "title": "Foundation types \u2014 Artifact dataclass, ArtifactsAdministrator ABC, ADMINISTRATORS dispatch skeleton",
+      "spec": "artifact-output-contract",
+      "phase": "foundation",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "1.1",
+          "title": "Add frozen/slots Artifact dataclass with install_path and content fields",
+          "scenario": "Rendered result exposes install_path and content",
+          "status": "done"
+        },
+        {
+          "id": "1.2",
+          "title": "Add frozen/slots AgentCaps and AgentMetadata dataclasses alongside Artifact",
+          "scenario": "Unknown metadata field fails",
+          "status": "done"
+        },
+        {
+          "id": "1.3",
+          "title": "Define ArtifactsAdministrator ABC with render_artifacts, get_agent_metadata, discover_agent_names",
+          "scenario": "Same call shape works across providers",
+          "status": "done"
+        },
+        {
+          "id": "1.4",
+          "title": "Add ADMINISTRATORS dict stub with Claude/OpenCode/Copilot entries",
+          "scenario": "Render through provider-agnostic dispatch",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "2",
+      "title": "Override-store helper \u2014 load_override_store, save_override_store, deep_merge",
+      "spec": "override-store-continuity",
+      "phase": "foundation",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "2.1",
+          "title": "Create override_store.py with load_override_store (missing file returns {}, malformed raises JSONDecodeError)",
+          "scenario": "Missing override store is empty",
+          "status": "done"
+        },
+        {
+          "id": "2.2",
+          "title": "Add save_override_store with deep-merge and atomic write",
+          "scenario": "Save deep-merges and preserves unrelated keys",
+          "status": "done"
+        },
+        {
+          "id": "2.3",
+          "title": "Add deep_merge (recursive dict merge, no input mutation, scalars/lists/nulls replace)",
+          "scenario": "Deep merge does not mutate inputs",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "3",
+      "title": "JSON metadata migration \u2014 create agent-metadata directory and 9 per-agent JSON files",
+      "spec": "json-backed-metadata-resources",
+      "phase": "foundation",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "3.1",
+          "title": "Create src/ai_harness/resources/agent-metadata/ directory",
+          "scenario": "Visible template loads matching JSON metadata",
+          "status": "done"
+        },
+        {
+          "id": "3.2",
+          "title": "Create 9 JSON files matching existing _AGENT_META: change-orchestrator, change-explorer, change-propose, change-design, change-specs, change-tasks, change-implementor, change-validator, change-archiver",
+          "scenario": "Discovery returns sorted visible names only",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "4",
+      "title": "Metadata loader \u2014 per-agent JSON decode, schema validation, AgentCaps/AgentMetadata decoding",
+      "spec": "json-backed-metadata-resources",
+      "phase": "foundation",
+      "depends_on": [
+        "1",
+        "2",
+        "3"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "4.1",
+          "title": "Add _load_agent_metadata(name) that reads agent-metadata/<name>.json via importlib.resources",
+          "scenario": "Visible template loads matching JSON metadata",
+          "status": "done"
+        },
+        {
+          "id": "4.2",
+          "title": "Add _validate_metadata_schema(raw: dict, filename: str) that rejects unknown fields, missing description, wrong types",
+          "scenario": "Unknown metadata field fails",
+          "status": "done"
+        },
+        {
+          "id": "4.3",
+          "title": "Add _decode_agent_caps(caps: dict) returning AgentCaps(write, bash, spawn tuple)",
+          "scenario": "Agent with restricted caps emits tools",
+          "status": "done"
+        },
+        {
+          "id": "4.4",
+          "title": "Add _decode_agent_metadata(raw: dict) returning AgentMetadata with AgentCaps, effort null handling, Mapping fields",
+          "scenario": "Effort null is omitted",
+          "status": "done"
+        },
+        {
+          "id": "4.5",
+          "title": "Add public discover_agent_names() (sorted, _-prefixed excluded, duplicate detection)",
+          "scenario": "Discovery returns sorted visible names only",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "5",
+      "title": "ClaudeArtifactsAdministrator \u2014 mode dispatch, frontmatter, spawn prose, install paths",
+      "spec": "claude-artifact-administration",
+      "phase": "core",
+      "depends_on": [
+        "4"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "5.1",
+          "title": "Implement ClaudeArtifactsAdministrator.render_artifacts with mode=primary skill vs agent dispatch",
+          "scenario": "Primary change orchestrator becomes a skill",
+          "status": "done"
+        },
+        {
+          "id": "5.2",
+          "title": "Implement skill frontmatter (description only, no model/effort/tools)",
+          "scenario": "Primary change orchestrator becomes a skill",
+          "status": "done"
+        },
+        {
+          "id": "5.3",
+          "title": "Implement agent frontmatter (name, description, model, optional effort, optional tools from AgentCaps)",
+          "scenario": "Subagent renders with Claude agent path and model",
+          "status": "done"
+        },
+        {
+          "id": "5.4",
+          "title": "Add spawn allowlist prose injection for mode=primary skills with caps.spawn",
+          "scenario": "Skill with spawn allowlist includes explanatory prose",
+          "status": "done"
+        },
+        {
+          "id": "5.5",
+          "title": "Implement get_agent_metadata using JSON metadata loader",
+          "scenario": "Same call shape works across providers",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "6",
+      "title": "OpenCodeArtifactsAdministrator \u2014 permission derivation, explicit override, color passthrough",
+      "spec": "opencode-artifact-administration",
+      "phase": "core",
+      "depends_on": [
+        "4"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "6.1",
+          "title": "Implement OpenCodeArtifactsAdministrator.render_artifacts to .config/opencode/agent/<name>.md",
+          "scenario": "OpenCode change explorer renders installable artifact",
+          "status": "done"
+        },
+        {
+          "id": "6.2",
+          "title": "Add frontmatter: description, mode (passthrough), model (required), reasoningEffort (from effort.opencode, null=omit)",
+          "scenario": "Effort null is omitted",
+          "status": "done"
+        },
+        {
+          "id": "6.3",
+          "title": "Add explicit permission precedence and caps-derived permission fallback with empty=omit",
+          "scenario": "Explicit permission wins over caps",
+          "status": "done"
+        },
+        {
+          "id": "6.4",
+          "title": "Add color passthrough and missing model.opencode ValueError",
+          "scenario": "Missing OpenCode model fails loudly",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "7",
+      "title": "CopilotArtifactsAdministrator \u2014 minimal frontmatter, .copilot/agents/ path",
+      "spec": "copilot-artifact-administration",
+      "phase": "core",
+      "depends_on": [
+        "4"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "7.1",
+          "title": "Implement CopilotArtifactsAdministrator.render_artifacts to .copilot/agents/<name>.agent.md",
+          "scenario": "Copilot change explorer renders existing path",
+          "status": "done"
+        },
+        {
+          "id": "7.2",
+          "title": "Add minimal frontmatter: name and description only, no model/effort/tools/permission/color",
+          "scenario": "Metadata with provider extras remains minimal",
+          "status": "done"
+        },
+        {
+          "id": "7.3",
+          "title": "No ValueError when model.copilot is missing",
+          "scenario": "Missing model.copilot succeeds",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "8",
+      "title": "ADMINISTRATORS dispatch \u2014 populate with 3 concrete admins, remove render_agents/get_agent_meta/write_override_store",
+      "spec": "provider-administrator-dispatch",
+      "phase": "core",
+      "depends_on": [
+        "5",
+        "6",
+        "7"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "8.1",
+          "title": "Populate ADMINISTRATORS with ClaudeArtifactsAdministrator, OpenCodeArtifactsAdministrator, CopilotArtifactsAdministrator instances",
+          "scenario": "Render through provider-agnostic dispatch",
+          "status": "done"
+        },
+        {
+          "id": "8.2",
+          "title": "Remove public render_agents, get_agent_meta, write_override_store from renderers.py __all__ and module",
+          "scenario": "Unsupported generic CLI has no administrator",
+          "status": "done"
+        },
+        {
+          "id": "8.3",
+          "title": "Add renderers __all__ export of Artifact, AgentCaps, AgentMetadata, ArtifactsAdministrator, ADMINISTRATORS",
+          "scenario": "Tests compare Artifact objects directly",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "9",
+      "title": "Caller migration \u2014 operations.py replaces render_agents + RenderedFile with ADMINISTRATORS + Artifact",
+      "spec": "caller-migration",
+      "phase": "core",
+      "depends_on": [
+        "8"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "9.1",
+          "title": "Update _write_rendered_agents to use ADMINISTRATORS[cli].render_artifacts",
+          "scenario": "Install writes stable provider paths",
+          "status": "done"
+        },
+        {
+          "id": "9.2",
+          "title": "Replace rendered.filename with artifact.install_path and artifact.content",
+          "scenario": "Operations can write without provider path logic",
+          "status": "done"
+        },
+        {
+          "id": "9.3",
+          "title": "Update import: remove render_agents, add ADMINISTRATORS import",
+          "scenario": "Generic CLI remains no-op",
+          "status": "done"
+        },
+        {
+          "id": "9.4",
+          "title": "Verify all install paths unchanged: .claude/skills/change-orchestrator/SKILL.md, .config/opencode/agent/<name>.md, .copilot/agents/<name>.agent.md",
+          "scenario": "Installed files appear at stable provider-visible paths",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "10",
+      "title": "Caller migration \u2014 wizard/tui.py replaces get_agent_meta + write_override_store with admin + override_store",
+      "spec": "caller-migration",
+      "phase": "core",
+      "depends_on": [
+        "8",
+        "2"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "10.1",
+          "title": "Replace get_agent_meta import with ADMINISTRATORS[AgentCli.CLAUDE/OPENCODE].get_agent_metadata for current model/effort queries",
+          "scenario": "Set-models persists through shared helper",
+          "status": "done"
+        },
+        {
+          "id": "10.2",
+          "title": "Replace write_override_store import with override_store.save_override_store",
+          "scenario": "Set-models persists through shared helper",
+          "status": "done"
+        },
+        {
+          "id": "10.3",
+          "title": "Update _current_claude_model, _current_claude_effort, _current_opencode_model, _current_opencode_effort helpers",
+          "scenario": "Wizard agent lists match discovered resources",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "11",
+      "title": "Test migration \u2014 test_renderers.py, test_install.py, test_set_models.py migrate to admin + Artifact",
+      "spec": "caller-migration",
+      "phase": "testing",
+      "depends_on": [
+        "9",
+        "10"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "11.1",
+          "title": "Migrate test_renderers.py: replace render_agents with ADMINISTRATORS[cli].render_artifacts, RenderedFile tuple unpacking with Artifact(install_path, content)",
+          "scenario": "Tests compare Artifact objects directly",
+          "status": "done"
+        },
+        {
+          "id": "11.2",
+          "title": "Add metadata schema decoding tests: unknown fields, missing description, wrong types, effort null, missing model.claude/opencode",
+          "scenario": "Unknown metadata field fails",
+          "status": "done"
+        },
+        {
+          "id": "11.3",
+          "title": "Migrate test_install.py: update install/re-render assertions for Artifact.install_path and ADMINISTRATORS dispatch",
+          "scenario": "Install writes stable provider paths",
+          "status": "done"
+        },
+        {
+          "id": "11.4",
+          "title": "Migrate test_set_models.py: import override_store.load_override_store, save_override_store, deep_merge; keep deep-merge and round-trip coverage",
+          "scenario": "Save deep-merges and preserves unrelated keys",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "12",
+      "title": "E2E + docs \u2014 e2e_test.sh path checks and README.md wording update",
+      "spec": "caller-migration",
+      "phase": "integration",
+      "depends_on": [
+        "11"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "12.1",
+          "title": "Update e2e_test.sh: verify .claude/skills/change-orchestrator/SKILL.md, .config/opencode/agent/* paths still checked via new admin seam",
+          "scenario": "E2E validates stable paths through new seam",
+          "status": "done"
+        },
+        {
+          "id": "12.2",
+          "title": "Update e2e_test.sh: verify override behavior validated through ADMINISTRATORS.render_artifacts not old renderer APIs",
+          "scenario": "Override behavior validated through new seam",
+          "status": "done"
+        },
+        {
+          "id": "12.3",
+          "title": "Update README.md: replace references to render_agents, RenderedFile, get_agent_meta, write_override_store with new administrator/Artifact/override_store vocabulary",
+          "scenario": "E2E validates stable paths through new seam",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "13",
+      "title": "Quality gate \u2014 full pytest + e2e + lint/format per project conventions; fix any regressions",
+      "spec": "caller-migration",
+      "phase": "cleanup",
+      "depends_on": [
+        "12"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "13.1",
+          "title": "Run full pytest: tests/test_renderers.py, tests/test_install.py, tests/test_set_models.py, tests/test_change.py, tests/test_init.py, tests/test_tasks.py, tests/test_worktree.py, tests/test_commit_format_resolver.py",
+          "scenario": "All tests pass through new seam",
+          "status": "done"
+        },
+        {
+          "id": "13.2",
+          "title": "Run e2e_test.sh (Tier 1 default): binary basics, init, install idempotency, override preservation",
+          "scenario": "E2E validates stable paths through new seam",
+          "status": "done"
+        },
+        {
+          "id": "13.3",
+          "title": "Run lint/format per CODING_STANDARDS.md: ruff check, ruff format, mypy",
+          "scenario": "All tests pass through new seam",
+          "status": "done"
+        },
+        {
+          "id": "13.4",
+          "title": "Fix any regressions found; commit final passing state if all gates green",
+          "scenario": "All tests pass through new seam",
+          "status": "done"
+        }
+      ]
+    }
+  ]
+}
