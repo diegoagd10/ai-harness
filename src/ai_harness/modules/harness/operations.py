@@ -33,8 +33,8 @@ from functools import partial
 from importlib.resources import files
 from pathlib import Path
 
+from ai_harness.modules.harness.administrators import ADMINISTRATORS
 from ai_harness.modules.harness.models import AgentCli
-from ai_harness.modules.harness.renderers import ADMINISTRATORS
 
 __all__ = [
     "InitResult",

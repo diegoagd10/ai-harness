@@ -875,7 +875,7 @@ def test_invalid_meta_raises_value_error(
     new_mode = bad_meta.get("mode", base.mode)
     bad = replace(base, mode=new_mode, model=new_model)
     with patch(
-        "ai_harness.modules.harness.renderers.load_agent_metadata",
+        "ai_harness.modules.harness.administrators.base.load_agent_metadata",
         return_value=bad,
     ):
         with pytest.raises(ValueError, match=error_match):
