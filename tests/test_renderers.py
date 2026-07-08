@@ -18,14 +18,14 @@ import pytest
 import yaml
 
 from ai_harness.modules.harness.models import AgentCli
-from ai_harness.modules.harness.renderers import (
+from ai_harness.modules.harness.administrators import (
     ADMINISTRATORS,
     AgentCaps,
     Artifact,
-    _claude_tools,
-    _opencode_permission,
     discover_agent_names,
 )
+from ai_harness.modules.harness.administrators.claude import _claude_tools
+from ai_harness.modules.harness.administrators.opencode import _opencode_permission
 
 
 def _parse_frontmatter(content: str) -> dict:
