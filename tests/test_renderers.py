@@ -3491,24 +3491,24 @@ def test_wizard_current_opencode_effort_applies_override(tmp_path: Path) -> None
 
 
 def test_wizard_does_not_import_removed_renderer_api() -> None:
-    """The wizard module no longer imports get_agent_meta / write_override_store.
+    """The wizard module no longer touches the deleted renderers shim.
 
-    Locks the task-10 caller migration: importing the removed symbols
-    would cause a runtime error once task 8 fully deletes them. The
-    wizard now uses ADMINISTRATORS metadata queries and the shared
-    override-store helper instead.
+    Locks the task-10 caller migration at the modern boundary: the
+    wizard imports nothing from the deleted ``renderers`` shim and
+    makes no calls to the removed legacy entry points
+    (``get_agent_meta``, ``write_override_store``). Once task 8 fully
+    deletes the shim, any leftover reference would break at import
+    time — this assertion guards against that.
     """
     import ai_harness.modules.wizard.tui as tui
 
     src = Path(tui.__file__).read_text(encoding="utf-8")
-    # No top-level import of the removed symbols.
-    assert "from ai_harness.modules.harness.renderers import" in src
-    import_line = next(
-        line for line in src.splitlines() if line.startswith("from ai_harness.modules.harness.renderers import")
-    )
-    assert "get_agent_meta" not in import_line
-    assert "write_override_store" not in import_line
+    # No top-level import from the deleted shim.
+    assert "from ai_harness.modules.harness.renderers import" not in src
+    # The wizard imports ADMINISTRATORS from the modern package.
+    assert "from ai_harness.modules.harness.administrators import ADMINISTRATORS" in src
     # No bare calls to the removed entry points anywhere in the wizard.
+    assert "get_agent_meta(" not in src
     assert "write_override_store(" not in src
 
 
