@@ -2149,7 +2149,7 @@ def _native_change_implementor_body(cli: AgentCli, *, home: Path) -> str:
 
 
 @pytest.mark.parametrize("cli", (AgentCli.OPENCODE, AgentCli.CLAUDE, AgentCli.COPILOT))
-def test_change_implementor_body_applies_injected_commit_format(cli: AgentCli) -> None:
+def test_change_implementor_body_applies_injected_commit_format(cli: AgentCli, tmp_path: Path) -> None:
     """Subtask 3.1 — loop step 6 substitutes {change_name}, {task_id}, {slug} and passes the
     result as the single ``-m`` argument to ``git commit``.
 
@@ -2157,7 +2157,7 @@ def test_change_implementor_body_applies_injected_commit_format(cli: AgentCli) -
     named in the step-6 prose, and the substituted result must flow
     directly to ``git commit -m`` (no human-supplied subject, no extra args).
     """
-    body = _native_change_implementor_body(cli)
+    body = _native_change_implementor_body(cli, home=tmp_path)
 
     # The three documented tokens appear as named placeholders.
     assert "{change_name}" in body, f"{cli}: {{change_name}} token missing from implementor body"
@@ -2172,7 +2172,7 @@ def test_change_implementor_body_applies_injected_commit_format(cli: AgentCli) -
 
 
 @pytest.mark.parametrize("cli", (AgentCli.OPENCODE, AgentCli.CLAUDE, AgentCli.COPILOT))
-def test_change_implementor_body_blocks_on_missing_directive(cli: AgentCli) -> None:
+def test_change_implementor_body_blocks_on_missing_directive(cli: AgentCli, tmp_path: Path) -> None:
     """Subtask 3.2 — defensive block on missing directive.
 
     Locks the safety-net envelope: when the implementor is spawned
@@ -2181,7 +2181,7 @@ def test_change_implementor_body_blocks_on_missing_directive(cli: AgentCli) -> N
     attempt ``git commit``. The error string is what the validator greps
     for downstream, so it must appear verbatim in the rendered prompt.
     """
-    body = _native_change_implementor_body(cli)
+    body = _native_change_implementor_body(cli, home=tmp_path)
 
     # The canonical missing-directive error string appears verbatim.
     assert "commit-format directive missing from delegation" in body, (
@@ -2192,7 +2192,7 @@ def test_change_implementor_body_blocks_on_missing_directive(cli: AgentCli) -> N
 
 
 @pytest.mark.parametrize("cli", (AgentCli.OPENCODE, AgentCli.CLAUDE, AgentCli.COPILOT))
-def test_change_implementor_body_blocks_on_unknown_placeholder(cli: AgentCli) -> None:
+def test_change_implementor_body_blocks_on_unknown_placeholder(cli: AgentCli, tmp_path: Path) -> None:
     """Subtask 3.3 — unknown-token block after substitution.
 
     Locks the regex-based unknown-token detection: a typo placeholder
@@ -2201,7 +2201,7 @@ def test_change_implementor_body_blocks_on_unknown_placeholder(cli: AgentCli) ->
     template ``unknown placeholder {<token>} in commit format`` is what
     the validator greps for.
     """
-    body = _native_change_implementor_body(cli)
+    body = _native_change_implementor_body(cli, home=tmp_path)
 
     # The unknown-token error template appears verbatim.
     assert "unknown placeholder {" in body and "} in commit format" in body, (
@@ -2253,7 +2253,7 @@ def test_renderer_parity_change_orchestrator_has_commit_format_directive(cli: Ag
 
 
 @pytest.mark.parametrize("cli", _NATIVE_RENDERERS_PARITY)
-def test_renderer_parity_change_implementor_has_substitution_rule(cli: AgentCli) -> None:
+def test_renderer_parity_change_implementor_has_substitution_rule(cli: AgentCli, tmp_path: Path) -> None:
     """Subtask 4.3 — the rendered change-implementor body carries the loop step-6
     substitution rule on every native renderer, naming all three documented tokens.
 
@@ -2261,7 +2261,7 @@ def test_renderer_parity_change_implementor_has_substitution_rule(cli: AgentCli)
     ``{change_name}``, ``{task_id}``, and ``{slug}`` so the implementor
     subagent sees the substitution contract on every CLI.
     """
-    body = _native_change_implementor_body(cli)
+    body = _native_change_implementor_body(cli, home=tmp_path)
 
     assert "{change_name}" in body, f"{cli}: change-implementor body missing {{change_name}} in substitution rule"
     assert "{task_id}" in body, f"{cli}: change-implementor body missing {{task_id}} in substitution rule"
@@ -2269,7 +2269,7 @@ def test_renderer_parity_change_implementor_has_substitution_rule(cli: AgentCli)
 
 
 @pytest.mark.parametrize("cli", _NATIVE_RENDERERS_PARITY)
-def test_renderer_parity_change_implementor_has_missing_directive_error(cli: AgentCli) -> None:
+def test_renderer_parity_change_implementor_has_missing_directive_error(cli: AgentCli, tmp_path: Path) -> None:
     """Subtask 4.4 — the rendered change-implementor body carries the canonical
     missing-directive error string on every native renderer.
 
@@ -2277,7 +2277,7 @@ def test_renderer_parity_change_implementor_has_missing_directive_error(cli: Age
     ``commit-format directive missing from delegation`` must reach every
     rendered body so the implementor can produce it verbatim.
     """
-    body = _native_change_implementor_body(cli)
+    body = _native_change_implementor_body(cli, home=tmp_path)
 
     assert "commit-format directive missing from delegation" in body, (
         f"{cli}: change-implementor body missing the 'commit-format directive missing from delegation' error string"
