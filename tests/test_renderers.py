@@ -1748,6 +1748,35 @@ def test_change_archiver_renders_on_every_native_agent_cli(tmp_path: Path) -> No
     )
 
 
+def test_change_agent_resources_smoke_have_metadata_and_body() -> None:
+    """Discovered change-agent resources ship with usable templates and metadata.
+
+    Discovery drives the catalog so future additions do not break the smoke;
+    the ``>= 9`` floor guards against empty/incomplete packaging without
+    freezing an exact future agent set. Per discovered name, the same-name
+    markdown template must exist, the template body must be non-empty after
+    stripping whitespace, and the production metadata loader must return a
+    record with a non-empty description.
+    """
+    from importlib.resources import files
+
+    from ai_harness.modules.harness.administrators import (
+        discover_agent_names,
+        load_agent_metadata,
+    )
+
+    template_root = files("ai_harness.resources") / "change-agent"
+    names = discover_agent_names()
+
+    assert len(names) >= 9, f"expected >= 9 discovered change agents, got {len(names)}"
+
+    for name in names:
+        template_path = template_root / f"{name}.md"
+        assert template_path.is_file(), f"missing template for {name}"
+        assert template_path.read_text(encoding="utf-8").strip(), f"empty template for {name}"
+        assert load_agent_metadata(name).description, f"metadata description empty for {name}"
+
+
 # ---------------------------------------------------------------------------
 # change-orchestrator — terminal archive routing
 # ---------------------------------------------------------------------------
