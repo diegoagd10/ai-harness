@@ -17,7 +17,7 @@ from typer.testing import CliRunner
 
 from ai_harness.main import app
 from ai_harness.modules.harness import AgentCli, InstallManifest, install_for_agent_clis, uninstall_for_agent_clis
-from ai_harness.modules.harness.renderers import (
+from ai_harness.modules.harness.administrators import (
     ADMINISTRATORS,
     AgentCaps,
     discover_agent_names,
