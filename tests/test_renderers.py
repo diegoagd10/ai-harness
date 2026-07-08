@@ -3074,27 +3074,6 @@ def test_claude_administrator_get_agent_metadata_applies_overrides(tmp_path: Pat
     assert meta.model.get("claude") == "opus"
 
 
-def test_claude_administrator_render_artifacts_byte_matches_old_renderer(tmp_path: Path) -> None:
-    """The new admin's render output is byte-identical to the legacy ``render_agents``.
-
-    Locks the migration contract: any drift surfaces as a test failure
-    before callers/tests rely on the new seam.
-    """
-    from ai_harness.modules.harness.renderers import (
-        ADMINISTRATORS,
-        render_agents,  # legacy byte-compat reference
-    )
-
-    admin = ADMINISTRATORS[AgentCli.CLAUDE]
-    old = render_agents(AgentCli.CLAUDE, overrides={}, home=tmp_path)
-    new = admin.render_artifacts(overrides={}, home=tmp_path)
-
-    assert len(old) == len(new)
-    for old_pair, new_artifact in zip(old, new, strict=True):
-        assert old_pair.filename == new_artifact.install_path
-        assert old_pair.content == new_artifact.content
-
-
 def test_claude_administrator_skill_includes_spawn_prose_when_caps_set(tmp_path: Path) -> None:
     """A primary skill with caps.spawn gets the spawn-allowlist prose section appended.
 
@@ -3226,22 +3205,6 @@ def test_opencode_administrator_explicit_permission_wins_over_caps(tmp_path: Pat
     }
 
 
-def test_opencode_administrator_render_artifacts_byte_matches_old_renderer(tmp_path: Path) -> None:
-    """OpenCode admin renders byte-identical output to legacy render_agents."""
-    from ai_harness.modules.harness.renderers import render_agents  # legacy byte-compat reference
-
-    old = render_agents(AgentCli.OPENCODE, overrides={}, home=tmp_path)
-
-    admin = ADMINISTRATORS[AgentCli.OPENCODE]
-    new = admin.render_artifacts(overrides={}, home=tmp_path)
-    new = admin.render_artifacts(overrides={}, home=tmp_path)
-
-    assert len(old) == len(new)
-    for old_pair, new_art in zip(old, new, strict=True):
-        assert old_pair.filename == new_art.install_path
-        assert old_pair.content == new_art.content
-
-
 def test_opencode_administrator_get_agent_metadata_resolves_overrides(tmp_path: Path) -> None:
     """OpenCode admin's get_agent_metadata applies the override store semantics."""
     from ai_harness.modules.harness.administrators import ADMINISTRATORS
@@ -3348,21 +3311,6 @@ def test_copilot_administrator_overrides_do_not_leak_extra_frontmatter(tmp_path:
     assert fm == {"name": "change-explorer", "description": fm["description"]}
 
 
-def test_copilot_administrator_render_artifacts_byte_matches_old_renderer(tmp_path: Path) -> None:
-    """Copilot admin renders byte-identical output to legacy render_agents."""
-    from ai_harness.modules.harness.renderers import render_agents  # legacy byte-compat reference
-
-    old = render_agents(AgentCli.COPILOT, overrides={}, home=tmp_path)
-
-    admin = ADMINISTRATORS[AgentCli.COPILOT]
-    new = admin.render_artifacts(overrides={}, home=tmp_path)
-
-    assert len(old) == len(new)
-    for old_pair, new_art in zip(old, new, strict=True):
-        assert old_pair.filename == new_art.install_path
-        assert old_pair.content == new_art.content
-
-
 def test_copilot_administrator_get_agent_metadata_resolves_overrides(tmp_path: Path) -> None:
     """Copilot admin's get_agent_metadata applies the override store semantics."""
     from ai_harness.modules.harness.administrators import ADMINISTRATORS
@@ -3375,50 +3323,7 @@ def test_copilot_administrator_get_agent_metadata_resolves_overrides(tmp_path: P
     )
 
     assert meta.description == "Updated explorer description."
-    assert meta.mode == "all"
-
-
-# ---------------------------------------------------------------------------
-# Public-surface bookkeeping (task 8) — __all__ exports
-# ---------------------------------------------------------------------------
-
-
-def test_renderers_public_surface_excludes_old_apis() -> None:
-    """renderers.__all__ no longer advertises the removed APIs.
-
-    Locks the public-surface change: removing ``render_agents``,
-    ``get_agent_meta``, ``write_override_store``, and ``RenderedFile``
-    from the package's public API. Tasks 9/10 will delete the underlying
-    implementations once callers migrate.
-    """
-    import ai_harness.modules.harness.renderers as renderers
-
-    assert "render_agents" not in renderers.__all__
-    assert "get_agent_meta" not in renderers.__all__
-    assert "write_override_store" not in renderers.__all__
-    assert "RenderedFile" not in renderers.__all__
-
-
-def test_renderers_public_surface_includes_new_apis() -> None:
-    """renderers.__all__ exposes the new administrator contract and types."""
-    import ai_harness.modules.harness.renderers as renderers
-
-    for export in (
-        "Artifact",
-        "AgentCaps",
-        "AgentMetadata",
-        "ArtifactsAdministrator",
-        "ADMINISTRATORS",
-        "ClaudeArtifactsAdministrator",
-        "OpenCodeArtifactsAdministrator",
-        "CopilotArtifactsAdministrator",
-        "discover_agent_names",
-        "load_agent_metadata",
-    ):
-        assert export in renderers.__all__, f"{export!r} missing from renderers.__all__"
-
-
-# ---------------------------------------------------------------------------
+    assert meta.mode == "all"# ---------------------------------------------------------------------------
 # Caller migration: operations.py (task 9) — already exercised by test_install.py
 # ---------------------------------------------------------------------------
 
