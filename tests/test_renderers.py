@@ -3539,7 +3539,7 @@ def test_claude_wizard_agents_match_discovered_visible_templates() -> None:
     longer exists or misses one the renderer will install.
     """
     from ai_harness.modules.harness.administrators import ADMINISTRATORS
-    from ai_harness.modules.wizard.pure import claude_wizard_agents
+    from ai_harness.utils import claude_wizard_agents
 
     discovered = set(ADMINISTRATORS[AgentCli.CLAUDE].discover_agent_names())
     assert set(claude_wizard_agents()) == discovered
@@ -3548,7 +3548,7 @@ def test_claude_wizard_agents_match_discovered_visible_templates() -> None:
 def test_opencode_wizard_agents_match_discovered_visible_templates() -> None:
     """opencode_change_agents() matches the discovered visible change-agent set."""
     from ai_harness.modules.harness.administrators import ADMINISTRATORS
-    from ai_harness.modules.wizard.pure import opencode_change_agents
+    from ai_harness.utils import opencode_change_agents
 
     discovered = set(ADMINISTRATORS[AgentCli.OPENCODE].discover_agent_names())
     assert set(opencode_change_agents()) == discovered
