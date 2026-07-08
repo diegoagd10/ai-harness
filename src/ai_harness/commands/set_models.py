@@ -15,8 +15,8 @@ import typer
 
 from ai_harness.commands import parse_agent_clis
 from ai_harness.modules.harness import AgentCli
-from ai_harness.modules.wizard.pure import parse_agent_mode
 from ai_harness.modules.wizard.tui import run_wizard_or_bail
+from ai_harness.utils import parse_agent_mode
 
 _SUPPORTED = (AgentCli.CLAUDE, AgentCli.OPENCODE)
 
