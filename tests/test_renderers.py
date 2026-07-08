@@ -1465,9 +1465,9 @@ def test_render_agents_mode_override_routes_through_dispatch(tmp_path: Path, mon
 # ---------------------------------------------------------------------------
 
 
-def test_render_agents_copilot_returns_agent_files() -> None:
+def test_render_agents_copilot_returns_agent_files(tmp_path: Path) -> None:
     """Copilot emits change agents under .copilot/agents/ with .agent.md extension."""
-    pairs = ADMINISTRATORS[AgentCli.COPILOT].render_artifacts()
+    pairs = ADMINISTRATORS[AgentCli.COPILOT].render_artifacts(home=tmp_path, overrides={})
 
     paths = [a.install_path for a in pairs]
     assert paths == [
@@ -1485,9 +1485,9 @@ def test_render_agents_copilot_returns_agent_files() -> None:
         assert a.content.startswith("---\n")
 
 
-def test_copilot_frontmatter_has_name_and_description_only() -> None:
+def test_copilot_frontmatter_has_name_and_description_only(tmp_path: Path) -> None:
     """Every Copilot agent frontmatter contains exactly ``name`` and ``description``."""
-    pairs = ADMINISTRATORS[AgentCli.COPILOT].render_artifacts()
+    pairs = ADMINISTRATORS[AgentCli.COPILOT].render_artifacts(home=tmp_path, overrides={})
 
     for name in (
         "change-explorer",
@@ -1505,7 +1505,9 @@ def test_copilot_frontmatter_has_name_and_description_only() -> None:
         fm = _parse_frontmatter(pair.content)
         assert fm.get("name") == name, f"{name}: expected name={name!r}, got {fm.get('name')!r}"
         assert fm.get("description", "").startswith(
-            ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata(name).description
+            ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata(
+                name, home=tmp_path, overrides={}
+            ).description
         ), f"{name}: description mismatch"
         # MUST NOT contain model, tools, user-invocable, disable-model-invocation, mode, permission, color
         for forbidden in (
@@ -1533,9 +1535,11 @@ def test_render_agents_copilot_byte_identical_when_no_overrides() -> None:
     assert baseline == no_arg
 
 
-def test_render_agents_copilot_honours_explicit_names() -> None:
+def test_render_agents_copilot_honours_explicit_names(tmp_path: Path) -> None:
     """An explicit names list renders just that subset for Copilot."""
-    pairs = ADMINISTRATORS[AgentCli.COPILOT].render_artifacts(["change-validator", "change-explorer"])
+    pairs = ADMINISTRATORS[AgentCli.COPILOT].render_artifacts(
+        ["change-validator", "change-explorer"], home=tmp_path, overrides={}
+    )
 
     assert [a.install_path for a in pairs] == [
         ".copilot/agents/change-validator.agent.md",
@@ -1810,11 +1814,29 @@ def test_change_archiver_result_envelope_includes_archive_commit_and_blocked_err
     assert "errors" in body
 
 
-def test_change_archiver_renders_on_every_native_agent_cli() -> None:
+def test_change_archiver_renders_on_every_native_agent_cli(tmp_path: Path) -> None:
     """All three native CLIs discover and render change-archiver."""
-    assert _find_pair(ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(), "change-archiver") is not None
-    assert _find_pair(ADMINISTRATORS[AgentCli.COPILOT].render_artifacts(), "change-archiver") is not None
-    assert _find_pair(ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts(), "change-archiver") is not None
+    assert (
+        _find_pair(
+            ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(home=tmp_path, overrides={}),
+            "change-archiver",
+        )
+        is not None
+    )
+    assert (
+        _find_pair(
+            ADMINISTRATORS[AgentCli.COPILOT].render_artifacts(home=tmp_path, overrides={}),
+            "change-archiver",
+        )
+        is not None
+    )
+    assert (
+        _find_pair(
+            ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts(home=tmp_path, overrides={}),
+            "change-archiver",
+        )
+        is not None
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2465,7 +2487,7 @@ def test_all_three_administrators_render_polymorphically(tmp_path: Path) -> None
         artifacts = admin.render_artifacts(overrides={}, home=tmp_path)
         assert isinstance(artifacts, list)
         assert all(isinstance(a, Artifact) for a in artifacts)
-        meta = admin.get_agent_metadata("change-explorer")
+        meta = admin.get_agent_metadata("change-explorer", home=tmp_path, overrides={})
         assert meta.description
 
 
