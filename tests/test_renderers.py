@@ -17,7 +17,6 @@ from unittest.mock import patch
 import pytest
 import yaml
 
-from ai_harness.modules.harness.models import AgentCli
 from ai_harness.modules.harness.administrators import (
     ADMINISTRATORS,
     AgentCaps,
@@ -26,6 +25,7 @@ from ai_harness.modules.harness.administrators import (
 )
 from ai_harness.modules.harness.administrators.claude import _claude_tools
 from ai_harness.modules.harness.administrators.opencode import _opencode_permission
+from ai_harness.modules.harness.models import AgentCli
 
 
 def _parse_frontmatter(content: str) -> dict:
@@ -1520,9 +1520,7 @@ def test_copilot_no_model_validation_required() -> None:
         "ai_harness.modules.harness.administrators.base.load_agent_metadata",
         return_value=bad_meta,
     ):
-        pairs = ADMINISTRATORS[AgentCli.COPILOT].render_artifacts(
-            ["change-explorer"], overrides={}
-        )
+        pairs = ADMINISTRATORS[AgentCli.COPILOT].render_artifacts(["change-explorer"], overrides={})
         assert len(pairs) == 1
         assert pairs[0].content.startswith("---\n")
 
@@ -3323,7 +3321,10 @@ def test_copilot_administrator_get_agent_metadata_resolves_overrides(tmp_path: P
     )
 
     assert meta.description == "Updated explorer description."
-    assert meta.mode == "all"# ---------------------------------------------------------------------------
+    assert meta.mode == "all"
+
+
+# ---------------------------------------------------------------------------
 # Caller migration: operations.py (task 9) — already exercised by test_install.py
 # ---------------------------------------------------------------------------
 
@@ -3369,8 +3370,8 @@ def test_operations_generic_is_noop_for_change_agent_rendering(tmp_path: Path) -
     needing per-provider branching in operations.
     """
     from ai_harness.modules.harness import install_for_agent_clis
-    from ai_harness.modules.harness.models import AgentCli
     from ai_harness.modules.harness.administrators import ADMINISTRATORS
+    from ai_harness.modules.harness.models import AgentCli
 
     assert ADMINISTRATORS.get(AgentCli.GENERIC) is None
 
@@ -3389,8 +3390,8 @@ def test_operations_uses_artifact_install_path_for_writes(tmp_path: Path) -> Non
     assembling provider paths or filenames in operations itself.
     """
     from ai_harness.modules.harness import install_for_agent_clis
-    from ai_harness.modules.harness.models import AgentCli
     from ai_harness.modules.harness.administrators import ADMINISTRATORS
+    from ai_harness.modules.harness.models import AgentCli
 
     install_for_agent_clis([AgentCli.GENERIC, AgentCli.OPENCODE], home=tmp_path)
 
