@@ -36,9 +36,7 @@ from ai_harness.modules.harness.administrators.base import (
     Artifact,
     ArtifactsAdministrator,
     _read_template_body,
-    _resolve_agent_metadata,
     _yaml_dump_frontmatter,
-    discover_agent_names,
 )
 
 __all__ = ["ClaudeArtifactsAdministrator"]
@@ -156,22 +154,3 @@ class ClaudeArtifactsAdministrator(ArtifactsAdministrator):
             else:
                 artifacts.append(_render_claude_agent_artifact(name, metadata))
         return artifacts
-
-    def get_agent_metadata(
-        self,
-        name: str,
-        overrides: dict | None = None,
-        *,
-        home: Path | None = None,
-    ) -> AgentMetadata:
-        """Return Claude-resolved metadata for *name* with overrides applied."""
-        return _resolve_agent_metadata(name, overrides=overrides, home=home)
-
-    def discover_agent_names(self) -> list[str]:
-        """Return visible Claude change-agent template names.
-
-        Discovery is provider-agnostic — every administrator sees the same
-        visible template set, sourced from
-        :func:`ai_harness.modules.harness.administrators.base.discover_agent_names`.
-        """
-        return discover_agent_names()
