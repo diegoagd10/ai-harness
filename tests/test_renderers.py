@@ -1723,29 +1723,22 @@ def test_change_archiver_meta_declares_subagent_role() -> None:
     assert meta.model["claude"] == "sonnet"
 
 
-def test_change_archiver_renders_on_every_native_agent_cli(tmp_path: Path) -> None:
-    """All three native CLIs discover and render change-archiver."""
-    assert (
-        _find_pair(
-            ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(home=tmp_path, overrides={}),
-            "change-archiver",
-        )
-        is not None
-    )
-    assert (
-        _find_pair(
-            ADMINISTRATORS[AgentCli.COPILOT].render_artifacts(home=tmp_path, overrides={}),
-            "change-archiver",
-        )
-        is not None
-    )
-    assert (
-        _find_pair(
-            ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts(home=tmp_path, overrides={}),
-            "change-archiver",
-        )
-        is not None
-    )
+@pytest.mark.parametrize("cli", [AgentCli.CLAUDE, AgentCli.OPENCODE, AgentCli.COPILOT])
+def test_change_archiver_renders_on_native_agent_clis(tmp_path: Path, cli: AgentCli) -> None:
+    """Change-archiver renders structurally on every native agent CLI.
+
+    The smoke asserts renderability and structural shape (frontmatter plus
+    a non-empty body) without inspecting prompt prose or archiver contract
+    wording. Rendering uses ``home=tmp_path`` and ``overrides={}`` so user
+    configuration is not consulted and the user's home is not mutated.
+    """
+    artifacts = ADMINISTRATORS[cli].render_artifacts(["change-archiver"], home=tmp_path, overrides={})
+
+    assert len(artifacts) == 1, f"{cli}: expected one change-archiver artifact, got {len(artifacts)}"
+    content = artifacts[0].content
+    assert content.startswith("---\n"), f"{cli}: rendered change-archiver missing YAML frontmatter"
+    body = content.split("---", 2)[2].strip()
+    assert body, f"{cli}: rendered change-archiver body is empty after frontmatter"
 
 
 def test_change_agent_resources_smoke_have_metadata_and_body() -> None:
