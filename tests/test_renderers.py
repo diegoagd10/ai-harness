@@ -1030,10 +1030,10 @@ def test_render_agents_override_changes_claude_model_in_frontmatter() -> None:
     assert fm["model"] == "opus"
 
 
-def test_render_agents_byte_identical_when_no_overrides() -> None:
+def test_render_agents_byte_identical_when_no_overrides(tmp_path: Path) -> None:
     """render_agents with overrides=None produces identical output to omit-overrides calls."""
-    baseline = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts()
-    no_arg = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts(overrides=None)
+    baseline = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts(home=tmp_path)
+    no_arg = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts(overrides=None, home=tmp_path)
 
     assert baseline == no_arg
 
@@ -1527,10 +1527,10 @@ def test_render_agents_copilot_unknown_cli_returns_empty() -> None:
     assert ADMINISTRATORS.get(AgentCli.GENERIC) or [] == []
 
 
-def test_render_agents_copilot_byte_identical_when_no_overrides() -> None:
+def test_render_agents_copilot_byte_identical_when_no_overrides(tmp_path: Path) -> None:
     """render_agents for Copilot with overrides=None produces identical output to default."""
-    baseline = ADMINISTRATORS[AgentCli.COPILOT].render_artifacts()
-    no_arg = ADMINISTRATORS[AgentCli.COPILOT].render_artifacts(overrides=None)
+    baseline = ADMINISTRATORS[AgentCli.COPILOT].render_artifacts(home=tmp_path)
+    no_arg = ADMINISTRATORS[AgentCli.COPILOT].render_artifacts(overrides=None, home=tmp_path)
 
     assert baseline == no_arg
 
