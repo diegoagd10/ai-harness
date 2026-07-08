@@ -38,7 +38,6 @@ from ai_harness.modules.harness.models import AgentCli
 from ai_harness.modules.harness.operations import re_render_for_agent_clis
 from ai_harness.modules.harness.override_store import save_override_store
 from ai_harness.modules.wizard.pure import (
-    AgentMode,
     ModelSelection,
     align_label_rows,
     build_confirmation_rows,
@@ -48,11 +47,14 @@ from ai_harness.modules.wizard.pure import (
     build_opencode_model_picker_rows,
     build_opencode_override_payload,
     build_override_payload,
-    claude_wizard_agents,
     format_selection_label,
     join_opencode_catalog,
-    opencode_change_agents,
     opencode_model_is_reasoning,
+)
+from ai_harness.utils import (
+    AgentMode,
+    claude_wizard_agents,
+    opencode_change_agents,
 )
 
 if TYPE_CHECKING:
