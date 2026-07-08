@@ -254,14 +254,14 @@ def _change_orchestrator_body(cli: AgentCli = AgentCli.OPENCODE, *, home: Path) 
     return pair.content.split("---", 2)[2].removeprefix("\n")
 
 
-def test_change_orchestrator_body_interactive_stop_after_every_delegated_phase() -> None:
+def test_change_orchestrator_body_interactive_stop_after_every_delegated_phase(tmp_path: Path) -> None:
     """Subtask 3.1 — interactive mode stops and waits after every delegated phase.
 
     Locks the per-phase stop/ask/wait seam: in interactive mode the
     orchestrator must not launch PRD (or any other next phase) in the
     same turn as explore; it must report, ask, STOP, and wait.
     """
-    body = _change_orchestrator_body().lower()
+    body = _change_orchestrator_body(home=tmp_path).lower()
 
     # Interactive mode fires the per-phase checkpoint.
     assert "interactive" in body
@@ -279,14 +279,14 @@ def test_change_orchestrator_body_interactive_stop_after_every_delegated_phase()
     assert "same turn" in body or "in the same turn" in body or "must not launch" in body
 
 
-def test_change_orchestrator_body_continue_after_prd_authorizes_design_only() -> None:
+def test_change_orchestrator_body_continue_after_prd_authorizes_design_only(tmp_path: Path) -> None:
     """Subtask 3.3 — continue after PRD authorizes design only.
 
     Locks phase-scoped approval: a 'continue' reply after PRD may launch
     design only, and MUST NOT chain to specs or tasks without another
     stop/ask/wait checkpoint.
     """
-    body = _change_orchestrator_body().lower()
+    body = _change_orchestrator_body(home=tmp_path).lower()
 
     # Phase-scoped approval is explicit.
     assert "phase-scoped" in body or "phase scoped" in body or "scoped to" in body
@@ -299,14 +299,14 @@ def test_change_orchestrator_body_continue_after_prd_authorizes_design_only() ->
     assert "checkpoint" in body or "another checkpoint" in body or "stop again" in body or "next checkpoint" in body
 
 
-def test_change_orchestrator_body_ambiguous_checkpoint_does_not_approve() -> None:
+def test_change_orchestrator_body_ambiguous_checkpoint_does_not_approve(tmp_path: Path) -> None:
     """Subtask 3.5 — ambiguous checkpoint reply is not approval.
 
     Locks the ambiguity rule: when a checkpoint reply is unclear, the
     orchestrator must not advance to the next phase. It re-asks or
     treats the response as no approval.
     """
-    body = _change_orchestrator_body().lower()
+    body = _change_orchestrator_body(home=tmp_path).lower()
 
     # Ambiguous reply handling.
     assert "ambig" in body
@@ -322,14 +322,14 @@ def test_change_orchestrator_body_ambiguous_checkpoint_does_not_approve() -> Non
     assert "re-ask" in body or "clarif" in body or "ask" in body
 
 
-def test_change_orchestrator_body_requires_exact_skill_md_path_injection() -> None:
+def test_change_orchestrator_body_requires_exact_skill_md_path_injection(tmp_path: Path) -> None:
     """Rendered change-orchestrator requires exact SKILL.md paths and forbids inventing.
 
     Locks the skill-path injection contract (subtask 6.4): the
     ``Skills to load before work`` handoff, exact-path requirement, and
     the rule against inventing or summarising paths.
     """
-    body = _change_orchestrator_body()
+    body = _change_orchestrator_body(home=tmp_path)
 
     # The literal handoff header is required.
     assert "Skills to load before work" in body
@@ -339,7 +339,7 @@ def test_change_orchestrator_body_requires_exact_skill_md_path_injection() -> No
     assert "never invent" in body.lower() or "never" in body.lower()
 
 
-def test_change_orchestrator_body_locks_auto_interactive_phase_gate() -> None:
+def test_change_orchestrator_body_locks_auto_interactive_phase_gate(tmp_path: Path) -> None:
     """Rendered change-orchestrator locks the auto/interactive phase gate.
 
     Locks the session-mode phase gate (subtask 6.5): mode source,
@@ -347,7 +347,7 @@ def test_change_orchestrator_body_locks_auto_interactive_phase_gate() -> None:
     auto-continues-only-when-safe conditions (prior phase passed,
     current artifacts reviewed, no failed/blocked/waiting facts).
     """
-    body = _change_orchestrator_body().lower()
+    body = _change_orchestrator_body(home=tmp_path).lower()
 
     # Mode label and source.
     assert "auto" in body
@@ -362,14 +362,14 @@ def test_change_orchestrator_body_locks_auto_interactive_phase_gate() -> None:
     assert "failed" in body or "blocked" in body or "waiting" in body
 
 
-def test_change_orchestrator_body_session_mode_hard_gate_before_delegation() -> None:
+def test_change_orchestrator_body_session_mode_hard_gate_before_delegation(tmp_path: Path) -> None:
     """Subtask 2.1 — session mode is a hard gate before change-new/change-continue.
 
     Locks the preflight requirement: execution mode MUST be established
     before any ``change-new`` or ``change-continue`` delegation, and the
     session-mode wording must be marked as a hard gate.
     """
-    body = _change_orchestrator_body()
+    body = _change_orchestrator_body(home=tmp_path)
 
     # Session mode is its own section in the new body.
     assert "## Change flow — session mode" in body, "session-mode section missing"
@@ -384,14 +384,14 @@ def test_change_orchestrator_body_session_mode_hard_gate_before_delegation() -> 
     assert "re-ask" in body.lower() or "ask" in body.lower()
 
 
-def test_change_orchestrator_body_unspecified_mode_defaults_to_interactive_and_caches() -> None:
+def test_change_orchestrator_body_unspecified_mode_defaults_to_interactive_and_caches(tmp_path: Path) -> None:
     """Subtask 2.3 — unspecified mode defaults to interactive and is cached.
 
     Locks the default + cache behavior: when the user does not specify
     interactive or auto, the orchestrator uses interactive as the default
     and caches that decision for the session.
     """
-    body = _change_orchestrator_body().lower()
+    body = _change_orchestrator_body(home=tmp_path).lower()
 
     # Default-to-interactive wording.
     assert "default" in body
@@ -406,14 +406,14 @@ def test_change_orchestrator_body_unspecified_mode_defaults_to_interactive_and_c
     assert "interactive" in window, "default must point at interactive, not auto"
 
 
-def test_change_orchestrator_body_cached_interactive_survives_continue() -> None:
+def test_change_orchestrator_body_cached_interactive_survives_continue(tmp_path: Path) -> None:
     """Subtask 2.4 — cached interactive mode survives later continue requests.
 
     Locks the cache durability: a later ``continue`` request does not
     reinterpret interactive mode as automatic pipeline approval. Only an
     explicit mode change can flip the cached mode.
     """
-    body = _change_orchestrator_body().lower()
+    body = _change_orchestrator_body(home=tmp_path).lower()
 
     # Cache is keyed by change name; a later 'continue' within the same
     # change doesn't flip the cached mode.
@@ -456,14 +456,14 @@ def test_phase_prompts_expose_shared_result_envelope() -> None:
     assert "critical:" in bodies["change-validator"]
 
 
-def test_change_orchestrator_body_cached_auto_runs_gatekeeper_before_next_phase() -> None:
+def test_change_orchestrator_body_cached_auto_runs_gatekeeper_before_next_phase(tmp_path: Path) -> None:
     """Subtask 5.2 — cached auto runs the gatekeeper before any next phase.
 
     Locks that auto-mode continuation is gated: the orchestrator runs
     the gatekeeper validation before launching the next phase, never
     just continuing because mode is auto.
     """
-    body = _change_orchestrator_body().lower()
+    body = _change_orchestrator_body(home=tmp_path).lower()
 
     # Gatekeeper is named as a distinct step.
     assert "gatekeeper" in body
@@ -475,14 +475,14 @@ def test_change_orchestrator_body_cached_auto_runs_gatekeeper_before_next_phase(
     assert "launch" in body or "next phase" in body
 
 
-def test_change_orchestrator_body_missing_artifact_blocks_auto_progression() -> None:
+def test_change_orchestrator_body_missing_artifact_blocks_auto_progression(tmp_path: Path) -> None:
     """Subtask 5.3 — missing or unreadable artifact blocks auto progression.
 
     Locks the artifact-existence gatekeeper check: when a phase claims
     success but its declared artifact path does not exist or cannot be
     read, auto progression stops.
     """
-    body = _change_orchestrator_body().lower()
+    body = _change_orchestrator_body(home=tmp_path).lower()
 
     # Artifact existence/readability is an explicit gatekeeper check.
     assert "artifact" in body
@@ -493,13 +493,13 @@ def test_change_orchestrator_body_missing_artifact_blocks_auto_progression() -> 
     assert "block" in body or "stop" in body or "fail" in body
 
 
-def test_change_orchestrator_body_scope_drift_blocks_auto_progression() -> None:
+def test_change_orchestrator_body_scope_drift_blocks_auto_progression(tmp_path: Path) -> None:
     """Subtask 5.4 — out-of-PRD scope output stops auto progression.
 
     Locks the no-drift gatekeeper check: phase output that invents
     requirements outside the PRD scope blocks automatic continuation.
     """
-    body = _change_orchestrator_body().lower()
+    body = _change_orchestrator_body(home=tmp_path).lower()
 
     # Drift wording is explicit.
     assert "drift" in body or "scope" in body
@@ -509,14 +509,14 @@ def test_change_orchestrator_body_scope_drift_blocks_auto_progression() -> None:
     assert "block" in body or "stop" in body or "fail" in body
 
 
-def test_change_orchestrator_body_bad_next_recommended_blocks_auto_progression() -> None:
+def test_change_orchestrator_body_bad_next_recommended_blocks_auto_progression(tmp_path: Path) -> None:
     """Subtask 5.5 — nextRecommended violating dependency order stops auto.
 
     Locks the routing-coherence gatekeeper check: a `nextRecommended`
     that violates the Change dependency order or jumps ahead blocks
     automatic continuation.
     """
-    body = _change_orchestrator_body().lower()
+    body = _change_orchestrator_body(home=tmp_path).lower()
 
     # nextRecommended is the routing signal.
     assert "nextrecommended" in body
@@ -528,14 +528,14 @@ def test_change_orchestrator_body_bad_next_recommended_blocks_auto_progression()
     assert "block" in body or "stop" in body or "fail" in body
 
 
-def test_change_orchestrator_body_failed_gatekeeper_never_launches_dependent_phase() -> None:
+def test_change_orchestrator_body_failed_gatekeeper_never_launches_dependent_phase(tmp_path: Path) -> None:
     """Subtask 5.6 — failed gatekeeper never launches a dependent phase.
 
     Locks the no-advance rule: when the gatekeeper check fails after
     any phase, the orchestrator stops and does not spawn the next
     delegated phase.
     """
-    body = _change_orchestrator_body().lower()
+    body = _change_orchestrator_body(home=tmp_path).lower()
 
     # Gatekeeper failure stops the chain.
     assert "gatekeeper" in body
@@ -551,14 +551,14 @@ def test_change_orchestrator_body_failed_gatekeeper_never_launches_dependent_pha
     )
 
 
-def test_change_orchestrator_body_interactive_continue_cannot_chain_auto() -> None:
+def test_change_orchestrator_body_interactive_continue_cannot_chain_auto(tmp_path: Path) -> None:
     """Subtask 5.7 — interactive continue after PRD cannot chain to auto.
 
     Locks the no-silent-auto-conversion rule: a `continue` reply after
     PRD in interactive mode authorizes design only; specs and tasks
     MUST NOT be auto-chained through the gatekeeper.
     """
-    body = _change_orchestrator_body().lower()
+    body = _change_orchestrator_body(home=tmp_path).lower()
 
     # Continue-after-PRD interaction is named.
     assert "continue" in body
@@ -578,13 +578,13 @@ def test_change_orchestrator_body_interactive_continue_cannot_chain_auto() -> No
 # reference carry-through enforceable from disk.
 
 
-def test_contract_orchestrator_pause_requires_stop_ask_wait() -> None:
+def test_contract_orchestrator_pause_requires_stop_ask_wait(tmp_path: Path) -> None:
     """Subtask 6.1 — a 'pause' keyword without STOP / ask / wait fails.
 
     Locks that interactive mode wording cannot be a soft 'pause' alone;
     it must pair pause semantics with explicit STOP, ask, and wait.
     """
-    body = _change_orchestrator_body().lower()
+    body = _change_orchestrator_body(home=tmp_path).lower()
 
     # 'pause' or 'interactive' is not enough on its own.
     assert "pause" in body or "interactive" in body
@@ -595,13 +595,13 @@ def test_contract_orchestrator_pause_requires_stop_ask_wait() -> None:
     assert "wait" in body
 
 
-def test_contract_orchestrator_approval_requires_phase_scope() -> None:
+def test_contract_orchestrator_approval_requires_phase_scope(tmp_path: Path) -> None:
     """Subtask 6.2 — approval keyword without phase scope fails.
 
     Locks that an approval phrase like 'continue' must be paired with
     phase-scoped semantics; bare 'approval' or 'continue' is not enough.
     """
-    body = _change_orchestrator_body().lower()
+    body = _change_orchestrator_body(home=tmp_path).lower()
 
     # Approval vocabulary is present.
     assert "continue" in body or "approval" in body or "approve" in body
@@ -615,13 +615,13 @@ def test_contract_orchestrator_approval_requires_phase_scope() -> None:
     )
 
 
-def test_contract_orchestrator_explore_must_wait_before_prd_same_turn() -> None:
+def test_contract_orchestrator_explore_must_wait_before_prd_same_turn(tmp_path: Path) -> None:
     """Subtask 6.3 — interactive explore result must wait before PRD.
 
     Locks that an explore phase whose `nextRecommended` is `prd` does
     NOT launch `propose` in the same turn; the orchestrator must wait.
     """
-    body = _change_orchestrator_body().lower()
+    body = _change_orchestrator_body(home=tmp_path).lower()
 
     assert "explore" in body
     assert "prd" in body
@@ -630,14 +630,14 @@ def test_contract_orchestrator_explore_must_wait_before_prd_same_turn() -> None:
     assert "same turn" in body or "in the same turn" in body or "must not launch" in body or "do not launch" in body
 
 
-def test_contract_orchestrator_continue_after_prd_authorizes_design_only() -> None:
+def test_contract_orchestrator_continue_after_prd_authorizes_design_only(tmp_path: Path) -> None:
     """Subtask 6.4 — continue after PRD authorizes design only.
 
     Locks that a `continue` reply following PRD authorizes `design`
     only and MUST NOT chain to specs or tasks without another
     checkpoint.
     """
-    body = _change_orchestrator_body().lower()
+    body = _change_orchestrator_body(home=tmp_path).lower()
 
     assert "continue" in body
     assert "prd" in body
@@ -649,14 +649,14 @@ def test_contract_orchestrator_continue_after_prd_authorizes_design_only() -> No
     assert "checkpoint" in body or "stop" in body
 
 
-def test_contract_orchestrator_auto_requires_explicit_or_cached_selection() -> None:
+def test_contract_orchestrator_auto_requires_explicit_or_cached_selection(tmp_path: Path) -> None:
     """Subtask 6.6 — auto mode without explicit or cached selection fails.
 
     Locks that auto-continuation is gated on an explicit user
     instruction or a previously cached session mode. Default fall-
     through to auto is forbidden.
     """
-    body = _change_orchestrator_body().lower()
+    body = _change_orchestrator_body(home=tmp_path).lower()
 
     assert "auto" in body
     # Auto must be explicit or cached.
@@ -666,13 +666,13 @@ def test_contract_orchestrator_auto_requires_explicit_or_cached_selection() -> N
     assert "fall-through" in body or "fall through" in body or "accidental" in body or "must not" in body
 
 
-def test_contract_orchestrator_auto_gatekeeper_requires_all_four_checks() -> None:
+def test_contract_orchestrator_auto_gatekeeper_requires_all_four_checks(tmp_path: Path) -> None:
     """Subtask 6.7 — auto gatekeeper missing any of the four checks fails.
 
     Locks the four mandatory gatekeeper checks: contract conformance,
     artifact existence, no drift from PRD scope, and routing coherence.
     """
-    body = _change_orchestrator_body().lower()
+    body = _change_orchestrator_body(home=tmp_path).lower()
 
     assert "gatekeeper" in body
     # All four mandatory checks are spelled out.
@@ -682,13 +682,13 @@ def test_contract_orchestrator_auto_gatekeeper_requires_all_four_checks() -> Non
     assert "routing" in body or "depend" in body
 
 
-def test_contract_orchestrator_launch_dedup_session_log_required() -> None:
+def test_contract_orchestrator_launch_dedup_session_log_required(tmp_path: Path) -> None:
     """Subtask 6.8 — launch dedup session log is asserted in the prompt.
 
     Locks that the orchestrator body mentions the session
     (phase, task-fingerprint) launch log and the duplicate guard.
     """
-    body = _change_orchestrator_body().lower()
+    body = _change_orchestrator_body(home=tmp_path).lower()
 
     # Launch dedup section in the new body.
     assert "launch dedup" in body
@@ -1785,9 +1785,9 @@ def test_change_archiver_renders_on_every_native_agent_cli() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_change_orchestrator_archive_route_spawns_change_archiver() -> None:
+def test_change_orchestrator_archive_route_spawns_change_archiver(tmp_path: Path) -> None:
     """Archive execution is delegated to change-archiver, not orchestrated inline."""
-    body = _change_orchestrator_body()
+    body = _change_orchestrator_body(home=tmp_path)
 
     # Spawns the archiver after the gate passes.
     assert "change-archiver" in body
@@ -1798,9 +1798,9 @@ def test_change_orchestrator_archive_route_spawns_change_archiver() -> None:
     assert "move" in body or "moves" in body or "move" in body_lower
 
 
-def test_change_orchestrator_archive_success_is_terminal() -> None:
+def test_change_orchestrator_archive_success_is_terminal(tmp_path: Path) -> None:
     """Successful archiver result ends the flow — no post-archive change-continue."""
-    body = _change_orchestrator_body().lower()
+    body = _change_orchestrator_body(home=tmp_path).lower()
 
     # Terminal language is explicit.
     assert "terminal" in body
@@ -1816,9 +1816,9 @@ def test_change_orchestrator_archive_success_is_terminal() -> None:
     )
 
 
-def test_change_orchestrator_archive_failure_escalates_to_blocked() -> None:
+def test_change_orchestrator_archive_failure_escalates_to_blocked(tmp_path: Path) -> None:
     """Archiver blocked result escalates to a blocked human-decision flow."""
-    body = _change_orchestrator_body().lower()
+    body = _change_orchestrator_body(home=tmp_path).lower()
 
     # Failure language names 'blocked' and surfaces errors for human decision.
     archive_section_idx = body.index("archive")
