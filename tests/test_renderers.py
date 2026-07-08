@@ -453,7 +453,7 @@ def test_change_orchestrator_body_cached_interactive_survives_continue(tmp_path:
     assert "re-ask" in body or "reasks" in body
 
 
-def test_phase_prompts_expose_shared_result_envelope() -> None:
+def test_phase_prompts_expose_shared_result_envelope(tmp_path: Path) -> None:
     """Explorer, implementor, and validator prompts share one result envelope.
 
     Locks the per-phase result envelope (subtask 6.6) across the three
@@ -461,7 +461,10 @@ def test_phase_prompts_expose_shared_result_envelope() -> None:
     shape and its own phase-specific semantic facts.
     """
     bodies = {
-        name: _find_pair(ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(), name)
+        name: _find_pair(
+            ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(home=tmp_path, overrides={}),
+            name,
+        )
         .content.split("---", 2)[2]
         .removeprefix("\n")
         for name in ("change-explorer", "change-implementor", "change-validator")
@@ -764,7 +767,7 @@ def test_contract_change_artifacts_carry_all_five_gentle_references() -> None:
         )
 
 
-def test_change_orchestrator_body_frontmatter_parity_after_body_only_edits() -> None:
+def test_change_orchestrator_body_frontmatter_parity_after_body_only_edits(tmp_path: Path) -> None:
     """Rendered change-orchestrator frontmatter stays aligned with its source.
 
     Locks metadata parity (subtask 6.7): body-only edits must not require
@@ -772,7 +775,10 @@ def test_change_orchestrator_body_frontmatter_parity_after_body_only_edits() -> 
     the body changes without a frontmatter bump, parity is still asserted
     through shape stability, not string equality.
     """
-    pair = _find_pair(ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(), "change-orchestrator")
+    pair = _find_pair(
+        ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(home=tmp_path, overrides={}),
+        "change-orchestrator",
+    )
     assert pair is not None
     content = pair.content
     fm = _parse_frontmatter(content)
@@ -792,18 +798,18 @@ def test_change_orchestrator_body_frontmatter_parity_after_body_only_edits() -> 
 # ---------------------------------------------------------------------------
 
 
-def test_opencode_frontmatter_includes_mode() -> None:
+def test_opencode_frontmatter_includes_mode(tmp_path: Path) -> None:
     """OpenCode output retains ``mode`` for all agents."""
-    pairs = ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts()
+    pairs = ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(home=tmp_path, overrides={})
 
     for a in pairs:
         fm = _parse_frontmatter(a.content)
         assert "mode" in fm, "mode should be present in OpenCode output"
 
 
-def test_opencode_frontmatter_includes_permission_where_configured() -> None:
+def test_opencode_frontmatter_includes_permission_where_configured(tmp_path: Path) -> None:
     """OpenCode output passes through the ``permission`` block when present."""
-    pairs = ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts()
+    pairs = ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(home=tmp_path, overrides={})
 
     # change-orchestrator carries a permissive permission block (full allow).
     pair = _find_pair(pairs, "change-orchestrator")
@@ -815,22 +821,24 @@ def test_opencode_frontmatter_includes_permission_where_configured() -> None:
     assert fm["permission"].get("task", {}).get("*") == "allow"
 
 
-def test_opencode_change_implementor_has_no_permission_block() -> None:
+def test_opencode_change_implementor_has_no_permission_block(tmp_path: Path) -> None:
     """change-implementor has no permission block in OpenCode (full access)."""
-    pairs = ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts()
+    pairs = ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(home=tmp_path, overrides={})
     pair = _find_pair(pairs, "change-implementor")
     assert pair is not None
     fm = _parse_frontmatter(pair.content)
     assert "permission" not in fm, f"change-implementor should not have permission, got {fm.get('permission')!r}"
 
 
-def test_change_orchestrator_frontmatter_uses_meta() -> None:
+def test_change_orchestrator_frontmatter_uses_meta(tmp_path: Path) -> None:
     """Change-orchestrator renders OpenCode frontmatter from _AGENT_META."""
-    pairs = ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts()
+    pairs = ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(home=tmp_path, overrides={})
     pair = _find_pair(pairs, "change-orchestrator")
     assert pair is not None
     fm = _parse_frontmatter(pair.content)
-    meta = ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata("change-orchestrator")
+    meta = ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata(
+        "change-orchestrator", home=tmp_path, overrides={}
+    )
 
     assert fm["description"] == meta.description
     assert fm["mode"] == "primary"
@@ -845,9 +853,9 @@ def test_change_orchestrator_frontmatter_uses_meta() -> None:
     }
 
 
-def test_opencode_subagents_have_no_color() -> None:
+def test_opencode_subagents_have_no_color(tmp_path: Path) -> None:
     """OpenCode change subagents carry no ``color`` key."""
-    pairs = ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts()
+    pairs = ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(home=tmp_path, overrides={})
 
     for name in ("change-explorer", "change-implementor", "change-validator"):
         pair = _find_pair(pairs, name)
