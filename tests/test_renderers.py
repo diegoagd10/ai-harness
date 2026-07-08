@@ -1856,14 +1856,14 @@ def _native_change_orchestrator_body(cli: AgentCli, *, home: Path) -> str:
 
 
 @pytest.mark.parametrize("cli", NATIVE_RENDERERS)
-def test_change_orchestrator_body_four_entry_classes_in_canonical_order(cli: AgentCli) -> None:
+def test_change_orchestrator_body_four_entry_classes_in_canonical_order(cli: AgentCli, tmp_path: Path) -> None:
     """Subtask 5.2 — the four entry classes appear in canonical order in every renderer.
 
     Locks the 4-way entry contract: the body must name Conversational,
     Small inline, Recommend change flow, and Explicit change flow in
     that order, so no renderer silently drops a class.
     """
-    body = _native_change_orchestrator_body(cli).lower()
+    body = _native_change_orchestrator_body(cli, home=tmp_path).lower()
 
     # Class markers — each `### Class N —` heading must appear in canonical order.
     class_markers = ("class 1", "class 2", "class 3", "class 4")
@@ -1876,14 +1876,14 @@ def test_change_orchestrator_body_four_entry_classes_in_canonical_order(cli: Age
 
 
 @pytest.mark.parametrize("cli", NATIVE_RENDERERS)
-def test_change_orchestrator_body_entry_class_boundary_statement_present(cli: AgentCli) -> None:
+def test_change_orchestrator_body_entry_class_boundary_statement_present(cli: AgentCli, tmp_path: Path) -> None:
     """Subtask 5.3 — explicit boundary statement between class 2 and class 3.
 
     Locks the boundary so the classifier does not collapse the two
     inline classes into one. The boundary prose sits between class 2
     and class 3 in document order.
     """
-    body = _native_change_orchestrator_body(cli).lower()
+    body = _native_change_orchestrator_body(cli, home=tmp_path).lower()
 
     # The new body has 4 classes in canonical order; the boundary between
     # class 2 and class 3 is implicit (class 3 starts with "Then delegate
@@ -1895,7 +1895,7 @@ def test_change_orchestrator_body_entry_class_boundary_statement_present(cli: Ag
 
 
 @pytest.mark.parametrize("cli", NATIVE_RENDERERS)
-def test_change_orchestrator_body_hard_triggers_present(cli: AgentCli) -> None:
+def test_change_orchestrator_body_hard_triggers_present(cli: AgentCli, tmp_path: Path) -> None:
     """All hard-trigger rules appear in every renderer.
 
     The new body uses 3 explicit hard triggers in Class 3 (vs. the old 6):
@@ -1904,7 +1904,7 @@ def test_change_orchestrator_body_hard_triggers_present(cli: AgentCli) -> None:
     were folded into Class 4 — change flow — which is the recommended path
     for any of those concerns.
     """
-    body = _native_change_orchestrator_body(cli).lower()
+    body = _native_change_orchestrator_body(cli, home=tmp_path).lower()
 
     triggers = (
         "4-file",
@@ -1916,14 +1916,14 @@ def test_change_orchestrator_body_hard_triggers_present(cli: AgentCli) -> None:
 
 
 @pytest.mark.parametrize("cli", NATIVE_RENDERERS)
-def test_change_orchestrator_body_canonical_english_trigger_phrases(cli: AgentCli) -> None:
+def test_change_orchestrator_body_canonical_english_trigger_phrases(cli: AgentCli, tmp_path: Path) -> None:
     """Subtask 5.5 — canonical English trigger phrases present in every renderer.
 
     Locks the managed-change trigger phrase list: do this as a change,
     implement this as a change, use change flow, use the change
     pipeline, run this through change.
     """
-    body = _native_change_orchestrator_body(cli).lower()
+    body = _native_change_orchestrator_body(cli, home=tmp_path).lower()
 
     phrases = (
         "do this as a change",
@@ -1937,13 +1937,13 @@ def test_change_orchestrator_body_canonical_english_trigger_phrases(cli: AgentCl
 
 
 @pytest.mark.parametrize("cli", NATIVE_RENDERERS)
-def test_change_orchestrator_body_canonical_spanish_trigger_phrases(cli: AgentCli) -> None:
+def test_change_orchestrator_body_canonical_spanish_trigger_phrases(cli: AgentCli, tmp_path: Path) -> None:
     """Subtask 5.6 — canonical Spanish trigger phrases present in every renderer.
 
     Locks the bilingual managed-change trigger phrase list: hazlo con
     change flow, implementalo como un change, usá change flow.
     """
-    body = _native_change_orchestrator_body(cli).lower()
+    body = _native_change_orchestrator_body(cli, home=tmp_path).lower()
 
     phrases = (
         "hazlo con change flow",
@@ -1955,13 +1955,13 @@ def test_change_orchestrator_body_canonical_spanish_trigger_phrases(cli: AgentCl
 
 
 @pytest.mark.parametrize("cli", NATIVE_RENDERERS)
-def test_change_orchestrator_body_bare_flow_exclusion(cli: AgentCli) -> None:
+def test_change_orchestrator_body_bare_flow_exclusion(cli: AgentCli, tmp_path: Path) -> None:
     """Subtask 5.7 — bare-flow exclusion is asserted in every renderer.
 
     Locks the explicit bare-flow exclusion: 'bare flow' must appear
     paired with a negative-language token (NOT / no / never).
     """
-    body = _native_change_orchestrator_body(cli).lower()
+    body = _native_change_orchestrator_body(cli, home=tmp_path).lower()
 
     # Find the bare-flow mention.
     bare_flow_idx = body.find("bare")
@@ -1977,14 +1977,14 @@ def test_change_orchestrator_body_bare_flow_exclusion(cli: AgentCli) -> None:
 
 
 @pytest.mark.parametrize("cli", NATIVE_RENDERERS)
-def test_change_orchestrator_body_similarity_check_tokens(cli: AgentCli) -> None:
+def test_change_orchestrator_body_similarity_check_tokens(cli: AgentCli, tmp_path: Path) -> None:
     """Subtask 5.9 — similarity-check tokens present in every renderer.
 
     Locks the three-branch contract: Engram, .ai-harness/changes/,
     .ai-harness/archive/, and the three branches (active, archived,
     stale).
     """
-    body = _native_change_orchestrator_body(cli).lower()
+    body = _native_change_orchestrator_body(cli, home=tmp_path).lower()
 
     tokens = (
         "engram",
@@ -1999,26 +1999,26 @@ def test_change_orchestrator_body_similarity_check_tokens(cli: AgentCli) -> None
 
 
 @pytest.mark.parametrize("cli", NATIVE_RENDERERS)
-def test_change_orchestrator_body_no_external_prior_art_paths(cli: AgentCli) -> None:
+def test_change_orchestrator_body_no_external_prior_art_paths(cli: AgentCli, tmp_path: Path) -> None:
     """No external prior-art paths should appear in the rendered body."""
-    body = _native_change_orchestrator_body(cli)
+    body = _native_change_orchestrator_body(cli, home=tmp_path)
     assert not re.search(r"gentle-ai/[\w./\-:]+", body), f"{cli}: external gentle-ai path leaked"
 
 
 @pytest.mark.parametrize("cli", NATIVE_RENDERERS)
-def test_change_orchestrator_body_hard_gate_heading_preserved(cli: AgentCli) -> None:
+def test_change_orchestrator_body_hard_gate_heading_preserved(cli: AgentCli, tmp_path: Path) -> None:
     """Subtask 5.11 — ## Session mode — auto vs interactive (HARD GATE) heading preserved.
 
     The interactive phase checkpoint and the auto gatekeeper sections
     downstream anchor on this marker. Renaming or removing it would
     break the downstream sections.
     """
-    body = _native_change_orchestrator_body(cli)
+    body = _native_change_orchestrator_body(cli, home=tmp_path)
     assert "## Change flow — session mode" in body, f"{cli}: hard-gate heading missing or renamed"
 
 
 @pytest.mark.parametrize("cli", NATIVE_RENDERERS)
-def test_change_orchestrator_body_no_new_cli_commands_or_flags(cli: AgentCli) -> None:
+def test_change_orchestrator_body_no_new_cli_commands_or_flags(cli: AgentCli, tmp_path: Path) -> None:
     """Subtask 5.12 — no new CLI commands, flags, or status tokens.
 
     The pre-change orchestrator body used the same set of CLI markers
@@ -2027,7 +2027,7 @@ def test_change_orchestrator_body_no_new_cli_commands_or_flags(cli: AgentCli) ->
     pre-existing markers and MUST NOT introduce new CLI commands or
     `ai-harness.change-status.*` envelope fields.
     """
-    body = _native_change_orchestrator_body(cli).lower()
+    body = _native_change_orchestrator_body(cli, home=tmp_path).lower()
     # Pre-existing CLI surface markers (must still be present). Note that
     # task-next / task-done / task-create / task-list are owned by the
     # change-implementor and change-validator prompts, not the orchestrator.
@@ -2046,7 +2046,7 @@ def test_change_orchestrator_body_no_new_cli_commands_or_flags(cli: AgentCli) ->
 
 @pytest.mark.parametrize("cli", NATIVE_RENDERERS)
 def test_change_orchestrator_body_similarity_check_gated_to_entry_classes_3_and_4(
-    cli: AgentCli,
+    cli: AgentCli, tmp_path: Path
 ) -> None:
     """Subtask 5.9 — similarity check is gated to entry classes 3 and 4 only.
 
@@ -2054,7 +2054,7 @@ def test_change_orchestrator_body_similarity_check_gated_to_entry_classes_3_and_
     state that entry classes 1 and 2 (including status reads) do NOT
     fire the check.
     """
-    body = _native_change_orchestrator_body(cli).lower()
+    body = _native_change_orchestrator_body(cli, home=tmp_path).lower()
 
     # Similarity-check paragraph in the new body (route contract section).
     sim_idx = body.find("similarity check")
@@ -2068,13 +2068,13 @@ def test_change_orchestrator_body_similarity_check_gated_to_entry_classes_3_and_
 
 
 @pytest.mark.parametrize("cli", NATIVE_RENDERERS)
-def test_change_orchestrator_body_similarity_check_three_branch_contract(cli: AgentCli) -> None:
+def test_change_orchestrator_body_similarity_check_three_branch_contract(cli: AgentCli, tmp_path: Path) -> None:
     """Subtask 5.9 — similarity check documents the three-branch (plus no-match) contract.
 
     Locks the outcomes: active folder → recommend continue; archived
     → default stop; stale Engram → ignore; no match → create new.
     """
-    body = _native_change_orchestrator_body(cli).lower()
+    body = _native_change_orchestrator_body(cli, home=tmp_path).lower()
 
     sim_idx = body.find("similarity check")
     assert sim_idx != -1, f"{cli}: similarity check section missing"
@@ -2097,7 +2097,7 @@ def test_change_orchestrator_body_similarity_check_three_branch_contract(cli: Ag
 
 
 @pytest.mark.parametrize("cli", (AgentCli.OPENCODE, AgentCli.CLAUDE, AgentCli.COPILOT))
-def test_change_orchestrator_body_inlines_commit_format_directive(cli: AgentCli) -> None:
+def test_change_orchestrator_body_inlines_commit_format_directive(cli: AgentCli, tmp_path: Path) -> None:
     """Subtask 2.2 — the orchestrator prompt instructs the spawned subagent to call
     ``resolve_commit_format(repo_root)`` per delegation and inline the returned
     string verbatim under ``Data injected for this delegation:`` as
@@ -2106,7 +2106,7 @@ def test_change_orchestrator_body_inlines_commit_format_directive(cli: AgentCli)
     Locks the read side of the orchestrator-injects pattern: every renderer must
     carry the directive block so the contract is installed on disk.
     """
-    body = _native_change_orchestrator_body(cli)
+    body = _native_change_orchestrator_body(cli, home=tmp_path)
 
     # The labeled block header appears verbatim.
     assert "Data injected for this delegation:" in body, f"{cli}: directive block header missing"
@@ -2234,7 +2234,7 @@ _NATIVE_RENDERERS_PARITY = (AgentCli.OPENCODE, AgentCli.CLAUDE, AgentCli.COPILOT
 
 
 @pytest.mark.parametrize("cli", _NATIVE_RENDERERS_PARITY)
-def test_renderer_parity_change_orchestrator_has_commit_format_directive(cli: AgentCli) -> None:
+def test_renderer_parity_change_orchestrator_has_commit_format_directive(cli: AgentCli, tmp_path: Path) -> None:
     """Subtasks 4.1 + 4.2 — the rendered change-orchestrator body carries the new delegation
     directive on every native renderer (OpenCode, Claude, Copilot).
 
@@ -2244,7 +2244,7 @@ def test_renderer_parity_change_orchestrator_has_commit_format_directive(cli: Ag
     task list are asserted here as part of a wider sweep that also
     covers Copilot.
     """
-    body = _native_change_orchestrator_body(cli)
+    body = _native_change_orchestrator_body(cli, home=tmp_path)
 
     assert "Data injected for this delegation:" in body, (
         f"{cli}: change-orchestrator body missing the 'Data injected for this delegation:' header"
