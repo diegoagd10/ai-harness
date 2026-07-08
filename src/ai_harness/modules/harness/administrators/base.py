@@ -166,7 +166,6 @@ class ArtifactsAdministrator(ABC):
         path is stable and the install manifest is deterministic.
         """
 
-    @abstractmethod
     def get_agent_metadata(
         self,
         name: str,
@@ -180,7 +179,13 @@ class ArtifactsAdministrator(ABC):
         reads disk, ``{}`` skips the disk read, and explicit dicts are
         used verbatim. The returned ``AgentMetadata`` is a fresh value
         callers may inspect or mutate without affecting shared state.
+
+        Default implementation on the base class — providers inherit
+        this unless they need provider-specific override handling.
+        Delegates to the shared :func:`_resolve_agent_metadata` helper
+        so every administrator resolves metadata identically.
         """
+        return _resolve_agent_metadata(name, overrides=overrides, home=home)
 
     @abstractmethod
     def discover_agent_names(self) -> list[str]:
