@@ -238,14 +238,18 @@ def test_change_orchestrator_body_gate_requires_explicit_confirmation() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _change_orchestrator_body(cli: AgentCli = AgentCli.OPENCODE) -> str:
+def _change_orchestrator_body(cli: AgentCli = AgentCli.OPENCODE, *, home: Path) -> str:
     """Return the rendered change-orchestrator body for ``cli``.
 
     Helper used by the borrowed-conductor tests so they can lock the body
     wording on a single renderer (OpenCode) without re-implementing the
-    parse/extract dance per test.
+    parse/extract dance per test. The caller supplies an isolated ``home``
+    so the helper never falls back to ``Path.home()``.
     """
-    pair = _find_pair(ADMINISTRATORS[cli].render_artifacts(), "change-orchestrator")
+    pair = _find_pair(
+        ADMINISTRATORS[cli].render_artifacts(home=home, overrides={}),
+        "change-orchestrator",
+    )
     assert pair is not None, f"change-orchestrator not rendered for {cli}"
     return pair.content.split("---", 2)[2].removeprefix("\n")
 
@@ -1837,9 +1841,16 @@ def test_change_orchestrator_archive_failure_escalates_to_blocked() -> None:
 NATIVE_RENDERERS = (AgentCli.OPENCODE, AgentCli.COPILOT, AgentCli.CLAUDE)
 
 
-def _native_change_orchestrator_body(cli: AgentCli) -> str:
-    """Return the rendered change-orchestrator body for the given native CLI."""
-    pair = _find_pair(ADMINISTRATORS[cli].render_artifacts(), "change-orchestrator")
+def _native_change_orchestrator_body(cli: AgentCli, *, home: Path) -> str:
+    """Return the rendered change-orchestrator body for the given native CLI.
+
+    The caller supplies an isolated ``home`` so the helper never falls back
+    to ``Path.home()``.
+    """
+    pair = _find_pair(
+        ADMINISTRATORS[cli].render_artifacts(home=home, overrides={}),
+        "change-orchestrator",
+    )
     assert pair is not None, f"change-orchestrator not rendered for {cli}"
     return pair.content.split("---", 2)[2].removeprefix("\n")
 
@@ -2123,9 +2134,16 @@ def test_change_orchestrator_body_inlines_commit_format_directive(cli: AgentCli)
 # ---------------------------------------------------------------------------
 
 
-def _native_change_implementor_body(cli: AgentCli) -> str:
-    """Return the rendered change-implementor body for the given native CLI."""
-    pair = _find_pair(ADMINISTRATORS[cli].render_artifacts(), "change-implementor")
+def _native_change_implementor_body(cli: AgentCli, *, home: Path) -> str:
+    """Return the rendered change-implementor body for the given native CLI.
+
+    The caller supplies an isolated ``home`` so the helper never falls back
+    to ``Path.home()``.
+    """
+    pair = _find_pair(
+        ADMINISTRATORS[cli].render_artifacts(home=home, overrides={}),
+        "change-implementor",
+    )
     assert pair is not None, f"change-implementor not rendered for {cli}"
     return pair.content.split("---", 2)[2].removeprefix("\n")
 
