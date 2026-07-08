@@ -33,49 +33,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from enum import StrEnum
-from typing import TYPE_CHECKING, NamedTuple
-
-if TYPE_CHECKING:
-    pass
-
-
-# ---------------------------------------------------------------------------
-# Agent-set mode — the ``-a/--agent`` flag vocabulary.
-#
-# Mirrors the existing ``AgentCli`` (in ``harness/models.py``) and ``Nav``
-# (in ``tui.py``) house style: a ``StrEnum`` whose members compare equal to
-# raw strings so downstream ``==`` / ``Choice(value=...)`` keep working.
-# ``parse_agent_mode`` is the single place that knows about case-sensitivity
-# and the valid set — callers receive a typed value or a clear error.
-# ---------------------------------------------------------------------------
-
-
-class AgentMode(StrEnum):
-    """The ``-a/--agent`` flag's valid values for ``set-models -o opencode``.
-
-    The string values match the lowercase vocabulary already used by
-    ``CLAUDE_MODELS`` and ``OPENCODE_REASONING_EFFORTS`` (strict lowercase,
-    no case folding). Adding a new mode is a one-line enum member plus
-    a parser branch.
-    """
-
-    CHANGE = "change"
-
-
-def parse_agent_mode(raw: str) -> AgentMode:
-    """Parse a raw ``-a/--agent`` string into an :class:`AgentMode`.
-
-    Strict-lowercase: ``"Change"`` and ``"CHANGE"`` are rejected — the
-    wizard's vocabulary is lowercase only. Raises :class:`ValueError` with
-    the valid set explicitly named so the CLI adapter can surface it
-    verbatim in a ``typer.BadParameter`` message.
-    """
-    try:
-        return AgentMode(raw)
-    except ValueError as exc:
-        valid = ", ".join(m.value for m in AgentMode)
-        raise ValueError(f"set-models -a got {raw!r}; valid values: {valid}.") from exc
+from typing import NamedTuple
 
 
 class ModelSelection(NamedTuple):
@@ -103,22 +61,6 @@ CLAUDE_MODELS: tuple[str, ...] = ("opus", "sonnet", "haiku", "fable", "inherit")
 #: Claude effort values the wizard offers. Order is intentional: low → max.
 CLAUDE_EFFORTS: tuple[str, ...] = ("low", "medium", "high", "xhigh", "max")
 
-#: All agents the Claude wizard presents — the 8 change subagents plus the
-#: change-orchestrator. The orchestrator's model override is ignored by the
-#: skill renderer, but the wizard presents all 9 for a uniform UX.
-#: Kept as a tuple so callers can't mutate the source of truth.
-CLAUDE_WIZARD_AGENTS: tuple[str, ...] = (
-    "change-orchestrator",
-    "change-explorer",
-    "change-implementor",
-    "change-validator",
-    "change-archiver",
-    "change-design",
-    "change-propose",
-    "change-specs",
-    "change-tasks",
-)
-
 
 def claude_models() -> tuple[str, ...]:
     """Return the fixed Claude model aliases the wizard offers."""
@@ -130,11 +72,6 @@ def claude_efforts() -> tuple[str, ...]:
     return CLAUDE_EFFORTS
 
 
-def claude_wizard_agents() -> tuple[str, ...]:
-    """Return the agents the Claude wizard presents (all 9 change agents including the orchestrator)."""
-    return CLAUDE_WIZARD_AGENTS
-
-
 # ---------------------------------------------------------------------------
 # Fixed OpenCode vocabulary — the wizard's single source of truth.
 # ---------------------------------------------------------------------------
@@ -144,33 +81,6 @@ def claude_wizard_agents() -> tuple[str, ...]:
 #: the same value set applies to every reasoning model. Order is intentional:
 #: low → high.
 OPENCODE_REASONING_EFFORTS: tuple[str, ...] = ("low", "medium", "high")
-
-
-# ---------------------------------------------------------------------------
-# Change-agent set — the OpenCode wizard's agent vocabulary.
-#
-# A frozen tuple and a single accessor that callers consume. The nine names
-# mirror the renderer resources under ``change-agent/`` (``_discover_agents``
-# walks that dir on the write path; the wizard does NOT read from the
-# filesystem — pure data is the wizard's source of truth by design).
-# ---------------------------------------------------------------------------
-
-OPENCODE_CHANGE_AGENTS: tuple[str, ...] = (
-    "change-orchestrator",
-    "change-explorer",
-    "change-implementor",
-    "change-validator",
-    "change-archiver",
-    "change-propose",
-    "change-design",
-    "change-specs",
-    "change-tasks",
-)
-
-
-def opencode_change_agents() -> tuple[str, ...]:
-    """Return the agents configurable through the OpenCode ``-a change`` branch."""
-    return OPENCODE_CHANGE_AGENTS
 
 
 def opencode_efforts() -> tuple[str, ...]:

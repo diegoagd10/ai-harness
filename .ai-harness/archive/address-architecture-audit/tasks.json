@@ -1,0 +1,429 @@
+{
+  "tasks": [
+    {
+      "id": "1",
+      "title": "Add get_agent_metadata() default to ArtifactsAdministrator",
+      "spec": "admin-defaults",
+      "phase": "core",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "1.1",
+          "title": "Add concrete get_agent_metadata() to ArtifactsAdministrator in base.py",
+          "scenario": "base-provides-metadata-default",
+          "status": "done"
+        },
+        {
+          "id": "1.2",
+          "title": "Verify R1: base defaults",
+          "scenario": "base-provides-metadata-default",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "2",
+      "title": "Add discover_agent_names() default to ArtifactsAdministrator",
+      "spec": "admin-defaults",
+      "phase": "core",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "2.1",
+          "title": "Add concrete discover_agent_names() to ArtifactsAdministrator in base.py",
+          "scenario": "claude-administrator-inherits-default-agent-discovery",
+          "status": "done"
+        },
+        {
+          "id": "2.2",
+          "title": "Verify R1: base defaults",
+          "scenario": "claude-administrator-inherits-default-agent-discovery",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "3",
+      "title": "Delete get_agent_metadata and discover_agent_names wrappers from ClaudeArtifactsAdministrator",
+      "spec": "admin-defaults",
+      "phase": "core",
+      "depends_on": [
+        "2"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "3.1",
+          "title": "Delete get_agent_metadata wrapper from claude.py",
+          "scenario": "subclasses-no-longer-define-metadata-wrappers",
+          "status": "done"
+        },
+        {
+          "id": "3.2",
+          "title": "Delete discover_agent_names wrapper from claude.py",
+          "scenario": "subclasses-no-longer-define-discovery-wrappers",
+          "status": "done"
+        },
+        {
+          "id": "3.3",
+          "title": "Remove unused imports from claude.py",
+          "scenario": "wrapper-only-imports-removed-from-provider-modules",
+          "status": "done"
+        },
+        {
+          "id": "3.4",
+          "title": "Verify grep -n \"def discover_agent_names\" claude.py returns zero",
+          "scenario": "subclasses-no-longer-define-discovery-wrappers",
+          "status": "done"
+        },
+        {
+          "id": "3.5",
+          "title": "Verify grep -n \"def get_agent_metadata\" claude.py returns zero",
+          "scenario": "subclasses-no-longer-define-metadata-wrappers",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "4",
+      "title": "Delete get_agent_metadata and discover_agent_names wrappers from CopilotArtifactsAdministrator",
+      "spec": "admin-defaults",
+      "phase": "core",
+      "depends_on": [
+        "1",
+        "2"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "4.1",
+          "title": "Delete get_agent_metadata wrapper from copilot.py",
+          "scenario": "subclasses-no-longer-define-metadata-wrappers",
+          "status": "done"
+        },
+        {
+          "id": "4.2",
+          "title": "Delete discover_agent_names wrapper from copilot.py",
+          "scenario": "subclasses-no-longer-define-discovery-wrappers",
+          "status": "done"
+        },
+        {
+          "id": "4.3",
+          "title": "Remove unused imports from copilot.py",
+          "scenario": "wrapper-only-imports-removed-from-provider-modules",
+          "status": "done"
+        },
+        {
+          "id": "4.4",
+          "title": "Verify grep -n \"def discover_agent_names\" copilot.py returns zero",
+          "scenario": "subclasses-no-longer-define-discovery-wrappers",
+          "status": "done"
+        },
+        {
+          "id": "4.5",
+          "title": "Verify grep -n \"def get_agent_metadata\" copilot.py returns zero",
+          "scenario": "subclasses-no-longer-define-metadata-wrappers",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "5",
+      "title": "Delete get_agent_metadata and discover_agent_names wrappers from OpenCodeArtifactsAdministrator",
+      "spec": "admin-defaults",
+      "phase": "core",
+      "depends_on": [
+        "1",
+        "2"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "5.1",
+          "title": "Delete get_agent_metadata wrapper from opencode.py",
+          "scenario": "subclasses-no-longer-define-metadata-wrappers",
+          "status": "done"
+        },
+        {
+          "id": "5.2",
+          "title": "Delete discover_agent_names wrapper from opencode.py",
+          "scenario": "subclasses-no-longer-define-discovery-wrappers",
+          "status": "done"
+        },
+        {
+          "id": "5.3",
+          "title": "Remove unused imports from opencode.py",
+          "scenario": "wrapper-only-imports-removed-from-provider-modules",
+          "status": "done"
+        },
+        {
+          "id": "5.4",
+          "title": "Verify grep -n \"def discover_agent_names\" opencode.py returns zero",
+          "scenario": "subclasses-no-longer-define-discovery-wrappers",
+          "status": "done"
+        },
+        {
+          "id": "5.5",
+          "title": "Verify grep -n \"def get_agent_metadata\" opencode.py returns zero",
+          "scenario": "subclasses-no-longer-define-metadata-wrappers",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "6",
+      "title": "Create ai_harness.utils package and agent_sets module",
+      "spec": "utils-package",
+      "phase": "foundation",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "6.1",
+          "title": "Create src/ai_harness/utils/__init__.py with re-exports",
+          "scenario": "public-utility-imports-are-available",
+          "status": "done"
+        },
+        {
+          "id": "6.2",
+          "title": "Create src/ai_harness/utils/agent_sets.py with AgentMode, parse_agent_mode, claude_wizard_agents, opencode_change_agents",
+          "scenario": "public-utility-imports-are-available",
+          "status": "done"
+        },
+        {
+          "id": "6.3",
+          "title": "Verify R1: utils package exists and re-exports",
+          "scenario": "public-utility-imports-are-available",
+          "status": "done"
+        },
+        {
+          "id": "6.4",
+          "title": "Verify R2: focused implementation module owns helpers",
+          "scenario": "public-utility-imports-are-available",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "7",
+      "title": "Update wizard/pure.py with compatibility re-exports from utils",
+      "spec": "utils-package",
+      "phase": "core",
+      "depends_on": [
+        "6"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "7.1",
+          "title": "Update wizard/pure.py to import and re-export AgentMode, parse_agent_mode, claude_wizard_agents, opencode_change_agents from ai_harness.utils",
+          "scenario": "wizard-pure-compatibility-re-export-delegates-to-utils",
+          "status": "done"
+        },
+        {
+          "id": "7.2",
+          "title": "Verify R4: wizard pure compatibility re-export delegates to utils",
+          "scenario": "wizard-pure-compatibility-re-export-delegates-to-utils",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "8",
+      "title": "Update set_models.py to import parse_agent_mode from ai_harness.utils",
+      "spec": "utils-package",
+      "phase": "core",
+      "depends_on": [
+        "6"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "8.1",
+          "title": "Update parse_agent_mode import in set_models.py to ai_harness.utils",
+          "scenario": "production-set-models-command-imports-from-utils",
+          "status": "done"
+        },
+        {
+          "id": "8.2",
+          "title": "Verify R5: production import migration",
+          "scenario": "production-set-models-command-imports-from-utils",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "9",
+      "title": "Update wizard/tui.py to import migrated helpers from ai_harness.utils",
+      "spec": "utils-package",
+      "phase": "core",
+      "depends_on": [
+        "6"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "9.1",
+          "title": "Update AgentMode, parse_agent_mode, claude_wizard_agents, opencode_change_agents imports in tui.py to ai_harness.utils",
+          "scenario": "production-set-models-command-imports-from-utils",
+          "status": "done"
+        },
+        {
+          "id": "9.2",
+          "title": "Verify R5: production import migration",
+          "scenario": "production-set-models-command-imports-from-utils",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "10",
+      "title": "Update test imports to use ai_harness.utils for migrated helpers",
+      "spec": "utils-package",
+      "phase": "testing",
+      "depends_on": [
+        "6"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "10.1",
+          "title": "Update imports in tests/test_set_models.py to ai_harness.utils",
+          "scenario": "public-utility-imports-are-available",
+          "status": "done"
+        },
+        {
+          "id": "10.2",
+          "title": "Update imports in tests/test_install.py to ai_harness.utils",
+          "scenario": "public-utility-imports-are-available",
+          "status": "done"
+        },
+        {
+          "id": "10.3",
+          "title": "Update imports in tests/test_renderers.py to ai_harness.utils",
+          "scenario": "public-utility-imports-are-available",
+          "status": "done"
+        },
+        {
+          "id": "10.4",
+          "title": "Verify R6: test import migration",
+          "scenario": "public-utility-imports-are-available",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "11",
+      "title": "Run pytest and ruff check to validate clean integration",
+      "spec": "utils-package",
+      "phase": "testing",
+      "depends_on": [
+        "7",
+        "8",
+        "9",
+        "10"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "11.1",
+          "title": "Run ruff check src/ai_harness/ tests/",
+          "scenario": "no-standalone-docs-tree-created",
+          "status": "done"
+        },
+        {
+          "id": "11.2",
+          "title": "Run pytest tests/",
+          "scenario": "no-standalone-docs-tree-created",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "12",
+      "title": "Add administrator Strategy dispatch ASCII diagram to base.py",
+      "spec": "source-diagrams",
+      "phase": "integration",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "12.1",
+          "title": "Add ASCII diagram for ADMINISTRATORS dispatch near ArtifactsAdministrator in base.py",
+          "scenario": "administrator-strategy-diagram-is-present-near-the-administrator-seam",
+          "status": "done"
+        },
+        {
+          "id": "12.2",
+          "title": "Verify R1: diagram is plain ASCII and source-adjacent",
+          "scenario": "administrator-strategy-diagram-is-present-near-the-administrator-seam",
+          "status": "done"
+        },
+        {
+          "id": "12.3",
+          "title": "Verify R2: diagram names stable participants (ADMINISTRATORS, ArtifactsAdministrator, concrete providers)",
+          "scenario": "administrator-diagram-names-the-stable-participants",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "13",
+      "title": "Add change/task FSM ASCII diagram to change.py",
+      "spec": "source-diagrams",
+      "phase": "integration",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "13.1",
+          "title": "Add ASCII diagram for change/task FSM near ChangeStatus or _derive_status() in change.py",
+          "scenario": "change-task-fsm-diagram-is-present-near-status-derivation",
+          "status": "done"
+        },
+        {
+          "id": "13.2",
+          "title": "Verify R1: diagram is plain ASCII and source-adjacent",
+          "scenario": "change-task-fsm-diagram-is-present-near-status-derivation",
+          "status": "done"
+        },
+        {
+          "id": "13.3",
+          "title": "Verify R2: diagram references file-backed state concepts (change status, tasks, task status derivation)",
+          "scenario": "change-task-fsm-diagram-names-file-backed-state",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "14",
+      "title": "Add wizard phase loop ASCII diagram to tui.py",
+      "spec": "source-diagrams",
+      "phase": "integration",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "14.1",
+          "title": "Add ASCII diagram for wizard phase loop near _drive_phases() in tui.py",
+          "scenario": "wizard-phase-loop-diagram-is-present-near-phase-driver",
+          "status": "done"
+        },
+        {
+          "id": "14.2",
+          "title": "Verify R1: diagram is plain ASCII and source-adjacent",
+          "scenario": "wizard-phase-loop-diagram-is-present-near-phase-driver",
+          "status": "done"
+        },
+        {
+          "id": "14.3",
+          "title": "Verify R2: diagram names navigation participants (current phase, phase handler, navigation, exit)",
+          "scenario": "wizard-phase-loop-diagram-names-navigation-behavior",
+          "status": "done"
+        }
+      ]
+    }
+  ]
+}

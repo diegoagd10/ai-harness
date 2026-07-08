@@ -17,6 +17,33 @@ Public surface (re-exported here for ergonomics)
 ``ClaudeArtifactsAdministrator``, ``OpenCodeArtifactsAdministrator``,
 ``CopilotArtifactsAdministrator``, ``ADMINISTRATORS``,
 ``load_agent_metadata``, ``discover_agent_names``.
+
+Administrator Strategy dispatch
+------------------------------
+``ADMINISTRATORS`` is the Strategy seam for the harness. Callers select
+a provider by :class:`AgentCli` and the dispatch hands them a concrete
+``ArtifactsAdministrator`` whose ``render_artifacts`` carries the
+provider-specific frontmatter + install-path knowledge. Only
+``render_artifacts`` is provider-specific; metadata and discovery are
+inherited from the ABC default.
+
+::
+
+    operations / wizard / commands
+                |
+                v
+    ADMINISTRATORS[AgentCli.X]
+                |
+                v
+    ArtifactsAdministrator (ABC)
+      | render_artifacts(...)   abstract — per-provider
+      | get_agent_metadata(...) default — _resolve_agent_metadata
+      | discover_agent_names()  default — module-level discovery
+                |
+       +--------+--------+--------+
+       v                 v                v
+    Claude          OpenCode          Copilot
+    admin           admin             admin
 """
 
 from __future__ import annotations

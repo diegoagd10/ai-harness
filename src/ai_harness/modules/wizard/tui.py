@@ -38,7 +38,6 @@ from ai_harness.modules.harness.models import AgentCli
 from ai_harness.modules.harness.operations import re_render_for_agent_clis
 from ai_harness.modules.harness.override_store import save_override_store
 from ai_harness.modules.wizard.pure import (
-    AgentMode,
     ModelSelection,
     align_label_rows,
     build_confirmation_rows,
@@ -48,11 +47,14 @@ from ai_harness.modules.wizard.pure import (
     build_opencode_model_picker_rows,
     build_opencode_override_payload,
     build_override_payload,
-    claude_wizard_agents,
     format_selection_label,
     join_opencode_catalog,
-    opencode_change_agents,
     opencode_model_is_reasoning,
+)
+from ai_harness.utils import (
+    AgentMode,
+    claude_wizard_agents,
+    opencode_change_agents,
 )
 
 if TYPE_CHECKING:
@@ -645,10 +647,43 @@ def _ask_confirm(title: str, selections: dict[str, ModelSelection]) -> str:
 def _drive_phases(phases: list[Callable[[], str]]) -> bool:
     """Run *phases* by index; return True to proceed, False on cancel.
 
-    Each phase returns '__continue__', '__back__', or '__cancel__'. '__back__'
-    decrements the index so the previous phase re-runs; phases share mutable
-    state through their enclosing closures, so back-navigation never loses
-    edits or re-runs setup done before this loop.
+    Each phase returns ``Nav.CONTINUE``, ``Nav.BACK``, or ``Nav.CANCEL``.
+    ``Nav.BACK`` decrements the index so the previous phase re-runs;
+    phases share mutable state through their enclosing closures, so
+    back-navigation never loses edits or re-runs setup done before
+    this loop.
+
+    Phase loop
+    ----------
+    The wizard is a small state machine over an index into the phase
+    list. Each phase handler returns one of three outcomes; the loop
+    advances, retreats, or exits accordingly.
+
+    ::
+
+        +-----------------------+
+        | start (index = 0)     |
+        +-----------+-----------+
+                    |
+                    v
+        +-----------+-----------+
+        | phases[index]()       |  <- phase handler executes
+        +-----------+-----------+
+                    |
+            +-------+--------+--------+
+            |                |        |
+            v                v        v
+        Nav.CONTINUE     Nav.BACK   Nav.CANCEL
+            |                |        |
+            v                v        v
+        index += 1       index -= 1   return False
+            |                |        (cancel)
+            v                v
+        next phase      same phase re-runs
+            |                |
+            v                v
+        end (return     loop until
+        True)           index >= len
     """
     index = 0
     while index < len(phases):

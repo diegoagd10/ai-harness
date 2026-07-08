@@ -22,7 +22,7 @@ from ai_harness.modules.harness.administrators import (
     AgentCaps,
     discover_agent_names,
 )
-from ai_harness.modules.wizard.pure import opencode_change_agents
+from ai_harness.utils import opencode_change_agents
 
 EXPECTED_SKILLS = ("branch-pr", "grill-me-one-by-one", "judgment-day")
 MANIFEST_REL = ".ai-harness/installed.json"
@@ -1317,7 +1317,7 @@ def test_re_render_claude_applies_overrides_from_store(tmp_path: Path) -> None:
 
 def test_discover_agents_excludes_underscore_files() -> None:
     """discover_agent_names returns change agents only, no _-prefixed files."""
-    from ai_harness.modules.wizard.pure import opencode_change_agents
+    from ai_harness.utils import opencode_change_agents
 
     names = discover_agent_names()
     expected_change = sorted(opencode_change_agents())
