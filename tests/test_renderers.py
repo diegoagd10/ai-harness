@@ -1503,13 +1503,26 @@ def test_render_agents_copilot_honours_explicit_names() -> None:
 
 
 def test_copilot_no_model_validation_required() -> None:
-    """Copilot renderer does NOT require a copilot model entry — missing model does not raise."""
-    bad_meta = {"description": "test", "mode": "subagent"}  # no model at all
+    """Copilot renderer does NOT require a copilot model entry — missing model does not raise.
+
+    Patches ``administrators.base.load_agent_metadata`` (the modern equivalent
+    of the deleted legacy ``get_agent_meta``) with an ``AgentMetadata`` that
+    lacks ``model.copilot``. The Copilot administrator must accept that
+    metadata without raising — Copilot does not require a per-agent model.
+    """
+    from ai_harness.modules.harness.administrators.base import _decode_agent_metadata
+
+    bad_meta = _decode_agent_metadata(
+        {"description": "test", "mode": "subagent"},  # no model at all
+        name="change-explorer",
+    )
     with patch(
-        "ai_harness.modules.harness.renderers.get_agent_meta",
+        "ai_harness.modules.harness.administrators.base.load_agent_metadata",
         return_value=bad_meta,
     ):
-        pairs = ADMINISTRATORS[AgentCli.COPILOT].render_artifacts(["change-explorer"])
+        pairs = ADMINISTRATORS[AgentCli.COPILOT].render_artifacts(
+            ["change-explorer"], overrides={}
+        )
         assert len(pairs) == 1
         assert pairs[0].content.startswith("---\n")
 
@@ -1615,7 +1628,7 @@ def test_change_agent_prompt_set_contains_expected_contract_keywords() -> None:
 def test_discover_agents_skips_missing_agent_dir(monkeypatch: pytest.MonkeyPatch) -> None:
     """Missing change-agent resources return an empty list."""
     monkeypatch.setattr(
-        "ai_harness.modules.harness.renderers._AGENT_RESOURCE_DIRS",
+        "ai_harness.modules.harness.administrators.base._AGENT_RESOURCE_DIRS",
         ("missing-change-agent",),
     )
 
@@ -1632,11 +1645,11 @@ def test_discover_agents_skips_empty_agent_dir(tmp_path: Path, monkeypatch: pyte
     empty_root = tmp_path / "resources"
     (empty_root / "empty-change-agent").mkdir(parents=True)
     monkeypatch.setattr(
-        "ai_harness.modules.harness.renderers.files",
+        "ai_harness.modules.harness.administrators.base.files",
         lambda package: package_root if package == "ai_harness.resources" else files(package),
     )
     monkeypatch.setattr(
-        "ai_harness.modules.harness.renderers._AGENT_RESOURCE_DIRS",
+        "ai_harness.modules.harness.administrators.base._AGENT_RESOURCE_DIRS",
         (empty_root / "empty-change-agent",),
     )
 
@@ -1654,7 +1667,7 @@ def test_discover_agents_excludes_underscore_prefixed_files_in_resource_dir(
     (change_root / "change-orchestrator.md").write_text("change", encoding="utf-8")
     (change_root / "_shared.md").write_text("shared", encoding="utf-8")
     monkeypatch.setattr(
-        "ai_harness.modules.harness.renderers._AGENT_RESOURCE_DIRS",
+        "ai_harness.modules.harness.administrators.base._AGENT_RESOURCE_DIRS",
         (change_root,),
     )
 
@@ -1673,7 +1686,7 @@ def test_discover_agents_raises_on_name_collision(tmp_path: Path, monkeypatch: p
     (dir_a / "shared.md").write_text("a", encoding="utf-8")
     (dir_b / "shared.md").write_text("b", encoding="utf-8")
     monkeypatch.setattr(
-        "ai_harness.modules.harness.renderers._AGENT_RESOURCE_DIRS",
+        "ai_harness.modules.harness.administrators.base._AGENT_RESOURCE_DIRS",
         (dir_a, dir_b),
     )
 
