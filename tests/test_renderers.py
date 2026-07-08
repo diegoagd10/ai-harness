@@ -57,9 +57,9 @@ def _find_pair(pairs: list, name: str):
 # ---------------------------------------------------------------------------
 
 
-def test_render_agents_claude_returns_agents_and_skill() -> None:
+def test_render_agents_claude_returns_agents_and_skill(tmp_path: Path) -> None:
     """Claude emits subagents and name-based primary skills."""
-    pairs = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts()
+    pairs = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts(home=tmp_path, overrides={})
 
     paths = [a.install_path for a in pairs]
     assert paths == [
@@ -78,9 +78,9 @@ def test_render_agents_claude_returns_agents_and_skill() -> None:
         assert a.content.startswith("---\n")
 
 
-def test_render_agents_opencode_returns_agents_under_agent_dir() -> None:
+def test_render_agents_opencode_returns_agents_under_agent_dir(tmp_path: Path) -> None:
     """OpenCode emits every change agent under .config/opencode/agent/."""
-    pairs = ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts()
+    pairs = ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(home=tmp_path, overrides={})
 
     paths = [a.install_path for a in pairs]
     assert paths == [
@@ -98,9 +98,11 @@ def test_render_agents_opencode_returns_agents_under_agent_dir() -> None:
         assert a.content.startswith("---\n")
 
 
-def test_render_agents_honours_explicit_names() -> None:
+def test_render_agents_honours_explicit_names(tmp_path: Path) -> None:
     """An explicit names list renders just that subset, in the given order."""
-    pairs = ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(["change-validator", "change-explorer"])
+    pairs = ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(
+        ["change-validator", "change-explorer"], home=tmp_path, overrides={}
+    )
 
     assert [a.install_path for a in pairs] == [
         ".config/opencode/agent/change-validator.md",
@@ -113,11 +115,29 @@ def test_render_agents_unknown_cli_returns_empty() -> None:
     assert ADMINISTRATORS.get(AgentCli.GENERIC) or [] == []
 
 
-def test_render_agents_writes_change_orchestrator_to_native_agent_dirs() -> None:
+def test_render_agents_writes_change_orchestrator_to_native_agent_dirs(tmp_path: Path) -> None:
     """All native Agent CLIs render the change-orchestrator prompt."""
-    assert _find_pair(ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(), "change-orchestrator") is not None
-    assert _find_pair(ADMINISTRATORS[AgentCli.COPILOT].render_artifacts(), "change-orchestrator") is not None
-    assert _find_pair(ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts(), "change-orchestrator") is not None
+    assert (
+        _find_pair(
+            ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(home=tmp_path, overrides={}),
+            "change-orchestrator",
+        )
+        is not None
+    )
+    assert (
+        _find_pair(
+            ADMINISTRATORS[AgentCli.COPILOT].render_artifacts(home=tmp_path, overrides={}),
+            "change-orchestrator",
+        )
+        is not None
+    )
+    assert (
+        _find_pair(
+            ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts(home=tmp_path, overrides={}),
+            "change-orchestrator",
+        )
+        is not None
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -125,9 +145,9 @@ def test_render_agents_writes_change_orchestrator_to_native_agent_dirs() -> None
 # ---------------------------------------------------------------------------
 
 
-def test_claude_subagents_have_name_and_model() -> None:
+def test_claude_subagents_have_name_and_model(tmp_path: Path) -> None:
     """Every Claude subagent frontmatter includes ``name`` and ``model``."""
-    pairs = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts()
+    pairs = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts(home=tmp_path, overrides={})
 
     for name in ("change-explorer", "change-implementor", "change-validator"):
         pair = _find_pair(pairs, name)
@@ -137,27 +157,27 @@ def test_claude_subagents_have_name_and_model() -> None:
         assert fm.get("model") == "sonnet", f"{name}: expected model=sonnet, got {fm.get('model')!r}"
 
 
-def test_claude_output_has_no_mode_field() -> None:
+def test_claude_output_has_no_mode_field(tmp_path: Path) -> None:
     """``mode`` is absent from all Claude rendered frontmatter."""
-    pairs = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts()
+    pairs = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts(home=tmp_path, overrides={})
 
     for a in pairs:
         fm = _parse_frontmatter(a.content)
         assert "mode" not in fm, f"mode should be absent from Claude output, got {fm.get('mode')!r}"
 
 
-def test_claude_change_subagents_have_no_tools_field() -> None:
+def test_claude_change_subagents_have_no_tools_field(tmp_path: Path) -> None:
     """Change subagents (full access) have no tools field — inherit all tools."""
-    pairs = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts()
+    pairs = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts(home=tmp_path, overrides={})
     pair = _find_pair(pairs, "change-implementor")
     assert pair is not None
     fm = _parse_frontmatter(pair.content)
     assert "tools" not in fm, f"change-implementor should not have tools field, got {fm.get('tools')!r}"
 
 
-def test_claude_subagents_have_no_color() -> None:
+def test_claude_subagents_have_no_color(tmp_path: Path) -> None:
     """No Claude subagent frontmatter carries a ``color`` key — Claude has no color concept."""
-    pairs = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts()
+    pairs = ADMINISTRATORS[AgentCli.CLAUDE].render_artifacts(home=tmp_path, overrides={})
 
     for name in ("change-explorer", "change-implementor", "change-validator"):
         pair = _find_pair(pairs, name)
@@ -183,23 +203,29 @@ def test_change_orchestrator_meta_declares_primary_restricted_agent() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_change_orchestrator_body_has_human_review_gate_heading() -> None:
+def test_change_orchestrator_body_has_human_review_gate_heading(tmp_path: Path) -> None:
     """Rendered change-orchestrator bodies expose the 'Human review gate' section.
 
     Locks the gate heading across every CLI renderer. Removing the heading from
     the prompt template breaks at least one render test.
     """
     for cli in (AgentCli.OPENCODE, AgentCli.COPILOT, AgentCli.CLAUDE):
-        pair = _find_pair(ADMINISTRATORS[cli].render_artifacts(), "change-orchestrator")
+        pair = _find_pair(
+            ADMINISTRATORS[cli].render_artifacts(home=tmp_path, overrides={}),
+            "change-orchestrator",
+        )
         assert pair is not None, f"change-orchestrator not found for {cli}"
         body = pair.content.split("---", 2)[2].removeprefix("\n")
         # Gate is a bold-inline paragraph in the new body (no `##` heading).
         assert "Human review gate" in body, f"{cli}: gate heading missing from rendered body"
 
 
-def test_change_orchestrator_body_gate_names_every_artifact() -> None:
+def test_change_orchestrator_body_gate_names_every_artifact(tmp_path: Path) -> None:
     """Gate wording names PRD, design, specs, and tasks explicitly for review."""
-    pair = _find_pair(ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(), "change-orchestrator")
+    pair = _find_pair(
+        ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(home=tmp_path, overrides={}),
+        "change-orchestrator",
+    )
     assert pair is not None
     body = pair.content.split("---", 2)[2].removeprefix("\n")
     gate_idx = body.index("Human review gate")
@@ -212,13 +238,16 @@ def test_change_orchestrator_body_gate_names_every_artifact() -> None:
     assert "tasks.json" in gate_section
 
 
-def test_change_orchestrator_body_gate_requires_explicit_confirmation() -> None:
+def test_change_orchestrator_body_gate_requires_explicit_confirmation(tmp_path: Path) -> None:
     """Gate wording precedes change-implementor and requires explicit confirmation.
 
     The continuation phrases that count as approval live in the gate section, so
     a human-confirmation policy can be checked against the rendered body.
     """
-    pair = _find_pair(ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(), "change-orchestrator")
+    pair = _find_pair(
+        ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(home=tmp_path, overrides={}),
+        "change-orchestrator",
+    )
     assert pair is not None
     body = pair.content.split("---", 2)[2].removeprefix("\n")
     gate_idx = body.index("Human review gate")
