@@ -1,4 +1,43 @@
-"""Derive file-backed change state from disk artifacts."""
+"""Derive file-backed change state from disk artifacts.
+
+Change/task FSM (file-backed)
+-----------------------------
+A change has no mutable status field — status is *derived* each call
+from the artifact files on disk under ``.ai-harness/changes/<name>/``.
+The phases and their gating artifact filenames are the source of truth;
+add or remove an artifact file and the FSM transitions automatically.
+
+::
+
+    explore (exploration.md)
+        |
+        v
+    prd (prd.md)
+        |
+        v
+    design (design.md)
+        |
+        v
+    specs (specs/*.md)
+        |
+        v
+    tasks (tasks.json) ---> TaskProgress derived from tasks.json:
+        |                       pending / in_progress / done / blocked
+        v                       (file-backed, no separate state column)
+    implement (implementation.md — populated as tasks close)
+        |
+        v
+    validate (validation.md)
+        |
+        v
+    archive (move change folder into .ai-harness/archive/)
+
+Each transition is gated by the artifact for the *next* phase being
+present and unblocked — ``_derive_status`` walks the phase order,
+aggregates ``TaskProgress`` from ``tasks.json``, and emits
+``next_recommended`` + ``blocked_reasons`` so callers can render
+the FSM without re-implementing the rules.
+"""
 
 from __future__ import annotations
 
