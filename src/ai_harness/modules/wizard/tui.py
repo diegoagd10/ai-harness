@@ -36,7 +36,7 @@ from rich.panel import Panel
 from ai_harness.modules.harness.models import AgentCli
 from ai_harness.modules.harness.operations import re_render_for_agent_clis
 from ai_harness.modules.harness.override_store import save_override_store
-from ai_harness.modules.harness.renderers import ADMINISTRATORS
+from ai_harness.modules.harness.administrators import ADMINISTRATORS
 from ai_harness.modules.wizard.pure import (
     AgentMode,
     ModelSelection,
