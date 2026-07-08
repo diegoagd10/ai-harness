@@ -864,7 +864,7 @@ def test_invalid_meta_raises_value_error(
     """
     from dataclasses import replace
 
-    from ai_harness.modules.harness.renderers import load_agent_metadata
+    from ai_harness.modules.harness.administrators import load_agent_metadata
 
     base = load_agent_metadata(agent_name)
     # Empty ``bad_meta`` means "no model field at all" → clear the model map.
@@ -2295,7 +2295,7 @@ def test_agent_metadata_is_frozen_slots_with_default_factory_caps() -> None:
     """AgentMetadata exposes the design's typed metadata fields with safe defaults."""
     from dataclasses import FrozenInstanceError, fields
 
-    from ai_harness.modules.harness.renderers import AgentCaps, AgentMetadata
+    from ai_harness.modules.harness.administrators import AgentCaps, AgentMetadata
 
     meta = AgentMetadata(description="test")
 
@@ -2329,7 +2329,7 @@ def test_artifacts_administrator_abc_subclasses_must_implement_contract() -> Non
     """
     from abc import ABC
 
-    from ai_harness.modules.harness.renderers import ArtifactsAdministrator
+    from ai_harness.modules.harness.administrators import ArtifactsAdministrator
 
     assert issubclass(ArtifactsAdministrator, ABC)
 
@@ -2347,7 +2347,7 @@ def test_artifacts_administrator_abc_subclasses_must_implement_contract() -> Non
 
 def test_administrators_dispatch_table_keys_each_supported_cli() -> None:
     """ADMINISTRATORS maps Claude/OpenCode/Copilot to concrete administrators; Generic is absent."""
-    from ai_harness.modules.harness.renderers import (
+    from ai_harness.modules.harness.administrators import (
         ADMINISTRATORS,
         ArtifactsAdministrator,
         ClaudeArtifactsAdministrator,
@@ -2368,7 +2368,7 @@ def test_administrators_dispatch_table_keys_each_supported_cli() -> None:
 
 def test_administrators_provider_class_attributes_identify_the_provider() -> None:
     """Each concrete administrator carries a ``provider`` class attribute naming its CLI."""
-    from ai_harness.modules.harness.renderers import (
+    from ai_harness.modules.harness.administrators import (
         ADMINISTRATORS,
         ClaudeArtifactsAdministrator,
         CopilotArtifactsAdministrator,
@@ -2392,7 +2392,7 @@ def test_all_three_administrators_render_polymorphically(tmp_path: Path) -> None
     polymorphic render contract; removing this test would let a future
     regression reintroduce NotImplementedError on the public surface.
     """
-    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+    from ai_harness.modules.harness.administrators import ADMINISTRATORS
 
     for cli in (AgentCli.CLAUDE, AgentCli.OPENCODE, AgentCli.COPILOT):
         admin = ADMINISTRATORS[cli]
@@ -2678,7 +2678,7 @@ def test_subagent_metadata_json_sets_native_models_per_agent() -> None:
 
 def test_load_agent_metadata_decodes_typed_agent_metadata() -> None:
     """load_agent_metadata returns a typed AgentMetadata with all defaults wired up."""
-    from ai_harness.modules.harness.renderers import load_agent_metadata
+    from ai_harness.modules.harness.administrators import load_agent_metadata
 
     meta = load_agent_metadata("change-explorer")
 
@@ -2696,7 +2696,7 @@ def test_load_agent_metadata_decodes_typed_agent_metadata() -> None:
 
 def test_load_agent_metadata_raises_for_missing_metadata_file() -> None:
     """A template name without a matching metadata JSON raises ValueError."""
-    from ai_harness.modules.harness.renderers import load_agent_metadata
+    from ai_harness.modules.harness.administrators import load_agent_metadata
 
     with pytest.raises(ValueError, match="Missing agent metadata"):
         load_agent_metadata("not-a-real-agent")
@@ -2704,7 +2704,7 @@ def test_load_agent_metadata_raises_for_missing_metadata_file() -> None:
 
 def test_load_agent_metadata_orchestrator_carries_permission_block() -> None:
     """The orchestrator metadata decodes its raw OpenCode permission block exactly."""
-    from ai_harness.modules.harness.renderers import load_agent_metadata
+    from ai_harness.modules.harness.administrators import load_agent_metadata
 
     meta = load_agent_metadata("change-orchestrator")
 
@@ -2721,7 +2721,7 @@ def test_load_agent_metadata_orchestrator_carries_permission_block() -> None:
 
 def test_validate_metadata_schema_rejects_unknown_top_level_field() -> None:
     """Schema validator rejects unsupported top-level keys (drift detection)."""
-    from ai_harness.modules.harness.renderers import _validate_metadata_schema
+    from ai_harness.modules.harness.administrators.base import _validate_metadata_schema
 
     bad = {"description": "test", "mode": "subagent", "model": {}, "forbidden": 1}
     with pytest.raises(ValueError, match="unknown metadata field.*forbidden"):
@@ -2730,7 +2730,7 @@ def test_validate_metadata_schema_rejects_unknown_top_level_field() -> None:
 
 def test_validate_metadata_schema_requires_description_string() -> None:
     """Description is required and must be a string."""
-    from ai_harness.modules.harness.renderers import _validate_metadata_schema
+    from ai_harness.modules.harness.administrators.base import _validate_metadata_schema
 
     with pytest.raises(ValueError, match="missing required 'description'"):
         _validate_metadata_schema({"mode": "subagent"}, filename="agent-metadata/x.json")
@@ -2740,7 +2740,7 @@ def test_validate_metadata_schema_requires_description_string() -> None:
 
 def test_validate_metadata_schema_rejects_non_string_mode() -> None:
     """Mode, when present, must be a string — provider meaning is text-encoded."""
-    from ai_harness.modules.harness.renderers import _validate_metadata_schema
+    from ai_harness.modules.harness.administrators.base import _validate_metadata_schema
 
     with pytest.raises(ValueError, match="'mode' must be a string"):
         _validate_metadata_schema(
@@ -2751,7 +2751,7 @@ def test_validate_metadata_schema_rejects_non_string_mode() -> None:
 
 def test_validate_metadata_schema_rejects_non_object_top_level() -> None:
     """Top-level metadata must be a JSON object."""
-    from ai_harness.modules.harness.renderers import _validate_metadata_schema
+    from ai_harness.modules.harness.administrators.base import _validate_metadata_schema
 
     with pytest.raises(ValueError, match="top-level must be an object"):
         _validate_metadata_schema("a string", filename="agent-metadata/x.json")
@@ -2759,7 +2759,7 @@ def test_validate_metadata_schema_rejects_non_object_top_level() -> None:
 
 def test_decode_agent_caps_returns_defaults_for_missing_or_null() -> None:
     """Absent or null caps → AgentCaps() (full capability)."""
-    from ai_harness.modules.harness.renderers import _decode_agent_caps
+    from ai_harness.modules.harness.administrators.base import _decode_agent_caps
 
     assert _decode_agent_caps(None, filename="x.json") == AgentCaps()
     # No raw arg at all — pass missing key by simulating absent field.
@@ -2768,7 +2768,7 @@ def test_decode_agent_caps_returns_defaults_for_missing_or_null() -> None:
 
 def test_decode_agent_caps_decodes_explicit_capabilities() -> None:
     """Explicit caps decode to the typed AgentCaps shape with a tuple spawn."""
-    from ai_harness.modules.harness.renderers import _decode_agent_caps
+    from ai_harness.modules.harness.administrators.base import _decode_agent_caps
 
     caps = _decode_agent_caps(
         {"write": False, "bash": False, "spawn": ["change-explorer", "change-validator"]},
@@ -2782,7 +2782,7 @@ def test_decode_agent_caps_decodes_explicit_capabilities() -> None:
 
 def test_decode_agent_caps_rejects_non_bool_flags() -> None:
     """write/bash flags must be booleans — no truthy coercion."""
-    from ai_harness.modules.harness.renderers import _decode_agent_caps
+    from ai_harness.modules.harness.administrators.base import _decode_agent_caps
 
     with pytest.raises(ValueError, match="'caps.write' must be a bool"):
         _decode_agent_caps({"write": "yes"}, filename="x.json")
@@ -2792,7 +2792,7 @@ def test_decode_agent_caps_rejects_non_bool_flags() -> None:
 
 def test_decode_agent_caps_rejects_malformed_spawn() -> None:
     """Spawn must be null or an array of strings; non-string entries fail loudly."""
-    from ai_harness.modules.harness.renderers import _decode_agent_caps
+    from ai_harness.modules.harness.administrators.base import _decode_agent_caps
 
     with pytest.raises(ValueError, match="'caps.spawn' entries must all be strings"):
         _decode_agent_caps({"spawn": ["ok", 1]}, filename="x.json")
@@ -2802,7 +2802,7 @@ def test_decode_agent_caps_rejects_malformed_spawn() -> None:
 
 def test_decode_agent_caps_rejects_non_object_caps() -> None:
     """Caps must be a JSON object (or null/missing)."""
-    from ai_harness.modules.harness.renderers import _decode_agent_caps
+    from ai_harness.modules.harness.administrators.base import _decode_agent_caps
 
     with pytest.raises(ValueError, match="'caps' must be an object"):
         _decode_agent_caps("string", filename="x.json")
@@ -2810,7 +2810,7 @@ def test_decode_agent_caps_rejects_non_object_caps() -> None:
 
 def test_decode_effort_map_preserves_null_values() -> None:
     """Effort map keeps null values verbatim — they're the "drop the field" sentinel."""
-    from ai_harness.modules.harness.renderers import _decode_effort_map
+    from ai_harness.modules.harness.administrators.base import _decode_effort_map
 
     effort = _decode_effort_map(
         {"claude": "high", "opencode": None},
@@ -2823,7 +2823,7 @@ def test_decode_effort_map_preserves_null_values() -> None:
 
 def test_decode_effort_map_rejects_non_string_non_null() -> None:
     """Each effort value must be a string or null — no numbers, bools, etc."""
-    from ai_harness.modules.harness.renderers import _decode_effort_map
+    from ai_harness.modules.harness.administrators.base import _decode_effort_map
 
     with pytest.raises(ValueError, match="'effort.claude' must be string or null"):
         _decode_effort_map({"claude": 42}, filename="x.json")
@@ -2833,7 +2833,7 @@ def test_decode_effort_map_rejects_non_string_non_null() -> None:
 
 def test_decode_model_map_rejects_non_string_values() -> None:
     """Each model value must be a string — silent coercion would mis-route providers."""
-    from ai_harness.modules.harness.renderers import _decode_model_map
+    from ai_harness.modules.harness.administrators.base import _decode_model_map
 
     with pytest.raises(ValueError, match="'model.claude' must be a string"):
         _decode_model_map({"claude": 123}, filename="x.json")
@@ -2841,7 +2841,7 @@ def test_decode_model_map_rejects_non_string_values() -> None:
 
 def test_decode_permission_keeps_raw_dict() -> None:
     """Raw permission dicts pass through with no key coercion."""
-    from ai_harness.modules.harness.renderers import _decode_permission
+    from ai_harness.modules.harness.administrators.base import _decode_permission
 
     raw = {"edit": "allow", "task": {"*": "allow"}}
     assert _decode_permission(raw, filename="x.json") == raw
@@ -2850,7 +2850,7 @@ def test_decode_permission_keeps_raw_dict() -> None:
 
 def test_decode_permission_rejects_non_object() -> None:
     """Permission must be null or an object — OpenCode permission is dict-shaped."""
-    from ai_harness.modules.harness.renderers import _decode_permission
+    from ai_harness.modules.harness.administrators.base import _decode_permission
 
     with pytest.raises(ValueError, match="'permission' must be an object"):
         _decode_permission("string", filename="x.json")
@@ -2858,7 +2858,7 @@ def test_decode_permission_rejects_non_object() -> None:
 
 def test_discover_agent_names_returns_sorted_visible_templates() -> None:
     """discover_agent_names returns the visible change-agent set in sorted order."""
-    from ai_harness.modules.harness.renderers import discover_agent_names
+    from ai_harness.modules.harness.administrators import discover_agent_names
 
     names = discover_agent_names()
 
@@ -2878,7 +2878,7 @@ def test_discover_agent_names_returns_sorted_visible_templates() -> None:
 
 def test_administrator_discover_agent_names_matches_module_function() -> None:
     """Each administrator's discover_agent_names matches the shared module-level function."""
-    from ai_harness.modules.harness.renderers import ADMINISTRATORS, discover_agent_names
+    from ai_harness.modules.harness.administrators import ADMINISTRATORS, discover_agent_names
 
     shared = discover_agent_names()
     for cli, admin in ADMINISTRATORS.items():
@@ -2892,7 +2892,7 @@ def test_administrator_dispatch_returns_artifact_objects() -> None:
     the same return type. Tasks 5/6/7 will turn these stubs into real
     renderers; the assertion below already locks the ABC contract shape.
     """
-    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+    from ai_harness.modules.harness.administrators import ADMINISTRATORS
 
     # discover_agent_names returns the shared list — verify shape across providers.
     for cli, admin in ADMINISTRATORS.items():
@@ -2911,7 +2911,7 @@ def test_load_agent_metadata_with_effort_null_round_trips() -> None:
     # Baseline file has no effort key. Add one for the test then drop it.
     raw["effort"] = {"claude": "high", "opencode": None}
 
-    from ai_harness.modules.harness.renderers import _decode_agent_metadata
+    from ai_harness.modules.harness.administrators.base import _decode_agent_metadata
 
     meta = _decode_agent_metadata(raw, name="change-explorer")
 
@@ -2926,7 +2926,7 @@ def test_load_agent_metadata_with_effort_null_round_trips() -> None:
 
 def test_claude_administrator_render_artifacts_returns_artifact_objects(tmp_path: Path) -> None:
     """Claude admin returns Artifact objects with install_path + content."""
-    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+    from ai_harness.modules.harness.administrators import ADMINISTRATORS
 
     admin = ADMINISTRATORS[AgentCli.CLAUDE]
     artifacts = admin.render_artifacts(overrides={}, home=tmp_path)
@@ -2940,7 +2940,7 @@ def test_claude_administrator_render_artifacts_returns_artifact_objects(tmp_path
 
 def test_claude_administrator_routes_primary_mode_to_skill(tmp_path: Path) -> None:
     """Claude admin renders change-orchestrator (mode=primary) as a skill at .claude/skills/.../SKILL.md."""
-    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+    from ai_harness.modules.harness.administrators import ADMINISTRATORS
 
     admin = ADMINISTRATORS[AgentCli.CLAUDE]
     artifacts = admin.render_artifacts(overrides={}, home=tmp_path)
@@ -2951,7 +2951,7 @@ def test_claude_administrator_routes_primary_mode_to_skill(tmp_path: Path) -> No
 
 def test_claude_administrator_routes_non_primary_mode_to_agent(tmp_path: Path) -> None:
     """Claude admin renders subagents (mode != primary) at .claude/agents/<name>.md."""
-    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+    from ai_harness.modules.harness.administrators import ADMINISTRATORS
 
     admin = ADMINISTRATORS[AgentCli.CLAUDE]
     artifacts = admin.render_artifacts(overrides={}, home=tmp_path)
@@ -2973,7 +2973,7 @@ def test_claude_administrator_routes_non_primary_mode_to_agent(tmp_path: Path) -
 
 def test_claude_administrator_skill_frontmatter_description_only(tmp_path: Path) -> None:
     """Primary skills carry only ``description`` in frontmatter (no model/effort/tools)."""
-    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+    from ai_harness.modules.harness.administrators import ADMINISTRATORS
 
     admin = ADMINISTRATORS[AgentCli.CLAUDE]
     artifacts = admin.render_artifacts(["change-orchestrator"], overrides={}, home=tmp_path)
@@ -2995,7 +2995,7 @@ def test_claude_administrator_skill_frontmatter_description_only(tmp_path: Path)
 
 def test_claude_administrator_subagent_frontmatter_contains_name_model(tmp_path: Path) -> None:
     """Claude subagent frontmatter is ordered: name, description, model."""
-    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+    from ai_harness.modules.harness.administrators import ADMINISTRATORS
 
     admin = ADMINISTRATORS[AgentCli.CLAUDE]
     artifacts = admin.render_artifacts(["change-explorer"], overrides={}, home=tmp_path)
@@ -3011,7 +3011,7 @@ def test_claude_administrator_subagent_frontmatter_contains_name_model(tmp_path:
 
 def test_claude_administrator_effort_override_propagates_to_frontmatter(tmp_path: Path) -> None:
     """A Claude effort override shows up in the rendered agent frontmatter."""
-    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+    from ai_harness.modules.harness.administrators import ADMINISTRATORS
 
     admin = ADMINISTRATORS[AgentCli.CLAUDE]
     overrides = {"change-implementor": {"effort": {"claude": "high"}}}
@@ -3023,7 +3023,7 @@ def test_claude_administrator_effort_override_propagates_to_frontmatter(tmp_path
 
 def test_claude_administrator_effort_null_drops_field(tmp_path: Path) -> None:
     """A Claude effort override of ``None`` drops the effort field rather than emitting null."""
-    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+    from ai_harness.modules.harness.administrators import ADMINISTRATORS
 
     admin = ADMINISTRATORS[AgentCli.CLAUDE]
     overrides = {"change-implementor": {"effort": {"claude": None}}}
@@ -3036,7 +3036,7 @@ def test_claude_administrator_effort_null_drops_field(tmp_path: Path) -> None:
 
 def test_claude_administrator_get_agent_metadata_returns_typed_value(tmp_path: Path) -> None:
     """get_agent_metadata returns a typed AgentMetadata with the expected fields."""
-    from ai_harness.modules.harness.renderers import ADMINISTRATORS, AgentMetadata
+    from ai_harness.modules.harness.administrators import ADMINISTRATORS, AgentMetadata
 
     admin = ADMINISTRATORS[AgentCli.CLAUDE]
     meta = admin.get_agent_metadata("change-explorer", overrides={}, home=tmp_path)
@@ -3049,7 +3049,7 @@ def test_claude_administrator_get_agent_metadata_returns_typed_value(tmp_path: P
 
 def test_claude_administrator_get_agent_metadata_applies_overrides(tmp_path: Path) -> None:
     """A model override on the agent lands in the resolved AgentMetadata."""
-    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+    from ai_harness.modules.harness.administrators import ADMINISTRATORS
 
     admin = ADMINISTRATORS[AgentCli.CLAUDE]
     meta = admin.get_agent_metadata(
@@ -3091,7 +3091,7 @@ def test_claude_administrator_skill_includes_spawn_prose_when_caps_set(tmp_path:
     """
     from importlib.resources import files
 
-    from ai_harness.modules.harness.renderers import ADMINISTRATORS, AgentCaps
+    from ai_harness.modules.harness.administrators import ADMINISTRATORS, AgentCaps
 
     # Hand-build a metadata dict with caps.spawn set on the primary agent.
     raw_path = files("ai_harness.resources") / "agent-metadata" / "change-orchestrator.json"
@@ -3100,7 +3100,7 @@ def test_claude_administrator_skill_includes_spawn_prose_when_caps_set(tmp_path:
 
     # Patch the in-memory override store with this metadata view so
     # the admin sees the new caps.
-    from ai_harness.modules.harness.renderers import _decode_agent_metadata as decode_fn
+    from ai_harness.modules.harness.administrators.base import _decode_agent_metadata as decode_fn
 
     meta = decode_fn(raw, name="change-orchestrator")
     assert meta.caps == AgentCaps(spawn=("change-explorer", "change-validator"))
@@ -3124,7 +3124,7 @@ def test_claude_administrator_skill_includes_spawn_prose_when_caps_set(tmp_path:
 
 def test_opencode_administrator_renders_to_opencode_agent_dir(tmp_path: Path) -> None:
     """OpenCode admin writes every change agent to .config/opencode/agent/<name>.md."""
-    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+    from ai_harness.modules.harness.administrators import ADMINISTRATORS
 
     admin = ADMINISTRATORS[AgentCli.OPENCODE]
     artifacts = admin.render_artifacts(overrides={}, home=tmp_path)
@@ -3145,7 +3145,7 @@ def test_opencode_administrator_renders_to_opencode_agent_dir(tmp_path: Path) ->
 
 def test_opencode_administrator_frontmatter_has_description_mode_model(tmp_path: Path) -> None:
     """OpenCode subagent frontmatter is ordered: description, mode, model."""
-    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+    from ai_harness.modules.harness.administrators import ADMINISTRATORS
 
     admin = ADMINISTRATORS[AgentCli.OPENCODE]
     artifacts = admin.render_artifacts(["change-explorer"], overrides={}, home=tmp_path)
@@ -3158,7 +3158,7 @@ def test_opencode_administrator_frontmatter_has_description_mode_model(tmp_path:
 
 def test_opencode_administrator_missing_model_raises(tmp_path: Path) -> None:
     """Missing model.opencode raises ValueError naming the missing provider."""
-    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+    from ai_harness.modules.harness.administrators import ADMINISTRATORS
 
     admin = ADMINISTRATORS[AgentCli.OPENCODE]
     # Wipe the entire model map by setting it to None — non-dict
@@ -3172,7 +3172,7 @@ def test_opencode_administrator_missing_model_raises(tmp_path: Path) -> None:
 
 def test_opencode_administrator_reasoning_effort_emitted_when_set(tmp_path: Path) -> None:
     """effort.opencode shows up as ``reasoningEffort`` in the frontmatter."""
-    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+    from ai_harness.modules.harness.administrators import ADMINISTRATORS
 
     admin = ADMINISTRATORS[AgentCli.OPENCODE]
     overrides = {"change-validator": {"effort": {"opencode": "high"}}}
@@ -3184,7 +3184,7 @@ def test_opencode_administrator_reasoning_effort_emitted_when_set(tmp_path: Path
 
 def test_opencode_administrator_reasoning_effort_null_is_omitted(tmp_path: Path) -> None:
     """effort.opencode = null drops the reasoningEffort field (no YAML null on disk)."""
-    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+    from ai_harness.modules.harness.administrators import ADMINISTRATORS
 
     admin = ADMINISTRATORS[AgentCli.OPENCODE]
     overrides = {"change-validator": {"effort": {"opencode": None}}}
@@ -3197,7 +3197,7 @@ def test_opencode_administrator_reasoning_effort_null_is_omitted(tmp_path: Path)
 
 def test_opencode_administrator_explicit_permission_wins_over_caps(tmp_path: Path) -> None:
     """A raw ``permission`` block in metadata is emitted exactly; caps-derived block is ignored."""
-    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+    from ai_harness.modules.harness.administrators import ADMINISTRATORS
 
     admin = ADMINISTRATORS[AgentCli.OPENCODE]
     artifacts = admin.render_artifacts(["change-orchestrator"], overrides={}, home=tmp_path)
@@ -3231,7 +3231,7 @@ def test_opencode_administrator_render_artifacts_byte_matches_old_renderer(tmp_p
 
 def test_opencode_administrator_get_agent_metadata_resolves_overrides(tmp_path: Path) -> None:
     """OpenCode admin's get_agent_metadata applies the override store semantics."""
-    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+    from ai_harness.modules.harness.administrators import ADMINISTRATORS
 
     admin = ADMINISTRATORS[AgentCli.OPENCODE]
     meta = admin.get_agent_metadata(
@@ -3247,7 +3247,7 @@ def test_opencode_administrator_get_agent_metadata_resolves_overrides(tmp_path: 
 
 def test_opencode_administrator_empty_permission_omitted(tmp_path: Path) -> None:
     """A caps-derived empty permission block must not emit ``{}`` on disk."""
-    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+    from ai_harness.modules.harness.administrators import ADMINISTRATORS
 
     admin = ADMINISTRATORS[AgentCli.OPENCODE]
     artifacts = admin.render_artifacts(["change-implementor"], overrides={}, home=tmp_path)
@@ -3265,7 +3265,7 @@ def test_opencode_administrator_empty_permission_omitted(tmp_path: Path) -> None
 
 def test_copilot_administrator_renders_to_copilot_agent_dir(tmp_path: Path) -> None:
     """Copilot admin writes every change agent to .copilot/agents/<name>.agent.md."""
-    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+    from ai_harness.modules.harness.administrators import ADMINISTRATORS
 
     admin = ADMINISTRATORS[AgentCli.COPILOT]
     artifacts = admin.render_artifacts(overrides={}, home=tmp_path)
@@ -3286,7 +3286,7 @@ def test_copilot_administrator_renders_to_copilot_agent_dir(tmp_path: Path) -> N
 
 def test_copilot_administrator_frontmatter_name_and_description_only(tmp_path: Path) -> None:
     """Copilot frontmatter contains only ``name`` and ``description`` (intentionally minimal)."""
-    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+    from ai_harness.modules.harness.administrators import ADMINISTRATORS
 
     admin = ADMINISTRATORS[AgentCli.COPILOT]
     artifacts = admin.render_artifacts(["change-explorer"], overrides={}, home=tmp_path)
@@ -3308,7 +3308,7 @@ def test_copilot_administrator_frontmatter_name_and_description_only(tmp_path: P
 
 def test_copilot_administrator_does_not_require_model_copilot(tmp_path: Path) -> None:
     """A metadata file without ``model.copilot`` is accepted — Copilot ignores model anyway."""
-    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+    from ai_harness.modules.harness.administrators import ADMINISTRATORS
 
     admin = ADMINISTRATORS[AgentCli.COPILOT]
     # No exception is raised even though no model.copilot entry exists in metadata.
@@ -3318,7 +3318,7 @@ def test_copilot_administrator_does_not_require_model_copilot(tmp_path: Path) ->
 
 def test_copilot_administrator_overrides_do_not_leak_extra_frontmatter(tmp_path: Path) -> None:
     """Overrides on model/effort/caps/permission do not leak into Copilot frontmatter."""
-    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+    from ai_harness.modules.harness.administrators import ADMINISTRATORS
 
     admin = ADMINISTRATORS[AgentCli.COPILOT]
     overrides = {
@@ -3352,7 +3352,7 @@ def test_copilot_administrator_render_artifacts_byte_matches_old_renderer(tmp_pa
 
 def test_copilot_administrator_get_agent_metadata_resolves_overrides(tmp_path: Path) -> None:
     """Copilot admin's get_agent_metadata applies the override store semantics."""
-    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+    from ai_harness.modules.harness.administrators import ADMINISTRATORS
 
     admin = ADMINISTRATORS[AgentCli.COPILOT]
     meta = admin.get_agent_metadata(
@@ -3452,7 +3452,7 @@ def test_operations_generic_is_noop_for_change_agent_rendering(tmp_path: Path) -
     """
     from ai_harness.modules.harness import install_for_agent_clis
     from ai_harness.modules.harness.models import AgentCli
-    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+    from ai_harness.modules.harness.administrators import ADMINISTRATORS
 
     assert ADMINISTRATORS.get(AgentCli.GENERIC) is None
 
@@ -3472,7 +3472,7 @@ def test_operations_uses_artifact_install_path_for_writes(tmp_path: Path) -> Non
     """
     from ai_harness.modules.harness import install_for_agent_clis
     from ai_harness.modules.harness.models import AgentCli
-    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+    from ai_harness.modules.harness.administrators import ADMINISTRATORS
 
     install_for_agent_clis([AgentCli.GENERIC, AgentCli.OPENCODE], home=tmp_path)
 
@@ -3601,7 +3601,7 @@ def test_wizard_imports_administrators_and_override_store_helper() -> None:
     src = Path(tui.__file__).read_text(encoding="utf-8")
     assert "ADMINISTRATORS" in src
     assert "save_override_store" in src
-    assert "from ai_harness.modules.harness.renderers import ADMINISTRATORS" in src
+    assert "from ai_harness.modules.harness.administrators import ADMINISTRATORS" in src
     assert "from ai_harness.modules.harness.override_store import save_override_store" in src
 
 
@@ -3619,7 +3619,7 @@ def test_claude_wizard_agents_match_discovered_visible_templates() -> None:
     drift surfaces here before the wizard offers an agent that no
     longer exists or misses one the renderer will install.
     """
-    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+    from ai_harness.modules.harness.administrators import ADMINISTRATORS
     from ai_harness.modules.wizard.pure import claude_wizard_agents
 
     discovered = set(ADMINISTRATORS[AgentCli.CLAUDE].discover_agent_names())
@@ -3628,7 +3628,7 @@ def test_claude_wizard_agents_match_discovered_visible_templates() -> None:
 
 def test_opencode_wizard_agents_match_discovered_visible_templates() -> None:
     """opencode_change_agents() matches the discovered visible change-agent set."""
-    from ai_harness.modules.harness.renderers import ADMINISTRATORS
+    from ai_harness.modules.harness.administrators import ADMINISTRATORS
     from ai_harness.modules.wizard.pure import opencode_change_agents
 
     discovered = set(ADMINISTRATORS[AgentCli.OPENCODE].discover_agent_names())
