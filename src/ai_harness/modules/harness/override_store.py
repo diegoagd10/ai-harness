@@ -18,8 +18,8 @@ deep_merge           Recursively merge ``override`` over ``base``; neither
                      input is mutated; dicts merge key-by-key; scalars,
                      lists, and ``None`` values replace.
 
-All other helpers (``_deep_merge`` inside ``renderers.py`` and friends) are
-private to the renderer module and consume this module rather than
+All other merge helpers (the per-provider ones inside
+``ai_harness.modules.harness.administrators``) consume this module rather than
 re-implement its semantics.
 """
 

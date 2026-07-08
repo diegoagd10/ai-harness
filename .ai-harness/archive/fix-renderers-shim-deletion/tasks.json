@@ -1,0 +1,164 @@
+{
+  "tasks": [
+    {
+      "id": "1",
+      "title": "Repoint wizard/tui.py ADMINISTRATORS import to administrators package",
+      "spec": "runtime-import-migration",
+      "phase": "core",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "1.1",
+          "title": "Change import at tui.py:39 from renderers to administrators",
+          "scenario": "Wizard source uses the modern administrator import",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "2",
+      "title": "Repoint test_renderers.py top-level imports to administrators package",
+      "spec": "test-import-migration",
+      "phase": "core",
+      "depends_on": [
+        "1"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "2.1",
+          "title": "Change top-level imports at test_renderers.py:21-28 from renderers to administrators",
+          "scenario": "Renderer tests collect with administrator public imports",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "3",
+      "title": "Repoint local imports inside test_renderers.py test bodies to administrators",
+      "spec": "test-import-migration",
+      "phase": "core",
+      "depends_on": [
+        "2"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "3.1",
+          "title": "Repoint local imports from renderers to administrators/base or provider modules",
+          "scenario": "Shared helper tests use base module imports",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "4",
+      "title": "Repoint monkeypatch strings in test_renderers.py to owning module",
+      "spec": "mock-target-migration",
+      "phase": "core",
+      "depends_on": [
+        "3"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "4.1",
+          "title": "Repoint renderers.* monkeypatch strings to administrators.base or provider modules",
+          "scenario": "Resource traversal patch hits the owning module",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "5",
+      "title": "Repoint test_install.py renderers import to administrators package",
+      "spec": "test-import-migration",
+      "phase": "core",
+      "depends_on": [
+        "4"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "5.1",
+          "title": "Change test_install.py:20 imports from renderers to administrators",
+          "scenario": "Install tests collect after shim deletion",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "6",
+      "title": "Delete five shim-specific tests from test_renderers.py",
+      "spec": "legacy-shim-test-removal",
+      "phase": "core",
+      "depends_on": [
+        "5"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "6.1",
+          "title": "Remove test_renderers_public_surface_excludes_old_apis, test_renderers_public_surface_includes_new_apis, and render_agents byte-compat tests",
+          "scenario": "Shim public-surface tests are absent",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "7",
+      "title": "Update wizard source-inspection assertions to expect administrator import boundary",
+      "spec": "wizard-assertion-alignment",
+      "phase": "core",
+      "depends_on": [
+        "6"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "7.1",
+          "title": "Update test_wizard_imports_administrators_and_override_store_helper to check administrators not renderers",
+          "scenario": "Wizard import assertion accepts the modern boundary",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "8",
+      "title": "Delete the deprecated renderers.py shim file",
+      "spec": "shim-deletion",
+      "phase": "core",
+      "depends_on": [
+        "7"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "8.1",
+          "title": "Remove src/ai_harness/modules/harness/renderers.py",
+          "scenario": "Shim file is absent",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "9",
+      "title": "Clean renderers.py references from README and source docstrings",
+      "spec": "documentation-cleanup",
+      "phase": "cleanup",
+      "depends_on": [
+        "8"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "9.1",
+          "title": "Remove stale renderers.py references from README, operations.py, override_store.py, and base.py",
+          "scenario": "README points to the administrator package",
+          "status": "done"
+        }
+      ]
+    }
+  ]
+}

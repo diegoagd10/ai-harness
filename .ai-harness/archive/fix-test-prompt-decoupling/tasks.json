@@ -1,0 +1,98 @@
+{
+  "tasks": [
+    {
+      "id": "1",
+      "title": "Rewrite install body assertion to containment",
+      "spec": "install-body-containment",
+      "phase": "core",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "1.1",
+          "title": "Replace exact/prefix body assertions with containment in test_install_claude_rendered_body_matches_template_verbatim",
+          "scenario": "rendered body includes the full template",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "2",
+      "title": "Delete five locked prompt/resource-coupled tests from test_renderers.py",
+      "spec": "prompt-coupled-test-removal",
+      "phase": "core",
+      "depends_on": [
+        "1"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "2.1",
+          "title": "Delete test_change_agent_prompt_set_contains_expected_contract_keywords",
+          "scenario": "prompt-coupled test removal",
+          "status": "done"
+        },
+        {
+          "id": "2.2",
+          "title": "Delete test_change_archiver_prompt_runs_cli_command_and_commits_once",
+          "scenario": "prompt-coupled test removal",
+          "status": "done"
+        },
+        {
+          "id": "2.3",
+          "title": "Delete test_change_archiver_body_ignores_unrelated_product_dirtiness",
+          "scenario": "prompt-coupled test removal",
+          "status": "done"
+        },
+        {
+          "id": "2.4",
+          "title": "Delete test_change_archiver_result_envelope_includes_archive_commit_and_blocked_errors",
+          "scenario": "prompt-coupled test removal",
+          "status": "done"
+        },
+        {
+          "id": "2.5",
+          "title": "Delete test_agent_metadata_has_one_json_file_per_change_agent_template",
+          "scenario": "prompt-coupled test removal",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "3",
+      "title": "Add discovery-driven resource smoke test",
+      "spec": "discovery-driven-resource-smoke",
+      "phase": "core",
+      "depends_on": [
+        "2"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "3.1",
+          "title": "Add test_change_agent_resources_smoke_have_metadata_and_body using discover_agent_names(), >= 9 floor, per-name template existence, non-empty body, and loadable metadata description",
+          "scenario": "complete resource passes smoke",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "4",
+      "title": "Add native archiver render smoke test parametrized across agent CLIs",
+      "spec": "native-archiver-render-smoke",
+      "phase": "core",
+      "depends_on": [
+        "3"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "4.1",
+          "title": "Add or reshape test_change_archiver_renders_on_native_agent_clis parametrized across AgentCli.CLAUDE, AgentCli.OPENCODE, AgentCli.COPILOT; assert len(artifacts)==1, content.startswith(\"---\\n\"), non-empty body after frontmatter; use home=tmp_path, overrides={}",
+          "scenario": "rendered artifact has frontmatter and body",
+          "status": "done"
+        }
+      ]
+    }
+  ]
+}

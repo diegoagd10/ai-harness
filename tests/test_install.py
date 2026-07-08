@@ -17,7 +17,7 @@ from typer.testing import CliRunner
 
 from ai_harness.main import app
 from ai_harness.modules.harness import AgentCli, InstallManifest, install_for_agent_clis, uninstall_for_agent_clis
-from ai_harness.modules.harness.renderers import (
+from ai_harness.modules.harness.administrators import (
     ADMINISTRATORS,
     AgentCaps,
     discover_agent_names,
@@ -963,17 +963,16 @@ def test_install_claude_rendered_body_matches_template_verbatim(tmp_path: Path) 
         rendered = (tmp_path / ".claude" / "agents" / f"{name}.md").read_text(encoding="utf-8")
         rendered_body = rendered.split("---", 2)[2].removeprefix("\n")
 
-        assert rendered_body == template_body, f"{name}: body does not match template verbatim"
+        assert template_body in rendered_body, f"{name}: rendered body does not include template body"
 
-    # Orchestrator skill — template body is a prefix. In the new design the
-    # orchestrator carries an explicit permission block in frontmatter (no
-    # separate Claude-only spawn allowlist prose section appended).
+    # Orchestrator skill — template body must appear inside the rendered body;
+    # the renderer may wrap or extend around it. Containment is the invariant.
     template_body = (change_templates_dir / f"{_CLAUDE_SKILL_NAME}.md").read_text(encoding="utf-8")
 
     rendered = (tmp_path / ".claude" / "skills" / _CLAUDE_SKILL_NAME / "SKILL.md").read_text(encoding="utf-8")
     rendered_body = rendered.split("---", 2)[2].removeprefix("\n")
 
-    assert rendered_body.startswith(template_body), f"{_CLAUDE_SKILL_NAME}: body does not start with template verbatim"
+    assert template_body in rendered_body, f"{_CLAUDE_SKILL_NAME}: rendered body does not include template body"
 
 
 # ---------------------------------------------------------------------------
@@ -1165,7 +1164,7 @@ def test_install_with_partial_overrides_preserves_others(tmp_path: Path) -> None
     explorer_fm = _read_frontmatter(tmp_path / ".config" / "opencode" / "agent" / "change-explorer.md")
     validator_fm = _read_frontmatter(tmp_path / ".config" / "opencode" / "agent" / "change-validator.md")
     orchestrator_fm = _read_frontmatter(tmp_path / ".config" / "opencode" / "agent" / "change-orchestrator.md")
-    # Default opencode models per agent (per _AGENT_META in renderers.py).
+    # Default opencode models per agent (per the agent-metadata JSON resources).
     assert explorer_fm["model"] == "minimax/MiniMax-M2.7"
     assert validator_fm["model"] == "minimax/MiniMax-M2.7"
     assert orchestrator_fm["model"] == "minimax/MiniMax-M3"

@@ -11,7 +11,7 @@ see docs/adr/0001-collapse-agent-cli-paths.md for rationale.
 Agent CLIs that support agents as a native concept (OpenCode) get the
 change agent templates rendered into their agent directory instead of the
 persona+skills pair. Each CLI's render is handled by a provider-specific
-function in ``renderers.py``.
+function in the administrators package.
 
 Public surface (re-exported from the package)
 ---------------------------------------------

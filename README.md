@@ -280,7 +280,7 @@ The project is a uv-managed Python package. The main regions of the tree:
 - `src/ai_harness/resources/agent-metadata/` — one JSON metadata file per change
   agent (`<name>.json`); the renderer decodes these into typed metadata the
   provider administrators translate into native frontmatter.
-- `src/ai_harness/modules/harness/renderers.py` — `ADMINISTRATORS` dispatch keyed by
+- `src/ai_harness/modules/harness/administrators/` — `ADMINISTRATORS` dispatch keyed by
   `AgentCli`; each administrator (`ClaudeArtifactsAdministrator`,
   `OpenCodeArtifactsAdministrator`, `CopilotArtifactsAdministrator`) owns its
   provider's discovery, frontmatter, and install paths behind the shared
