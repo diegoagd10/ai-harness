@@ -1165,7 +1165,7 @@ def test_install_with_partial_overrides_preserves_others(tmp_path: Path) -> None
     explorer_fm = _read_frontmatter(tmp_path / ".config" / "opencode" / "agent" / "change-explorer.md")
     validator_fm = _read_frontmatter(tmp_path / ".config" / "opencode" / "agent" / "change-validator.md")
     orchestrator_fm = _read_frontmatter(tmp_path / ".config" / "opencode" / "agent" / "change-orchestrator.md")
-    # Default opencode models per agent (per _AGENT_META in renderers.py).
+    # Default opencode models per agent (per the agent-metadata JSON resources).
     assert explorer_fm["model"] == "minimax/MiniMax-M2.7"
     assert validator_fm["model"] == "minimax/MiniMax-M2.7"
     assert orchestrator_fm["model"] == "minimax/MiniMax-M3"

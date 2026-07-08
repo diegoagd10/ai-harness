@@ -192,8 +192,7 @@ class ArtifactsAdministrator(ABC):
 
 
 # ---------------------------------------------------------------------------
-# Shared private helpers — used by every provider admin and by the deprecated
-# :mod:`ai_harness.modules.harness.renderers` shims. Treat these as
+# Shared private helpers — used by every provider admin. Treat these as
 # intra-package seams; tests reach in to assert behavior, callers do not.
 # ---------------------------------------------------------------------------
 
@@ -325,8 +324,9 @@ def _decode_effort_map(raw: object, *, filename: str) -> Mapping[str, str | None
     """Decode the ``effort`` JSON value into a provider-keyed mapping.
 
     Each value MUST be either a string or ``null`` — JSON ``null`` is the
-    documented "drop the field" sentinel that admin renderers translate
-    into "omit the provider frontmatter key". Other types fail loudly.
+    documented "drop the field" sentinel that the per-provider
+    administrators translate into "omit the provider frontmatter key".
+    Other types fail loudly.
     """
     if raw is None:
         return {}
