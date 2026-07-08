@@ -2341,16 +2341,20 @@ def test_agent_metadata_is_frozen_slots_with_default_factory_caps() -> None:
 
 
 def test_artifacts_administrator_abc_subclasses_must_implement_contract() -> None:
-    """ArtifactsAdministrator subclasses must implement render_artifacts, get_agent_metadata, discover_agent_names.
+    """ArtifactsAdministrator subclasses must implement render_artifacts; defaults are inherited.
 
-    Locks the abstract-method contract: a subclass that forgets any of the
-    three methods cannot be instantiated.
+    Locks the abstract-method contract: only ``render_artifacts`` is
+    abstract after the admin-defaults migration. ``get_agent_metadata``
+    and ``discover_agent_names`` are concrete defaults on the base
+    class — a subclass that forgets either inherits the base default
+    and still instantiates.
     """
     from abc import ABC
 
     from ai_harness.modules.harness.administrators import ArtifactsAdministrator
 
     assert issubclass(ArtifactsAdministrator, ABC)
+    assert ArtifactsAdministrator.__abstractmethods__ == frozenset({"render_artifacts"})
 
     class _Incomplete(ArtifactsAdministrator):
         provider = "claude"
@@ -2358,10 +2362,18 @@ def test_artifacts_administrator_abc_subclasses_must_implement_contract() -> Non
         def render_artifacts(self, names=None, overrides=None, *, home=None):  # noqa: ARG002
             return []
 
-        # Missing get_agent_metadata and discover_agent_names on purpose.
+        # Inherits concrete get_agent_metadata and discover_agent_names defaults.
+
+    # Subclass still instantiates — only render_artifacts is abstract, and we override it.
+    assert _Incomplete().provider == "claude"
+
+    class _MissingRender(ArtifactsAdministrator):
+        provider = "claude"
+
+        # Missing render_artifacts on purpose.
 
     with pytest.raises(TypeError, match="abstract"):
-        _Incomplete()
+        _MissingRender()
 
 
 def test_administrators_dispatch_table_keys_each_supported_cli() -> None:

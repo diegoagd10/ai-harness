@@ -187,13 +187,18 @@ class ArtifactsAdministrator(ABC):
         """
         return _resolve_agent_metadata(name, overrides=overrides, home=home)
 
-    @abstractmethod
     def discover_agent_names(self) -> list[str]:
         """Return visible change-agent names in sorted filename order.
 
         ``_``-prefixed templates are excluded; duplicates fail loudly.
         The returned list is the install/manifest ordering authority.
+
+        Default implementation on the base class — providers inherit
+        this because template discovery is provider-agnostic and every
+        administrator reads the same template set from
+        :func:`discover_agent_names`.
         """
+        return discover_agent_names()
 
 
 # ---------------------------------------------------------------------------
