@@ -836,9 +836,7 @@ def test_change_orchestrator_frontmatter_uses_meta(tmp_path: Path) -> None:
     pair = _find_pair(pairs, "change-orchestrator")
     assert pair is not None
     fm = _parse_frontmatter(pair.content)
-    meta = ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata(
-        "change-orchestrator", home=tmp_path, overrides={}
-    )
+    meta = ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata("change-orchestrator", home=tmp_path, overrides={})
 
     assert fm["description"] == meta.description
     assert fm["mode"] == "primary"
@@ -1505,9 +1503,7 @@ def test_copilot_frontmatter_has_name_and_description_only(tmp_path: Path) -> No
         fm = _parse_frontmatter(pair.content)
         assert fm.get("name") == name, f"{name}: expected name={name!r}, got {fm.get('name')!r}"
         assert fm.get("description", "").startswith(
-            ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata(
-                name, home=tmp_path, overrides={}
-            ).description
+            ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata(name, home=tmp_path, overrides={}).description
         ), f"{name}: description mismatch"
         # MUST NOT contain model, tools, user-invocable, disable-model-invocation, mode, permission, color
         for forbidden in (
