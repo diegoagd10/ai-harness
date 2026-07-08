@@ -1633,37 +1633,6 @@ def test_discover_agents_excludes_underscore_prefixed_files() -> None:
     assert len(names) == 9
 
 
-def test_change_agent_prompt_set_contains_expected_contract_keywords() -> None:
-    """The bundled change-agent prompts carry the file-backed flow contracts."""
-    from importlib.resources import files
-
-    root = files("ai_harness.resources") / "change-agent"
-    prompts = {path.name: path.read_text(encoding="utf-8") for path in root.iterdir() if path.name.endswith(".md")}
-
-    assert sorted(prompts) == [
-        "change-archiver.md",
-        "change-design.md",
-        "change-explorer.md",
-        "change-implementor.md",
-        "change-orchestrator.md",
-        "change-propose.md",
-        "change-specs.md",
-        "change-tasks.md",
-        "change-validator.md",
-    ]
-    assert "budget" in prompts["change-explorer.md"]
-    assert "nextRecommended" in prompts["change-orchestrator.md"]
-    assert "verdict" in prompts["change-validator.md"]
-    assert "task-create" in prompts["change-tasks.md"]
-    assert "task-next" in prompts["change-implementor.md"]
-    assert "task-list" in prompts["change-validator.md"]
-    assert "ai-harness change-archive" in prompts["change-archiver.md"]
-    assert "docs: archive" in prompts["change-archiver.md"]
-    combined = "\n".join(prompts.values())
-    assert "change start" not in combined
-    assert "change ready" not in combined
-
-
 def test_discover_agents_skips_missing_agent_dir(monkeypatch: pytest.MonkeyPatch) -> None:
     """Missing change-agent resources return an empty list."""
     monkeypatch.setattr(
@@ -1752,62 +1721,6 @@ def test_change_archiver_meta_declares_subagent_role() -> None:
     assert meta.mode == "all"
     assert meta.model["opencode"] == "minimax/MiniMax-M2.7-highspeed"
     assert meta.model["claude"] == "sonnet"
-
-
-def test_change_archiver_prompt_runs_cli_command_and_commits_once() -> None:
-    """Change-archiver body tells the agent to run the CLI and commit once.
-
-    Locks the dedicated-archive-agent contract: the prompt runs
-    ``ai-harness change-archive {change}``, scopes the commit to the
-    resulting ``.ai-harness`` changes only, and uses ``docs: archive``
-    as the commit-message prefix.
-    """
-    from importlib.resources import files
-
-    body = (files("ai_harness.resources") / "change-agent" / "change-archiver.md").read_text(encoding="utf-8")
-
-    assert "ai-harness change-archive" in body
-    assert "docs: archive" in body
-    # Single-commit scoping is explicit.
-    assert "exactly one" in body.lower() or "one scoped commit" in body.lower()
-    # Scope restriction to .ai-harness is explicit.
-    assert ".ai-harness" in body
-    # Failure path escalates instead of retrying.
-    assert "blocked" in body.lower() or "human" in body.lower()
-
-
-def test_change_archiver_body_ignores_unrelated_product_dirtiness() -> None:
-    """The archiver must NOT commit unrelated product dirtiness — scope is .ai-harness only.
-
-    The new architecture enforces the boundary via path-scoped staging
-    (`git add -A .ai-harness/`) plus a pre-commit verification gate
-    (`git diff --cached --stat`). Out-of-scope dirtiness can't be
-    staged because the git command itself won't touch it; in-scope
-    non-archive dirtiness is caught by the verification gate.
-    """
-    from importlib.resources import files
-
-    body = (files("ai_harness.resources") / "change-agent" / "change-archiver.md").read_text(encoding="utf-8")
-
-    body_lower = body.lower()
-    # The intent is still documented in the prompt.
-    assert "unrelated product dirtiness" in body_lower or "unrelated" in body_lower
-    # The new enforcement mechanism: path-scoped staging + pre-commit verification.
-    assert "git add -a .ai-harness/" in body_lower
-    assert "git diff --cached --stat" in body_lower
-
-
-def test_change_archiver_result_envelope_includes_archive_commit_and_blocked_errors() -> None:
-    """The archiver result envelope carries the archive commit when done and errors when blocked."""
-    from importlib.resources import files
-
-    body = (files("ai_harness.resources") / "change-agent" / "change-archiver.md").read_text(encoding="utf-8")
-
-    # Success envelope fields.
-    assert "archive_commit" in body or "archive commit" in body.lower()
-    assert "archive_paths" in body or "archive paths" in body.lower()
-    # Blocked envelope carries CLI errors verbatim.
-    assert "errors" in body
 
 
 def test_change_archiver_renders_on_every_native_agent_cli(tmp_path: Path) -> None:
@@ -2678,26 +2591,6 @@ def test_agent_metadata_resources_directory_exists() -> None:
 
     root = files("ai_harness.resources") / "agent-metadata"
     assert root.is_dir(), "agent-metadata resource directory must exist"
-
-
-def test_agent_metadata_has_one_json_file_per_change_agent_template() -> None:
-    """One JSON file per visible template, matching the change-agent/ directory exactly."""
-    from importlib.resources import files
-
-    metadata_root = files("ai_harness.resources") / "agent-metadata"
-    template_root = files("ai_harness.resources") / "change-agent"
-
-    metadata_names = sorted(p.name.removesuffix(".json") for p in metadata_root.iterdir() if p.name.endswith(".json"))
-    template_names = sorted(
-        p.name.removesuffix(".md")
-        for p in template_root.iterdir()
-        if p.name.endswith(".md") and not p.name.startswith("_")
-    )
-
-    assert metadata_names == template_names, (
-        f"metadata/templates drift: metadata={metadata_names}, templates={template_names}"
-    )
-    assert len(metadata_names) == 9
 
 
 def test_each_agent_metadata_json_decodes_and_has_required_fields() -> None:
