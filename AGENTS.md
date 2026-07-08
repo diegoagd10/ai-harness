@@ -38,9 +38,9 @@ The followings are not optional, are MANDATORY:
 
 ## Code location
 
-- src/ai-harness/main.py - Point of entry of the application
-- src/ai-harness/commands - Typer commands
-- src/ai-harness/modules - Deep modules
-- src/ai-harness/utils - Static methods utils
-- src/ai-harness/resources - Resources of the project
+- src/ai_harness/main.py - Point of entry of the application
+- src/ai_harness/commands - Typer commands
+- src/ai_harness/modules - Deep modules
+- src/ai_harness/utils - Static methods utils
+- src/ai_harness/resources - Resources of the project
 - expected - The expected artifacts after installation
