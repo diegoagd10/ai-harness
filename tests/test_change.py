@@ -10,13 +10,21 @@ import pytest
 from typer.testing import CliRunner
 
 from ai_harness.main import app
+from ai_harness.modules.change_config.models import ChangeConfigPromptContext
 from ai_harness.modules.harness.change import (
+    ChangeStatus,
     ChangeStoreError,
     change_archive,
     change_continue,
     change_new,
 )
-from ai_harness.modules.harness.tasks import SubtaskInput, TaskInput, task_create, task_done
+from ai_harness.modules.harness.tasks import (
+    SubtaskInput,
+    TaskInput,
+    TaskProgress,
+    task_create,
+    task_done,
+)
 
 runner = CliRunner()
 
@@ -27,7 +35,7 @@ def test_change_new_scaffolds_fresh_change_status(tmp_path: Path) -> None:
 
     assert (tmp_path / ".ai-harness" / "changes" / "demo").is_dir()
     assert status.schemaName == "ai-harness.change-status"
-    assert status.schemaVersion == 1
+    assert status.schemaVersion == 2
     assert status.changeName == "demo"
     assert status.artifacts == {
         "explore": "missing",
@@ -41,8 +49,138 @@ def test_change_new_scaffolds_fresh_change_status(tmp_path: Path) -> None:
     }
     assert status.dependencies["explore"] == "ready"
     assert status.nextRecommended == "explore"
+    # Version-2 shape: nullable configContext defaults to None for change_new
+    # because new changes never consult repository configuration.
+    assert status.configContext is None
+    # Phase instructions remain the existing nullable string contract.
+    assert status.phaseInstructions is None
     assert "budget" not in asdict(status)
     assert "verdict" not in asdict(status)
+
+
+def test_change_status_serializes_populated_config_context_as_json_object() -> None:
+    """A populated ChangeConfigPromptContext is serialized as a JSON object with phase_rules."""
+    populated = ChangeConfigPromptContext(
+        phase="change_propose",
+        phase_rules=("First rule", "Second rule"),
+    )
+    status = ChangeStatus(
+        schemaName="ai-harness.change-status",
+        schemaVersion=2,
+        changeName="auth-rework",
+        changeRoot=".ai-harness/changes/auth-rework",
+        artifactPaths={"prd": [".ai-harness/changes/auth-rework/prd.md"]},
+        artifacts={"prd": "missing"},
+        taskProgress=TaskProgress(total=0, completed=0, pending=0, allComplete=True),
+        dependencies={"prd": "ready"},
+        relationships={"parent": None, "siblings": [], "children": []},
+        phaseInstructions=None,
+        nextRecommended="prd",
+        blockedReasons=[],
+        configContext=populated,
+    )
+
+    serialized = json.loads(json.dumps(asdict(status)))
+
+    assert serialized["schemaVersion"] == 2
+    assert serialized["nextRecommended"] == "prd"
+    assert serialized["configContext"] == {
+        "phase": "change_propose",
+        "phase_rules": ["First rule", "Second rule"],
+    }
+    # phaseInstructions remains the documented nullable string field with
+    # its existing name and meaning; the additive change must not perturb it.
+    assert serialized["phaseInstructions"] is None
+
+
+def test_change_status_serializes_empty_rules_as_json_array() -> None:
+    """An empty rules tuple serializes as a JSON array (not null and not omitted)."""
+    populated = ChangeConfigPromptContext(phase="change_explorer", phase_rules=())
+    status = ChangeStatus(
+        schemaName="ai-harness.change-status",
+        schemaVersion=2,
+        changeName="demo",
+        changeRoot=".ai-harness/changes/demo",
+        artifactPaths={"exploration": []},
+        artifacts={"explore": "missing"},
+        taskProgress=TaskProgress(total=0, completed=0, pending=0, allComplete=True),
+        dependencies={"explore": "ready"},
+        relationships={"parent": None, "siblings": [], "children": []},
+        phaseInstructions=None,
+        nextRecommended="explore",
+        blockedReasons=[],
+        configContext=populated,
+    )
+
+    serialized = json.loads(json.dumps(asdict(status)))
+
+    assert serialized["configContext"]["phase"] == "change_explorer"
+    assert serialized["configContext"]["phase_rules"] == []
+    assert isinstance(serialized["configContext"]["phase_rules"], list)
+
+
+def test_change_status_preserves_ordered_rules_in_source_order() -> None:
+    """Rules appear in the response exactly as written, in source order."""
+    populated = ChangeConfigPromptContext(
+        phase="change_propose",
+        phase_rules=("Observe", "Decide", "Report"),
+    )
+    status = ChangeStatus(
+        schemaName="ai-harness.change-status",
+        schemaVersion=2,
+        changeName="demo",
+        changeRoot=".ai-harness/changes/demo",
+        artifactPaths={"prd": []},
+        artifacts={"prd": "missing"},
+        taskProgress=TaskProgress(total=0, completed=0, pending=0, allComplete=True),
+        dependencies={"prd": "ready"},
+        relationships={"parent": None, "siblings": [], "children": []},
+        phaseInstructions=None,
+        nextRecommended="prd",
+        blockedReasons=[],
+        configContext=populated,
+    )
+
+    serialized = json.loads(json.dumps(asdict(status)))
+
+    assert serialized["configContext"]["phase_rules"] == ["Observe", "Decide", "Report"]
+
+
+def test_change_status_keeps_phase_instructions_alongside_config_context() -> None:
+    """A non-null phaseInstructions survives the additive configContext field."""
+    populated = ChangeConfigPromptContext(phase="change_propose", phase_rules=("Only rule",))
+    status = ChangeStatus(
+        schemaName="ai-harness.change-status",
+        schemaVersion=2,
+        changeName="demo",
+        changeRoot=".ai-harness/changes/demo",
+        artifactPaths={"prd": []},
+        artifacts={"prd": "missing"},
+        taskProgress=TaskProgress(total=0, completed=0, pending=0, allComplete=True),
+        dependencies={"prd": "ready"},
+        relationships={"parent": None, "siblings": [], "children": []},
+        phaseInstructions="Draft the PRD.",
+        nextRecommended="prd",
+        blockedReasons=[],
+        configContext=populated,
+    )
+
+    serialized = json.loads(json.dumps(asdict(status)))
+
+    assert serialized["phaseInstructions"] == "Draft the PRD."
+    assert serialized["configContext"]["phase_rules"] == ["Only rule"]
+
+
+def test_cli_change_new_status_includes_null_config_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The CLI version-2 status JSON for ``change-new`` exposes configContext as null."""
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["change-new", "demo"])
+
+    assert result.exit_code == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["schemaVersion"] == 2
+    assert payload["configContext"] is None
 
 
 def test_change_continue_derives_artifacts_dependencies_and_next_phase(tmp_path: Path) -> None:

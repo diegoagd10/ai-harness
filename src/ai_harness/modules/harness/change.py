@@ -45,11 +45,16 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
+from ai_harness.modules.change_config.models import ChangeConfigPromptContext
 from ai_harness.modules.harness.tasks import TaskProgress, TaskStoreError, task_progress
 
 _PHASES = ("explore", "prd", "design", "specs", "tasks", "implement", "validate", "archive")
 _SCHEMA_NAME = "ai-harness.change-status"
-_SCHEMA_VERSION = 1
+# Schema version 2 introduces the additive nullable ``configContext``
+# field. Version 1 omitted that field entirely; consumers rely on the
+# numeric version to detect the additive shape rather than silently
+# receiving a changed schema.
+_SCHEMA_VERSION = 2
 _ARTIFACT_FILENAMES = {
     "exploration": "exploration.md",
     "prd": "prd.md",
@@ -77,7 +82,16 @@ class ChangeStoreError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class ChangeStatus:
-    """Represent the derived file-backed state for one change."""
+    """Represent the derived file-backed state for one change.
+
+    Schema version 2 adds the final nullable ``configContext`` field
+    holding the routed phase's :class:`ChangeConfigPromptContext`, or
+    ``None`` when no phase context is required (``change-new``, or any
+    ``change-continue`` whose ``nextRecommended`` is the synthetic
+    ``resolve-blockers`` token). Existing v1 fields retain their order,
+    name, type, and meaning; this dataclass is still serialized to JSON
+    via the existing :func:`dataclasses.asdict` CLI edge.
+    """
 
     schemaName: str
     schemaVersion: int
@@ -91,6 +105,7 @@ class ChangeStatus:
     phaseInstructions: str | None
     nextRecommended: str
     blockedReasons: list[str]
+    configContext: ChangeConfigPromptContext | None
 
 
 def change_new(root: Path, change: str) -> ChangeStatus:
@@ -137,6 +152,7 @@ def _derive_status(root: Path, change: str) -> ChangeStatus:
         phaseInstructions=None,
         nextRecommended=_next_recommended(artifacts, dependencies),
         blockedReasons=[],
+        configContext=None,
     )
 
 
