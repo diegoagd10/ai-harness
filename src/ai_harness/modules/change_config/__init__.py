@@ -17,11 +17,16 @@ from ai_harness.modules.change_config.models import (
     ChangeConfigPromptContext,
     ChangeConfigValidationResults,
 )
-from ai_harness.modules.change_config.module import ChangeConfigAdministrator, ChangeConfigError
+from ai_harness.modules.change_config.module import (
+    PHASE_ORDER,
+    ChangeConfigAdministrator,
+    ChangeConfigError,
+)
 
 __all__ = [
     "ChangeConfigAdministrator",
     "ChangeConfigError",
     "ChangeConfigPromptContext",
     "ChangeConfigValidationResults",
+    "PHASE_ORDER",
 ]

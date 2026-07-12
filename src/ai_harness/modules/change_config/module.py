@@ -42,6 +42,12 @@ _PHASE_ORDER: tuple[str, ...] = (
     "change_archiver",
 )
 
+# Public alias of the canonical phase-order tuple. The seam exposes it so
+# callers (notably the ``ai-harness init`` CLI tests) can verify the
+# generated config against a single source of truth instead of duplicating
+# the list — which previously tripped pylint's duplicate-code gate.
+PHASE_ORDER: tuple[str, ...] = _PHASE_ORDER
+
 # Canonical phase keys map to themselves; short aliases map to their owner.
 # Consulted *after* kebab-to-snake normalization so callers can pass either
 # "explore" or "change-explorer" interchangeably and land on the same node.

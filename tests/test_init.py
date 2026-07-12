@@ -471,17 +471,24 @@ def test_cli_init_no_label_or_gh_references_on_fresh_init(tmp_path: Path, monkey
 # CLI adapter — comprehensive coverage for the new init contract
 # ---------------------------------------------------------------------------
 
-_EXPECTED_PHASE_KEYS = (
-    "change_explorer",
-    "change_propose",
-    "change_design",
-    "change_specs",
-    "change_tasks",
-    "change_implementor",
-    "change_validator",
-    "change_archiver",
-)
 _STABLE_COMMIT_FORMAT = "[{change_name}][{task_id}] {slug}"
+
+
+def test_phase_order_is_publicly_importable_from_seam() -> None:
+    """The canonical orchestrator phase keys are part of the seam's public surface.
+
+    The init CLI tests reference the canonical phase list through the
+    ``change_config`` package rather than duplicating it locally; this test
+    guards that contract without enumerating the values again, so the
+    list of names itself stays in exactly one place: the seam module.
+    """
+    from ai_harness.modules.change_config import PHASE_ORDER as seam_phase_order
+
+    assert isinstance(seam_phase_order, tuple)
+    assert len(seam_phase_order) == 8
+    assert all(isinstance(name, str) for name in seam_phase_order)
+    assert all(name.startswith("change_") for name in seam_phase_order)
+    assert len(set(seam_phase_order)) == len(seam_phase_order)
 
 
 def _run_init(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -498,11 +505,13 @@ def test_cli_init_generated_config_parses_as_valid_yaml(tmp_path: Path, monkeypa
     config_path = tmp_path / CONFIG_REL
     assert config_path.is_file()
 
+    from ai_harness.modules.change_config import PHASE_ORDER
+
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert isinstance(raw, dict)
     assert raw["commit"]["format"] == _STABLE_COMMIT_FORMAT
-    assert set(raw["phases"]) == set(_EXPECTED_PHASE_KEYS)
-    for phase_key in _EXPECTED_PHASE_KEYS:
+    assert set(raw["phases"]) == set(PHASE_ORDER)
+    for phase_key in PHASE_ORDER:
         assert raw["phases"][phase_key] == {"rules": []}, f"phase {phase_key!r} must carry an empty starter rules list"
 
 
@@ -510,9 +519,11 @@ def test_cli_init_generated_config_has_eight_phase_sections(tmp_path: Path, monk
     """The freshly generated config contains exactly one section per orchestrator phase."""
     _run_init(tmp_path, monkeypatch)
 
+    from ai_harness.modules.change_config import PHASE_ORDER
+
     raw = yaml.safe_load((tmp_path / CONFIG_REL).read_text(encoding="utf-8"))
 
-    assert sorted(raw["phases"]) == sorted(_EXPECTED_PHASE_KEYS)
+    assert sorted(raw["phases"]) == sorted(PHASE_ORDER)
 
 
 # --- preservation across fresh-state edge cases ---
