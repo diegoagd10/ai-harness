@@ -393,86 +393,50 @@ def test_init_repo_new_markers_take_precedence_over_legacy(tmp_path: Path) -> No
 
 
 # ---------------------------------------------------------------------------
-# CLI adapter — exercise through typer
+# CLI adapter — exercise through typer (NEW contract: config-only init)
 # ---------------------------------------------------------------------------
 
+CONFIG_REL = ".ai-harness/config.yml"
 
-def test_cli_init_writes_skeleton_and_exits_zero(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """``ai-harness init`` writes the skeleton and exits 0."""
+
+def test_cli_init_creates_config_yml_via_administrator(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``ai-harness init`` delegates to ChangeConfigAdministrator and writes the config file."""
     monkeypatch.chdir(tmp_path)
 
     result = runner.invoke(app, ["init"])
 
     assert result.exit_code == 0, result.stderr
-    assert (tmp_path / CODING_STANDARDS).is_file()
-    content = (tmp_path / CODING_STANDARDS).read_text(encoding="utf-8")
-    assert "# Coding Standards" in content
-    # When file is written, stdout reports it was created
-    assert "created" in result.stdout.lower()
+    assert (tmp_path / CONFIG_REL).is_file(), "init must create .ai-harness/config.yml"
 
 
-def test_cli_init_skips_when_file_exists(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """``ai-harness init`` exits 0 and reports unchanged when CODING_STANDARDS.md already exists."""
+def test_cli_init_output_identifies_config_without_creation_claim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``ai-harness init`` output mentions the config path and makes no created/exists claim."""
     monkeypatch.chdir(tmp_path)
-
-    existing = tmp_path / CODING_STANDARDS
-    original = "# Already here\n"
-    existing.write_text(original, encoding="utf-8")
 
     result = runner.invoke(app, ["init"])
 
     assert result.exit_code == 0, result.stderr
-    assert existing.read_text(encoding="utf-8") == original
-    assert "unchanged" in result.stdout.lower()
+    stdout_lower = result.stdout.lower()
+    assert CONFIG_REL in result.stdout, f"Output must mention the config path; got:\n{result.stdout!r}"
+    # Output must not assert creation (would be a lie on idempotent re-run).
+    assert "created " + CONFIG_REL not in stdout_lower
+    assert "wrote " + CONFIG_REL not in stdout_lower
+    assert "already exists" not in stdout_lower
 
 
-def test_cli_init_reports_init_block_appended(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """``ai-harness init`` reports the init block landed when CLAUDE.md exists without markers."""
+def test_cli_init_leaves_root_documents_untouched(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``ai-harness init`` does not create or modify root ``CLAUDE.md`` / ``AGENTS.md`` / ``CODING_STANDARDS.md``."""
     monkeypatch.chdir(tmp_path)
-
-    claude = tmp_path / CLAUDE_MD
-    claude.write_text("## Agent skills\n", encoding="utf-8")
 
     result = runner.invoke(app, ["init"])
 
     assert result.exit_code == 0, result.stderr
-    assert "Managed init block on" in result.stdout
-    assert CLAUDE_MD in result.stdout
-    content = claude.read_text(encoding="utf-8")
-    assert INIT_START in content
-    assert INIT_END in content
-
-
-def test_cli_init_reports_init_block_already_present(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """``ai-harness init`` reports unchanged when both agent docs already have new init markers."""
-    monkeypatch.chdir(tmp_path)
-
-    managed = f"{INIT_START}\n\nFollow the repo's `CODING_STANDARDS.md`.\n\n{INIT_END}\n"
-    (tmp_path / CLAUDE_MD).write_text(managed, encoding="utf-8")
-    (tmp_path / AGENTS_MD).write_text(managed, encoding="utf-8")
-
-    result = runner.invoke(app, ["init"])
-
-    assert result.exit_code == 0, result.stderr
-    assert "already present" in result.stdout.lower()
-    assert "unchanged" in result.stdout.lower()
-
-
-def test_cli_init_reports_init_block_appended_to_agents_md(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """``ai-harness init`` names AGENTS.md when it receives the init block."""
-    monkeypatch.chdir(tmp_path)
-
-    agents = tmp_path / AGENTS_MD
-    agents.write_text("# Agent persona\n", encoding="utf-8")
-
-    result = runner.invoke(app, ["init"])
-
-    assert result.exit_code == 0, result.stderr
-    assert "Managed init block on" in result.stdout
-    assert AGENTS_MD in result.stdout
-    content = agents.read_text(encoding="utf-8")
-    assert INIT_START in content
-    assert INIT_END in content
+    for root_doc in (CLAUDE_MD, AGENTS_MD, CODING_STANDARDS):
+        assert not (tmp_path / root_doc).exists(), (
+            f"{root_doc} must not be created by init; output was:\n{result.stdout!r}"
+        )
 
 
 def test_cli_init_no_label_or_gh_references_on_fresh_init(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -489,15 +453,3 @@ def test_cli_init_no_label_or_gh_references_on_fresh_init(tmp_path: Path, monkey
         assert forbidden not in combined, (
             f"Found forbidden string {forbidden!r} in output:\n{result.stdout!r}\n{result.stderr!r}"
         )
-
-
-def test_cli_init_idempotent_re_run_exits_zero(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """``ai-harness init`` exits 0 on an idempotent re-run after the artifacts already exist."""
-    monkeypatch.chdir(tmp_path)
-
-    first = runner.invoke(app, ["init"])
-    assert first.exit_code == 0, first.stderr
-
-    second = runner.invoke(app, ["init"])
-    assert second.exit_code == 0, second.stderr
-    assert "already exists" in second.stdout.lower() or "already present" in second.stdout.lower()
