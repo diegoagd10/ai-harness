@@ -42,9 +42,10 @@ the FSM without re-implementing the rules.
 from __future__ import annotations
 
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
+from ai_harness.modules.change_config import ChangeConfigAdministrator, ChangeConfigError
 from ai_harness.modules.change_config.models import ChangeConfigPromptContext
 from ai_harness.modules.harness.tasks import TaskProgress, TaskStoreError, task_progress
 
@@ -119,12 +120,60 @@ def change_new(root: Path, change: str) -> ChangeStatus:
 
 
 def change_continue(root: Path, change: str) -> ChangeStatus:
-    """Return status for an existing change folder."""
+    """Return status for an existing change folder.
+
+    Derives the file-backed status first, then enriches the response
+    with the routed phase's :class:`ChangeConfigPromptContext` (or
+    ``None`` for ``resolve-blockers``) using
+    :class:`ChangeConfigAdministrator`. The reusable
+    :func:`_derive_status` remains side-effect free; enrichment is the
+    behaviour-specific seam owned by ``change-continue``.
+
+    Sequence is fixed: derive → classify route → validate config →
+    read context → immutable replace. Reusing a cached administrator
+    or parsed configuration is forbidden so file edits between calls
+    become visible immediately.
+    """
     change_dir = _change_dir(root, change)
     if not change_dir.is_dir():
         raise ChangeStoreError(f"Change not found: {change}")
 
-    return _derive_status(root, change)
+    status = _derive_status(root, change)
+    context = _resolve_config_context(root, status.nextRecommended)
+    if context is not None:
+        return replace(status, configContext=context)
+    return status
+
+
+def _resolve_config_context(root: Path, next_recommended: str) -> ChangeConfigPromptContext | None:
+    """Return the routed phase's prompt context or ``None`` for blockers.
+
+    ``resolve-blockers`` is the synthetic non-routable token — no
+    sub-agent dispatches, so the configuration administrator is never
+    consulted and no canonical phase is invented. Actionable routes
+    instantiate a fresh administrator, validate
+    ``.ai-harness/config.yml``, and read context through the
+    administrator's ``get_context_by``. Validation warnings are
+    non-halting and never block context delivery.
+
+    Every halted outcome (missing file, malformed YAML, schema-invalid
+    config, read failure) is normalized to :class:`ChangeStoreError`
+    here so callers see one failure type across the derivation seam.
+    """
+    if next_recommended == "resolve-blockers":
+        return None
+
+    admin = ChangeConfigAdministrator(repo_root=root)
+    try:
+        validation = admin.validate_config()
+    except ChangeConfigError as exc:
+        raise ChangeStoreError(f"Change configuration is unavailable: {exc}") from exc
+    if not validation.is_valid:
+        raise ChangeStoreError("Change configuration is invalid; fix .ai-harness/config.yml before continuing.")
+    try:
+        return admin.get_context_by(next_recommended)
+    except ChangeConfigError as exc:
+        raise ChangeStoreError(f"Could not load change configuration context: {exc}") from exc
 
 
 def _derive_status(root: Path, change: str) -> ChangeStatus:

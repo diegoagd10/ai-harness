@@ -10,6 +10,7 @@ import pytest
 from typer.testing import CliRunner
 
 from ai_harness.main import app
+from ai_harness.modules.change_config import ChangeConfigAdministrator
 from ai_harness.modules.change_config.models import ChangeConfigPromptContext
 from ai_harness.modules.harness.change import (
     ChangeStatus,
@@ -183,9 +184,332 @@ def test_cli_change_new_status_includes_null_config_context(tmp_path: Path, monk
     assert payload["configContext"] is None
 
 
+# ---------------------------------------------------------------------------
+# configContext enrichment — change_continue seam (task 2)
+# ---------------------------------------------------------------------------
+
+
+def _initialize_config_with_rules(tmp_path: Path, rules_by_phase: dict[str, list[str]]) -> None:
+    """Write a valid ``.ai-harness/config.yml`` with per-phase rule lists.
+
+    Used by routed-context tests to give ``change_continue`` a real
+    configured file so the seam consults
+    ``ChangeConfigAdministrator.get_context_by`` end-to-end. Keeps the
+    helper narrow so each test stays a single specification.
+    """
+    config_path = tmp_path / ".ai-harness" / "config.yml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+
+    phases = {
+        "change_explorer": {"rules": rules_by_phase.get("change_explorer", [])},
+        "change_propose": {"rules": rules_by_phase.get("change_propose", [])},
+        "change_design": {"rules": rules_by_phase.get("change_design", [])},
+        "change_specs": {"rules": rules_by_phase.get("change_specs", [])},
+        "change_tasks": {"rules": rules_by_phase.get("change_tasks", [])},
+        "change_implementor": {"rules": rules_by_phase.get("change_implementor", [])},
+        "change_validator": {"rules": rules_by_phase.get("change_validator", [])},
+        "change_archiver": {"rules": rules_by_phase.get("change_archiver", [])},
+    }
+    payload = {
+        "commit": {"format": "[{change_name}][{task_id}] {slug}"},
+        "phases": phases,
+    }
+    config_path.write_text(
+        __import__("yaml").safe_dump(payload, sort_keys=False),
+        encoding="utf-8",
+    )
+
+
+def _stage_change_for_route(tmp_path: Path, change: str, *, next_recommended: str) -> None:
+    """Populate a change's artifact files so ``nextRecommended`` equals *next_recommended*.
+
+    Each phase ``X`` only becomes ``nextRecommended`` when ``X``'s
+    artifact is missing but every earlier-listed phase is present. So
+    setting up state for one route sometimes requires *not* writing
+    a later artifact. The ``prerequisites`` table is the minimum set
+    of artifact states needed to land on each route, plus the
+    ``must_be_present`` guard that keeps earlier phases from
+    shortcutting the recommendation.
+
+    Tests for non-obvious aliases (``prd``, ``implement``,
+    ``archive``) use this helper to land on a specific route
+    deterministically without leaking into archive.
+    """
+    change_new(tmp_path, change)
+    change_dir = tmp_path / ".ai-harness" / "changes" / change
+
+    # Prerequisite map: every artifact that MUST be present for the
+    # requested route to surface as ``nextRecommended``. The target
+    # phase itself is intentionally absent here.
+    prerequisites = {
+        "explore": [],
+        "prd": ["exploration.md"],
+        "design": ["exploration.md", "prd.md"],
+        "specs": ["exploration.md", "prd.md", "design.md"],
+        # tasks needs both design and specs done. Either is sufficient,
+        # but the FSM lists tasks after specs — supply both so the test
+        # is order-independent.
+        "tasks": ["exploration.md", "prd.md", "design.md", "specs"],
+        "implement": ["exploration.md", "prd.md", "design.md", "specs"],
+        "validate": ["exploration.md", "prd.md", "design.md", "specs"],
+        "archive": ["exploration.md", "prd.md", "design.md", "specs"],
+    }
+    present = prerequisites[next_recommended]
+    if "exploration.md" in present:
+        (change_dir / "exploration.md").write_text("x\n", encoding="utf-8")
+    if "prd.md" in present:
+        (change_dir / "prd.md").write_text("x\n", encoding="utf-8")
+    if "design.md" in present:
+        (change_dir / "design.md").write_text("x\n", encoding="utf-8")
+    if "specs" in present:
+        specs_dir = change_dir / "specs"
+        specs_dir.mkdir()
+        (specs_dir / "capability.md").write_text("x\n", encoding="utf-8")
+
+    # For implement/validate/archive routes, the FSM requires a tasks
+    # file with at least one task that is fully closed before implement
+    # is ready. Use the existing tasks API so the test stays on the
+    # public seam.
+    needs_tasks = next_recommended in {"implement", "validate", "archive"}
+    if needs_tasks:
+        task = task_create(
+            tmp_path,
+            change,
+            TaskInput(
+                title="Finish work",
+                spec="specs/capability.md",
+                phase="implement",
+                depends_on=[],
+                subtasks=[SubtaskInput(title="Build")],
+            ),
+        )
+        task_done(tmp_path, change, task.id)
+        # The implementation.md, validation.md artifacts are still
+        # intentionally absent for ``implement``/``validate`` routes —
+        # only the matching lifecycle artifact must be missing so the
+        # nextRecommended token equals the requested route.
+        if next_recommended in {"validate", "archive"}:
+            (change_dir / "implementation.md").write_text("x\n", encoding="utf-8")
+        if next_recommended == "archive":
+            (change_dir / "validation.md").write_text("x\n", encoding="utf-8")
+
+
+def test_change_continue_attaches_canonical_explorer_context_for_explore_route(tmp_path: Path) -> None:
+    """A fresh change's ``explore`` route resolves to ``change_explorer``."""
+    _initialize_config_with_rules(
+        tmp_path,
+        {"change_explorer": ["Read the codebase", "Surface unknowns"]},
+    )
+    change_new(tmp_path, "demo")
+
+    status = change_continue(tmp_path, "demo")
+
+    assert status.nextRecommended == "explore"
+    assert status.configContext is not None
+    assert status.configContext.phase == "change_explorer"
+    assert status.configContext.phase_rules == ("Read the codebase", "Surface unknowns")
+
+
+def test_change_continue_attaches_canonical_propose_context_for_prd_route(tmp_path: Path) -> None:
+    """``prd`` resolves through the alias map to ``change_propose``."""
+    _initialize_config_with_rules(
+        tmp_path,
+        {"change_propose": ["Anchor scope", "Outcome-first framing"]},
+    )
+    _stage_change_for_route(tmp_path, "demo", next_recommended="prd")
+
+    status = change_continue(tmp_path, "demo")
+
+    assert status.nextRecommended == "prd"
+    assert status.configContext is not None
+    assert status.configContext.phase == "change_propose"
+    assert status.configContext.phase_rules == ("Anchor scope", "Outcome-first framing")
+
+
+def test_change_continue_attaches_canonical_design_context_for_design_route(tmp_path: Path) -> None:
+    """``design`` resolves to ``change_design``."""
+    _initialize_config_with_rules(
+        tmp_path,
+        {"change_design": ["Pick a seam", "Trade-offs table"]},
+    )
+    _stage_change_for_route(tmp_path, "demo", next_recommended="design")
+
+    status = change_continue(tmp_path, "demo")
+
+    assert status.nextRecommended == "design"
+    assert status.configContext is not None
+    assert status.configContext.phase == "change_design"
+    assert status.configContext.phase_rules == ("Pick a seam", "Trade-offs table")
+
+
+def test_change_continue_attaches_canonical_specs_context_for_specs_route(tmp_path: Path) -> None:
+    """``specs`` resolves to ``change_specs``."""
+    _initialize_config_with_rules(
+        tmp_path,
+        {"change_specs": ["One capability per file", "Cover edge cases"]},
+    )
+    _stage_change_for_route(tmp_path, "demo", next_recommended="specs")
+
+    status = change_continue(tmp_path, "demo")
+
+    assert status.nextRecommended == "specs"
+    assert status.configContext is not None
+    assert status.configContext.phase == "change_specs"
+    assert status.configContext.phase_rules == ("One capability per file", "Cover edge cases")
+
+
+def test_change_continue_attaches_canonical_tasks_context_for_tasks_route(tmp_path: Path) -> None:
+    """``tasks`` resolves to ``change_tasks``."""
+    _initialize_config_with_rules(
+        tmp_path,
+        {"change_tasks": ["Idiomatic tasks.json", "Sequenced dependencies"]},
+    )
+    _stage_change_for_route(tmp_path, "demo", next_recommended="tasks")
+
+    status = change_continue(tmp_path, "demo")
+
+    assert status.nextRecommended == "tasks"
+    assert status.configContext is not None
+    assert status.configContext.phase == "change_tasks"
+    assert status.configContext.phase_rules == ("Idiomatic tasks.json", "Sequenced dependencies")
+
+
+def test_change_continue_attaches_canonical_implementor_context_for_implement_route(tmp_path: Path) -> None:
+    """``implement`` resolves through the alias map to ``change_implementor``."""
+    _initialize_config_with_rules(
+        tmp_path,
+        {"change_implementor": ["TDD red/green/refactor", "One commit per task"]},
+    )
+    _stage_change_for_route(tmp_path, "demo", next_recommended="implement")
+
+    status = change_continue(tmp_path, "demo")
+
+    assert status.nextRecommended == "implement"
+    assert status.configContext is not None
+    assert status.configContext.phase == "change_implementor"
+    assert status.configContext.phase_rules == ("TDD red/green/refactor", "One commit per task")
+
+
+def test_change_continue_attaches_canonical_validator_context_for_validate_route(tmp_path: Path) -> None:
+    """``validate`` resolves to ``change_validator``."""
+    _initialize_config_with_rules(
+        tmp_path,
+        {"change_validator": ["Verdict shape", "Re-run on warnings"]},
+    )
+    _stage_change_for_route(tmp_path, "demo", next_recommended="validate")
+
+    status = change_continue(tmp_path, "demo")
+
+    assert status.nextRecommended == "validate"
+    assert status.configContext is not None
+    assert status.configContext.phase == "change_validator"
+    assert status.configContext.phase_rules == ("Verdict shape", "Re-run on warnings")
+
+
+def test_change_continue_attaches_canonical_archiver_context_for_archive_route(tmp_path: Path) -> None:
+    """``archive`` resolves through the alias map to ``change_archiver``."""
+    _initialize_config_with_rules(
+        tmp_path,
+        {"change_archiver": ["Move specs/ to .ai-harness/specs/", "Roll back partial moves"]},
+    )
+    _stage_change_for_route(tmp_path, "demo", next_recommended="archive")
+
+    status = change_continue(tmp_path, "demo")
+
+    assert status.nextRecommended == "archive"
+    assert status.configContext is not None
+    assert status.configContext.phase == "change_archiver"
+    assert status.configContext.phase_rules == (
+        "Move specs/ to .ai-harness/specs/",
+        "Roll back partial moves",
+    )
+
+
+def test_change_continue_preserves_lifecycle_status_when_enriching_config_context(tmp_path: Path) -> None:
+    """Enrichment must NOT change artifacts/dependencies/taskProgress/nextRecommended."""
+    _initialize_config_with_rules(
+        tmp_path,
+        {"change_explorer": ["Read the codebase"]},
+    )
+    change_new(tmp_path, "demo")
+    change_dir = tmp_path / ".ai-harness" / "changes" / "demo"
+    (change_dir / "exploration.md").write_text("x\n", encoding="utf-8")
+
+    status = change_continue(tmp_path, "demo")
+
+    # Lifecycle-derived fields remain identical to a config-free derivation.
+    assert status.nextRecommended == "prd"
+    assert status.artifacts["explore"] == "done"
+    assert status.dependencies["explore"] == "all_done"
+    assert status.dependencies["prd"] == "ready"
+    # The new field carries the routed phase context.
+    assert status.configContext is not None
+    assert status.configContext.phase == "change_propose"
+
+
+def test_change_continue_bypasses_configuration_for_resolve_blockers(tmp_path: Path) -> None:
+    """``resolve-blockers`` returns null context and never reads the configuration.
+
+    Even if the configuration file is missing or malformed, a
+    blocked-state continuation must still succeed because no sub-agent
+    is routable in that state. The test deliberately pre-installs a
+    broken config so any accidental ``validate_config`` call would
+    raise; the only way to satisfy the assertion is to bypass the
+    configuration administrator entirely.
+    """
+    change_new(tmp_path, "demo")
+    change_dir = tmp_path / ".ai-harness" / "changes" / "demo"
+    # Land on resolve-blockers: complete every required artifact so all
+    # but ``archive`` read all_done, then keep tasks empty so
+    # ``archive`` dependency stays blocked.
+    for name in ("exploration.md", "prd.md", "design.md"):
+        (change_dir / name).write_text("x\n", encoding="utf-8")
+    specs_dir = change_dir / "specs"
+    specs_dir.mkdir()
+    (specs_dir / "capability.md").write_text("x\n", encoding="utf-8")
+    (change_dir / "implementation.md").write_text("x\n", encoding="utf-8")
+    (change_dir / "validation.md").write_text("x\n", encoding="utf-8")
+    (change_dir / "tasks.json").write_text('{"tasks": []}', encoding="utf-8")
+    # Intentionally broken configuration file. If the seam reads it,
+    # validate_config() raises ChangeConfigError which fails the test.
+    (tmp_path / ".ai-harness" / "config.yml").write_text("commit: [unclosed\n", encoding="utf-8")
+
+    status = change_continue(tmp_path, "demo")
+
+    assert status.nextRecommended == "resolve-blockers"
+    assert status.configContext is None
+    # Other lifecycle fields are populated normally.
+    assert status.artifacts["explore"] == "done"
+    assert status.dependencies["archive"] == "blocked"
+
+
+def test_change_continue_observes_config_rule_edit_on_next_invocation(tmp_path: Path) -> None:
+    """Edits to ``.ai-harness/config.yml`` between invocations become visible immediately.
+
+    Locks the freshness contract: the next invocation must reflect the
+    edit, proving that no administrator, parsed config, or context is
+    cached across calls.
+    """
+    _initialize_config_with_rules(tmp_path, {"change_explorer": ["Before edit"]})
+    change_new(tmp_path, "demo")
+
+    first_status = change_continue(tmp_path, "demo")
+    assert first_status.configContext is not None
+    assert first_status.configContext.phase_rules == ("Before edit",)
+
+    # User edits ``.ai-harness/config.yml`` between calls.
+    _initialize_config_with_rules(tmp_path, {"change_explorer": ["After edit", "Added later"]})
+
+    second_status = change_continue(tmp_path, "demo")
+    assert second_status.configContext is not None
+    assert second_status.configContext.phase == "change_explorer"
+    assert second_status.configContext.phase_rules == ("After edit", "Added later")
+
+
 def test_change_continue_derives_artifacts_dependencies_and_next_phase(tmp_path: Path) -> None:
     """Continuing derives completed phases from artifact presence."""
     change_new(tmp_path, "demo")
+    ChangeConfigAdministrator(repo_root=tmp_path).initialize_config()
     change_dir = tmp_path / ".ai-harness" / "changes" / "demo"
     (change_dir / "exploration.md").write_text("explored\n", encoding="utf-8")
 
@@ -201,6 +525,7 @@ def test_change_continue_derives_artifacts_dependencies_and_next_phase(tmp_path:
 
 def test_tasks_dependency_is_ready_when_design_or_specs_exists(tmp_path: Path) -> None:
     """The tasks phase accepts either design or specs as its input dependency."""
+    ChangeConfigAdministrator(repo_root=tmp_path).initialize_config()
     change_new(tmp_path, "by-design")
     design_dir = tmp_path / ".ai-harness" / "changes" / "by-design"
     (design_dir / "exploration.md").write_text("explored\n", encoding="utf-8")
@@ -220,6 +545,7 @@ def test_tasks_dependency_is_ready_when_design_or_specs_exists(tmp_path: Path) -
 
 def test_archive_requires_validation_and_non_empty_complete_tasks(tmp_path: Path) -> None:
     """Archive stays blocked for zero or pending tasks even when validation exists."""
+    ChangeConfigAdministrator(repo_root=tmp_path).initialize_config()
     change_new(tmp_path, "demo")
     change_dir = tmp_path / ".ai-harness" / "changes" / "demo"
     (change_dir / "exploration.md").write_text("explored\n", encoding="utf-8")
@@ -269,6 +595,7 @@ def test_change_errors_on_collision_and_absent_change(tmp_path: Path) -> None:
 def test_cli_change_new_and_continue_output_status_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The CLI exposes change-new and change-continue as top-level JSON commands."""
     monkeypatch.chdir(tmp_path)
+    ChangeConfigAdministrator(repo_root=tmp_path).initialize_config()
 
     new_result = runner.invoke(app, ["change-new", "demo"])
     continue_result = runner.invoke(app, ["change-continue", "demo"])
