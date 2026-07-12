@@ -4,6 +4,17 @@ Behavioural tests: they exercise the public surface (``init_repo`` and the typer
 command) through a temporary directory so no real repo is ever touched. The
 path-mapping knowledge is hidden inside ``operations`` — these tests assert
 OBSERVABLE behaviour (which file is written / skipped), never internal helpers.
+
+Two contracts live here:
+
+- ``init_repo`` (legacy deep-module API): root-document scaffolding at
+  ``repo_root``. The CLI no longer reaches into this surface, but the
+  public API stays available for compatibility. Its tests stay unchanged.
+- ``ai-harness init`` (CLI command): thin typer adapter that delegates to
+  :class:`ChangeConfigAdministrator` for ``.ai-harness/config.yml``
+  initialization. Behavioural coverage here asserts the new filesystem
+  contract (fresh create, preservation, idempotency, root-doc isolation,
+  truthful output).
 """
 
 from __future__ import annotations
@@ -11,6 +22,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 from typer.testing import CliRunner
 
 from ai_harness.main import app
@@ -393,86 +405,50 @@ def test_init_repo_new_markers_take_precedence_over_legacy(tmp_path: Path) -> No
 
 
 # ---------------------------------------------------------------------------
-# CLI adapter — exercise through typer
+# CLI adapter — exercise through typer (NEW contract: config-only init)
 # ---------------------------------------------------------------------------
 
+CONFIG_REL = ".ai-harness/config.yml"
 
-def test_cli_init_writes_skeleton_and_exits_zero(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """``ai-harness init`` writes the skeleton and exits 0."""
+
+def test_cli_init_creates_config_yml_via_administrator(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``ai-harness init`` delegates to ChangeConfigAdministrator and writes the config file."""
     monkeypatch.chdir(tmp_path)
 
     result = runner.invoke(app, ["init"])
 
     assert result.exit_code == 0, result.stderr
-    assert (tmp_path / CODING_STANDARDS).is_file()
-    content = (tmp_path / CODING_STANDARDS).read_text(encoding="utf-8")
-    assert "# Coding Standards" in content
-    # When file is written, stdout reports it was created
-    assert "created" in result.stdout.lower()
+    assert (tmp_path / CONFIG_REL).is_file(), "init must create .ai-harness/config.yml"
 
 
-def test_cli_init_skips_when_file_exists(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """``ai-harness init`` exits 0 and reports unchanged when CODING_STANDARDS.md already exists."""
+def test_cli_init_output_identifies_config_without_creation_claim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``ai-harness init`` output mentions the config path and makes no created/exists claim."""
     monkeypatch.chdir(tmp_path)
-
-    existing = tmp_path / CODING_STANDARDS
-    original = "# Already here\n"
-    existing.write_text(original, encoding="utf-8")
 
     result = runner.invoke(app, ["init"])
 
     assert result.exit_code == 0, result.stderr
-    assert existing.read_text(encoding="utf-8") == original
-    assert "unchanged" in result.stdout.lower()
+    stdout_lower = result.stdout.lower()
+    assert CONFIG_REL in result.stdout, f"Output must mention the config path; got:\n{result.stdout!r}"
+    # Output must not assert creation (would be a lie on idempotent re-run).
+    assert "created " + CONFIG_REL not in stdout_lower
+    assert "wrote " + CONFIG_REL not in stdout_lower
+    assert "already exists" not in stdout_lower
 
 
-def test_cli_init_reports_init_block_appended(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """``ai-harness init`` reports the init block landed when CLAUDE.md exists without markers."""
+def test_cli_init_leaves_root_documents_untouched(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``ai-harness init`` does not create or modify root ``CLAUDE.md`` / ``AGENTS.md`` / ``CODING_STANDARDS.md``."""
     monkeypatch.chdir(tmp_path)
-
-    claude = tmp_path / CLAUDE_MD
-    claude.write_text("## Agent skills\n", encoding="utf-8")
 
     result = runner.invoke(app, ["init"])
 
     assert result.exit_code == 0, result.stderr
-    assert "Managed init block on" in result.stdout
-    assert CLAUDE_MD in result.stdout
-    content = claude.read_text(encoding="utf-8")
-    assert INIT_START in content
-    assert INIT_END in content
-
-
-def test_cli_init_reports_init_block_already_present(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """``ai-harness init`` reports unchanged when both agent docs already have new init markers."""
-    monkeypatch.chdir(tmp_path)
-
-    managed = f"{INIT_START}\n\nFollow the repo's `CODING_STANDARDS.md`.\n\n{INIT_END}\n"
-    (tmp_path / CLAUDE_MD).write_text(managed, encoding="utf-8")
-    (tmp_path / AGENTS_MD).write_text(managed, encoding="utf-8")
-
-    result = runner.invoke(app, ["init"])
-
-    assert result.exit_code == 0, result.stderr
-    assert "already present" in result.stdout.lower()
-    assert "unchanged" in result.stdout.lower()
-
-
-def test_cli_init_reports_init_block_appended_to_agents_md(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """``ai-harness init`` names AGENTS.md when it receives the init block."""
-    monkeypatch.chdir(tmp_path)
-
-    agents = tmp_path / AGENTS_MD
-    agents.write_text("# Agent persona\n", encoding="utf-8")
-
-    result = runner.invoke(app, ["init"])
-
-    assert result.exit_code == 0, result.stderr
-    assert "Managed init block on" in result.stdout
-    assert AGENTS_MD in result.stdout
-    content = agents.read_text(encoding="utf-8")
-    assert INIT_START in content
-    assert INIT_END in content
+    for root_doc in (CLAUDE_MD, AGENTS_MD, CODING_STANDARDS):
+        assert not (tmp_path / root_doc).exists(), (
+            f"{root_doc} must not be created by init; output was:\n{result.stdout!r}"
+        )
 
 
 def test_cli_init_no_label_or_gh_references_on_fresh_init(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -491,13 +467,197 @@ def test_cli_init_no_label_or_gh_references_on_fresh_init(tmp_path: Path, monkey
         )
 
 
-def test_cli_init_idempotent_re_run_exits_zero(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """``ai-harness init`` exits 0 on an idempotent re-run after the artifacts already exist."""
+# ---------------------------------------------------------------------------
+# CLI adapter — comprehensive coverage for the new init contract
+# ---------------------------------------------------------------------------
+
+_STABLE_COMMIT_FORMAT = "[{change_name}][{task_id}] {slug}"
+
+
+def test_phase_order_is_publicly_importable_from_seam() -> None:
+    """The canonical orchestrator phase keys are part of the seam's public surface.
+
+    The init CLI tests reference the canonical phase list through the
+    ``change_config`` package rather than duplicating it locally; this test
+    guards that contract without enumerating the values again, so the
+    list of names itself stays in exactly one place: the seam module.
+    """
+    from ai_harness.modules.change_config import PHASE_ORDER as seam_phase_order
+
+    assert isinstance(seam_phase_order, tuple)
+    assert len(seam_phase_order) == 8
+    assert all(isinstance(name, str) for name in seam_phase_order)
+    assert all(name.startswith("change_") for name in seam_phase_order)
+    assert len(set(seam_phase_order)) == len(seam_phase_order)
+
+
+def _run_init(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Run ``ai-harness init`` against *tmp_path* and return the CliRunner result."""
     monkeypatch.chdir(tmp_path)
+    return runner.invoke(app, ["init"])
 
-    first = runner.invoke(app, ["init"])
+
+def test_cli_init_generated_config_parses_as_valid_yaml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fresh ``ai-harness init`` produces YAML that parses with the stable defaults."""
+    result = _run_init(tmp_path, monkeypatch)
+
+    assert result.exit_code == 0, result.stderr
+    config_path = tmp_path / CONFIG_REL
+    assert config_path.is_file()
+
+    from ai_harness.modules.change_config import PHASE_ORDER
+
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert isinstance(raw, dict)
+    assert raw["commit"]["format"] == _STABLE_COMMIT_FORMAT
+    assert set(raw["phases"]) == set(PHASE_ORDER)
+    for phase_key in PHASE_ORDER:
+        assert raw["phases"][phase_key] == {"rules": []}, f"phase {phase_key!r} must carry an empty starter rules list"
+
+
+def test_cli_init_generated_config_has_eight_phase_sections(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The freshly generated config contains exactly one section per orchestrator phase."""
+    _run_init(tmp_path, monkeypatch)
+
+    from ai_harness.modules.change_config import PHASE_ORDER
+
+    raw = yaml.safe_load((tmp_path / CONFIG_REL).read_text(encoding="utf-8"))
+
+    assert sorted(raw["phases"]) == sorted(PHASE_ORDER)
+
+
+# --- preservation across fresh-state edge cases ---
+
+
+def test_cli_init_preserves_user_edited_config_bytes_and_mtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``ai-harness init`` against a user-edited config leaves its bytes and mtime untouched."""
+    monkeypatch.chdir(tmp_path)
+    config_path = tmp_path / CONFIG_REL
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    original = (
+        "commit:\n  format: 'custom-format'\nphases:\n  change_explorer:\n    rules:\n      - user rule preserved\n"
+    )
+    config_path.write_text(original, encoding="utf-8")
+    mtime_before = config_path.stat().st_mtime
+
+    result = _run_init(tmp_path, monkeypatch)
+
+    assert result.exit_code == 0, result.stderr
+    assert config_path.read_text(encoding="utf-8") == original
+    assert config_path.stat().st_mtime == mtime_before, "mtime must not change on preserved config"
+
+
+def test_cli_init_preserves_invalid_config_untouched(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An invalid YAML config is preserved byte-identical; init does not repair it."""
+    monkeypatch.chdir(tmp_path)
+    config_path = tmp_path / CONFIG_REL
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    invalid = "commit: [unclosed\n  this is not valid yaml: :\n"
+    config_path.write_text(invalid, encoding="utf-8")
+    mtime_before = config_path.stat().st_mtime
+
+    result = _run_init(tmp_path, monkeypatch)
+
+    assert result.exit_code == 0, result.stderr
+    assert config_path.read_text(encoding="utf-8") == invalid
+    assert config_path.stat().st_mtime == mtime_before
+
+
+def test_cli_init_preserves_empty_config_untouched(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An empty config file stays empty; init does not invent content."""
+    monkeypatch.chdir(tmp_path)
+    config_path = tmp_path / CONFIG_REL
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text("", encoding="utf-8")
+    mtime_before = config_path.stat().st_mtime
+
+    result = _run_init(tmp_path, monkeypatch)
+
+    assert result.exit_code == 0, result.stderr
+    assert config_path.read_text(encoding="utf-8") == ""
+    assert config_path.stat().st_mtime == mtime_before
+
+
+# --- idempotency after fresh creation ---
+
+
+def test_cli_init_idempotent_re_run_preserves_generated_config_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A repeated ``ai-harness init`` after fresh creation does not rewrite the config."""
+    first = _run_init(tmp_path, monkeypatch)
     assert first.exit_code == 0, first.stderr
+    config_path = tmp_path / CONFIG_REL
+    bytes_after_first = config_path.read_bytes()
+    mtime_after_first = config_path.stat().st_mtime
 
-    second = runner.invoke(app, ["init"])
+    second = _run_init(tmp_path, monkeypatch)
+
     assert second.exit_code == 0, second.stderr
-    assert "already exists" in second.stdout.lower() or "already present" in second.stdout.lower()
+    assert config_path.read_bytes() == bytes_after_first
+    assert config_path.stat().st_mtime == mtime_after_first, "idempotent run must not touch mtime"
+
+
+# --- root-document sentinels and truthfulness ---
+
+
+def test_cli_init_preserves_existing_root_documents_byte_for_byte(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pre-existing root docs — each with sentinel content — remain byte-identical after init."""
+    monkeypatch.chdir(tmp_path)
+    sentinels = {
+        CLAUDE_MD: "# Claude sentinel\n<!-- do not touch -->\n",
+        AGENTS_MD: "# Agents sentinel\n<!-- do not touch -->\n",
+        CODING_STANDARDS: "# Standards sentinel\n<!-- do not touch -->\n",
+    }
+    for name, content in sentinels.items():
+        (tmp_path / name).write_text(content, encoding="utf-8")
+    sizes_before = {name: (tmp_path / name).stat().st_size for name in sentinels}
+
+    result = _run_init(tmp_path, monkeypatch)
+
+    assert result.exit_code == 0, result.stderr
+    for name, content in sentinels.items():
+        assert (tmp_path / name).read_text(encoding="utf-8") == content, f"{name} must remain byte-identical after init"
+        assert (tmp_path / name).stat().st_size == sizes_before[name]
+
+
+def test_cli_init_output_excludes_root_document_management_claims(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Init output never claims a root CLAUDE.md / AGENTS.md / CODING_STANDARDS.md was managed."""
+    result = _run_init(tmp_path, monkeypatch)
+
+    assert result.exit_code == 0, result.stderr
+    combined = (result.stdout + "\n" + result.stderr).lower()
+    for forbidden in (
+        "claude.md",
+        "agents.md",
+        "coding_standards.md",
+        "coding standards",
+        "managed init block",
+        "init block",
+    ):
+        assert forbidden not in combined, (
+            f"Forbidden string {forbidden!r} in init output:\n{result.stdout!r}\n{result.stderr!r}"
+        )
+
+
+def test_cli_init_runs_against_repo_with_partial_root_documents(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Init leaves every present root doc byte-identical and every absent one absent."""
+    monkeypatch.chdir(tmp_path)
+    claude_original = "# Claude user content\n"
+    (tmp_path / CLAUDE_MD).write_text(claude_original, encoding="utf-8")
+    assert not (tmp_path / AGENTS_MD).exists()
+    assert not (tmp_path / CODING_STANDARDS).exists()
+
+    result = _run_init(tmp_path, monkeypatch)
+
+    assert result.exit_code == 0, result.stderr
+    assert (tmp_path / CLAUDE_MD).read_text(encoding="utf-8") == claude_original
+    assert not (tmp_path / AGENTS_MD).exists()
+    assert not (tmp_path / CODING_STANDARDS).exists()
+    assert (tmp_path / CONFIG_REL).is_file()

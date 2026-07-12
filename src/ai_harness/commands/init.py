@@ -1,31 +1,26 @@
-"""Init command — thin typer adapter over ``init_repo``.
+"""Init command — thin typer adapter over ``ChangeConfigAdministrator``.
 
-No business logic here; the command delegates to ``init_repo`` and echoes
-the result. This is a repo-local scaffold (distinct from the global ``install``).
+Routes ``ai-harness init`` to the change-config administrator seam so the
+command owns no filesystem policy beyond invocation and reporting. No root
+scaffold delegation: ``CLAUDE.md``, ``AGENTS.md``, and
+``CODING_STANDARDS.md`` stay user-owned.
 """
 
 from __future__ import annotations
 
 import typer
 
-from ai_harness.modules.harness import init_repo
+from ai_harness.modules.change_config import ChangeConfigAdministrator
 
 
 def init() -> None:
-    """Scaffold CODING_STANDARDS.md and the agent-doc init block at the repo root.
+    """Initialize the change configuration at ``.ai-harness/config.yml``.
 
-    Idempotent — if an artifact already exists with the new init markers it is
-    left unchanged; an existing legacy ``ai-harness:start/end`` block is
-    migrated in place. No GitHub label side effects.
+    Delegates to :meth:`ChangeConfigAdministrator.initialize_config`, which
+    creates the file only when absent and leaves existing user-owned
+    configuration untouched. The wording is valid for both creation and an
+    idempotent no-op because the administrator returns no created-versus-
+    existing status.
     """
-    result = init_repo()
-
-    if result.wrote_standards:
-        typer.echo("Created CODING_STANDARDS.md (titles-only skeleton — fill in the bodies).")
-    else:
-        typer.echo("CODING_STANDARDS.md already exists — unchanged.")
-
-    if result.wrote_init_block:
-        typer.echo(f"Managed init block on {', '.join(result.init_block_targets)}.")
-    else:
-        typer.echo(f"Managed init block already present on {', '.join(result.init_block_targets)} — unchanged.")
+    ChangeConfigAdministrator().initialize_config()
+    typer.echo("Initialized change configuration at .ai-harness/config.yml")

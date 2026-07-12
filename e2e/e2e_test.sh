@@ -125,199 +125,195 @@ _init_popdir() {
     fi
 }
 
-test_init_creates_three_files_in_empty_repo() {
-    log_test "init creates CODING_STANDARDS.md + CLAUDE.md + AGENTS.md in empty repo"
+
+test_init_creates_config_yml_and_leaves_root_documents_untouched() {
+    log_test "init creates .ai-harness/config.yml and leaves root documents absent"
     cleanup_test_env
     _init_pushdir || { log_fail "could not create tempdir"; return 1; }
     local out rc
     out=$("$BINARY" init 2>&1); rc=$?
-    if [ $rc -ne 0 ]; then log_fail "init exited non-zero ($rc): $out"; _init_popdir; return 1; fi
     local failed=0
-    assert_file_exists "CODING_STANDARDS.md" "CODING_STANDARDS.md" || failed=1
-    assert_file_exists "CLAUDE.md" "CLAUDE.md" || failed=1
-    assert_file_exists "AGENTS.md" "AGENTS.md" || failed=1
-    # Both agent docs carry the new init markers.
-    assert_file_contains "CLAUDE.md" "ai-harness:init:start" "CLAUDE.md has init start marker" || failed=1
-    assert_file_contains "CLAUDE.md" "ai-harness:init:end" "CLAUDE.md has init end marker" || failed=1
-    assert_file_contains "AGENTS.md" "ai-harness:init:start" "AGENTS.md has init start marker" || failed=1
-    assert_file_contains "AGENTS.md" "ai-harness:init:end" "AGENTS.md has init end marker" || failed=1
-    # Legacy markers are absent.
-    if grep -qF "<!-- ai-harness:start -->" CLAUDE.md AGENTS.md 2>/dev/null; then
-        log_fail "legacy markers still present in agent docs"
-        failed=1
-    fi
-    if [ $failed -eq 0 ]; then log_pass; _init_popdir; else _init_popdir; return 1; fi
-}
-
-test_init_creates_byte_identical_agent_docs() {
-    log_test "init creates byte-identical CLAUDE.md and AGENTS.md"
-    cleanup_test_env
-    _init_pushdir || { log_fail "could not create tempdir"; return 1; }
-    "$BINARY" init >/dev/null 2>&1
-    local failed=0
-    assert_md5_match CLAUDE.md AGENTS.md "CLAUDE.md == AGENTS.md md5" || failed=1
-    assert_file_contains CLAUDE.md "CODING_STANDARDS.md" "CLAUDE.md references CODING_STANDARDS.md" || failed=1
-    assert_file_contains AGENTS.md "CODING_STANDARDS.md" "AGENTS.md references CODING_STANDARDS.md" || failed=1
-    if [ $failed -eq 0 ]; then log_pass; _init_popdir; else _init_popdir; return 1; fi
-}
-
-test_init_idempotent_re_run_preserves_mtimes() {
-    log_test "init on saturated repo leaves file mtimes unchanged"
-    cleanup_test_env
-    _init_pushdir || { log_fail "could not create tempdir"; return 1; }
-    # First run: creates all three files.
-    "$BINARY" init >/dev/null 2>&1
-    # Record mtimes.
-    local m_coding m_claude m_agents
-    m_coding=$(stat -c %Y CODING_STANDARDS.md)
-    m_claude=$(stat -c %Y CLAUDE.md)
-    m_agents=$(stat -c %Y AGENTS.md)
-    # Sleep 2 seconds so any rewrite would change the mtime.
-    sleep 2
-    # Second run: must be a no-op for these files.
-    local out rc
-    out=$("$BINARY" init 2>&1); rc=$?
-    local failed=0
-    if [ $rc -ne 0 ]; then log_fail "second init exited non-zero ($rc): $out"; failed=1; fi
-    local m_coding2 m_claude2 m_agents2
-    m_coding2=$(stat -c %Y CODING_STANDARDS.md)
-    m_claude2=$(stat -c %Y CLAUDE.md)
-    m_agents2=$(stat -c %Y AGENTS.md)
-    [ "$m_coding" = "$m_coding2" ] && log_pass "CODING_STANDARDS.md mtime unchanged ($m_coding)" || { log_fail "CODING_STANDARDS.md mtime changed ($m_coding -> $m_coding2)"; failed=1; }
-    [ "$m_claude" = "$m_claude2" ] && log_pass "CLAUDE.md mtime unchanged ($m_claude)" || { log_fail "CLAUDE.md mtime changed ($m_claude -> $m_claude2)"; failed=1; }
-    [ "$m_agents" = "$m_agents2" ] && log_pass "AGENTS.md mtime unchanged ($m_agents)" || { log_fail "AGENTS.md mtime changed ($m_agents -> $m_agents2)"; failed=1; }
-    _init_popdir
-    [ $failed -eq 0 ] && return 0 || return 1
-}
-
-test_init_migrates_legacy_block_byte_identically() {
-    log_test "init migrates legacy block byte-identically (user prefix/suffix preserved)"
-    cleanup_test_env
-    _init_pushdir || { log_fail "could not create tempdir"; return 1; }
-    # Seed CLAUDE.md and AGENTS.md with the legacy block bounded by recorded
-    # user-authored content (including the substring "labels" / "loop" to
-    # disambiguate from the migrated body). Note: no extra blank line between
-    # the legacy end-marker and the suffix — the migration algorithm itself
-    # inserts exactly one separator newline, so a pre-existing blank line
-    # would drift the suffix position.
-    cat > CLAUDE.md <<'EOF'
-# my-project prefix
-
-<!-- ai-harness:start -->
-
-## Loop label policy
-
-- prd-issue has ready-for-agent only
-- sub-issue has ready-for-agent + loop
-
-<!-- ai-harness:end -->
-# my-project suffix (with labels and loop mentioned on purpose)
-EOF
-    cp CLAUDE.md AGENTS.md
-    # Record the prefix (everything up to the start-marker line) and the
-    # suffix (everything from the end-marker line to EOF).
-    local prefix suffix
-    prefix=$(awk '/<!-- ai-harness:start -->/{exit} {print}' CLAUDE.md)
-    suffix=$(awk '/<!-- ai-harness:end -->/{flag=1; next} flag' CLAUDE.md)
-    local out rc
-    out=$("$BINARY" init 2>&1); rc=$?
-    local failed=0
-    if [ $rc -ne 0 ]; then log_fail "init exited non-zero ($rc): $out"; failed=1; fi
-    # Post-init: prefix survives at the head of the file byte-identical.
-    # The user suffix also survives byte-identical — the migration adds
-    # exactly one separator newline (the trailing newline of the new init
-    # block) between the new end-marker line and the user suffix, so the
-    # user bytes that follow the legacy end-marker line appear at the tail
-    # with one extra leading "\n". We assert that the post-init content
-    # after the new end-marker line is "\n" + <recorded suffix>, i.e. the
-    # separator newline followed by the user bytes byte-identical.
-    local post_prefix post_suffix_block
-    post_prefix=$(awk '/<!-- ai-harness:init:start -->/{exit} {print}' CLAUDE.md)
-    post_suffix_block=$(awk '/<!-- ai-harness:init:end -->/{flag=1; next} flag' CLAUDE.md)
-    [ "$prefix" = "$post_prefix" ] && log_pass "CLAUDE.md user prefix byte-identical" || { log_fail "CLAUDE.md user prefix drifted:\nBEFORE:\n$prefix\nAFTER:\n$post_prefix"; failed=1; }
-    [ "$post_suffix_block" = "
-$suffix" ] && log_pass "CLAUDE.md user suffix byte-identical (preceded by exactly one separator newline)" || { log_fail "CLAUDE.md user suffix drifted:\nBEFORE:\n$suffix\nAFTER:\n$post_suffix_block\nExpected post-suffix block to be '\\n' + suffix."; failed=1; }
-    # Same guarantees on AGENTS.md.
-    local agents_prefix agents_suffix_block
-    agents_prefix=$(awk '/<!-- ai-harness:init:start -->/{exit} {print}' AGENTS.md)
-    agents_suffix_block=$(awk '/<!-- ai-harness:init:end -->/{flag=1; next} flag' AGENTS.md)
-    [ "$prefix" = "$agents_prefix" ] && log_pass "AGENTS.md user prefix byte-identical" || { log_fail "AGENTS.md user prefix drifted:\nBEFORE:\n$prefix\nAFTER:\n$agents_prefix"; failed=1; }
-    [ "$agents_suffix_block" = "
-$suffix" ] && log_pass "AGENTS.md user suffix byte-identical (preceded by exactly one separator newline)" || { log_fail "AGENTS.md user suffix drifted:\nBEFORE:\n$suffix\nAFTER:\n$agents_suffix_block"; failed=1; }
-    # New init markers present, legacy markers absent in both files.
-    assert_file_contains CLAUDE.md "ai-harness:init:start" "CLAUDE.md has init start marker" || failed=1
-    assert_file_contains CLAUDE.md "ai-harness:init:end" "CLAUDE.md has init end marker" || failed=1
-    assert_file_contains AGENTS.md "ai-harness:init:start" "AGENTS.md has init start marker" || failed=1
-    assert_file_contains AGENTS.md "ai-harness:init:end" "AGENTS.md has init end marker" || failed=1
-    if grep -qF "<!-- ai-harness:start -->" CLAUDE.md AGENTS.md 2>/dev/null; then
-        log_fail "legacy markers still present in agent docs"
-        failed=1
-    fi
-    _init_popdir
-    [ $failed -eq 0 ] && return 0 || return 1
-}
-
-test_init_appends_block_without_disturbing_user_content() {
-    log_test "init appends init block to populated CLAUDE.md without disturbing user content"
-    cleanup_test_env
-    _init_pushdir || { log_fail "could not create tempdir"; return 1; }
-    # Seed CLAUDE.md with user content (no markers); AGENTS.md is absent.
-    cat > CLAUDE.md <<'EOF'
-# my custom claude content
-
-This is my hand-written note about my project.
-EOF
-    local original
-    original=$(cat CLAUDE.md)
-    local out rc
-    out=$("$BINARY" init 2>&1); rc=$?
-    local failed=0
-    if [ $rc -ne 0 ]; then log_fail "init exited non-zero ($rc): $out"; failed=1; fi
-    # Recorded content survives at the head of CLAUDE.md byte-for-byte.
-    # split the file at the start marker and confirm the prefix equals the
-    # recorded original.
-    local post_prefix
-    post_prefix=$(awk '/<!-- ai-harness:init:start -->/{exit} {print}' CLAUDE.md)
-    if [ "$post_prefix" = "$original" ]; then
-        log_pass "CLAUDE.md user content survives byte-identical at the head"
-    else
-        log_fail "CLAUDE.md user content drifted at head.\nEXPECTED:\n$original\nACTUAL:\n$post_prefix"
-        failed=1
-    fi
-    # Init block appears in CLAUDE.md.
-    assert_file_contains CLAUDE.md "ai-harness:init:start" "CLAUDE.md has init start marker" || failed=1
-    assert_file_contains CLAUDE.md "ai-harness:init:end" "CLAUDE.md has init end marker" || failed=1
-    # AGENTS.md is created with just the managed block.
-    assert_file_exists AGENTS.md "AGENTS.md was created" || failed=1
-    assert_file_contains AGENTS.md "ai-harness:init:start" "AGENTS.md has init start marker" || failed=1
-    _init_popdir
-    [ $failed -eq 0 ] && return 0 || return 1
-}
-
-test_init_stdout_has_no_label_or_gh_references() {
-    log_test "init stdout/stderr contain no label / GitHub / gh / Warning references"
-    cleanup_test_env
-    _init_pushdir || { log_fail "could not create tempdir"; return 1; }
-    # Capture stdout and stderr separately.
-    local stdout stderr
-    stdout=$("$BINARY" init 2>/tmp/init_stderr_ci)
-    rc=$?
-    stderr=$(cat /tmp/init_stderr_ci); rm -f /tmp/init_stderr_ci
-    local combined
-    combined="$stdout"$'\n'"$stderr"
-    local failed=0
-    for forbidden in "Created GitHub labels" "Warning:" "ready-for-agent" "gh CLI"; do
-        if echo "$combined" | grep -qiF "$forbidden"; then
-            log_fail "forbidden string '$forbidden' found in init output:\nSTDOUT:\n$stdout\nSTDERR:\n$stderr"
-            failed=1
-        fi
+    if [ $rc -ne 0 ]; then log_fail "init exited non-zero ($rc): $out"; failed=1; _init_popdir; return 1; fi
+    assert_file_exists ".ai-harness/config.yml" ".ai-harness/config.yml" || failed=1
+    # Root documents must not be created by init.
+    for root_doc in CLAUDE.md AGENTS.md CODING_STANDARDS.md; do
+        assert_file_not_exists "$root_doc" "$root_doc absent after init" || failed=1
     done
-    [ "$stderr" = "" ] && log_pass "stderr empty" || { log_fail "stderr not empty:\n$stderr"; failed=1; }
+    # Output identifies the config path without claiming it was created.
+    if echo "$out" | grep -qF ".ai-harness/config.yml"; then
+        log_pass "output mentions .ai-harness/config.yml"
+    else
+        log_fail "output does not mention config path:\n$out"
+        failed=1
+    fi
+    if echo "$out" | tr '[:upper:]' '[:lower:]' | grep -qE "created .ai-harness|already exists|wrote .ai-harness"; then
+        log_fail "output makes a creation/already-exists claim:\n$out"
+        failed=1
+    fi
     _init_popdir
     [ $failed -eq 0 ] && return 0 || return 1
 }
 
-test_init_exit_zero_on_success_and_no_op() {
+test_init_preserves_prepopulated_config_bytes_and_mtime() {
+    log_test "init preserves pre-populated .ai-harness/config.yml bytes and mtime"
+    cleanup_test_env
+    _init_pushdir || { log_fail "could not create tempdir"; return 1; }
+    # Seed a pre-existing config the user owns. The contents are deliberately
+    # not the bundled default — the test asserts bytes are preserved verbatim,
+    # including any trailing newlines. The comparison goes through cmp so a
+    # difference in trailing newline bytes would be caught.
+    mkdir -p .ai-harness
+    local original
+    original=$(printf 'commit:\n  format: '\''custom-format'\''\nphases:\n  change_explorer:\n    rules:\n      - user rule preserved\n')
+    printf '%s' "$original" > .ai-harness/config.yml
+    local m_before
+    m_before=$(stat -c %Y .ai-harness/config.yml)
+    sleep 2
+    local out rc
+    out=$("$BINARY" init 2>&1); rc=$?
+    local failed=0
+    if [ $rc -ne 0 ]; then log_fail "init exited non-zero ($rc): $out"; failed=1; _init_popdir; return 1; fi
+    local m_after
+    m_after=$(stat -c %Y .ai-harness/config.yml)
+    # cmp -s reads the file bytes and compares against a process-substituted
+    # stdin whose contents are reconstructed from $original. Process
+    # substitution preserves trailing newlines, so byte identity is exact —
+    # unlike `$(cat FILE)` which strips trailing newlines per POSIX.
+    if cmp -s .ai-harness/config.yml <(printf '%s' "$original"); then
+        log_pass "pre-populated config bytes preserved"
+    else
+        log_fail "pre-populated config bytes drifted"
+        failed=1
+    fi
+    if [ "$m_before" = "$m_after" ]; then
+        log_pass "pre-populated config mtime unchanged ($m_before)"
+    else
+        log_fail "pre-populated config mtime changed ($m_before -> $m_after)"
+        failed=1
+    fi
+    _init_popdir
+    [ $failed -eq 0 ] && return 0 || return 1
+}
+
+test_init_idempotent_rerun_preserves_generated_config_bytes_and_mtime() {
+    log_test "init repeated after fresh creation preserves config bytes and mtime"
+    cleanup_test_env
+    _init_pushdir || { log_fail "could not create tempdir"; return 1; }
+    # First run: creates the config from the default template.
+    "$BINARY" init >/dev/null 2>&1
+    local hash_before m_before
+    hash_before=$(md5sum .ai-harness/config.yml | cut -d' ' -f1)
+    m_before=$(stat -c %Y .ai-harness/config.yml)
+    sleep 2
+    local out rc
+    out=$("$BINARY" init 2>&1); rc=$?
+    local failed=0
+    if [ $rc -ne 0 ]; then log_fail "second init exited non-zero ($rc): $out"; failed=1; _init_popdir; return 1; fi
+    local hash_after m_after
+    hash_after=$(md5sum .ai-harness/config.yml | cut -d' ' -f1)
+    m_after=$(stat -c %Y .ai-harness/config.yml)
+    # md5sum is a byte-exact check; the previous `$(cat FILE)` comparison
+    # silently stripped trailing newlines and could not catch a difference
+    # in trailing whitespace.
+    if [ "$hash_before" = "$hash_after" ]; then
+        log_pass "generated config bytes preserved on re-run (md5 $hash_before)"
+    else
+        log_fail "generated config bytes drifted on re-run ($hash_before -> $hash_after)"
+        failed=1
+    fi
+    if [ "$m_before" = "$m_after" ]; then
+        log_pass "generated config mtime unchanged on re-run ($m_before)"
+    else
+        log_fail "generated config mtime changed on re-run ($m_before -> $m_after)"
+        failed=1
+    fi
+    _init_popdir
+    [ $failed -eq 0 ] && return 0 || return 1
+}
+
+test_init_preserves_prepopulated_config_trailing_newlines() {
+    log_test "init preserves pre-populated config including trailing newline bytes"
+    cleanup_test_env
+    _init_pushdir || { log_fail "could not create tempdir"; return 1; }
+    # Seed a config with multiple trailing newlines — a previous byte
+    # comparison via `$(cat FILE)` could not detect corruption of these
+    # trailing bytes. The md5sum check is byte-exact.
+    mkdir -p .ai-harness
+    printf 'commit:\n  format: '\''custom-format'\''\nphases:\n  change_explorer:\n    rules:\n      - user rule preserved\n\n\n' > .ai-harness/config.yml
+    local hash_before m_before
+    hash_before=$(md5sum .ai-harness/config.yml | cut -d' ' -f1)
+    m_before=$(stat -c %Y .ai-harness/config.yml)
+    sleep 2
+    local out rc
+    out=$("$BINARY" init 2>&1); rc=$?
+    local failed=0
+    if [ $rc -ne 0 ]; then log_fail "init exited non-zero ($rc): $out"; failed=1; _init_popdir; return 1; fi
+    local hash_after m_after
+    hash_after=$(md5sum .ai-harness/config.yml | cut -d' ' -f1)
+    m_after=$(stat -c %Y .ai-harness/config.yml)
+    if [ "$hash_before" = "$hash_after" ]; then
+        log_pass "pre-populated config (with trailing newlines) bytes preserved (md5 $hash_before)"
+    else
+        log_fail "pre-populated config (with trailing newlines) bytes drifted ($hash_before -> $hash_after)"
+        failed=1
+    fi
+    if [ "$m_before" = "$m_after" ]; then
+        log_pass "pre-populated config (with trailing newlines) mtime unchanged ($m_before)"
+    else
+        log_fail "pre-populated config (with trailing newlines) mtime changed ($m_before -> $m_after)"
+        failed=1
+    fi
+    _init_popdir
+    [ $failed -eq 0 ] && return 0 || return 1
+}
+
+test_init_leaves_root_documents_alone_when_present() {
+    log_test "init does not touch pre-existing root documents"
+    cleanup_test_env
+    _init_pushdir || { log_fail "could not create tempdir"; return 1; }
+    # Seed root documents with sentinel bytes that would be destroyed by any
+    # rewrite. Init must leave them byte-identical.
+    printf '# Claude sentinel\n<!-- do not touch -->\n' > CLAUDE.md
+    printf '# Agents sentinel\n<!-- do not touch -->\n' > AGENTS.md
+    printf '# Standards sentinel\n<!-- do not touch -->\n' > CODING_STANDARDS.md
+    local c_before a_before s_before
+    c_before=$(cat CLAUDE.md)
+    a_before=$(cat AGENTS.md)
+    s_before=$(cat CODING_STANDARDS.md)
+    local out rc
+    out=$("$BINARY" init 2>&1); rc=$?
+    local failed=0
+    if [ $rc -ne 0 ]; then log_fail "init exited non-zero ($rc): $out"; failed=1; _init_popdir; return 1; fi
+    local c_after a_after s_after
+    c_after=$(cat CLAUDE.md)
+    a_after=$(cat AGENTS.md)
+    s_after=$(cat CODING_STANDARDS.md)
+    if [ "$c_before" = "$c_after" ]; then
+        log_pass "CLAUDE.md byte-identical"
+    else
+        log_fail "CLAUDE.md content drifted:\nBEFORE:\n$c_before\nAFTER:\n$c_after"
+        failed=1
+    fi
+    if [ "$a_before" = "$a_after" ]; then
+        log_pass "AGENTS.md byte-identical"
+    else
+        log_fail "AGENTS.md content drifted:\nBEFORE:\n$a_before\nAFTER:\n$a_after"
+        failed=1
+    fi
+    if [ "$s_before" = "$s_after" ]; then
+        log_pass "CODING_STANDARDS.md byte-identical"
+    else
+        log_fail "CODING_STANDARDS.md content drifted:\nBEFORE:\n$s_before\nAFTER:\n$s_after"
+        failed=1
+    fi
+    # The config file still gets initialized — root doc isolation does not
+    # block config init.
+    assert_file_exists .ai-harness/config.yml ".ai-harness/config.yml created" || failed=1
+    _init_popdir
+    [ $failed -eq 0 ] && return 0 || return 1
+}
+
+test_init_exit_zero_on_fresh_and_rerun() {
     log_test "init exits 0 on a fresh run and on an idempotent re-run"
     cleanup_test_env
     # Fresh run.
@@ -326,7 +322,7 @@ test_init_exit_zero_on_success_and_no_op() {
     if [ $rc1 -ne 0 ]; then log_fail "fresh init exited non-zero ($rc1)"; _init_popdir; return 1; fi
     log_pass "fresh init exits 0"
     _init_popdir
-    # Saturated re-run.
+    # Pre-populated re-run.
     _init_pushdir || { log_fail "could not create tempdir (saturated)"; return 1; }
     "$BINARY" init >/dev/null 2>&1  # prime
     local rc2; "$BINARY" init >/dev/null 2>&1; rc2=$?
@@ -521,13 +517,12 @@ TIER1_TESTS=(test_binary_exists test_binary_runs test_help_and_routing
               test_install_no_args_succeeds test_uninstall_nothing_installed_is_idempotent
               test_install_output_patterns test_flag_coverage test_install_idempotent_no_args
               test_install_renders_commit_format_directive_in_orchestrator
-              test_init_creates_three_files_in_empty_repo
-              test_init_creates_byte_identical_agent_docs
-              test_init_idempotent_re_run_preserves_mtimes
-              test_init_migrates_legacy_block_byte_identically
-              test_init_appends_block_without_disturbing_user_content
-              test_init_stdout_has_no_label_or_gh_references
-              test_init_exit_zero_on_success_and_no_op)
+              test_init_creates_config_yml_and_leaves_root_documents_untouched
+              test_init_preserves_prepopulated_config_bytes_and_mtime
+              test_init_idempotent_rerun_preserves_generated_config_bytes_and_mtime
+              test_init_preserves_prepopulated_config_trailing_newlines
+              test_init_leaves_root_documents_alone_when_present
+              test_init_exit_zero_on_fresh_and_rerun)
 
 run_tier1() { local f=0; for t in "${TIER1_TESTS[@]}"; do $t || f=1; done; return $f; }
 run_tier2() {
