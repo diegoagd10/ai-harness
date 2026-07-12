@@ -159,7 +159,9 @@ test_init_preserves_prepopulated_config_bytes_and_mtime() {
     cleanup_test_env
     _init_pushdir || { log_fail "could not create tempdir"; return 1; }
     # Seed a pre-existing config the user owns. The contents are deliberately
-    # not the bundled default — the test asserts bytes are preserved verbatim.
+    # not the bundled default — the test asserts bytes are preserved verbatim,
+    # including any trailing newlines. The comparison goes through cmp so a
+    # difference in trailing newline bytes would be caught.
     mkdir -p .ai-harness
     local original
     original=$(printf 'commit:\n  format: '\''custom-format'\''\nphases:\n  change_explorer:\n    rules:\n      - user rule preserved\n')
@@ -171,13 +173,16 @@ test_init_preserves_prepopulated_config_bytes_and_mtime() {
     out=$("$BINARY" init 2>&1); rc=$?
     local failed=0
     if [ $rc -ne 0 ]; then log_fail "init exited non-zero ($rc): $out"; failed=1; _init_popdir; return 1; fi
-    local actual m_after
-    actual=$(cat .ai-harness/config.yml)
+    local m_after
     m_after=$(stat -c %Y .ai-harness/config.yml)
-    if [ "$actual" = "$original" ]; then
+    # cmp -s reads the file bytes and compares against a process-substituted
+    # stdin whose contents are reconstructed from $original. Process
+    # substitution preserves trailing newlines, so byte identity is exact —
+    # unlike `$(cat FILE)` which strips trailing newlines per POSIX.
+    if cmp -s .ai-harness/config.yml <(printf '%s' "$original"); then
         log_pass "pre-populated config bytes preserved"
     else
-        log_fail "pre-populated config bytes drifted:\nBEFORE:\n$original\nAFTER:\n$actual"
+        log_fail "pre-populated config bytes drifted"
         failed=1
     fi
     if [ "$m_before" = "$m_after" ]; then
@@ -196,27 +201,66 @@ test_init_idempotent_rerun_preserves_generated_config_bytes_and_mtime() {
     _init_pushdir || { log_fail "could not create tempdir"; return 1; }
     # First run: creates the config from the default template.
     "$BINARY" init >/dev/null 2>&1
-    local bytes_before m_before
-    bytes_before=$(cat .ai-harness/config.yml)
+    local hash_before m_before
+    hash_before=$(md5sum .ai-harness/config.yml | cut -d' ' -f1)
     m_before=$(stat -c %Y .ai-harness/config.yml)
     sleep 2
     local out rc
     out=$("$BINARY" init 2>&1); rc=$?
     local failed=0
     if [ $rc -ne 0 ]; then log_fail "second init exited non-zero ($rc): $out"; failed=1; _init_popdir; return 1; fi
-    local bytes_after m_after
-    bytes_after=$(cat .ai-harness/config.yml)
+    local hash_after m_after
+    hash_after=$(md5sum .ai-harness/config.yml | cut -d' ' -f1)
     m_after=$(stat -c %Y .ai-harness/config.yml)
-    if [ "$bytes_before" = "$bytes_after" ]; then
-        log_pass "generated config bytes preserved on re-run"
+    # md5sum is a byte-exact check; the previous `$(cat FILE)` comparison
+    # silently stripped trailing newlines and could not catch a difference
+    # in trailing whitespace.
+    if [ "$hash_before" = "$hash_after" ]; then
+        log_pass "generated config bytes preserved on re-run (md5 $hash_before)"
     else
-        log_fail "generated config bytes drifted on re-run:\nBEFORE:\n$bytes_before\nAFTER:\n$bytes_after"
+        log_fail "generated config bytes drifted on re-run ($hash_before -> $hash_after)"
         failed=1
     fi
     if [ "$m_before" = "$m_after" ]; then
         log_pass "generated config mtime unchanged on re-run ($m_before)"
     else
         log_fail "generated config mtime changed on re-run ($m_before -> $m_after)"
+        failed=1
+    fi
+    _init_popdir
+    [ $failed -eq 0 ] && return 0 || return 1
+}
+
+test_init_preserves_prepopulated_config_trailing_newlines() {
+    log_test "init preserves pre-populated config including trailing newline bytes"
+    cleanup_test_env
+    _init_pushdir || { log_fail "could not create tempdir"; return 1; }
+    # Seed a config with multiple trailing newlines — a previous byte
+    # comparison via `$(cat FILE)` could not detect corruption of these
+    # trailing bytes. The md5sum check is byte-exact.
+    mkdir -p .ai-harness
+    printf 'commit:\n  format: '\''custom-format'\''\nphases:\n  change_explorer:\n    rules:\n      - user rule preserved\n\n\n' > .ai-harness/config.yml
+    local hash_before m_before
+    hash_before=$(md5sum .ai-harness/config.yml | cut -d' ' -f1)
+    m_before=$(stat -c %Y .ai-harness/config.yml)
+    sleep 2
+    local out rc
+    out=$("$BINARY" init 2>&1); rc=$?
+    local failed=0
+    if [ $rc -ne 0 ]; then log_fail "init exited non-zero ($rc): $out"; failed=1; _init_popdir; return 1; fi
+    local hash_after m_after
+    hash_after=$(md5sum .ai-harness/config.yml | cut -d' ' -f1)
+    m_after=$(stat -c %Y .ai-harness/config.yml)
+    if [ "$hash_before" = "$hash_after" ]; then
+        log_pass "pre-populated config (with trailing newlines) bytes preserved (md5 $hash_before)"
+    else
+        log_fail "pre-populated config (with trailing newlines) bytes drifted ($hash_before -> $hash_after)"
+        failed=1
+    fi
+    if [ "$m_before" = "$m_after" ]; then
+        log_pass "pre-populated config (with trailing newlines) mtime unchanged ($m_before)"
+    else
+        log_fail "pre-populated config (with trailing newlines) mtime changed ($m_before -> $m_after)"
         failed=1
     fi
     _init_popdir
@@ -476,6 +520,7 @@ TIER1_TESTS=(test_binary_exists test_binary_runs test_help_and_routing
               test_init_creates_config_yml_and_leaves_root_documents_untouched
               test_init_preserves_prepopulated_config_bytes_and_mtime
               test_init_idempotent_rerun_preserves_generated_config_bytes_and_mtime
+              test_init_preserves_prepopulated_config_trailing_newlines
               test_init_leaves_root_documents_alone_when_present
               test_init_exit_zero_on_fresh_and_rerun)
 
