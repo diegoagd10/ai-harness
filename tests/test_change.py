@@ -628,6 +628,117 @@ def test_cli_change_errors_are_non_zero_and_not_json(tmp_path: Path, monkeypatch
 
 
 # ---------------------------------------------------------------------------
+# deterministic configuration failure — CLI contract coverage
+# ---------------------------------------------------------------------------
+
+
+def test_change_continue_raises_changestoreerror_when_config_missing(tmp_path: Path) -> None:
+    """Missing ``.ai-harness/config.yml`` halts continuation as ChangeStoreError."""
+    change_new(tmp_path, "demo")
+
+    with pytest.raises(ChangeStoreError, match="configuration"):
+        change_continue(tmp_path, "demo")
+
+
+def test_change_continue_raises_changestoreerror_when_config_malformed(tmp_path: Path) -> None:
+    """Malformed YAML is normalized to ChangeStoreError at the seam."""
+    change_new(tmp_path, "demo")
+    (tmp_path / ".ai-harness" / "config.yml").parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / ".ai-harness" / "config.yml").write_text("commit: [unclosed\n", encoding="utf-8")
+
+    with pytest.raises(ChangeStoreError, match="configuration"):
+        change_continue(tmp_path, "demo")
+
+
+def test_change_continue_raises_changestoreerror_when_config_schema_invalid(tmp_path: Path) -> None:
+    """Schema-invalid configuration halts continuation as ChangeStoreError."""
+    change_new(tmp_path, "demo")
+    (tmp_path / ".ai-harness" / "config.yml").parent.mkdir(parents=True, exist_ok=True)
+    # Missing ``commit`` and ``phases`` keys → validation rejects.
+    (tmp_path / ".ai-harness" / "config.yml").write_text("notes: this is not the schema\n", encoding="utf-8")
+
+    with pytest.raises(ChangeStoreError, match="invalid"):
+        change_continue(tmp_path, "demo")
+
+
+def test_cli_change_continue_fails_when_config_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Missing config produces a non-zero exit, useful stderr, and no stdout JSON."""
+    monkeypatch.chdir(tmp_path)
+    runner.invoke(app, ["change-new", "demo"])
+
+    result = runner.invoke(app, ["change-continue", "demo"])
+
+    assert result.exit_code == 1
+    assert "configuration" in result.stderr.lower()
+    assert result.stdout == ""
+
+
+def test_cli_change_continue_fails_when_config_malformed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Malformed YAML produces a non-zero exit, useful stderr, and no stdout JSON."""
+    monkeypatch.chdir(tmp_path)
+    ChangeConfigAdministrator(repo_root=tmp_path).initialize_config()
+    runner.invoke(app, ["change-new", "demo"])
+    (tmp_path / ".ai-harness" / "config.yml").write_text("commit: [unclosed\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["change-continue", "demo"])
+
+    assert result.exit_code == 1
+    assert "configuration" in result.stderr.lower()
+    assert result.stdout == ""
+
+
+def test_cli_change_continue_fails_when_config_schema_invalid(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Schema-invalid YAML produces a non-zero exit, useful stderr, and no stdout JSON."""
+    monkeypatch.chdir(tmp_path)
+    ChangeConfigAdministrator(repo_root=tmp_path).initialize_config()
+    runner.invoke(app, ["change-new", "demo"])
+    (tmp_path / ".ai-harness" / "config.yml").write_text("wrong_section: []\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["change-continue", "demo"])
+
+    assert result.exit_code == 1
+    assert "invalid" in result.stderr.lower()
+    assert result.stdout == ""
+
+
+def test_change_continue_succeeds_with_only_warnings(tmp_path: Path) -> None:
+    """Validation warnings (unknown phase key) must NOT halt context delivery."""
+    ChangeConfigAdministrator(repo_root=tmp_path).initialize_config()
+    change_new(tmp_path, "demo")
+    config_path = tmp_path / ".ai-harness" / "config.yml"
+    data = __import__("yaml").safe_load(config_path.read_text(encoding="utf-8"))
+    # Add a non-halting warning by introducing an unknown phase key.
+    data["phases"]["change_extra"] = {"rules": ["preserved"]}
+    config_path.write_text(__import__("yaml").safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    status = change_continue(tmp_path, "demo")
+
+    assert status.nextRecommended == "explore"
+    # Warnings alone never produce a null configContext.
+    assert status.configContext is not None
+    assert status.configContext.phase == "change_explorer"
+
+
+def test_cli_change_continue_succeeds_with_only_warnings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The CLI surfaces success and a populated configContext even when warnings exist."""
+    monkeypatch.chdir(tmp_path)
+    ChangeConfigAdministrator(repo_root=tmp_path).initialize_config()
+    runner.invoke(app, ["change-new", "demo"])
+    config_path = tmp_path / ".ai-harness" / "config.yml"
+    data = __import__("yaml").safe_load(config_path.read_text(encoding="utf-8"))
+    data["phases"]["change_extra"] = {"rules": ["preserved"]}
+    config_path.write_text(__import__("yaml").safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    result = runner.invoke(app, ["change-continue", "demo"])
+
+    assert result.exit_code == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["schemaVersion"] == 2
+    assert payload["configContext"] is not None
+    assert payload["configContext"]["phase"] == "change_explorer"
+
+
+# ---------------------------------------------------------------------------
 # Helpers — build a Change folder that passes every archive preflight
 # ---------------------------------------------------------------------------
 

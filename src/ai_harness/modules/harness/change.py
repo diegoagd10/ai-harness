@@ -166,13 +166,13 @@ def _resolve_config_context(root: Path, next_recommended: str) -> ChangeConfigPr
     admin = ChangeConfigAdministrator(repo_root=root)
     try:
         validation = admin.validate_config()
-    except ChangeConfigError as exc:
+    except (ChangeConfigError, OSError) as exc:
         raise ChangeStoreError(f"Change configuration is unavailable: {exc}") from exc
     if not validation.is_valid:
         raise ChangeStoreError("Change configuration is invalid; fix .ai-harness/config.yml before continuing.")
     try:
         return admin.get_context_by(next_recommended)
-    except ChangeConfigError as exc:
+    except (ChangeConfigError, OSError) as exc:
         raise ChangeStoreError(f"Could not load change configuration context: {exc}") from exc
 
 
