@@ -1,0 +1,152 @@
+{
+  "tasks": [
+    {
+      "id": "1",
+      "title": "Add version-2 ChangeStatus context contract",
+      "spec": "routed-context-delivery",
+      "phase": "foundation",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "1.1",
+          "title": "Extend src/ai_harness/modules/harness/change.py ChangeStatus with final nullable configContext and schema version 2",
+          "scenario": "Emit the version-2 config-context schema",
+          "status": "done"
+        },
+        {
+          "id": "1.2",
+          "title": "Keep _derive_status and change_new file-backed with null configContext and no configuration access",
+          "scenario": "Do not load context for change creation",
+          "status": "done"
+        },
+        {
+          "id": "1.3",
+          "title": "Cover ChangeStatus JSON serialization in tests/test_change.py and tests/test_change_config.py, including populated canonical context, empty rules, ordered exact rules, and retained phaseInstructions",
+          "scenario": "Serialize a populated context",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "2",
+      "title": "Enrich routed continuations through configuration administrator",
+      "spec": "complete-lifecycle-routing",
+      "phase": "core",
+      "depends_on": [
+        "1"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "2.1",
+          "title": "Update change_continue in src/ai_harness/modules/harness/change.py to derive status before a fresh ChangeConfigAdministrator validation and get_context_by read",
+          "scenario": "Derive a route before configuration validation",
+          "status": "done"
+        },
+        {
+          "id": "2.2",
+          "title": "Attach the immutable administrator context using get_context_by for every actionable route without a duplicate alias map or cache",
+          "scenario": "Resolve every supported route",
+          "status": "done"
+        },
+        {
+          "id": "2.3",
+          "title": "Add integration coverage in tests/test_change.py for all eight routes and canonical prd, implement, and archive aliases while preserving lifecycle status fields",
+          "scenario": "Resolve non-obvious aliases",
+          "status": "done"
+        },
+        {
+          "id": "2.4",
+          "title": "Bypass administrator validation and context reads for resolve-blockers and return null configContext",
+          "scenario": "Bypass configuration for a blocked route",
+          "status": "done"
+        },
+        {
+          "id": "2.5",
+          "title": "Add real-config freshness coverage in tests/test_change.py after an .ai-harness/config.yml rule edit",
+          "scenario": "Observe a configuration edit on the next invocation",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "3",
+      "title": "Normalize routed configuration failures at the CLI boundary",
+      "spec": "deterministic-configuration-failure",
+      "phase": "integration",
+      "depends_on": [
+        "2"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "3.1",
+          "title": "Normalize validation and get_context_by exceptions or invalid validation results to ChangeStoreError in src/ai_harness/modules/harness/change.py",
+          "scenario": "Fail for a read error after validation",
+          "status": "done"
+        },
+        {
+          "id": "3.2",
+          "title": "Preserve src/ai_harness/commands/change.py established stderr and non-zero error handling without partial JSON output",
+          "scenario": "Fail for absent configuration",
+          "status": "done"
+        },
+        {
+          "id": "3.3",
+          "title": "Add CLI-facing tests in tests/test_change.py for missing, unreadable, malformed, and schema-invalid configuration with empty stdout",
+          "scenario": "Fail for malformed YAML",
+          "status": "done"
+        },
+        {
+          "id": "3.4",
+          "title": "Add tests that warnings remain non-halting and invalid configuration never calls for or returns usable context",
+          "scenario": "Continue with a non-halting warning",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "4",
+      "title": "Document orchestrator forwarding of version-2 context",
+      "spec": "orchestrator-context-forwarding",
+      "phase": "integration",
+      "depends_on": [
+        "2"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "4.1",
+          "title": "Update src/ai_harness/resources/change-agent/change-orchestrator.md with the complete version-2 ChangeStatus contract and representative prd context",
+          "scenario": "Document the representative proposal response",
+          "status": "done"
+        },
+        {
+          "id": "4.2",
+          "title": "Require the orchestrator to forward configContext unchanged only for actionable nextRecommended routes and not read configuration independently",
+          "scenario": "Forward routed proposal context",
+          "status": "done"
+        },
+        {
+          "id": "4.3",
+          "title": "Synchronize expected/change-orchestrator.md with the source prompt version-2 shape and blocked null-context behavior",
+          "scenario": "Keep rendered documentation synchronized",
+          "status": "done"
+        },
+        {
+          "id": "4.4",
+          "title": "Extend tests/test_renderers.py to assert source-rendered parity and routed versus resolve-blockers forwarding instructions",
+          "scenario": "Do not forward blocked context",
+          "status": "done"
+        },
+        {
+          "id": "4.5",
+          "title": "Update .ai-harness/specs/agent-cli-contracts/orchestrator-cli-contract.md with nullable configContext, schemaVersion 2, and the exact JSON fragment",
+          "scenario": "Document the complete version-2 continuation contract",
+          "status": "done"
+        }
+      ]
+    }
+  ]
+}
