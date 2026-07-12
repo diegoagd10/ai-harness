@@ -150,14 +150,94 @@ Never run `ai-harness --help`, any subcommand `--help`,
 means you ignored this section.
 
 `change-new {name}` and `change-continue {name}` both print one
-ChangeStatus JSON object; the routing fields are `nextRecommended`
-(`explore | prd | design | specs | tasks | implement | validate |
-archive | resolve-blockers`), `dependencies`, `taskProgress`, and
-`blockedReasons`. `change-new` hard-errors when the folder already
-exists; `change-continue` hard-errors when it is absent.
-`change-archive {change}` prints `done` on success or
+ChangeStatus JSON object (schema version 2). The routing fields are
+`nextRecommended` (`explore | prd | design | specs | tasks | implement
+| validate | archive | resolve-blockers`), `dependencies`,
+`taskProgress`, and `blockedReasons`. The trailing `configContext` field
+is the routed phase's prompt context: it is the JSON object
+`{ "phase": "<canonical change_* key>", "phase_rules": [<rules in
+source order>] }` when `nextRecommended` is one of the eight actionable
+phases, and `null` for `change-new` or for `change-continue` whose
+`nextRecommended` is `resolve-blockers`. `change-new` hard-errors when
+the folder already exists; `change-continue` hard-errors when it is
+absent. `change-archive {change}` prints `done` on success or
 `{"errors": [...]}` on failure — it is run by `change-archiver`, never
 by you.
+
+Representative `change-continue` response for a change whose next
+phase is `prd`:
+
+```json
+{
+  "schemaName": "ai-harness.change-status",
+  "schemaVersion": 2,
+  "changeName": "auth-rework",
+  "changeRoot": ".ai-harness/changes/auth-rework",
+  "artifactPaths": {
+    "exploration": [".ai-harness/changes/auth-rework/exploration.md"],
+    "prd": [],
+    "design": [],
+    "specs": [],
+    "tasks": [],
+    "implementation": [],
+    "validation": []
+  },
+  "artifacts": {
+    "explore": "done",
+    "prd": "missing",
+    "design": "missing",
+    "specs": "missing",
+    "tasks": "missing",
+    "implement": "missing",
+    "validate": "missing",
+    "archive": "missing"
+  },
+  "taskProgress": {
+    "total": 0,
+    "completed": 0,
+    "pending": 0,
+    "allComplete": false
+  },
+  "dependencies": {
+    "explore": "all_done",
+    "prd": "ready",
+    "design": "blocked",
+    "specs": "blocked",
+    "tasks": "blocked",
+    "implement": "blocked",
+    "validate": "blocked",
+    "archive": "blocked"
+  },
+  "relationships": {
+    "parent": null,
+    "siblings": [],
+    "children": []
+  },
+  "phaseInstructions": null,
+  "nextRecommended": "prd",
+  "blockedReasons": [],
+  "configContext": {
+    "phase": "change_propose",
+    "phase_rules": ["First rule", "Second rule"]
+  }
+}
+```
+
+`change-new` returns the same shape with `configContext: null`.
+`change-continue` for a change whose `nextRecommended` is
+`resolve-blockers` also reports `configContext: null` and never
+dispatches a phase sub-agent.
+
+### Forward `configContext` to the selected sub-agent
+
+When `change-continue` returns an actionable `nextRecommended`, the
+returned `configContext` is the canonical phase ruleset the next
+sub-agent needs in order to do its job. Forward that JSON object to
+the selected sub-agent — verbatim, with no rewrite, no independent
+`.ai-harness/config.yml` read, and no alias reconstruction. Do NOT
+synthesize rule text from the routing token; the CLI already did the
+work. When `nextRecommended` is `resolve-blockers`, do not forward
+anything and do not invoke a phase sub-agent.
 
 ## Change flow — grill gate (before spending phases)
 

@@ -2275,6 +2275,197 @@ def test_renderer_parity_change_implementor_has_missing_directive_error(cli: Age
 
 
 # ---------------------------------------------------------------------------
+# change-orchestrator — version-2 configContext forwarding contract (task 4)
+# ---------------------------------------------------------------------------
+#
+# Locks the new ``configContext`` field across every native renderer and
+# against the checked-in rendered expectation. Parity is enforced both on
+# the source prompt and on the rendered body so a missing rule in any
+# renderer breaks at least one row of the parametrized matrix.
+
+
+@pytest.mark.parametrize("cli", _NATIVE_RENDERERS_PARITY)
+def test_change_orchestrator_body_documents_version_two_changestatus(cli: AgentCli, tmp_path: Path) -> None:
+    """Task 4.1 — the rendered orchestrator body documents the version-2 contract.
+
+    Locks the cross-renderer parity contract for the new additively
+    versioned ChangeStatus shape. The body must name
+    ``configContext``, ``schema version 2``, and the routed-phase
+    JSON shape (canonical ``change_*`` phase plus ordered rules).
+    """
+    body = _native_change_orchestrator_body(cli, home=tmp_path)
+
+    assert "configContext" in body, f"{cli}: configContext missing from orchestrator body"
+    assert "schema version 2" in body.lower() or "schemaversion: 2" in body.lower(), (
+        f"{cli}: schema version 2 not advertised in orchestrator body"
+    )
+
+
+@pytest.mark.parametrize("cli", _NATIVE_RENDERERS_PARITY)
+def test_change_orchestrator_body_representative_prd_response_is_parseable(cli: AgentCli, tmp_path: Path) -> None:
+    """Task 4.1 — the representative prd response embedded in the orchestrator body parses."""
+
+    body = _native_change_orchestrator_body(cli, home=tmp_path)
+
+    # The body embeds at least one JSON fenced code block. Extract every
+    # fenced block whose info string is ``json`` (or absent) and try to
+    # parse the body until one matches the version-2 contract.
+    payload = _extract_change_continue_response(body)
+    assert payload is not None, f"{cli}: orchestrator body missing a parseable ChangeStatus example"
+
+    assert payload["schemaVersion"] == 2
+    assert payload["nextRecommended"] == "prd"
+    assert payload["configContext"] == {
+        "phase": "change_propose",
+        "phase_rules": ["First rule", "Second rule"],
+    }
+
+
+@pytest.mark.parametrize("cli", _NATIVE_RENDERERS_PARITY)
+def test_change_orchestrator_body_requires_configcontext_forwarding(cli: AgentCli, tmp_path: Path) -> None:
+    """Task 4.2 — the rendered orchestrator body instructs the model to forward configContext.
+
+    Locks the forwarding rule for actionable routes and the explicit
+    no-forward rule for ``resolve-blockers``. The contract is the
+    orchestrator's only authoritative source for the routing policy
+    so the wording must reach every renderer.
+    """
+    body = _native_change_orchestrator_body(cli, home=tmp_path)
+
+    # The forwarding section is a heading-level-3 paragraph that names
+    # both the actionable forwarding rule and the resolve-blockers
+    # exception. Locate it by its lead phrase so unrelated
+    # resolve-blockers mentions earlier/later in the body don't
+    # confuse the assertion.
+    forward_idx = body.find("Forward `configContext` to the selected sub-agent")
+    assert forward_idx != -1, f"{cli}: forwarding rule missing from orchestrator body"
+    # The forwarding section is fully contained in the next paragraph
+    # block; trailing content is constrained to the following `##` section.
+    next_section = body.find("## ", forward_idx)
+    forwarding_section = body[forward_idx : next_section if next_section != -1 else None]
+
+    # Actionable forwarding rule.
+    rejection_markers = ("no rewrite", "rewrite", "independent", "alias")
+    assert any(marker in forwarding_section.lower() for marker in rejection_markers), (
+        f"{cli}: orchestrator forwarding rule does not forbid independent reads or alias rebuilds"
+    )
+    # resolve-blockers exception.
+    assert "resolve-blockers" in forwarding_section, (
+        f"{cli}: forwarding rule does not name the resolve-blockers exception"
+    )
+    assert (
+        "forward nothing" in forwarding_section.lower()
+        or "do not forward" in forwarding_section.lower()
+        or "not forward" in forwarding_section.lower()
+    ), f"{cli}: forwarding rule does not explicitly forbid forwarding for resolve-blockers"
+
+
+def test_change_orchestrator_expected_rendered_mirrors_source_version_two_contract(tmp_path: Path) -> None:
+    """Task 4.3 — the checked-in rendered expectation mirrors the source prompt version-2 shape.
+
+    Both files must name ``configContext`` and ``schemaVersion: 2``
+    for the same routing example. A drift between source and rendered
+    expectation breaks the publish pipeline and silently regresses the
+    forwarding contract.
+    """
+    prompt_path = Path("src/ai_harness/resources/change-agent/change-orchestrator.md")
+    expected_path = Path("expected/change-orchestrator.md")
+
+    # Source prompt has no frontmatter; rendered expectation has
+    # frontmatter fenced by ``---``. Strip it (when present) so the
+    # parity check focuses on the body content.
+    prompt_body = _strip_frontmatter(prompt_path.read_text(encoding="utf-8"))
+    expected_body = _strip_frontmatter(expected_path.read_text(encoding="utf-8"))
+
+    assert "configContext" in prompt_body, "source prompt missing configContext"
+    assert "configContext" in expected_body, "rendered expectation missing configContext"
+
+    # Both must contain at least one parseable ChangeStatus example whose
+    # schemaVersion equals 2 and whose configContext matches the
+    # representative ``prd`` shape.
+    for label, body in (("source", prompt_body), ("expected", expected_body)):
+        payload = _extract_change_continue_response(body)
+        assert payload is not None, f"{label}: missing a parseable ChangeStatus example"
+        assert payload["schemaVersion"] == 2
+        assert payload["configContext"]["phase"] == "change_propose"
+
+
+def _strip_frontmatter(raw: str) -> str:
+    """Return *raw* with the leading YAML frontmatter stripped (if any).
+
+    Markdown source-of-truth prompts have no frontmatter; rendered
+    expectations do. Renderer parity tests operate on the body, so
+    callers normalize via this helper.
+    """
+    if raw.startswith("---"):
+        parts = raw.split("---", 2)
+        if len(parts) >= 3:
+            return parts[2].removeprefix("\n")
+    return raw
+
+
+def _extract_change_continue_response(body: str) -> dict[str, object] | None:
+    """Return the first JSON object in *body* whose ``schemaVersion`` is 2.
+
+    Scans fenced ``json`` (and unfenced) code blocks. Used by renderer
+    parity tests to assert the embedded ``change-continue`` response
+    matches the public ``ChangeStatus`` dataclass shape.
+    """
+    import json as _json
+
+    in_fence = False
+    fence_lang = ""
+    buf: list[str] = []
+    candidates: list[str] = []
+
+    def _flush(buf: list[str]) -> list[str]:
+        return buf
+
+    for raw_line in body.splitlines():
+        stripped = raw_line.strip()
+        if stripped.startswith("```"):
+            if in_fence:
+                if fence_lang.lower() in {"", "json", "text"}:
+                    candidates.append("\n".join(buf))
+                buf = []
+                in_fence = False
+                fence_lang = ""
+            else:
+                in_fence = True
+                fence_lang = stripped.removeprefix("```")
+                buf = []
+        elif in_fence:
+            buf.append(raw_line)
+
+    for candidate in candidates:
+        try:
+            parsed = _json.loads(candidate)
+        except _json.JSONDecodeError:
+            # Try to find the first balanced JSON object in the candidate.
+            start = candidate.find("{")
+            while start != -1:
+                depth = 0
+                for end in range(start, len(candidate)):
+                    if candidate[end] == "{":
+                        depth += 1
+                    elif candidate[end] == "}":
+                        depth -= 1
+                        if depth == 0:
+                            try:
+                                parsed = _json.loads(candidate[start : end + 1])
+                                if isinstance(parsed, dict):
+                                    return parsed
+                            except _json.JSONDecodeError:
+                                pass
+                            break
+                start = candidate.find("{", start + 1)
+            continue
+        if isinstance(parsed, dict) and parsed.get("schemaVersion") == 2:
+            return parsed
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Foundation contract — Artifact, AgentMetadata, ArtifactsAdministrator,
 # ADMINISTRATORS dispatch (task 1).
 # ---------------------------------------------------------------------------
