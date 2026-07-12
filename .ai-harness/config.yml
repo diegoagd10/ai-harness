@@ -1,0 +1,42 @@
+commit:
+  format: '[{change_name}][{task_id}] {slug}'
+phases:
+  change_explorer:
+    rules:
+      - Target Python >=3.12; use uv, ruff, pytest, typer, and questionary.
+      - Prefer composition over inheritance and use ASCII diagrams for class interactions.
+      - Keep application code in the documented src/ai_harness locations.
+  change_propose:
+    rules:
+      - Target Python >=3.12; use uv, ruff, pytest, typer, and questionary.
+      - State applicable design, coding, testing, and code-location constraints.
+  change_design:
+    rules:
+      - Prefer composition over inheritance.
+      - Use ASCII diagrams to represent class interactions.
+      - Prefer classes over Python script files; avoid bypass methods and bypass classes.
+  change_specs:
+    rules:
+      - Specify tests that do not touch the user system.
+      - Restrict mocks to HTTP clients, databases, and file persistence.
+      - Account for Python >=3.12, uv, ruff, pytest, typer, questionary, Docker/bash e2e, and pnpm/TypeScript test-harness constraints.
+  change_tasks:
+    rules:
+      - Include test tasks that do not touch the user system and use mocks only for HTTP clients, databases, and file persistence.
+  change_implementor:
+    rules:
+      - Use Python >=3.12 and uv; use ruff for linting and formatting and pytest for tests and coverage.
+      - Use typer and questionary for the TUI; use Docker and bash for e2e; use pnpm and TypeScript for the test harness.
+      - Prefer composition over inheritance and provide ASCII diagrams for class interactions.
+      - Prefer classes over Python script files; avoid bypass methods and bypass classes.
+      - Tests must not touch the user system; use mocks only for HTTP clients, databases, and file persistence.
+      - Place code in src/ai_harness/main.py, src/ai_harness/commands, src/ai_harness/modules, src/ai_harness/utils, src/ai_harness/resources, or expected as appropriate.
+  change_validator:
+    rules:
+      - Run `uv run ruff format --check .`.
+      - Run `uv run ruff check .`.
+      - Run `uv run pylint --disable=all --enable=duplicate-code --recursive=y ./src ./tests ./e2e`.
+      - Run `uv run pytest`.
+      - Run `./e2e/docker-test.sh`.
+  change_archiver:
+    rules: []
