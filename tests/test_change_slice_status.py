@@ -381,7 +381,6 @@ def test_review_slice_reaches_human_review_checkpoint(tmp_path: Path) -> None:
         ],
     )
     _stage_artifact(change_dir, "specs/review-time.md")
-    _stage_artifact(change_dir, "validations/review-time.md", content="verdict: pass\n")
     task = task_create(
         tmp_path,
         "review-time",
@@ -394,6 +393,7 @@ def test_review_slice_reaches_human_review_checkpoint(tmp_path: Path) -> None:
         ),
     )
     task_done(tmp_path, "review-time", task.id)
+    _stage_artifact(change_dir, "validations/review-time.md", content="verdict: pass\n")
 
     status = change_continue(tmp_path, "review-time")
 
@@ -483,7 +483,6 @@ def test_human_gate_route_has_no_config_context(tmp_path: Path) -> None:
         ],
     )
     _stage_artifact(change_dir, "specs/human-gate.md")
-    _stage_artifact(change_dir, "validations/human-gate.md", content="verdict: pass\n")
     task = task_create(
         tmp_path,
         "human-gate",
@@ -496,6 +495,7 @@ def test_human_gate_route_has_no_config_context(tmp_path: Path) -> None:
         ),
     )
     task_done(tmp_path, "human-gate", task.id)
+    _stage_artifact(change_dir, "validations/human-gate.md", content="verdict: pass\n")
 
     status = change_continue(tmp_path, "human-gate")
 

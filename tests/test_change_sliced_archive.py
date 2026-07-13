@@ -82,10 +82,16 @@ def _render_capability(capability: dict[str, object]) -> str:
 
 
 def _complete_capability(tmp_path: Path, change: str, capability_id: str) -> None:
-    """Stage spec, validation, and one completed associated task for a capability."""
+    """Stage spec, validation, and one completed associated task for a capability.
+
+    The slice validation is written after the associated task is
+    completed so its mtime is strictly newer than the tasks.json
+    store; this mirrors the natural workflow and prevents the
+    initial-validation freshness check from falsely flagging the
+    validation as stale.
+    """
     change_dir = tmp_path / ".ai-harness" / "changes" / change
     _stage(change_dir, f"specs/{capability_id}.md")
-    _stage(change_dir, f"validations/{capability_id}.md", content="verdict: pass\n")
     task = task_create(
         tmp_path,
         change,
@@ -98,6 +104,7 @@ def _complete_capability(tmp_path: Path, change: str, capability_id: str) -> Non
         ),
     )
     task_done(tmp_path, change, task.id)
+    _stage(change_dir, f"validations/{capability_id}.md", content="verdict: pass\n")
 
 
 def _archiveable_legacy_change(tmp_path: Path, change: str) -> Path:

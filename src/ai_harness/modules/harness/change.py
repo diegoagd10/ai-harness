@@ -610,11 +610,35 @@ def _derive_slice_status(
             [],
         )
 
+    # The slice validation is present and non-empty. Before treating
+    # the slice as reviewable, reject an initial validation older than
+    # any PRD, applicable design, spec, or associated task input —
+    # those edits invalidate the validation's conclusions.
+    continuation = _approval_status_for_gate(approvals, "continuation", selected_capability.id, root, change)
+    if continuation.state != "valid" and _slice_validation_is_stale(
+        change_dir, spec_path, design_path, validation_path
+    ):
+        return (
+            _build_slice_status(
+                mode="sliced",
+                route="validate-slice",
+                current=current_ref,
+                next_capability=next_ref,
+                spec_path=spec_path,
+                design_path=design_path,
+                validation_path=validation_path,
+                progress=progress,
+                risk=risk,
+                approval=ApprovalStatus(gate=None, state="not-required"),
+                completed=tuple(completed),
+            ),
+            [],
+        )
+
     # Slice validation is present and non-empty. The capability is
     # reviewable: either the continuation approval is valid (and the
     # capability advances to the next slice or final validation), or it
     # is pending the human checkpoint.
-    continuation = _approval_status_for_gate(approvals, "continuation", selected_capability.id, root, change)
     if continuation.state != "valid":
         return (
             _build_slice_status(
@@ -650,19 +674,18 @@ def _derive_slice_status(
             progress,
         )
 
-        # There is another capability to plan, so select it now (without
-        # requiring its future artifacts). The route naturally falls to
-        # ``design`` or ``specs`` based on what already exists for that
-        # next capability.
-        return _route_next_capability(
-            delivery,
-            next_selected,
-            completed,
-            change_dir,
-            root,
-            change,
-            progress,
-        )
+    # Continuation approval is valid but another capability is still
+    # selected — plan that capability now without requiring its future
+    # artifacts.
+    return _route_next_capability(
+        delivery,
+        next_selected,
+        completed,
+        change_dir,
+        root,
+        change,
+        progress,
+    )
 
 
 def _walk_completed_capabilities(
@@ -1030,6 +1053,48 @@ def _capability_ref_from(capability: Capability | None) -> CapabilityRef | None:
     return CapabilityRef(id=capability.id, ordinal=capability.ordinal, title=capability.title)
 
 
+def _slice_validation_is_stale(
+    change_dir: Path,
+    spec_path: str,
+    design_path: str,
+    validation_path: str,
+) -> bool:
+    """Return whether the slice validation is older than its PRD/design/spec/tasks.
+
+    The slice validation becomes stale the moment any of its inputs
+    changes after it was written. We compare POSIX mtimes for the PRD
+    (``prd.md``), the applicable design (``design.md`` for change-wide
+    or ``designs/<id>.md`` for slice-scoped), the selected spec, and
+    the cumulative tasks store. An mtime comparison error conservatively
+    treats the validation as stale so a missing-file regression never
+    falsely advances the slice.
+    """
+    validation_file = change_dir / validation_path
+    if not validation_file.is_file():
+        return True
+    try:
+        validation_mtime = validation_file.stat().st_mtime
+    except OSError:
+        return True
+
+    candidate_paths = (
+        change_dir / "prd.md",
+        change_dir / design_path,
+        change_dir / spec_path,
+        change_dir / "tasks.json",
+    )
+    for candidate in candidate_paths:
+        if not candidate.is_file():
+            continue
+        try:
+            candidate_mtime = candidate.stat().st_mtime
+        except OSError:
+            return True
+        if validation_mtime < candidate_mtime:
+            return True
+    return False
+
+
 def _capability_artifact_paths(capability: Capability) -> tuple[str, str, str]:
     """Return ``(specPath, designPath, validationPath)`` for a capability."""
     spec_path = f"specs/{capability.id}.md"
@@ -1091,7 +1156,7 @@ def _approval_status_for_gate(
 
     latest = matching[-1]
     try:
-        current_digest = _compute_scope_digest(root, change, gate=gate)
+        current_digest = _compute_scope_digest(root, change, gate=gate, capability_id=capability_id)
     except (ChangeStoreError, OSError):
         return ApprovalStatus(gate=gate, state="stale")
 
@@ -1235,7 +1300,14 @@ class ChangeLifecycle:
                 f"Approval refused: current route is not a human gate (route={current.sliceStatus.route!r})."
             )
 
-        scope_digest = _compute_scope_digest(self._root, change, gate=gate)
+        # The capability the gate fingerprints MUST match the record's
+        # ``capabilityId`` so later-capability approvals do not silently
+        # fall back to capability 1 inputs.
+        if current.sliceStatus.currentCapability is None:
+            raise ChangeStoreError("Approval refused: no current capability to fingerprint.")
+        capability_id = current.sliceStatus.currentCapability.id
+
+        scope_digest = _compute_scope_digest(self._root, change, gate=gate, capability_id=capability_id)
         store = ApprovalStore(change_dir)
         try:
             existing = store.read()
@@ -1243,9 +1315,7 @@ class ChangeLifecycle:
             raise ChangeStoreError(str(exc)) from exc
 
         record = ApprovalRecord(
-            capabilityId=current.sliceStatus.currentCapability.id
-            if current.sliceStatus.currentCapability is not None
-            else change,
+            capabilityId=capability_id,
             gate=gate,
             scopeDigest=scope_digest,
             approvedAt=_now_iso8601(),
@@ -1263,7 +1333,7 @@ def _now_iso8601() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _compute_scope_digest(root: Path, change: str, *, gate: str) -> str:
+def _compute_scope_digest(root: Path, change: str, *, gate: str, capability_id: str) -> str:
     """Return the gate-specific scope fingerprint, length-delimited and hashed.
 
     Implementation scope covers the complete PRD, applicable design,
@@ -1273,14 +1343,16 @@ def _compute_scope_digest(root: Path, change: str, *, gate: str) -> str:
 
     The bytes are concatenated with length prefixes so a path/content
     boundary cannot collide and equality compares constant-time SHA-256
-    hex strings.
+    hex strings. ``capability_id`` identifies the gate's target
+    capability so later capabilities fingerprint their own scope
+    instead of the first capability's.
     """
     change_dir = _change_dir(root, change)
     delivery = read_prd_delivery(change_dir / "prd.md")
     if delivery.mode != "sliced":
         raise ChangeStoreError("Scope fingerprinting requires a sliced PRD.")
 
-    capability = _select_capability_for_gate(delivery, gate)
+    capability = _select_capability_for_gate(delivery, gate, capability_id)
     spec_path = change_dir / f"specs/{capability.id}.md"
 
     parts: list[bytes] = []
@@ -1314,17 +1386,22 @@ def _compute_scope_digest(root: Path, change: str, *, gate: str) -> str:
     return hash_scope_digest(tuple(parts))
 
 
-def _select_capability_for_gate(delivery: PrdDelivery, gate: str) -> Capability:
+def _select_capability_for_gate(delivery: PrdDelivery, gate: str, capability_id: str) -> Capability:
     """Return the capability the gate applies to.
 
-    For task 4 the router always gates the first capability; task 5
-    introduces continuation capability skipping. The shared invariant
-    is that the approval scope covers exactly one capability, never
-    arbitrary caller input.
+    The implementation and continuation gates each apply to exactly one
+    capability; ``capability_id`` is derived from the current slice
+    status (or supplied by the caller) so a later-capability
+    approval fingerprints that capability's own scope. Falling back to
+    the first capability would silently leak stale approvals, so the
+    helper raises when the requested ID is missing from the PRD.
     """
     if not delivery.capabilities:
         raise ChangeStoreError("Cannot approve without at least one capability.")
-    return delivery.capabilities[0]
+    for capability in delivery.capabilities:
+        if capability.id == capability_id:
+            return capability
+    raise ChangeStoreError(f"Cannot approve {gate} gate: capability {capability_id!r} is not in the PRD.")
 
 
 def _applicable_design_bytes(change_dir: Path, capability: Capability) -> bytes:
@@ -1492,7 +1569,7 @@ def _approval_state_for_gate(
 
     latest = matching[-1]
     try:
-        current_digest = _compute_scope_digest(root, change, gate=gate)
+        current_digest = _compute_scope_digest(root, change, gate=gate, capability_id=capability_id)
     except (ChangeStoreError, OSError):
         return "stale"
 

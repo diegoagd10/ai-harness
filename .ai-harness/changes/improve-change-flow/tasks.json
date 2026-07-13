@@ -306,6 +306,141 @@
           "status": "done"
         }
       ]
+    },
+    {
+      "id": "9",
+      "title": "Gate approval scope to the gate's capability and reject stale initial slice validation",
+      "spec": "risk-and-scope-governance",
+      "phase": "fix",
+      "depends_on": [
+        "4",
+        "5"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "9.1",
+          "title": "Make scope fingerprinting use the gate's actual capability rather than always capability 1",
+          "scenario": "Caller cannot approve arbitrary scope",
+          "status": "done"
+        },
+        {
+          "id": "9.2",
+          "title": "Reject initial slice validation older than PRD, design, spec, or associated task input",
+          "scenario": "Stale initial validation is regenerated",
+          "status": "done"
+        },
+        {
+          "id": "9.3",
+          "title": "Add focused tests for capability-specific approvals and stale initial validation",
+          "scenario": "Implementation scope edit reopens approval",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "10",
+      "title": "Block sliced routing when approval entries are malformed",
+      "spec": "risk-and-scope-governance",
+      "phase": "fix",
+      "depends_on": [
+        "9"
+      ],
+      "status": "pending",
+      "subtasks": [
+        {
+          "id": "10.1",
+          "title": "Raise ApprovalStoreError for malformed approval entries instead of silently dropping them",
+          "scenario": "Malformed approval data blocks routing",
+          "status": "pending"
+        },
+        {
+          "id": "10.2",
+          "title": "Add tests covering the malformed entry blocking path",
+          "scenario": "Malformed approval data blocks routing",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "11",
+      "title": "Surface a safe routing diagnostic for unsafe task spec references",
+      "spec": "safe-normal-risk-first-slice",
+      "phase": "fix",
+      "depends_on": [
+        "9"
+      ],
+      "status": "pending",
+      "subtasks": [
+        {
+          "id": "11.1",
+          "title": "Add a routingDiagnostic field to CapabilityTaskState",
+          "scenario": "Unsafe references do not associate",
+          "status": "pending"
+        },
+        {
+          "id": "11.2",
+          "title": "Populate routingDiagnostic from task_capability_state and surface it in slice status",
+          "scenario": "Unsafe references do not associate",
+          "status": "pending"
+        },
+        {
+          "id": "11.3",
+          "title": "Add tests covering the unsafe reference diagnostic",
+          "scenario": "Unsafe references do not associate",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "12",
+      "title": "Deduplicate change-flow test fixtures for the pylint gate",
+      "spec": "ordered-slice-continuation",
+      "phase": "fix",
+      "depends_on": [
+        "9",
+        "10",
+        "11"
+      ],
+      "status": "pending",
+      "subtasks": [
+        {
+          "id": "12.1",
+          "title": "Extract shared change-flow fixtures into a single test helpers module",
+          "scenario": "Supported toolchain runs focused coverage",
+          "status": "pending"
+        },
+        {
+          "id": "12.2",
+          "title": "Update owned test files to import the shared fixtures",
+          "scenario": "Supported toolchain runs focused coverage",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "13",
+      "title": "Restore TDD evidence grammar and full commit SHAs",
+      "spec": "ordered-slice-continuation",
+      "phase": "fix",
+      "depends_on": [
+        "12"
+      ],
+      "status": "pending",
+      "subtasks": [
+        {
+          "id": "13.1",
+          "title": "Use full commit SHAs and comma-separated file paths in every TDD evidence row",
+          "scenario": "Supported toolchain runs focused coverage",
+          "status": "pending"
+        },
+        {
+          "id": "13.2",
+          "title": "Restore RED/GREEN literals and resolve the task 8 commit-report discrepancy",
+          "scenario": "Supported toolchain runs focused coverage",
+          "status": "pending"
+        }
+      ]
     }
   ]
 }

@@ -81,6 +81,26 @@ def _stage(change_dir: Path, relative: str, content: str = "x\n") -> None:
     target.write_text(content, encoding="utf-8")
 
 
+def _stage_artifact(change_dir: Path, relative: str, content: str = "x\n") -> None:
+    """Write a content file at ``<change_dir>/<relative>`` creating parents."""
+    target = change_dir / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content, encoding="utf-8")
+
+
+def _initialize_config(tmp_path: Path, *phases: str) -> None:
+    """Initialize a minimal config so ``change_continue`` can resolve context."""
+    config_path = tmp_path / ".ai-harness" / "config.yml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "commit": {"format": "[{change_name}][{task_id}] {slug}"},
+        "phases": {phase: {"rules": ["rule"]} for phase in phases},
+    }
+    import yaml
+
+    config_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+
 @pytest.fixture(autouse=True)
 def _autouse_config(tmp_path: Path):
     """Write a complete config so change_continue and change_approve succeed."""
@@ -431,7 +451,6 @@ def test_continuation_scope_edit_reopens_slice_review(tmp_path: Path) -> None:
         ],
     )
     _stage(change_dir, "specs/continuation-scope-edit.md")
-    _stage(change_dir, "validations/continuation-scope-edit.md", content="verdict: pass\n")
     task = task_create(
         tmp_path,
         "continuation-scope-edit",
@@ -444,6 +463,7 @@ def test_continuation_scope_edit_reopens_slice_review(tmp_path: Path) -> None:
         ),
     )
     task_done(tmp_path, "continuation-scope-edit", task.id)
+    _stage(change_dir, "validations/continuation-scope-edit.md", content="verdict: pass\n")
     change_approve(tmp_path, "continuation-scope-edit")
 
     # Now edit the validation file — continuation scope includes validation bytes.
@@ -536,3 +556,281 @@ def test_cli_change_approve_rejects_off_route(tmp_path: Path, monkeypatch: pytes
 
     assert result.exit_code != 0
     assert "route" in result.stderr.lower() or "route" in result.stdout.lower()
+
+
+# ---------------------------------------------------------------------------
+# Capability-specific fingerprint (validation fix)
+# ---------------------------------------------------------------------------
+
+
+def test_continuation_approval_for_capability_2_fingerprints_its_own_scope(tmp_path: Path) -> None:
+    """Capability 2's continuation approval fingerprints capability 2's scope.
+
+    The continuation approval adds the selected task state digest and
+    the slice-validation bytes to the implementation scope, so two
+    capabilities must produce different continuation digests. Earlier
+    behavior always used capability 1's inputs, so capability 2's
+    approval could be coincidentally valid against capability 1.
+    """
+    change_dir = _make_change(tmp_path, "continuation-scope-per-cap")
+    _write_sliced_prd(
+        change_dir,
+        capabilities=[
+            {"id": "first", "title": "First", "level": "normal", "design": "none"},
+            {"id": "second", "title": "Second", "level": "normal", "design": "none"},
+        ],
+    )
+    # Capability 1: spec, task, validation, approve continuation.
+    _stage(change_dir, "specs/first.md")
+    first_task = task_create(
+        tmp_path,
+        "continuation-scope-per-cap",
+        TaskInput(
+            title="First work",
+            spec="first",
+            phase="implement",
+            depends_on=[],
+            subtasks=[SubtaskInput(title="step")],
+        ),
+    )
+    task_done(tmp_path, "continuation-scope-per-cap", first_task.id)
+    _stage(change_dir, "validations/first.md", content="verdict: pass\n")
+    change_approve(tmp_path, "continuation-scope-per-cap")
+
+    # Capability 2: spec, task, validation, approve continuation.
+    _stage(change_dir, "specs/second.md")
+    second_task = task_create(
+        tmp_path,
+        "continuation-scope-per-cap",
+        TaskInput(
+            title="Second work",
+            spec="second",
+            phase="implement",
+            depends_on=[],
+            subtasks=[SubtaskInput(title="step")],
+        ),
+    )
+    task_done(tmp_path, "continuation-scope-per-cap", second_task.id)
+    _stage(change_dir, "validations/second.md", content="verdict: pass\n")
+    change_approve(tmp_path, "continuation-scope-per-cap")
+
+    persisted = json.loads((change_dir / "approvals.json").read_text(encoding="utf-8"))
+    records = persisted["approvals"]
+    second_continuation = [r for r in records if r["capabilityId"] == "second" and r["gate"] == "continuation"]
+    first_continuation = [r for r in records if r["capabilityId"] == "first" and r["gate"] == "continuation"]
+    assert second_continuation and first_continuation
+    # Different capability-specific digests — confirms capability 2
+    # continuation approval is not reusing capability 1 inputs.
+    assert second_continuation[-1]["scopeDigest"] != first_continuation[-1]["scopeDigest"]
+
+
+def test_high_risk_continuation_approval_for_capability_2_fingerprints_its_own_scope(tmp_path: Path) -> None:
+    """High-risk capability 2's continuation approval fingerprints capability 2's scope.
+
+    Implementation approvals for high-risk capabilities also use the
+    gate's actual capability. Earlier behavior hashed capability 1's
+    inputs for every implementation approval, so editing capability
+    2's spec or task definitions could not invalidate a capability 2
+    implementation approval.
+    """
+    change_dir = _make_change(tmp_path, "hr-continuation-per-cap")
+    _write_sliced_prd(
+        change_dir,
+        capabilities=[
+            {
+                "id": "first",
+                "title": "First",
+                "level": "normal",
+                "reasons": ["security"],
+                "design": "none",
+            },
+            {
+                "id": "second",
+                "title": "Second",
+                "level": "normal",
+                "reasons": ["security"],
+                "design": "none",
+            },
+        ],
+    )
+    _stage(change_dir, "design.md", content="# change-wide design\n")
+    # Capability 1: spec, task, validation. High-risk first ⇒
+    # implementation approval must come before continuation.
+    _stage(change_dir, "specs/first.md")
+    first_task = task_create(
+        tmp_path,
+        "hr-continuation-per-cap",
+        TaskInput(
+            title="First work",
+            spec="first",
+            phase="implement",
+            depends_on=[],
+            subtasks=[SubtaskInput(title="step")],
+        ),
+    )
+    change_approve(tmp_path, "hr-continuation-per-cap")  # implementation for first
+    task_done(tmp_path, "hr-continuation-per-cap", first_task.id)
+    _stage(change_dir, "validations/first.md", content="verdict: pass\n")
+    change_approve(tmp_path, "hr-continuation-per-cap")  # continuation for first
+
+    # Capability 2: spec, task. The implementation approval gate
+    # should fire because capability 2 is high-risk.
+    _stage(change_dir, "specs/second.md")
+    task_create(
+        tmp_path,
+        "hr-continuation-per-cap",
+        TaskInput(
+            title="Second work",
+            spec="second",
+            phase="implement",
+            depends_on=[],
+            subtasks=[SubtaskInput(title="step")],
+        ),
+    )
+
+    persisted_pre = json.loads((change_dir / "approvals.json").read_text(encoding="utf-8"))
+    # No implementation record for second yet.
+    second_impl_records_pre = [
+        r for r in persisted_pre["approvals"] if r["capabilityId"] == "second" and r["gate"] == "implementation"
+    ]
+    assert not second_impl_records_pre
+
+    change_approve(tmp_path, "hr-continuation-per-cap")  # implementation for second
+
+    persisted = json.loads((change_dir / "approvals.json").read_text(encoding="utf-8"))
+    second_impl_records = [
+        r for r in persisted["approvals"] if r["capabilityId"] == "second" and r["gate"] == "implementation"
+    ]
+    first_continuation_records = [
+        r for r in persisted["approvals"] if r["capabilityId"] == "first" and r["gate"] == "continuation"
+    ]
+    assert second_impl_records, "expected an implementation approval for capability 2"
+    assert first_continuation_records, "expected a continuation approval for capability 1"
+
+    # Capability 2 implementation digest MUST differ from capability 1
+    # continuation digest — confirming capability 2 fingerprints its
+    # own inputs rather than reusing capability 1.
+    second_digest = second_impl_records[-1]["scopeDigest"]
+    first_digest = first_continuation_records[-1]["scopeDigest"]
+    assert second_digest != first_digest
+
+
+# ---------------------------------------------------------------------------
+# Stale initial validation (validation fix)
+# ---------------------------------------------------------------------------
+
+
+def test_stale_initial_slice_validation_routes_to_validate_slice(tmp_path: Path) -> None:
+    """A validation older than its PRD/design/spec/tasks routes back to validate-slice.
+
+    Per the spec scenario "Stale initial validation is regenerated",
+    once any covered input changes after the validation is written,
+    the validation is stale and the slice cannot be reviewed until
+    the validator regenerates it.
+    """
+    _initialize_config(tmp_path, "change_implementor", "change_validator")
+    change_dir = _make_change(tmp_path, "stale-initial-validation")
+    _write_sliced_prd(
+        change_dir,
+        capabilities=[
+            {"id": "stale-initial-validation", "title": "S", "level": "normal", "design": "none"},
+        ],
+    )
+    _stage_artifact(change_dir, "specs/stale-initial-validation.md")
+    task = task_create(
+        tmp_path,
+        "stale-initial-validation",
+        TaskInput(
+            title="Work",
+            spec="stale-initial-validation",
+            phase="implement",
+            depends_on=[],
+            subtasks=[SubtaskInput(title="step")],
+        ),
+    )
+    task_done(tmp_path, "stale-initial-validation", task.id)
+    _stage_artifact(change_dir, "validations/stale-initial-validation.md", content="verdict: pass\n")
+
+    # Mutate the PRD AFTER the validation was written so the
+    # validation is now older than a covered input.
+    import time
+
+    time.sleep(0.05)
+    prd = change_dir / "prd.md"
+    prd_text = prd.read_text(encoding="utf-8")
+    prd.write_text(prd_text + "\n## Updated\n", encoding="utf-8")
+
+    status = change_continue(tmp_path, "stale-initial-validation")
+    payload = json.loads(json.dumps(asdict(status)))
+    # Stale initial validation must not let the slice reach
+    # ``review-slice``; the route falls back to ``validate-slice``
+    # so the validator can regenerate it.
+    assert payload["sliceStatus"]["route"] == "validate-slice"
+
+
+def test_stale_validation_after_spec_edit_routes_to_validate_slice(tmp_path: Path) -> None:
+    """A spec edit after the validation makes the slice validation stale."""
+    _initialize_config(tmp_path, "change_implementor", "change_validator")
+    change_dir = _make_change(tmp_path, "stale-spec")
+    _write_sliced_prd(
+        change_dir,
+        capabilities=[
+            {"id": "stale-spec", "title": "S", "level": "normal", "design": "none"},
+        ],
+    )
+    _stage_artifact(change_dir, "specs/stale-spec.md")
+    task = task_create(
+        tmp_path,
+        "stale-spec",
+        TaskInput(
+            title="Work",
+            spec="stale-spec",
+            phase="implement",
+            depends_on=[],
+            subtasks=[SubtaskInput(title="step")],
+        ),
+    )
+    task_done(tmp_path, "stale-spec", task.id)
+    _stage_artifact(change_dir, "validations/stale-spec.md", content="verdict: pass\n")
+
+    import time
+
+    time.sleep(0.05)
+    spec = change_dir / "specs" / "stale-spec.md"
+    spec.write_text("# spec\n## updated\n", encoding="utf-8")
+
+    status = change_continue(tmp_path, "stale-spec")
+    payload = json.loads(json.dumps(asdict(status)))
+    assert payload["sliceStatus"]["route"] == "validate-slice"
+
+
+def test_current_validation_after_completion_reaches_review_slice(tmp_path: Path) -> None:
+    """A non-empty validation written after the task state reaches ``review-slice``."""
+    _initialize_config(tmp_path, "change_implementor", "change_validator")
+    change_dir = _make_change(tmp_path, "current-validation")
+    _write_sliced_prd(
+        change_dir,
+        capabilities=[
+            {"id": "current-validation", "title": "C", "level": "normal", "design": "none"},
+        ],
+    )
+    _stage_artifact(change_dir, "specs/current-validation.md")
+    task = task_create(
+        tmp_path,
+        "current-validation",
+        TaskInput(
+            title="Work",
+            spec="current-validation",
+            phase="implement",
+            depends_on=[],
+            subtasks=[SubtaskInput(title="step")],
+        ),
+    )
+    task_done(tmp_path, "current-validation", task.id)
+    # Write the validation AFTER the task is completed so it is the
+    # newest file in the change directory.
+    _stage_artifact(change_dir, "validations/current-validation.md", content="verdict: pass\n")
+
+    status = change_continue(tmp_path, "current-validation")
+    payload = json.loads(json.dumps(asdict(status)))
+    assert payload["sliceStatus"]["route"] == "review-slice"
