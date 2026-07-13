@@ -13,6 +13,7 @@ import typer
 from ai_harness.modules.harness.change import (
     ChangeStatus,
     ChangeStoreError,
+    change_approve,
     change_archive,
     change_continue,
     change_new,
@@ -41,6 +42,20 @@ def change_continue_cmd(change: str = typer.Argument(..., help="Change name.")) 
     """Print status JSON for an existing change."""
     try:
         _print_json(change_continue(Path.cwd(), change))
+    except ChangeStoreError as exc:
+        _exit_error(str(exc))
+
+
+def change_approve_cmd(change: str = typer.Argument(..., help="Change name.")) -> None:
+    """Approve the current pending gate and print the resulting status JSON.
+
+    The CLI takes no input JSON: the gate, scope fingerprint, and
+    decision time are all derived from disk at call time. Off-route
+    invocations exit non-zero without writing approval data, which
+    callers rely on to detect "no current gate to approve".
+    """
+    try:
+        _print_json(change_approve(Path.cwd(), change))
     except ChangeStoreError as exc:
         _exit_error(str(exc))
 

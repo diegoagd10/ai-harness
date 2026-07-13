@@ -7,9 +7,11 @@ Re-exports the public surface so callers import from the package root:
 from ai_harness.modules.harness.change import (
     ApprovalStatus,
     CapabilityRef,
+    ChangeLifecycle,
     ChangeStatus,
     ChangeStoreError,
     SliceStatus,
+    change_approve,
     change_continue,
     change_new,
 )
@@ -52,6 +54,7 @@ __all__ = [
     "ApprovalStatus",
     "CapabilityRef",
     "CapabilityTaskState",
+    "ChangeLifecycle",
     "ChangeStatus",
     "ChangeStoreError",
     "InitResult",
@@ -68,6 +71,7 @@ __all__ = [
     "WorktreeEntry",
     "WorktreeResult",
     "create_worktree",
+    "change_approve",
     "change_continue",
     "change_new",
     "init_repo",

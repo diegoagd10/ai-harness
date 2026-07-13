@@ -60,19 +60,26 @@ from __future__ import annotations
 
 import shutil
 from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from pathlib import Path
 
 from ai_harness.modules.change_config import ChangeConfigAdministrator, ChangeConfigError
 from ai_harness.modules.change_config.models import ChangeConfigPromptContext
 from ai_harness.modules.harness.change_flow import (
+    ApprovalRecord,
+    ApprovalStore,
+    ApprovalStoreError,
     Capability,
+    PrdDelivery,
     RiskAssessment,
     compute_effective_risk,
+    hash_scope_digest,
     read_prd_delivery,
 )
 from ai_harness.modules.harness.tasks import (
     TaskProgress,
     TaskStoreError,
+    task_capability_state,
     task_progress,
 )
 
@@ -428,6 +435,12 @@ def _derive_slice_status(
     if delivery.mode == "legacy":
         return _legacy_slice_status(), []
 
+    # Read approvals first so malformed data surfaces as a blocked
+    # route before any capability derivation proceeds.
+    approvals, approval_error = _safe_read_approvals(change_dir)
+    if approval_error is not None:
+        return _blocked_slice_status(approval_error), [approval_error]
+
     # Sliced delivery: walk the first capability without a valid
     # continuation approval. For task 3 we always select the first
     # capability; task 5 adds continuation approval filtering.
@@ -439,11 +452,14 @@ def _derive_slice_status(
     risk = compute_effective_risk(first_capability)
     # The first-capability check is intentionally limited to basic
     # review; deeper continuation selection belongs to task 5.
-    approval = _approval_for_first_slice()
     spec_path, design_path, validation_path = _capability_artifact_paths(first_capability)
 
     if risk.changeWideDesignRequired and not _non_empty_file(change_dir / "design.md"):
-        # Elevated risk requires a change-wide design first.
+        # Elevated risk requires a change-wide design first. The
+        # implementation gate is *also* implied because change-wide
+        # design is a high-risk prerequisite, but the immediate
+        # actionable route is ``design``; we mark approval as the
+        # eventual pending requirement.
         return (
             _build_slice_status(
                 mode="sliced",
@@ -472,7 +488,7 @@ def _derive_slice_status(
                 validation_path=validation_path,
                 progress=progress,
                 risk=risk,
-                approval=approval,
+                approval=_approval_status_for_gate(approvals, "implementation", first_capability.id, root, change),
             ),
             [],
         )
@@ -489,7 +505,7 @@ def _derive_slice_status(
                 validation_path=validation_path,
                 progress=progress,
                 risk=risk,
-                approval=approval,
+                approval=_approval_status_for_gate(approvals, "implementation", first_capability.id, root, change),
             ),
             [],
         )
@@ -509,12 +525,43 @@ def _derive_slice_status(
                 validation_path=validation_path,
                 progress=progress,
                 risk=risk,
-                approval=approval,
+                approval=_approval_status_for_gate(approvals, "implementation", first_capability.id, root, change),
             ),
             [],
         )
 
+    # Effective high-risk capabilities require a fresh implementation
+    # approval before any pending task is implemented. Without one the
+    # route is ``approve-implementation`` (the human gate).
+    if risk.effectiveLevel == "high":
+        gate = _approval_status_for_gate(approvals, "implementation", first_capability.id, root, change)
+        if gate.state != "valid":
+            return (
+                _build_slice_status(
+                    mode="sliced",
+                    route="approve-implementation",
+                    current=current_ref,
+                    next_capability=next_ref,
+                    spec_path=spec_path,
+                    design_path=design_path,
+                    validation_path=validation_path,
+                    progress=progress,
+                    risk=risk,
+                    approval=gate,
+                ),
+                [],
+            )
+
     if not cap_state.progress.allComplete:
+        # Once an implementation approval is valid for a high-risk
+        # capability, the approval state persists through pending work
+        # so the slice never silently forgets the human gate. For
+        # normal-risk slices, the gate was never required.
+        implement_approval = (
+            _approval_status_for_gate(approvals, "implementation", first_capability.id, root, change)
+            if risk.effectiveLevel == "high"
+            else ApprovalStatus(gate=None, state="not-required")
+        )
         return (
             _build_slice_status(
                 mode="sliced",
@@ -526,7 +573,7 @@ def _derive_slice_status(
                 validation_path=validation_path,
                 progress=progress,
                 risk=risk,
-                approval=approval,
+                approval=implement_approval,
             ),
             [],
         )
@@ -543,7 +590,7 @@ def _derive_slice_status(
                 validation_path=validation_path,
                 progress=progress,
                 risk=risk,
-                approval=approval,
+                approval=ApprovalStatus(gate=None, state="not-required"),
             ),
             [],
         )
@@ -663,6 +710,53 @@ def _approval_for_first_slice() -> ApprovalStatus:
     return ApprovalStatus(gate=None, state="not-required")
 
 
+def _safe_read_approvals(change_dir: Path) -> tuple[tuple[ApprovalRecord, ...], str | None]:
+    """Return approval records and any parse error.
+
+    The slice router needs the approval records to project state. If
+    ``approvals.json`` is present but malformed, the caller MUST
+    surface the failure as a blocked route — silently ignoring the
+    data would let callers accept approvals that cannot be audited.
+    """
+    store = ApprovalStore(change_dir)
+    try:
+        return store.read(), None
+    except ApprovalStoreError as exc:
+        return (), str(exc)
+
+
+def _approval_status_for_gate(
+    approvals: tuple[ApprovalRecord, ...],
+    gate: str,
+    capability_id: str,
+    root: Path,
+    change: str,
+) -> ApprovalStatus:
+    """Return the current :class:`ApprovalStatus` for the given gate.
+
+    Looks for the latest persisted record matching
+    ``(capability_id, gate)`` and recomputes the scope digest from
+    disk. When the digest matches the recorded digest, the approval is
+    ``valid``; otherwise it is ``stale``. A missing record produces
+    ``state="required"`` for ``implementation`` and
+    ``state="required"`` for ``continuation`` is only ever consulted
+    when the slice arrives at the review checkpoint.
+    """
+    matching = [record for record in approvals if record.gate == gate and record.capabilityId == capability_id]
+    if not matching:
+        return ApprovalStatus(gate=gate, state="required")
+
+    latest = matching[-1]
+    try:
+        current_digest = _compute_scope_digest(root, change, gate=gate)
+    except (ChangeStoreError, OSError):
+        return ApprovalStatus(gate=gate, state="stale")
+
+    if current_digest == latest.scopeDigest:
+        return ApprovalStatus(gate=gate, state="valid")
+    return ApprovalStatus(gate=gate, state="stale")
+
+
 def _read_capability_state(root: Path, change_dir: Path, capability: Capability):
     """Return the capability task state without leaking the seam to the router."""
     # Lazy import keeps the slice module surface small at load time and
@@ -710,7 +804,7 @@ def change_archive(root: Path, change: str) -> None:
     ``.ai-harness/specs/{change}/`` and the remaining
     ``.ai-harness/changes/{change}/`` folder to
     ``.ai-harness/archive/{change}/``. The moves are all-or-nothing: if
-    the second move fails, the first is rolled back so the source tree
+    the second stage fails, the first is rolled back so the source tree
     is restored unchanged.
 
     On failure, raises :class:`ChangeStoreError` whose ``errors`` attribute
@@ -722,6 +816,199 @@ def change_archive(root: Path, change: str) -> None:
         raise ChangeStoreError("\n".join(errors), errors=errors)
 
     _archive_move(root, change)
+
+
+# ---------------------------------------------------------------------------
+# Approval persistence — task 4
+# ---------------------------------------------------------------------------
+
+
+def change_approve(root: Path, change: str) -> ChangeStatus:
+    """Approve the current pending gate and return freshly derived status.
+
+    The operation refuses to act when the current route is not a human
+    gate (``approve-implementation`` or ``review-slice``). It derives
+    the gate-specific scope fingerprint from disk, atomically writes a
+    new :class:`ApprovalRecord` to ``approvals.json``, and returns the
+    resulting :class:`ChangeStatus` so the caller can confirm the new
+    state without re-deriving it.
+
+    Raises :class:`ChangeStoreError` for off-route approvals, malformed
+    approvals data, missing change folders, or any disk write failure.
+    """
+    return ChangeLifecycle(root).approve_pending_gate(change)
+
+
+class ChangeLifecycle:
+    """Own creation, continuation, approval persistence, and archive moves.
+
+    All four operations are side-effect free *except*:
+
+    - :meth:`create` creates an empty change folder.
+    - :meth:`approve_pending_gate` atomically writes
+      ``approvals.json``.
+    - :meth:`archive` performs the two-stage move.
+
+    :meth:`continue_` is derived entirely from disk; its returned
+    :class:`ChangeStatus` is the canonical source for any caller.
+    """
+
+    def __init__(self, root: Path) -> None:
+        self._root = root
+
+    def create(self, change: str) -> ChangeStatus:
+        """Wrap :func:`change_new` so the class is the only seam for callers."""
+        return change_new(self._root, change)
+
+    def continue_(self, change: str) -> ChangeStatus:
+        """Wrap :func:`change_continue` so the class is the only seam for callers."""
+        return change_continue(self._root, change)
+
+    def approve_pending_gate(self, change: str) -> ChangeStatus:
+        """Atomically approve the current gate and return the fresh status.
+
+        Identifies the current route by deriving status (without
+        persisting approval data), then computes the gate-specific
+        scope fingerprint from disk. Refuses to write any approval
+        when the route is neither ``approve-implementation`` nor
+        ``review-slice``; the gate selection is fully driven by disk
+        facts so callers cannot approve arbitrary scope.
+
+        The recorded :class:`ApprovalRecord` includes a derived scope
+        digest, so the next status derivation detects scope edits
+        through fingerprint mismatch and reports the approval stale.
+        """
+        change_dir = _change_dir(self._root, change)
+        if not change_dir.is_dir():
+            raise ChangeStoreError(f"Change not found: {change}")
+
+        current = _derive_status(self._root, change)
+        if current.sliceStatus is None:
+            raise ChangeStoreError("No slice status available; cannot approve without a sliced PRD.")
+
+        gate = current.sliceStatus.approval.gate
+        if gate not in {"implementation", "continuation"}:
+            raise ChangeStoreError(
+                f"Approval refused: current route is not a human gate (route={current.sliceStatus.route!r})."
+            )
+
+        scope_digest = _compute_scope_digest(self._root, change, gate=gate)
+        store = ApprovalStore(change_dir)
+        try:
+            existing = store.read()
+        except ApprovalStoreError as exc:
+            raise ChangeStoreError(str(exc)) from exc
+
+        record = ApprovalRecord(
+            capabilityId=current.sliceStatus.currentCapability.id
+            if current.sliceStatus.currentCapability is not None
+            else change,
+            gate=gate,
+            scopeDigest=scope_digest,
+            approvedAt=_now_iso8601(),
+        )
+        store.write(record, existing=existing)
+        return _derive_status(self._root, change)
+
+    def archive(self, change: str) -> None:
+        """Wrap :func:`change_archive` so the class is the only seam for callers."""
+        change_archive(self._root, change)
+
+
+def _now_iso8601() -> str:
+    """Return the current UTC timestamp in RFC 3339 / ISO 8601 form."""
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _compute_scope_digest(root: Path, change: str, *, gate: str) -> str:
+    """Return the gate-specific scope fingerprint, length-delimited and hashed.
+
+    Implementation scope covers the complete PRD, applicable design,
+    selected spec, effective risk, and the selected task *definition*
+    digest. Continuation scope is the implementation scope plus the
+    selected task *state* digest and the slice-validation bytes.
+
+    The bytes are concatenated with length prefixes so a path/content
+    boundary cannot collide and equality compares constant-time SHA-256
+    hex strings.
+    """
+    change_dir = _change_dir(root, change)
+    delivery = read_prd_delivery(change_dir / "prd.md")
+    if delivery.mode != "sliced":
+        raise ChangeStoreError("Scope fingerprinting requires a sliced PRD.")
+
+    capability = _select_capability_for_gate(delivery, gate)
+    spec_path = change_dir / f"specs/{capability.id}.md"
+
+    parts: list[bytes] = []
+    parts.append(_label_bytes("capability"))
+    parts.append(capability.id.encode("utf-8"))
+    parts.append(_label_bytes("gate"))
+    parts.append(gate.encode("utf-8"))
+    parts.append(_label_bytes("prd"))
+    parts.append((change_dir / "prd.md").read_bytes() if (change_dir / "prd.md").is_file() else b"")
+    parts.append(_label_bytes("risk"))
+    parts.append(_risk_bytes(compute_effective_risk(capability)))
+
+    design_bytes = _applicable_design_bytes(change_dir, capability)
+    parts.append(_label_bytes("design"))
+    parts.append(design_bytes)
+
+    parts.append(_label_bytes("spec"))
+    parts.append(spec_path.read_bytes() if spec_path.is_file() else b"")
+
+    cap_state = task_capability_state(root, change, spec_path.relative_to(root).as_posix())
+    parts.append(_label_bytes("task_definition_digest"))
+    parts.append(cap_state.definitionDigest.encode("utf-8"))
+
+    if gate == "continuation":
+        parts.append(_label_bytes("task_state_digest"))
+        parts.append(cap_state.stateDigest.encode("utf-8"))
+        validation_path = change_dir / f"validations/{capability.id}.md"
+        parts.append(_label_bytes("validation"))
+        parts.append(validation_path.read_bytes() if validation_path.is_file() else b"")
+
+    return hash_scope_digest(tuple(parts))
+
+
+def _select_capability_for_gate(delivery: PrdDelivery, gate: str) -> Capability:
+    """Return the capability the gate applies to.
+
+    For task 4 the router always gates the first capability; task 5
+    introduces continuation capability skipping. The shared invariant
+    is that the approval scope covers exactly one capability, never
+    arbitrary caller input.
+    """
+    if not delivery.capabilities:
+        raise ChangeStoreError("Cannot approve without at least one capability.")
+    return delivery.capabilities[0]
+
+
+def _applicable_design_bytes(change_dir: Path, capability: Capability) -> bytes:
+    """Read the change-wide or slice-scoped design bytes for the capability."""
+    if capability.design == "change":
+        design_file = change_dir / "design.md"
+    elif capability.design == "slice":
+        design_file = change_dir / "designs" / f"{capability.id}.md"
+    else:
+        return b""
+    return design_file.read_bytes() if design_file.is_file() else b""
+
+
+def _risk_bytes(risk: RiskAssessment) -> bytes:
+    """Serialize a :class:`RiskAssessment` to bytes for the scope digest."""
+    parts = [
+        risk.declaredLevel.encode("utf-8"),
+        risk.effectiveLevel.encode("utf-8"),
+        risk.designScope.encode("utf-8"),
+        b"\x00".join(reason.encode("utf-8") for reason in risk.reasons),
+    ]
+    return b"\x00".join(parts)
+
+
+def _label_bytes(label: str) -> bytes:
+    """Encode a digest segment label."""
+    return label.encode("utf-8")
 
 
 def _archive_preflight(root: Path, change: str) -> list[str]:
