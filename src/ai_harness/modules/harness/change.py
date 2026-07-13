@@ -58,6 +58,7 @@ the FSM without re-implementing the rules.
 
 from __future__ import annotations
 
+import re
 import shutil
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -649,10 +650,10 @@ def _derive_slice_status(
             progress,
         )
 
-    # There is another capability to plan, so select it now (without
-    # requiring its future artifacts). The route naturally falls to
-    # ``design`` or ``specs`` based on what already exists for that
-    # next capability.
+        # There is another capability to plan, so select it now (without
+        # requiring its future artifacts). The route naturally falls to
+        # ``design`` or ``specs`` based on what already exists for that
+        # next capability.
         return _route_next_capability(
             delivery,
             next_selected,
@@ -1359,6 +1360,13 @@ def _archive_preflight(root: Path, change: str) -> list[str]:
     Returns an empty list when every precondition holds. Multiple errors
     are collected so the CLI can surface them all at once instead of
     forcing the user to retry one failure at a time.
+
+    Direct archive calls RE-compute all eligibility facts from disk so
+    previously-archived routes cannot smuggle incomplete work into the
+    archive folder. Sliced changes additionally require every PRD
+    capability to have a valid continuation approval, its tasks to be
+    complete, and the root ``validation.md`` to be newer than the
+    latest continuation approval.
     """
     errors: list[str] = []
     change_dir = _change_dir(root, change)
@@ -1371,14 +1379,18 @@ def _archive_preflight(root: Path, change: str) -> list[str]:
 
     try:
         progress = task_progress(root, change)
-        if not progress.allComplete:
-            errors.append(f"Cannot archive: tasks are incomplete ({progress.completed}/{progress.total} done)")
+        if not progress.allComplete or progress.total == 0:
+            errors.append(
+                f"Cannot archive: tasks are incomplete or empty ({progress.completed}/{progress.total} complete)"
+            )
     except TaskStoreError as exc:
         errors.append(f"Cannot read task progress: {exc}")
 
     validation = change_dir / "validation.md"
     if not validation.is_file():
         errors.append(f"Validation artifact missing: {validation}")
+
+    _evaluate_sliced_preflight(root, change, change_dir, errors)
 
     specs_dest = _specs_archive_dir(root, change)
     if specs_dest.exists():
@@ -1389,6 +1401,102 @@ def _archive_preflight(root: Path, change: str) -> list[str]:
         errors.append(f"Archive destination already exists: {archive_dest}")
 
     return errors
+
+
+def _evaluate_sliced_preflight(
+    root: Path,
+    change: str,
+    change_dir: Path,
+    errors: list[str],
+) -> None:
+    """Add sliced archive preflight errors in-place; never raises.
+
+    Reads the PRD ``changeFlow`` block directly so the archive check
+    never trusts a cached slice-status payload. Sliced mode adds these
+    checks on top of the legacy preconditions: every capability must
+    have a valid continuation approval, its tasks must be complete,
+    its slice validation must remain present, and the root
+    ``validation.md`` must be newer than the latest continuation
+    approval.
+    """
+    delivery = read_prd_delivery(change_dir / "prd.md")
+    if delivery.mode != "sliced":
+        return  # Legacy mode already covered by the base preflight.
+
+    if delivery.mode == "blocked":
+        errors.append(f"Sliced PRD metadata is invalid: {delivery.error or 'unspecified'}")
+        return
+
+    approvals, approval_error = _safe_read_approvals(change_dir)
+    if approval_error is not None:
+        errors.append(f"Cannot read approvals.json: {approval_error}")
+        approvals = ()
+
+    completion_approval_time: str | None = None
+    for capability in delivery.capabilities:
+        continuation_state = _approval_state_for_gate(approvals, "continuation", capability.id, root, change)
+        slice_validation = change_dir / f"validations/{capability.id}.md"
+        cap_state = _read_capability_state(root, change_dir, capability)
+        if not _non_empty_file(slice_validation):
+            errors.append(
+                f"Sliced capability {capability.id!r} is missing its slice validation "
+                f"({slice_validation.relative_to(change_dir)})."
+            )
+        if not cap_state.taskIds:
+            errors.append(
+                f"Sliced capability {capability.id!r} has no associated task set; an empty task set is not archiveable."
+            )
+        elif not cap_state.progress.allComplete:
+            errors.append(
+                f"Sliced capability {capability.id!r} has incomplete tasks "
+                f"({cap_state.progress.completed}/{cap_state.progress.total} complete)."
+            )
+        if continuation_state != "valid":
+            errors.append(
+                f"Sliced capability {capability.id!r} lacks a valid continuation "
+                "approval; archive preflight requires every capability to be reviewed."
+            )
+        else:
+            for record in approvals:
+                if record.capabilityId == capability.id and record.gate == "continuation":
+                    if completion_approval_time is None or record.approvedAt > completion_approval_time:
+                        completion_approval_time = record.approvedAt
+
+    root_validation = change_dir / "validation.md"
+    if not _non_empty_file(root_validation):
+        errors.append("Root validation.md is missing — slice validations never substitute for it.")
+    elif completion_approval_time is not None:
+        match = re.match(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})Z$", completion_approval_time)
+        if match is None:
+            errors.append("Latest continuation approval timestamp is malformed; re-approve to refresh.")
+        elif root_validation.stat().st_mtime <= _iso_to_epoch(match.group(1)):
+            errors.append("Root validation.md is older than the latest continuation approval.")
+
+
+def _approval_state_for_gate(
+    approvals: tuple[ApprovalRecord, ...],
+    gate: str,
+    capability_id: str,
+    root: Path,
+    change: str,
+) -> str:
+    """Return only the :class:`ApprovalStatus.state` for a gate.
+
+    Archive preflight does not need the gate label, only the validity
+    string. This wrapper keeps the splice free of dataclass imports
+    and avoids recomputing the scope digest for every capability.
+    """
+    matching = [record for record in approvals if record.gate == gate and record.capabilityId == capability_id]
+    if not matching:
+        return "required"
+
+    latest = matching[-1]
+    try:
+        current_digest = _compute_scope_digest(root, change, gate=gate)
+    except (ChangeStoreError, OSError):
+        return "stale"
+
+    return "valid" if current_digest == latest.scopeDigest else "stale"
 
 
 def _archive_move(root: Path, change: str) -> None:
