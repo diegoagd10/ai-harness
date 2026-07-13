@@ -15,6 +15,7 @@ from ai_harness.modules.harness.operations import (
     uninstall_for_agent_clis,
 )
 from ai_harness.modules.harness.tasks import (
+    CapabilityTaskState,
     Subtask,
     SubtaskInput,
     Task,
@@ -22,6 +23,7 @@ from ai_harness.modules.harness.tasks import (
     TaskInput,
     TaskProgress,
     TaskStoreError,
+    task_capability_state,
     task_create,
     task_done,
     task_list,
@@ -39,6 +41,7 @@ from ai_harness.modules.harness.worktree import (
 
 __all__ = [
     "AgentCli",
+    "CapabilityTaskState",
     "ChangeStatus",
     "ChangeStoreError",
     "InitResult",
@@ -58,6 +61,7 @@ __all__ = [
     "change_new",
     "init_repo",
     "install_for_agent_clis",
+    "task_capability_state",
     "task_create",
     "task_done",
     "task_list",

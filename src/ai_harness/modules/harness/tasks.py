@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 from dataclasses import dataclass, replace
 from json import JSONDecodeError
 from pathlib import Path
@@ -11,6 +13,7 @@ from typing import Any
 TaskId = str
 TaskStatus = str
 _VALID_STATUSES = {"pending", "done"}
+_CAPABILITY_SPEC_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
 class TaskStoreError(RuntimeError):
@@ -67,6 +70,29 @@ class TaskProgress:
     completed: int
     pending: int
     allComplete: bool
+
+
+@dataclass(frozen=True, slots=True)
+class CapabilityTaskState:
+    """View a single capability's task slice for the router.
+
+    The lifecycle router asks for this when deriving a capability's
+    implementation or continuation fingerprint, ordering, or completion
+    without parsing :mod:`tasks.json` itself. ``progress`` counts only
+    associated tasks, ``taskIds`` preserves insertion order so the router
+    can iterate deterministically, and the digests give scope-editing
+    detection without leaking raw task bytes to the caller.
+
+    ``definitionDigest`` covers selected task IDs, titles, canonical spec
+    references, phases, dependencies, and subtask IDs/titles/scenarios,
+    but excludes task statuses. ``stateDigest`` adds statuses on top so a
+    normal pending→done transition invalidates only the state side.
+    """
+
+    progress: TaskProgress
+    taskIds: list[TaskId]
+    definitionDigest: str
+    stateDigest: str
 
 
 def task_create(root: Path, change: str, task_input: TaskInput) -> Task:
@@ -164,6 +190,68 @@ def task_progress(root: Path, change: str) -> TaskProgress:
     completed = sum(1 for task in tasks if task.status == "done")
     pending = len(tasks) - completed
     return TaskProgress(total=len(tasks), completed=completed, pending=pending, allComplete=pending == 0)
+
+
+def task_capability_state(root: Path, change: str, spec_reference: str) -> CapabilityTaskState:
+    """Return the capability task view for a single PRD capability.
+
+    Accepts the legacy task spec forms ``<id>``, ``<id>.md``,
+    ``specs/<id>.md`` and any absolute/relative ``specs/<id>.md`` path
+    whose tail matches the canonical ``specs/<id>.md`` shape. Unsafe
+    references (absolute paths, parent traversal, nested spec paths,
+    empty IDs, or references to a different capability) silently leave
+    the task unassociated; the router receives a ``CapabilityTaskState``
+    filtered to safe, matching associations plus stable digests.
+
+    Raises :class:`TaskStoreError` only when the underlying tasks store
+    is unreadable, so the seam surfaces a uniform error type when
+    tasks.json is missing, malformed, or otherwise invalid for the
+    change directory.
+    """
+    canonical_spec = _canonicalize_task_spec(spec_reference)
+    try:
+        tasks = _read_tasks(root, change)
+    except TaskStoreError:
+        # Preserve TaskStoreError semantics; only swallow the missing-
+        # change-dir case so the router can ask for the slice of a new
+        # change before tasks.json exists.
+        if not (root / ".ai-harness" / "changes" / change).is_dir():
+            return _empty_capability_state()
+        raise
+    if not (root / ".ai-harness" / "changes" / change).is_dir():
+        return _empty_capability_state()
+
+    if canonical_spec is None:
+        associated = []
+        canonical_for_digest = None
+    else:
+        # Tasks.json stores the raw ``Task.spec`` input, which can be any of
+        # the supported legacy forms. Canonicalize both sides so association
+        # is independent of the form used at task creation time.
+        associated = [task for task in tasks if _canonicalize_task_spec(task.spec) == canonical_spec]
+        canonical_for_digest = canonical_spec
+
+    ordered_ids = [task.id for task in associated]
+    completed = sum(1 for task in associated if task.status == "done")
+    total = len(associated)
+    progress = TaskProgress(
+        total=total,
+        completed=completed,
+        pending=total - completed,
+        # Empty selection is vacuously complete; non-empty selection
+        # is complete only when every selected task is done. This
+        # matches ``task_progress`` semantics so the router sees one
+        # invariant across both seams.
+        allComplete=(total == 0) or (completed == total),
+    )
+
+    definition_digest, state_digest = _capability_digests(associated, canonical_for_digest)
+    return CapabilityTaskState(
+        progress=progress,
+        taskIds=ordered_ids,
+        definitionDigest=definition_digest,
+        stateDigest=state_digest,
+    )
 
 
 def _read_tasks(root: Path, change: str) -> list[Task]:
@@ -338,3 +426,129 @@ def _expect_str_list(raw: dict[str, Any], key: str) -> list[str]:
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
         raise TaskStoreError(f"Malformed tasks.json: {key} must be a list of strings")
     return list(value)
+
+
+def _canonicalize_task_spec(spec_reference: str) -> str | None:
+    """Return ``specs/<id>.md`` or ``None`` for unsafe references.
+
+    Supported forms: ``<id>``, ``<id>.md``, ``specs/<id>.md``. Every
+    variant must lower-case, kebab-case the identifier, and emit the
+    canonical ``specs/<id>.md`` tail so association is order- and
+    path-separator independent.
+
+    Returns ``None`` for empty, absolute, parent-traversing, nested,
+    missing-extension, or otherwise malformed spec references. Callers
+    treat ``None`` as an unambiguous "do not associate" signal without
+    raising — the router needs a diagnostic, not an exception.
+    """
+    if not isinstance(spec_reference, str):
+        return None
+    candidate = spec_reference.strip()
+    if not candidate:
+        return None
+    if candidate != spec_reference.replace("\x00", ""):
+        return None  # Defensive: caller-injected NUL stays unsafe.
+
+    # Reject absolute paths, including Windows-style roots.
+    if candidate.startswith(("/", "\\")) or re.match(r"^[A-Za-z]:[\\/]", candidate):
+        return None
+    # Reject parent traversal regardless of platform separator.
+    if ".." in Path(candidate).parts:
+        return None
+    # Strip the legacy prefix variants if present so the remainder is just an id.
+    suffix = candidate
+    if suffix.startswith("specs/") or suffix.startswith("specs" + "\\"):
+        suffix = suffix.split("/", 1)[-1].split("\\", 1)[-1]
+
+    # Now ``suffix`` is either ``<id>`` or ``<id>.md``.
+    if suffix.endswith(".md"):
+        suffix = suffix[: -len(".md")]
+
+    if not suffix or not _CAPABILITY_SPEC_PATTERN.match(suffix):
+        return None
+
+    # ``Path("nested/spec")`` parts already guarantee no further nesting
+    # at this point, but add one final guard against anything that
+    # would re-introduce a slash via the original string.
+    if "/" in suffix or "\\" in suffix:
+        return None
+
+    return f"specs/{suffix}.md"
+
+
+def _capability_digests(tasks: list[Task], canonical_spec: str | None) -> tuple[str, str]:
+    """Return length-delimited ``definitionDigest`` and ``stateDigest``.
+
+    ``definitionDigest`` excludes task statuses so ordinary completion
+    does not invalidate the implementation approval. ``stateDigest``
+    includes statuses so a continuation fingerprint flips when a slice
+    is re-validated or a task moves pending→done.
+
+    The digests use the *canonical* spec reference per task (not the raw
+    stored value) so two stores created with different legacy input
+    forms (``<id>`` vs ``specs/<id>.md``) produce identical digests.
+
+    The digests are length-delimited so path/content boundaries cannot
+    collide and equality compares constant-time-stable SHA-256 hex
+    strings.
+    """
+    definition_lines: list[str] = []
+    state_lines: list[str] = []
+    if canonical_spec is not None:
+        definition_lines.append(_digest_segment("spec", canonical_spec))
+    for task in tasks:
+        task_canonical_spec = _canonicalize_task_spec(task.spec) or ""
+        definition_lines.append(_digest_segment("id", task.id))
+        definition_lines.append(_digest_segment("title", task.title))
+        definition_lines.append(_digest_segment("spec", task_canonical_spec))
+        definition_lines.append(_digest_segment("phase", task.phase))
+        definition_lines.append(_digest_segment("depends", ",".join(task.depends_on)))
+        for subtask in task.subtasks:
+            definition_lines.append(_digest_segment("sub", subtask.id))
+            definition_lines.append(_digest_segment("stitle", subtask.title))
+            definition_lines.append(_digest_segment("scen", subtask.scenario or ""))
+        state_lines.append(_digest_segment("status", f"{task.id}:{task.status}"))
+    return (
+        _hash_segments(definition_lines) if definition_lines else _hash_segments(["<empty>"]),
+        _hash_segments(state_lines) if state_lines else _hash_segments(["<empty>"]),
+    )
+
+
+def _digest_segment(label: str, value: str) -> str:
+    """Encode one field for the capability digest.
+
+    Returns ``"<label>\\x1f<length>\\x1f<value>"`` so two unrelated
+    fields cannot coalesce — both the label and a length prefix must
+    match for the lines to compare equal.
+    """
+    encoded_value = value.encode("utf-8")
+    return f"{label}\x1f{len(encoded_value)}\x1f{value}"
+
+
+def _hash_segments(lines: list[str]) -> str:
+    """Hash length-delimited concatenated segments with SHA-256.
+
+    Each line is prefixed with its own UTF-8 byte length so boundaries
+    are unambiguous regardless of value content (paths, titles, JSON
+    fragments, etc.). Hashing is consistent across processes because
+    every input is bytes-derived and ordered.
+    """
+    buffer = bytearray()
+    for line in lines:
+        encoded = line.encode("utf-8")
+        buffer.extend(str(len(encoded)).encode("ascii"))
+        buffer.extend(b":")
+        buffer.extend(encoded)
+        buffer.extend(b"\n")
+    return "sha256:" + hashlib.sha256(bytes(buffer)).hexdigest()
+
+
+def _empty_capability_state() -> CapabilityTaskState:
+    """Return a deterministic empty slice view for missing-change queries."""
+    progress = TaskProgress(total=0, completed=0, pending=0, allComplete=True)
+    return CapabilityTaskState(
+        progress=progress,
+        taskIds=[],
+        definitionDigest=_hash_segments(["<empty>"]),
+        stateDigest=_hash_segments(["<empty>"]),
+    )
