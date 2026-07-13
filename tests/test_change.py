@@ -36,7 +36,7 @@ def test_change_new_scaffolds_fresh_change_status(tmp_path: Path) -> None:
 
     assert (tmp_path / ".ai-harness" / "changes" / "demo").is_dir()
     assert status.schemaName == "ai-harness.change-status"
-    assert status.schemaVersion == 2
+    assert status.schemaVersion == 3
     assert status.changeName == "demo"
     assert status.artifacts == {
         "explore": "missing",
@@ -68,7 +68,7 @@ def test_change_status_serializes_populated_config_context_as_json_object() -> N
     )
     status = ChangeStatus(
         schemaName="ai-harness.change-status",
-        schemaVersion=2,
+        schemaVersion=3,
         changeName="auth-rework",
         changeRoot=".ai-harness/changes/auth-rework",
         artifactPaths={"prd": [".ai-harness/changes/auth-rework/prd.md"]},
@@ -84,7 +84,7 @@ def test_change_status_serializes_populated_config_context_as_json_object() -> N
 
     serialized = json.loads(json.dumps(asdict(status)))
 
-    assert serialized["schemaVersion"] == 2
+    assert serialized["schemaVersion"] == 3
     assert serialized["nextRecommended"] == "prd"
     assert serialized["configContext"] == {
         "phase": "change_propose",
@@ -103,7 +103,7 @@ def test_change_status_serializes_empty_rules_as_json_array() -> None:
     )
     status = ChangeStatus(
         schemaName="ai-harness.change-status",
-        schemaVersion=2,
+        schemaVersion=3,
         changeName="demo",
         changeRoot=".ai-harness/changes/demo",
         artifactPaths={"exploration": []},
@@ -133,7 +133,7 @@ def test_change_status_preserves_ordered_rules_in_source_order() -> None:
     )
     status = ChangeStatus(
         schemaName="ai-harness.change-status",
-        schemaVersion=2,
+        schemaVersion=3,
         changeName="demo",
         changeRoot=".ai-harness/changes/demo",
         artifactPaths={"prd": []},
@@ -159,7 +159,7 @@ def test_change_status_keeps_phase_instructions_alongside_config_context() -> No
     )
     status = ChangeStatus(
         schemaName="ai-harness.change-status",
-        schemaVersion=2,
+        schemaVersion=3,
         changeName="demo",
         changeRoot=".ai-harness/changes/demo",
         artifactPaths={"prd": []},
@@ -180,14 +180,14 @@ def test_change_status_keeps_phase_instructions_alongside_config_context() -> No
 
 
 def test_cli_change_new_status_includes_null_config_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The CLI version-2 status JSON for ``change-new`` exposes configContext as null."""
+    """The CLI version-3 status JSON for ``change-new`` exposes configContext as null."""
     monkeypatch.chdir(tmp_path)
 
     result = runner.invoke(app, ["change-new", "demo"])
 
     assert result.exit_code == 0, result.stderr
     payload = json.loads(result.stdout)
-    assert payload["schemaVersion"] == 2
+    assert payload["schemaVersion"] == 3
     assert payload["configContext"] is None
 
 
@@ -744,7 +744,7 @@ def test_cli_change_continue_succeeds_with_only_warnings(tmp_path: Path, monkeyp
 
     assert result.exit_code == 0, result.stderr
     payload = json.loads(result.stdout)
-    assert payload["schemaVersion"] == 2
+    assert payload["schemaVersion"] == 3
     assert payload["configContext"] is not None
     assert payload["configContext"]["phase"] == "change_explorer"
 

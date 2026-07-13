@@ -7,6 +7,8 @@ from the artifact files on disk under ``.ai-harness/changes/<name>/``.
 The phases and their gating artifact filenames are the source of truth;
 add or remove an artifact file and the FSM transitions automatically.
 
+Legacy / global FSM (no ``changeFlow`` front matter):
+
 ::
 
     explore (exploration.md)
@@ -32,6 +34,21 @@ add or remove an artifact file and the FSM transitions automatically.
         v
     archive (move change folder into .ai-harness/archive/)
 
+Sliced FSM (PRD declares ``changeFlow`` with ordered capabilities):
+
+::
+
+    sliced design<capability>.md -> specs/<capability>.md
+            -> tasks.json (filtered by canonical spec)
+            -> implement -> validations/<capability>.md
+            -> review-slice (approval gate)
+            -> next capability or final validation -> archive
+
+Rich slice routes are projected onto the existing ``nextRecommended``
+phase tokens at the serializer boundary so older consumers see a
+schema-v2-compatible surface; the additive ``sliceStatus`` field
+carries the slice-aware truth for new consumers.
+
 Each transition is gated by the artifact for the *next* phase being
 present and unblocked — ``_derive_status`` walks the phase order,
 aggregates ``TaskProgress`` from ``tasks.json``, and emits
@@ -47,15 +64,26 @@ from pathlib import Path
 
 from ai_harness.modules.change_config import ChangeConfigAdministrator, ChangeConfigError
 from ai_harness.modules.change_config.models import ChangeConfigPromptContext
-from ai_harness.modules.harness.tasks import TaskProgress, TaskStoreError, task_progress
+from ai_harness.modules.harness.change_flow import (
+    Capability,
+    RiskAssessment,
+    compute_effective_risk,
+    read_prd_delivery,
+)
+from ai_harness.modules.harness.tasks import (
+    TaskProgress,
+    TaskStoreError,
+    task_progress,
+)
 
 _PHASES = ("explore", "prd", "design", "specs", "tasks", "implement", "validate", "archive")
 _SCHEMA_NAME = "ai-harness.change-status"
-# Schema version 2 introduces the additive nullable ``configContext``
-# field. Version 1 omitted that field entirely; consumers rely on the
-# numeric version to detect the additive shape rather than silently
-# receiving a changed schema.
-_SCHEMA_VERSION = 2
+# Schema version 3 introduces the additive nullable ``sliceStatus`` field
+# carrying slice-aware routing and selected/next capability refs. Version 2
+# added the nullable ``configContext`` field; version 1 omitted both.
+# Consumers rely on the numeric version to detect the additive shape
+# rather than silently receiving a changed schema.
+_SCHEMA_VERSION = 3
 _ARTIFACT_FILENAMES = {
     "exploration": "exploration.md",
     "prd": "prd.md",
@@ -82,16 +110,73 @@ class ChangeStoreError(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
+class CapabilityRef:
+    """A capability pointer in ``sliceStatus``.
+
+    ``ordinal`` is the one-based PRD order, so consumers can render
+    "Capability 1 of 3" without re-parsing the PRD.
+    """
+
+    id: str
+    ordinal: int
+    title: str
+
+
+@dataclass(frozen=True, slots=True)
+class ApprovalStatus:
+    """The currently-pending human gate and its state.
+
+    ``gate`` is ``"implementation"`` (effective high-risk capabilities)
+    or ``"continuation"`` (capability-bound review). ``state`` reports
+    whether the gate is required, present, or stale. ``null`` gates
+    mean no human decision is needed.
+    """
+
+    gate: str | None  # "implementation" | "continuation" | null
+    state: str  # "not-required" | "required" | "valid" | "stale"
+
+
+@dataclass(frozen=True, slots=True)
+class SliceStatus:
+    """The additive slice-aware status (schema v3).
+
+    ``mode`` discriminates legacy (no sliced front matter) from sliced
+    or blocked. ``route`` is the rich slice token; ``nextRecommended``
+    on :class:`ChangeStatus` is its safe projection for legacy
+    consumers. ``currentCapability`` and ``nextCapability`` are
+    non-null whenever a sliced or blocked delivery can identify the
+    work in scope; both are null in legacy mode and for one-capability
+    changes that have no successor.
+
+    ``taskProgress`` mirrors the global ``taskProgress``; this duplicate
+    is intentional so a route caller never needs to re-derive progress.
+    ``completedCapabilities`` is the ordered list of capability IDs the
+    router has accepted as complete in this derivation pass — it is
+    never persisted across invocations.
+    """
+
+    mode: str  # "sliced" | "legacy" | "blocked"
+    route: str
+    currentCapability: CapabilityRef | None
+    nextCapability: CapabilityRef | None
+    completedCapabilities: tuple[str, ...]
+    specPath: str | None
+    designPath: str | None
+    validationPath: str | None
+    taskProgress: TaskProgress
+    risk: RiskAssessment | None
+    approval: ApprovalStatus
+
+
+@dataclass(frozen=True, slots=True)
 class ChangeStatus:
     """Represent the derived file-backed state for one change.
 
-    Schema version 2 adds the final nullable ``configContext`` field
-    holding the routed phase's :class:`ChangeConfigPromptContext`, or
-    ``None`` when no phase context is required (``change-new``, or any
-    ``change-continue`` whose ``nextRecommended`` is the synthetic
-    ``resolve-blockers`` token). Existing v1 fields retain their order,
-    name, type, and meaning; this dataclass is still serialized to JSON
-    via the existing :func:`dataclasses.asdict` CLI edge.
+    Schema version 3 appends the additive nullable ``sliceStatus``
+    field while every v2 field (including ``configContext``) retains
+    its order, name, type, and meaning. Legacy consumers can ignore
+    ``sliceStatus``; sliced-aware consumers read slice status directly
+    and rely on ``nextRecommended`` for the projected legacy token.
     """
 
     schemaName: str
@@ -107,6 +192,7 @@ class ChangeStatus:
     nextRecommended: str
     blockedReasons: list[str]
     configContext: ChangeConfigPromptContext | None
+    sliceStatus: SliceStatus | None = None
 
 
 def change_new(root: Path, change: str) -> ChangeStatus:
@@ -188,6 +274,17 @@ def _derive_status(root: Path, change: str) -> ChangeStatus:
     artifacts = _artifact_statuses(artifact_paths)
     dependencies = _dependencies(artifacts, progress)
 
+    # Slice-aware derivation. Legacy mode (no sliced front matter) falls
+    # back to a ``legacy`` slice status whose ``route`` mirrors the
+    # projected ``nextRecommended`` token. Sliced or blocked deliveries
+    # produce rich routes that the projector below maps back to the
+    # existing phase tokens so older consumers see no change.
+    slice_status, blocked_reasons = _derive_slice_status(root, change, change_dir, progress)
+    next_recommended = _project_slice_route_to_next_recommended(
+        slice_status.route,
+        fallback=_next_recommended(artifacts, dependencies),
+    )
+
     return ChangeStatus(
         schemaName=_SCHEMA_NAME,
         schemaVersion=_SCHEMA_VERSION,
@@ -199,9 +296,10 @@ def _derive_status(root: Path, change: str) -> ChangeStatus:
         dependencies=dependencies,
         relationships={"parent": None, "siblings": [], "children": []},
         phaseInstructions=None,
-        nextRecommended=_next_recommended(artifacts, dependencies),
-        blockedReasons=[],
+        nextRecommended=next_recommended,
+        blockedReasons=blocked_reasons,
         configContext=None,
+        sliceStatus=slice_status,
     )
 
 
@@ -288,6 +386,311 @@ def _next_recommended(artifacts: dict[str, str], dependencies: dict[str, str]) -
     for phase in _PHASES:
         if artifacts[phase] == "missing" and dependencies[phase] == "ready":
             return phase
+    return "resolve-blockers"
+
+
+# ---------------------------------------------------------------------------
+# Slice-aware status derivation (schema v3, additive only)
+# ---------------------------------------------------------------------------
+
+
+_LEGACY_BLOCKED_REASONS: tuple[str, ...] = ()
+# Slice routes that DO NOT have a legacy equivalent and therefore
+# project to ``resolve-blockers`` so older consumers always receive a
+# known token. Every other rich route maps verbatim onto a legacy phase
+# token (see ``_project_slice_route_to_next_recommended``).
+_HUMAN_GATE_SLICE_ROUTES = frozenset({"review-slice", "approve-implementation"})
+_VALIDATION_SLICE_ROUTES = frozenset({"validate-slice", "final-validate"})
+
+
+def _derive_slice_status(
+    root: Path,
+    change: str,
+    change_dir: Path,
+    progress: TaskProgress,
+) -> tuple[SliceStatus, list[str]]:
+    """Compute the additive ``SliceStatus`` for a change.
+
+    Returns a tuple of the slice status and any human-readable
+    ``blockedReasons`` callers should carry through. ``blockedReasons``
+    is populated only for malformed metadata or required human gates;
+    valid routes leave it empty so existing callers see no behavioral
+    change.
+    """
+    prd_path = change_dir / "prd.md"
+    delivery = read_prd_delivery(prd_path)
+
+    if delivery.mode == "blocked":
+        return _blocked_slice_status(delivery.error or "Sliced PRD metadata is invalid."), (
+            [delivery.error] if delivery.error else ["Sliced PRD metadata is invalid."]
+        )
+
+    if delivery.mode == "legacy":
+        return _legacy_slice_status(), []
+
+    # Sliced delivery: walk the first capability without a valid
+    # continuation approval. For task 3 we always select the first
+    # capability; task 5 adds continuation approval filtering.
+    first_capability = delivery.capabilities[0]
+    next_capability = delivery.capabilities[1] if len(delivery.capabilities) > 1 else None
+    current_ref = _capability_ref_from(first_capability)
+    next_ref = _capability_ref_from(next_capability) if next_capability else None
+
+    risk = compute_effective_risk(first_capability)
+    # The first-capability check is intentionally limited to basic
+    # review; deeper continuation selection belongs to task 5.
+    approval = _approval_for_first_slice()
+    spec_path, design_path, validation_path = _capability_artifact_paths(first_capability)
+
+    if risk.changeWideDesignRequired and not _non_empty_file(change_dir / "design.md"):
+        # Elevated risk requires a change-wide design first.
+        return (
+            _build_slice_status(
+                mode="sliced",
+                route="design",
+                current=current_ref,
+                next_capability=next_ref,
+                spec_path=spec_path,
+                design_path="design.md",
+                validation_path=validation_path,
+                progress=progress,
+                risk=risk,
+                approval=ApprovalStatus(gate="implementation", state="required"),
+            ),
+            ["Change-wide design is required before planning can proceed."],
+        )
+
+    if first_capability.design == "slice" and not _non_empty_file(change_dir / design_path):
+        return (
+            _build_slice_status(
+                mode="sliced",
+                route="design",
+                current=current_ref,
+                next_capability=next_ref,
+                spec_path=spec_path,
+                design_path=design_path,
+                validation_path=validation_path,
+                progress=progress,
+                risk=risk,
+                approval=approval,
+            ),
+            [],
+        )
+
+    if not _non_empty_file(change_dir / spec_path):
+        return (
+            _build_slice_status(
+                mode="sliced",
+                route="specs",
+                current=current_ref,
+                next_capability=next_ref,
+                spec_path=spec_path,
+                design_path=design_path,
+                validation_path=validation_path,
+                progress=progress,
+                risk=risk,
+                approval=approval,
+            ),
+            [],
+        )
+
+    # Tasks gating: zero associated tasks (per spec reference) routes
+    # to ``tasks``.
+    cap_state = _read_capability_state(root, change_dir, first_capability)
+    if not cap_state.taskIds:
+        return (
+            _build_slice_status(
+                mode="sliced",
+                route="tasks",
+                current=current_ref,
+                next_capability=next_ref,
+                spec_path=spec_path,
+                design_path=design_path,
+                validation_path=validation_path,
+                progress=progress,
+                risk=risk,
+                approval=approval,
+            ),
+            [],
+        )
+
+    if not cap_state.progress.allComplete:
+        return (
+            _build_slice_status(
+                mode="sliced",
+                route="implement",
+                current=current_ref,
+                next_capability=next_ref,
+                spec_path=spec_path,
+                design_path=design_path,
+                validation_path=validation_path,
+                progress=progress,
+                risk=risk,
+                approval=approval,
+            ),
+            [],
+        )
+
+    if not _non_empty_file(change_dir / validation_path):
+        return (
+            _build_slice_status(
+                mode="sliced",
+                route="validate-slice",
+                current=current_ref,
+                next_capability=next_ref,
+                spec_path=spec_path,
+                design_path=design_path,
+                validation_path=validation_path,
+                progress=progress,
+                risk=risk,
+                approval=approval,
+            ),
+            [],
+        )
+
+    return (
+        _build_slice_status(
+            mode="sliced",
+            route="review-slice",
+            current=current_ref,
+            next_capability=next_ref,
+            spec_path=spec_path,
+            design_path=design_path,
+            validation_path=validation_path,
+            progress=progress,
+            risk=risk,
+            approval=ApprovalStatus(gate="continuation", state="required"),
+        ),
+        [],
+    )
+
+
+def _legacy_slice_status() -> SliceStatus:
+    """Return a legacy-mode slice status.
+
+    Legacy mode intentionally carries no current/next capability and
+    routes to the ``legacy`` token; the projector turns that into the
+    existing global ``nextRecommended`` token.
+    """
+    return SliceStatus(
+        mode="legacy",
+        route="legacy",
+        currentCapability=None,
+        nextCapability=None,
+        completedCapabilities=(),
+        specPath=None,
+        designPath=None,
+        validationPath=None,
+        taskProgress=TaskProgress(total=0, completed=0, pending=0, allComplete=True),
+        risk=None,
+        approval=ApprovalStatus(gate=None, state="not-required"),
+    )
+
+
+def _blocked_slice_status(error: str) -> SliceStatus:
+    """Return a blocked-mode slice status carrying no capability pointer."""
+    return SliceStatus(
+        mode="blocked",
+        route="resolve-blockers",
+        currentCapability=None,
+        nextCapability=None,
+        completedCapabilities=(),
+        specPath=None,
+        designPath=None,
+        validationPath=None,
+        taskProgress=TaskProgress(total=0, completed=0, pending=0, allComplete=True),
+        risk=None,
+        approval=ApprovalStatus(gate=None, state="required"),
+    )
+
+
+def _build_slice_status(
+    *,
+    mode: str,
+    route: str,
+    current: CapabilityRef | None,
+    next_capability: CapabilityRef | None,
+    spec_path: str | None,
+    design_path: str | None,
+    validation_path: str | None,
+    progress: TaskProgress,
+    risk: RiskAssessment | None,
+    approval: ApprovalStatus,
+) -> SliceStatus:
+    """Construct a slice status with a stable field order."""
+    return SliceStatus(
+        mode=mode,
+        route=route,
+        currentCapability=current,
+        nextCapability=next_capability,
+        completedCapabilities=(),
+        specPath=spec_path,
+        designPath=design_path,
+        validationPath=validation_path,
+        taskProgress=progress,
+        risk=risk,
+        approval=approval,
+    )
+
+
+def _capability_ref_from(capability: Capability | None) -> CapabilityRef | None:
+    """Convert a parsed capability into a :class:`CapabilityRef`."""
+    if capability is None:
+        return None
+    return CapabilityRef(id=capability.id, ordinal=capability.ordinal, title=capability.title)
+
+
+def _capability_artifact_paths(capability: Capability) -> tuple[str, str, str]:
+    """Return ``(specPath, designPath, validationPath)`` for a capability."""
+    spec_path = f"specs/{capability.id}.md"
+    design_path = f"designs/{capability.id}.md"
+    validation_path = f"validations/{capability.id}.md"
+    return spec_path, design_path, validation_path
+
+
+def _non_empty_file(path: Path) -> bool:
+    """Return whether *path* is a regular file with at least one byte."""
+    if not path.is_file():
+        return False
+    try:
+        return path.stat().st_size > 0
+    except OSError:
+        return False
+
+
+def _approval_for_first_slice() -> ApprovalStatus:
+    """Default approval state for a never-approved first slice."""
+    return ApprovalStatus(gate=None, state="not-required")
+
+
+def _read_capability_state(root: Path, change_dir: Path, capability: Capability):
+    """Return the capability task state without leaking the seam to the router."""
+    # Lazy import keeps the slice module surface small at load time and
+    # avoids a circular dependency between ``change`` and ``tasks``.
+    from ai_harness.modules.harness.tasks import task_capability_state
+
+    spec_path = f"specs/{capability.id}.md"
+    return task_capability_state(root, change_dir.name, spec_path)
+
+
+def _project_slice_route_to_next_recommended(route: str, *, fallback: str) -> str:
+    """Project a rich slice route onto a legacy ``nextRecommended`` token.
+
+    Validation routes project to ``validate``. Human gates and the
+    blocked resolution token project to ``resolve-blockers`` so legacy
+    consumers never see a new token. All other actionable slice
+    routes map verbatim onto the legacy phase vocabulary. The
+    ``legacy`` slice route passes through ``fallback`` unchanged so a
+    legacy change keeps its existing recommendation logic.
+    """
+    if route == "legacy":
+        return fallback
+    if route in _HUMAN_GATE_SLICE_ROUTES:
+        return "resolve-blockers"
+    if route in _VALIDATION_SLICE_ROUTES:
+        return "validate"
+    if route in _PHASES:
+        return route
     return "resolve-blockers"
 
 
