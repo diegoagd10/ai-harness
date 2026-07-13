@@ -2331,9 +2331,10 @@ def test_change_orchestrator_body_documents_version_two_changestatus(cli: AgentC
     body = _native_change_orchestrator_body(cli, home=tmp_path)
 
     assert "configContext" in body, f"{cli}: configContext missing from orchestrator body"
-    assert "schema version 2" in body.lower() or "schemaversion: 2" in body.lower(), (
-        f"{cli}: schema version 2 not advertised in orchestrator body"
-    )
+    # Schema v3 is additive on v2 — the orchestrator advertises both
+    # versions so older and newer consumers can find their contract.
+    versioned = "schemaVersion: 2" in body or "schemaVersion: 3" in body
+    assert versioned, f"{cli}: schema version 2 or 3 not advertised in orchestrator body"
 
 
 @pytest.mark.parametrize("cli", _NATIVE_RENDERERS_PARITY)
@@ -2344,16 +2345,26 @@ def test_change_orchestrator_body_representative_prd_response_is_parseable(cli: 
 
     # The body embeds at least one JSON fenced code block. Extract every
     # fenced block whose info string is ``json`` (or absent) and try to
-    # parse the body until one matches the version-2 contract.
+    # parse the body until one matches the versioned contract.
     payload = _extract_change_continue_response(body)
     assert payload is not None, f"{cli}: orchestrator body missing a parseable ChangeStatus example"
 
-    assert payload["schemaVersion"] == 2
-    assert payload["nextRecommended"] == "prd"
-    assert payload["configContext"] == {
-        "phase": "change_propose",
-        "phase_rules": ["First rule", "Second rule"],
-    }
+    # Schema v3 is additive on v2; the embedding may advertise either.
+    assert payload["schemaVersion"] in (2, 3)
+    # Legacy form: actionable ``prd`` token with a populated
+    # ``configContext``. Sliced form: a nullable ``configContext``
+    # with a populated ``sliceStatus``. Both forms are valid
+    # advertising for the schema version.
+    if payload["schemaVersion"] == 2:
+        assert payload["nextRecommended"] == "prd"
+        assert payload["configContext"] == {
+            "phase": "change_propose",
+            "phase_rules": ["First rule", "Second rule"],
+        }
+    else:
+        assert payload["configContext"] is None
+        assert payload["sliceStatus"]["mode"] == "sliced"
+        assert payload["sliceStatus"]["approval"]["gate"] == "implementation"
 
 
 @pytest.mark.parametrize("cli", _NATIVE_RENDERERS_PARITY)
@@ -2398,10 +2409,10 @@ def test_change_orchestrator_body_requires_configcontext_forwarding(cli: AgentCl
 def test_change_orchestrator_expected_rendered_mirrors_source_version_two_contract(tmp_path: Path) -> None:
     """Task 4.3 — the checked-in rendered expectation mirrors the source prompt version-2 shape.
 
-    Both files must name ``configContext`` and ``schemaVersion: 2``
-    for the same routing example. A drift between source and rendered
-    expectation breaks the publish pipeline and silently regresses the
-    forwarding contract.
+    Both files must name ``configContext`` and ``schemaVersion: 2`` or
+    ``schemaVersion: 3`` (additive on v2) for the same routing example.
+    A drift between source and rendered expectation breaks the publish
+    pipeline and silently regresses the forwarding contract.
     """
     prompt_path = Path("src/ai_harness/resources/change-agent/change-orchestrator.md")
     expected_path = Path("expected/change-orchestrator.md")
@@ -2416,13 +2427,19 @@ def test_change_orchestrator_expected_rendered_mirrors_source_version_two_contra
     assert "configContext" in expected_body, "rendered expectation missing configContext"
 
     # Both must contain at least one parseable ChangeStatus example whose
-    # schemaVersion equals 2 and whose configContext matches the
-    # representative ``prd`` shape.
+    # schemaVersion is 2 or 3. Legacy v2 examples route ``prd`` with
+    # populated ``configContext``; v3 examples may show the sliced
+    # approval gate (``configContext: null`` + ``sliceStatus.approval``)
+    # — both forms are valid advertising for the schema contract.
     for label, body in (("source", prompt_body), ("expected", expected_body)):
         payload = _extract_change_continue_response(body)
         assert payload is not None, f"{label}: missing a parseable ChangeStatus example"
-        assert payload["schemaVersion"] == 2
-        assert payload["configContext"]["phase"] == "change_propose"
+        assert payload["schemaVersion"] in (2, 3)
+        if payload["schemaVersion"] == 2:
+            assert payload["configContext"]["phase"] == "change_propose"
+        else:
+            assert payload["configContext"] is None
+            assert payload["sliceStatus"]["mode"] == "sliced"
 
 
 def _strip_frontmatter(raw: str) -> str:
@@ -2440,11 +2457,12 @@ def _strip_frontmatter(raw: str) -> str:
 
 
 def _extract_change_continue_response(body: str) -> dict[str, object] | None:
-    """Return the first JSON object in *body* whose ``schemaVersion`` is 2.
+    """Return the first JSON object in *body* whose ``schemaVersion`` is 2 or 3.
 
     Scans fenced ``json`` (and unfenced) code blocks. Used by renderer
     parity tests to assert the embedded ``change-continue`` response
-    matches the public ``ChangeStatus`` dataclass shape.
+    matches the public ``ChangeStatus`` dataclass shape. Schema v3 is
+    additive on v2 so both representations are valid.
     """
     import json as _json
 
@@ -2495,7 +2513,7 @@ def _extract_change_continue_response(body: str) -> dict[str, object] | None:
                             break
                 start = candidate.find("{", start + 1)
             continue
-        if isinstance(parsed, dict) and parsed.get("schemaVersion") == 2:
+        if isinstance(parsed, dict) and parsed.get("schemaVersion") in (2, 3):
             return parsed
     return None
 

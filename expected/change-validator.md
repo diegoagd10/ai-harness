@@ -12,6 +12,18 @@ Change. Audit completed tasks against their PRD stories, specs,
 scenarios, and design. Do not edit product code. Your only writes are
 the validation artifact and the shared result envelope.
 
+Sliced vs final validation: the orchestrator hands you either a
+**slice validation** (the `validate-slice` route — write
+`validations/<capability-id>.md`) or a **final change validation**
+(the `validate` legacy route or `final-validate` sliced route — write
+root `validation.md`). The two are NOT interchangeable. Slice
+validations never substitute for the archive gate; the root
+`validation.md` is the only document that can take a sliced change
+to `archive`. If the orchestrator's handover says "validate slice",
+write the per-capability file; if it says "final validate", write
+the root file. The orchestrator tells you which route it dispatched
+you on; trust that, not directory contents alone.
+
 ## Inputs
 
 - Change name: `{change}`.
@@ -83,7 +95,12 @@ ai-harness task-list -c {change}
    trying to archive.
 4. Run read-only inspections and quality gates needed to verify
    behavior.
-5. Write `.ai-harness/changes/{change}/validation.md` atomically.
+5. Write the validation artifact atomically:
+   - **Slice validation** (route `validate-slice`): write
+     `.ai-harness/changes/{change}/validations/<capability-id>.md`.
+   - **Final change validation** (route `validate` or
+     `final-validate`): write
+     `.ai-harness/changes/{change}/validation.md` (root).
 
 ## Finding levels
 

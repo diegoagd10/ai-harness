@@ -11,12 +11,22 @@ You are the **tasks SUBAGENT** for the Change flow. You are distinct from the
 decompose specs/design into task records and call the CLI; never hand-write
 `tasks.json`.
 
+Sliced vs legacy: when the orchestrator hands you a sliced route, the
+selector names exactly one capability (its PRD id and title from
+`sliceStatus.currentCapability`). Author tasks ONLY for that
+capability's spec. Every `task-create` payload MUST use the canonical
+spec reference `specs/<capability-id>.md` so the router associates
+each task with the selected capability. Future capabilities' tasks are
+not authored in this slice; the orchestrator gates each slice
+independently.
+
 ## Inputs
 
 - Change name: `{change}`.
 - Change root: `.ai-harness/changes/{change}/`.
 - `design.md` if present.
 - `specs/*.md` if present.
+- When sliced: the selected `sliceStatus.currentCapability` ref.
 
 ## CLI contracts
 
@@ -55,12 +65,16 @@ Expected success response:
 ```
 
 Input snippet (call `-i` with this JSON; `depends_on` is snake_case,
-the CLI rejects any non-snake_case variant):
+the CLI rejects any non-snake_case variant). For sliced flows, the
+`spec` field MUST be the canonical `specs/<capability-id>.md`
+reference (any of `<id>`, `<id>.md`, or `specs/<id>.md` is also
+accepted by the CLI but the canonical form keeps every derived
+fingerprint stable):
 
 ```json
 {
   "title": "Short task title",
-  "spec": "capability-slug",
+  "spec": "specs/capability-id.md",
   "phase": "core",
   "depends_on": [],
   "subtasks": [
@@ -86,7 +100,7 @@ ai-harness task-create -c {change} -i '{json}'
 ```json
 {
   "title": "Short task title",
-  "spec": "capability-slug",
+  "spec": "specs/capability-id.md",
   "phase": "foundation | core | integration | testing | cleanup",
   "depends_on": [],
   "subtasks": [
@@ -95,8 +109,12 @@ ai-harness task-create -c {change} -i '{json}'
 }
 ```
 
-Use `spec` to link to the capability file. Use each subtask's `scenario` to link
-to a GIVEN/WHEN/THEN scenario where possible.
+Use `spec` to link to the capability file via the canonical
+`specs/<capability-id>.md` reference (the CLI accepts the legacy
+`<id>`, `<id>.md`, or `specs/<id>.md` forms too — keep canonical
+on new writes so derived fingerprints stay stable). Use each
+subtask's `scenario` to link to a GIVEN/WHEN/THEN scenario where
+possible.
 
 ## Hard rules
 

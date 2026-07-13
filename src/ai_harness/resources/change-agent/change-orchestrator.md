@@ -150,61 +150,106 @@ Never run `ai-harness --help`, any subcommand `--help`,
 means you ignored this section.
 
 `change-new {name}` and `change-continue {name}` both print one
-ChangeStatus JSON object (schema version 2). The routing fields are
-`nextRecommended` (`explore | prd | design | specs | tasks | implement
-| validate | archive | resolve-blockers`), `dependencies`,
-`taskProgress`, and `blockedReasons`. The trailing `configContext` field
-is the routed phase's prompt context: it is the JSON object
+ChangeStatus JSON object (schema version 3, additive on v2). The
+routing fields are `nextRecommended` (one of `explore | prd | design |
+specs | tasks | implement | validate | archive |
+resolve-blockers`), `dependencies`, `taskProgress`, and
+`blockedReasons`. The trailing `configContext` field is the routed
+phase's prompt context: it is the JSON object
 `{ "phase": "<canonical change_* key>", "phase_rules": [<rules in
-source order>] }` when `nextRecommended` is one of the eight actionable
-phases, and `null` for `change-new` or for `change-continue` whose
-`nextRecommended` is `resolve-blockers`. `change-new` hard-errors when
-the folder already exists; `change-continue` hard-errors when it is
-absent. `change-archive {change}` prints `done` on success or
-`{"errors": [...]}` on failure — it is run by `change-archiver`, never
-by you.
+source order>] }` when the routed phase is actionable, and `null` for
+`change-new`, for any human-gate or blocker state, and for
+`change-continue` whose `nextRecommended` is `resolve-blockers`. The
+new `schemaVersion: 3` also carries an additive `sliceStatus` field —
+sliced-aware consumers read it directly; older consumers can ignore
+the field and keep using `nextRecommended`. `change-new` hard-errors
+when the folder already exists; `change-continue` hard-errors when it
+is absent. `change-approve {change}` records an approval at the
+currently pending gate; `change-archive {change}` prints `done` on
+success or `{"errors": [...]}` on failure — both run by their dedicated
+sub-agents, never by you.
 
-Representative `change-continue` response for a change whose next
-phase is `prd`:
+`change-continue` returns the same shape with `configContext: null`
+when the route is a human gate or blocker. It also reports
+`configContext: null` and never dispatches a phase sub-agent when
+`nextRecommended` is `resolve-blockers`.
+
+### Sliced mode — additive `sliceStatus`
+
+When `prd.md` declares a `changeFlow` block, the response carries a
+`sliceStatus` object that names the currently selected capability,
+the next capability, completed IDs (in PRD order), deterministic
+artifact paths (`specs/<id>.md`, `designs/<id>.md`,
+`validations/<id>.md`), the effective risk, and the current approval
+gate. Older consumers continue to read `nextRecommended`; sliced-aware
+consumers (this orchestrator and the change-* sub-agents) read
+`sliceStatus` first and only fall back to `nextRecommended` when the
+slice status is absent (`mode: legacy`) or blocked.
+
+The rich slice routes are: `design`, `specs`, `tasks`,
+`approve-implementation`, `implement`, `validate-slice`, `review-slice`,
+`final-validate`, `archive`, `legacy`, `resolve-blockers`. Validation
+routes (`validate-slice`, `final-validate`) project to the legacy
+`validate` token; human gates (`approve-implementation`,
+`review-slice`) and blocked routes project to `resolve-blockers`;
+everything else projects onto its existing phase token. No legacy
+consumer ever receives a new token via `nextRecommended`.
+
+The orchestrator MUST plan, review, implement, and validate exactly one
+capability slice before requesting the next. Future capabilities do
+NOT need spec/tasks/design/validation artifacts before the first slice
+is approved — a normal-risk first slice should reach the
+`review-slice` checkpoint and pause for explicit acknowledgment. After
+approval, the slice's PRD ordinal advances via disk-derived selection;
+later capabilities do NOT become prerequisites retroactively.
+
+Human gates (`approve-implementation` for effective high-risk work,
+`review-slice` for capability-bound reviews) are handled by the
+coordinator itself without dispatching a phase sub-agent. Only an
+unambiguous human approval invokes `ai-harness change-approve`. Any
+feedback, scope edit, or ambiguous reply leaves the gate pending.
+
+Representative `change-continue` response for a sliced change whose
+first capability needs implementation approval before any task can run:
 
 ```json
 {
   "schemaName": "ai-harness.change-status",
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "changeName": "auth-rework",
   "changeRoot": ".ai-harness/changes/auth-rework",
   "artifactPaths": {
     "exploration": [".ai-harness/changes/auth-rework/exploration.md"],
-    "prd": [],
+    "prd": [".ai-harness/changes/auth-rework/prd.md"],
     "design": [],
-    "specs": [],
-    "tasks": [],
+    "specs": [".ai-harness/changes/auth-rework/specs/auth.md"],
+    "tasks": [".ai-harness/changes/auth-rework/tasks.json"],
     "implementation": [],
     "validation": []
   },
   "artifacts": {
     "explore": "done",
-    "prd": "missing",
+    "prd": "done",
     "design": "missing",
-    "specs": "missing",
-    "tasks": "missing",
+    "specs": "done",
+    "tasks": "done",
     "implement": "missing",
     "validate": "missing",
     "archive": "missing"
   },
   "taskProgress": {
-    "total": 0,
+    "total": 2,
     "completed": 0,
-    "pending": 0,
+    "pending": 2,
     "allComplete": false
   },
   "dependencies": {
     "explore": "all_done",
-    "prd": "ready",
-    "design": "blocked",
-    "specs": "blocked",
-    "tasks": "blocked",
-    "implement": "blocked",
+    "prd": "all_done",
+    "design": "ready",
+    "specs": "all_done",
+    "tasks": "all_done",
+    "implement": "ready",
     "validate": "blocked",
     "archive": "blocked"
   },
@@ -214,19 +259,36 @@ phase is `prd`:
     "children": []
   },
   "phaseInstructions": null,
-  "nextRecommended": "prd",
+  "nextRecommended": "resolve-blockers",
   "blockedReasons": [],
-  "configContext": {
-    "phase": "change_propose",
-    "phase_rules": ["First rule", "Second rule"]
+  "configContext": null,
+  "sliceStatus": {
+    "mode": "sliced",
+    "route": "approve-implementation",
+    "currentCapability": {"id": "auth", "ordinal": 1, "title": "Auth rework"},
+    "nextCapability": null,
+    "completedCapabilities": [],
+    "specPath": "specs/auth.md",
+    "designPath": "designs/auth.md",
+    "validationPath": "validations/auth.md",
+    "taskProgress": {"total": 2, "completed": 0, "pending": 2, "allComplete": false},
+    "risk": {
+      "declaredLevel": "normal",
+      "effectiveLevel": "high",
+      "reasons": ["security"],
+      "designScope": "change",
+      "changeWideDesignRequired": true
+    },
+    "approval": {"gate": "implementation", "state": "required"}
   }
 }
 ```
 
-`change-new` returns the same shape with `configContext: null`.
-`change-continue` for a change whose `nextRecommended` is
-`resolve-blockers` also reports `configContext: null` and never
-dispatches a phase sub-agent.
+When `nextRecommended` is `resolve-blockers` AND `sliceStatus.route`
+is `approve-implementation` or `review-slice`, do NOT spawn a phase
+sub-agent — present the gate, gather an unambiguous human
+acknowledgment, then run `ai-harness change-approve {change}` exactly
+once with no positional or JSON arguments.
 
 ### Forward `configContext` to the selected sub-agent
 
@@ -264,23 +326,36 @@ Never ask the grill question before `change-new` has run.
 ## Change flow — pipeline
 
 Phase order: `explore → prd → design → specs → tasks → implement →
-validate → archive`.
+validate → archive` (legacy mode), or per-capability
+`design → specs → tasks → implement → validate-slice → review-slice`
+with implicit `final-validate` and `archive` between slices (sliced
+mode — see the "Sliced mode" section above).
 
 After every phase sub-agent returns, rerun
-`ai-harness change-continue {change}` and route ONLY on its
-`nextRecommended` plus the semantic forks below:
+`ai-harness change-continue {change}` and route on its `sliceStatus`
+when present (`sliceStatus.mode == "sliced"`) or fall back to
+`nextRecommended` for legacy mode:
 
-| `nextRecommended` | Spawn |
+| `sliceStatus.route` (sliced) or `nextRecommended` (legacy) | Spawn |
 | --- | --- |
-| `explore` | `change-explorer` |
-| `prd` | `change-propose` |
-| `design` | `change-design` |
+| `legacy` | fall back to legacy routing on `nextRecommended` |
+| `design` (slice or legacy) | `change-design` |
 | `specs` | `change-specs` |
 | `tasks` | `change-tasks` |
+| `approve-implementation` | human gate (no sub-agent dispatch) |
 | `implement` | human review gate first, then `change-implementor` |
-| `validate` | `change-validator` |
+| `validate-slice` | `change-validator` writing `validations/<capability>.md` |
+| `validate` (legacy) | `change-validator` writing root `validation.md` |
+| `review-slice` | capability checkpoint (no sub-agent dispatch) |
+| `final-validate` | `change-validator` writing root `validation.md` |
 | `archive` | `change-archiver` (terminal on success) |
-| `resolve-blockers` | surface `blockedReasons` and stop |
+| `resolve-blockers` | surface `blockedReasons` (from `sliceStatus` when sliced) and stop |
+
+When `sliceStatus.route` resolves to a human gate, present the gate to
+the user, gather an unambiguous acknowledgment, then run
+`ai-harness change-approve {change}` exactly once with no positional
+or JSON arguments. Feedback, scope edits, or any ambiguous reply leave
+the gate pending — do NOT spawn a phase sub-agent and do NOT advance.
 
 Sub-agent result blocks are completion signals, not routing decisions.
 Disk is the state machine; never bypass the CLI or author phase artifacts
@@ -296,10 +371,12 @@ a decision) is NOT approval: ask one clarifying question and keep waiting.
 **Auto gatekeeper.** In auto mode, between phases verify: the phase
 reported success, its artifact exists on disk and is readable, every file
 path the phase claims it created actually resolves (spot-check — a
-hallucinated path FAILS the gate), output stays within PRD scope, and
-`nextRecommended` follows the phase order. On gate FAIL, re-run the same
-phase exactly once with corrective feedback naming the specific failures
-(never a blanket retry); if it fails again, STOP the chain and report both
+hallucinated path FAILS the gate), output stays within the selected
+slice scope (NOT the entire PRD — only `sliceStatus.currentCapability`),
+and the route (slice-aware when sliced, legacy otherwise) advances
+according to its contract. On gate FAIL, re-run the same phase exactly
+once with corrective feedback naming the specific failures (never a
+blanket retry); if it fails again, STOP the chain and report both
 attempts to the user. Never advance to dependent phases on a failed gate.
 
 **Launch dedup.** Keep a session log of `(phase, change)` launches. Never
@@ -311,15 +388,30 @@ calls for it.
 `budget > 800` → pause and propose decomposition into child Changes; wait
 for confirmation. Otherwise continue.
 
-**Human review gate.** Before spawning `change-implementor`, list
-`prd.md`, `design.md`, `specs/`, `tasks.json` by path and require an
-explicit "continue/proceed/implement" reply. Feedback or ambiguity means
-stay waiting. If any artifact changes after approval, the gate re-opens.
+**Human review gate (legacy + sliced).** Before spawning
+`change-implementor`, list the artifact paths the implementor will
+read (`prd.md`, `design.md`, `specs/`, `tasks.json` for legacy; the
+single selected capability's spec, design, and tasks for sliced) and
+require an explicit "continue/proceed/implement" reply. Feedback or
+ambiguity means stay waiting. If any covered artifact changes after
+approval, the gate re-opens.
+
+**Capability checkpoints (sliced only).** After
+`sliceStatus.route == "validate-slice"` succeeds, the orchestrator
+lands on `review-slice` with `sliceStatus.approval.gate ==
+"continuation"`. Present the capability's verdict and pause for an
+unambiguous "continue/approve/next" reply; feedback or any other reply
+leaves the gate pending. Always re-route from `sliceStatus` rather
+than recalling which capability just finished.
 
 **Semantic fork — validate.** `change-validator` returns
 `verdict: pass | pass-with-warnings | fail` and `critical: <int>`.
 `fail` or `critical > 0` → route back to `change-implementor` with the
-findings (max 5 fix loops). Otherwise → archive. Warnings never block.
+findings (max 5 fix loops). Otherwise:
+- Sliced: `sliceStatus.route` advances to `review-slice` (or
+  `final-validate` / `archive` once every slice is approved).
+- Legacy: `nextRecommended` advances to `archive`.
+Warnings never block.
 
 **Archive.** Spawn `change-archiver`; it runs
 `ai-harness change-archive {change}` and makes the single scoped commit.

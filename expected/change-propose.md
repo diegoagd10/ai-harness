@@ -61,6 +61,30 @@ Write `.ai-harness/changes/{change}/prd.md` atomically using this
 `## Capabilities` is the prd→specs handoff. Each entry should be independently
 specifiable as a tracer-bullet vertical slice.
 
+When the user asks for a sliced change flow, append a YAML front
+matter block at the top of `prd.md`:
+
+```yaml
+---
+changeFlow:
+  schemaVersion: 1
+  mode: sliced
+  capabilities:
+    - id: <capability-id>
+      title: <Capability Title>
+      risk:
+        level: normal | high
+        reasons: []
+      design: none | slice | change
+---
+```
+
+Capability IDs are unique, stable, lower-case kebab-case identifiers.
+Their list order is delivery order. `design` is `none` or `slice` for
+normal-risk slices; effective high risk overrides it to `change`. The
+prose `## Capabilities` section MUST describe the same entries for
+humans — routing reads only the versioned front matter.
+
 ## Result
 
 ```result
