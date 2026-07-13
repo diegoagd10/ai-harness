@@ -441,18 +441,25 @@ def _derive_slice_status(
     if approval_error is not None:
         return _blocked_slice_status(approval_error), [approval_error]
 
-    # Sliced delivery: walk the first capability without a valid
-    # continuation approval. For task 3 we always select the first
-    # capability; task 5 adds continuation approval filtering.
-    first_capability = delivery.capabilities[0]
-    next_capability = delivery.capabilities[1] if len(delivery.capabilities) > 1 else None
-    current_ref = _capability_ref_from(first_capability)
-    next_ref = _capability_ref_from(next_capability) if next_capability else None
+    # Sliced delivery: derive completion across capabilities and select
+    # the next capability that does not yet have a valid continuation
+    # approval. Completed IDs are listed in PRD order; a one-capability
+    # PRD shows ``completedCapabilities`` populated and ``current`` set
+    # to ``None`` once that one capability finishes.
+    completed, selected_ordinal = _walk_completed_capabilities(delivery, change, change_dir, root, progress)
 
-    risk = compute_effective_risk(first_capability)
-    # The first-capability check is intentionally limited to basic
-    # review; deeper continuation selection belongs to task 5.
-    spec_path, design_path, validation_path = _capability_artifact_paths(first_capability)
+    if selected_ordinal is None:
+        # Every capability has a valid continuation approval — terminal
+        # route (final-validate or archive).
+        return _archive_route_after_all_complete(delivery, completed, change_dir, progress)
+
+    selected_capability = next(cap for cap in delivery.capabilities if cap.ordinal == selected_ordinal)
+    next_capability = delivery.capabilities[selected_ordinal] if selected_ordinal < len(delivery.capabilities) else None
+    current_ref = _capability_ref_from(selected_capability)
+    next_ref = _capability_ref_from(next_capability)
+
+    risk = compute_effective_risk(selected_capability)
+    spec_path, design_path, validation_path = _capability_artifact_paths(selected_capability)
 
     if risk.changeWideDesignRequired and not _non_empty_file(change_dir / "design.md"):
         # Elevated risk requires a change-wide design first. The
@@ -472,11 +479,12 @@ def _derive_slice_status(
                 progress=progress,
                 risk=risk,
                 approval=ApprovalStatus(gate="implementation", state="required"),
+                completed=tuple(completed),
             ),
             ["Change-wide design is required before planning can proceed."],
         )
 
-    if first_capability.design == "slice" and not _non_empty_file(change_dir / design_path):
+    if selected_capability.design == "slice" and not _non_empty_file(change_dir / design_path):
         return (
             _build_slice_status(
                 mode="sliced",
@@ -488,7 +496,8 @@ def _derive_slice_status(
                 validation_path=validation_path,
                 progress=progress,
                 risk=risk,
-                approval=_approval_status_for_gate(approvals, "implementation", first_capability.id, root, change),
+                approval=_approval_status_for_gate(approvals, "implementation", selected_capability.id, root, change),
+                completed=tuple(completed),
             ),
             [],
         )
@@ -505,14 +514,15 @@ def _derive_slice_status(
                 validation_path=validation_path,
                 progress=progress,
                 risk=risk,
-                approval=_approval_status_for_gate(approvals, "implementation", first_capability.id, root, change),
+                approval=_approval_status_for_gate(approvals, "implementation", selected_capability.id, root, change),
+                completed=tuple(completed),
             ),
             [],
         )
 
     # Tasks gating: zero associated tasks (per spec reference) routes
     # to ``tasks``.
-    cap_state = _read_capability_state(root, change_dir, first_capability)
+    cap_state = _read_capability_state(root, change_dir, selected_capability)
     if not cap_state.taskIds:
         return (
             _build_slice_status(
@@ -525,7 +535,8 @@ def _derive_slice_status(
                 validation_path=validation_path,
                 progress=progress,
                 risk=risk,
-                approval=_approval_status_for_gate(approvals, "implementation", first_capability.id, root, change),
+                approval=_approval_status_for_gate(approvals, "implementation", selected_capability.id, root, change),
+                completed=tuple(completed),
             ),
             [],
         )
@@ -534,7 +545,7 @@ def _derive_slice_status(
     # approval before any pending task is implemented. Without one the
     # route is ``approve-implementation`` (the human gate).
     if risk.effectiveLevel == "high":
-        gate = _approval_status_for_gate(approvals, "implementation", first_capability.id, root, change)
+        gate = _approval_status_for_gate(approvals, "implementation", selected_capability.id, root, change)
         if gate.state != "valid":
             return (
                 _build_slice_status(
@@ -548,6 +559,7 @@ def _derive_slice_status(
                     progress=progress,
                     risk=risk,
                     approval=gate,
+                    completed=tuple(completed),
                 ),
                 [],
             )
@@ -558,7 +570,7 @@ def _derive_slice_status(
         # so the slice never silently forgets the human gate. For
         # normal-risk slices, the gate was never required.
         implement_approval = (
-            _approval_status_for_gate(approvals, "implementation", first_capability.id, root, change)
+            _approval_status_for_gate(approvals, "implementation", selected_capability.id, root, change)
             if risk.effectiveLevel == "high"
             else ApprovalStatus(gate=None, state="not-required")
         )
@@ -574,6 +586,7 @@ def _derive_slice_status(
                 progress=progress,
                 risk=risk,
                 approval=implement_approval,
+                completed=tuple(completed),
             ),
             [],
         )
@@ -591,6 +604,333 @@ def _derive_slice_status(
                 progress=progress,
                 risk=risk,
                 approval=ApprovalStatus(gate=None, state="not-required"),
+                completed=tuple(completed),
+            ),
+            [],
+        )
+
+    # Slice validation is present and non-empty. The capability is
+    # reviewable: either the continuation approval is valid (and the
+    # capability advances to the next slice or final validation), or it
+    # is pending the human checkpoint.
+    continuation = _approval_status_for_gate(approvals, "continuation", selected_capability.id, root, change)
+    if continuation.state != "valid":
+        return (
+            _build_slice_status(
+                mode="sliced",
+                route="review-slice",
+                current=current_ref,
+                next_capability=next_ref,
+                spec_path=spec_path,
+                design_path=design_path,
+                validation_path=validation_path,
+                progress=progress,
+                risk=risk,
+                approval=ApprovalStatus(gate="continuation", state="required"),
+                completed=tuple(completed),
+            ),
+            [],
+        )
+
+    # Continuation approval is valid: walk the completed capability
+    # list to identify work past the selected capability. Anything
+    # before the first incomplete capability is completed.
+    completed, next_selected = _walk_completed_capabilities(delivery, change, change_dir, root, progress)
+
+    if next_selected is None:
+        # Every capability has a valid continuation approval. The
+        # router must still check whether the root ``validation.md``
+        # is current and non-empty — slice validations never
+        # substitute for the archive gate.
+        return _archive_route_after_all_complete(
+            delivery,
+            completed,
+            change_dir,
+            progress,
+        )
+
+    # There is another capability to plan, so select it now (without
+    # requiring its future artifacts). The route naturally falls to
+    # ``design`` or ``specs`` based on what already exists for that
+    # next capability.
+        return _route_next_capability(
+            delivery,
+            next_selected,
+            completed,
+            change_dir,
+            root,
+            change,
+            progress,
+        )
+
+
+def _walk_completed_capabilities(
+    delivery: PrdDelivery,
+    change: str,
+    change_dir: Path,
+    root: Path,
+    progress: TaskProgress,
+) -> tuple[list[str], int | None]:
+    """Return ``(completed_ids, next_ordinal_or_none)`` for sliced delivery.
+
+    A capability is completed when its continuation approval is
+    *valid*, its associated tasks are non-empty and complete, its
+    slice validation is non-empty, and there is no later in-progress
+    capability. We intentionally do not rely on persisted completion
+    state — every call re-derives from disk.
+    """
+    approvals, _ = _safe_read_approvals(change_dir)
+    completed: list[str] = []
+    next_ordinal: int | None = None
+    for capability in delivery.capabilities:
+        continuation = _approval_status_for_gate(approvals, "continuation", capability.id, root, change)
+        slice_validation = change_dir / f"validations/{capability.id}.md"
+        cap_state = _read_capability_state(root, change_dir, capability)
+        if (
+            continuation.state == "valid"
+            and _non_empty_file(slice_validation)
+            and cap_state.taskIds
+            and cap_state.progress.allComplete
+        ):
+            completed.append(capability.id)
+            continue
+        next_ordinal = capability.ordinal
+        break
+
+    # If all capabilities were completed, signal the terminal route.
+    if next_ordinal is None and len(completed) == len(delivery.capabilities):
+        return completed, None
+    if next_ordinal is None:
+        # Defensive: empty PRD would already be rejected upstream.
+        next_ordinal = delivery.capabilities[-1].ordinal if delivery.capabilities else None
+    return completed, next_ordinal
+
+
+def _archive_route_after_all_complete(
+    delivery: PrdDelivery,
+    completed: list[str],
+    change_dir: Path,
+    progress: TaskProgress,
+) -> tuple[SliceStatus, list[str]]:
+    """Return the archive-or-final-validate SliceStatus for a fully completed PRD."""
+    completion_approvals = _latest_continuation_approval_time(change_dir)
+    root_validation = change_dir / "validation.md"
+    route, reason = _finalize_route(root_validation, completion_approvals)
+
+    status = _build_slice_status(
+        mode="sliced",
+        route=route,
+        current=None,
+        next_capability=None,
+        spec_path=None,
+        design_path=None,
+        validation_path=None,
+        progress=progress,
+        risk=None,
+        approval=ApprovalStatus(gate=None, state="not-required"),
+        completed=tuple(completed),
+    )
+    return status, [reason] if reason else []
+
+
+def _finalize_route(root_validation: Path, completion_approval_time: str | None) -> tuple[str, str]:
+    """Return ``(archive | final-validate, diagnostic)``.
+
+    Archive routing requires a non-empty, current root ``validation.md``
+    newer than the most recent continuation approval. Slice validations
+    never substitute for the archive gate.
+    """
+    if not _non_empty_file(root_validation):
+        return "final-validate", "Root validation.md is missing — write it before archive."
+
+    if completion_approval_time is None:
+        # No continuation approval has been recorded, so any validation
+        # is implicitly current. This branch shouldn't fire in practice
+        # (we only call this from the completed-all path) but guards
+        # against future regressions.
+        return "archive", ""
+
+    validation_mtime = root_validation.stat().st_mtime
+    # ISO 8601 strings sort lexicographically by design — but
+    # :meth:`ApprovalStore.write` round-trips with a UTC ``Z``
+    # timestamp, so the comparison is safe.
+    import re
+
+    match = re.match(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})Z$", completion_approval_time)
+    if match is None:
+        return "final-validate", "Continuation approval timestamp is malformed."
+    approval_epoch = _iso_to_epoch(match.group(1))
+    return (
+        ("archive", "")
+        if validation_mtime > approval_epoch
+        else ("final-validate", "Root validation.md is older than the latest continuation approval.")
+    )
+
+
+def _iso_to_epoch(iso_timestamp: str) -> float:
+    """Convert an ISO 8601 timestamp to a POSIX epoch (UTC)."""
+    from datetime import datetime
+
+    return datetime.fromisoformat(iso_timestamp).replace(tzinfo=UTC).timestamp()
+
+
+def _latest_continuation_approval_time(change_dir: Path) -> str | None:
+    """Return the most recent ``approvedAt`` for any continuation entry, or ``None``."""
+    approvals, _ = _safe_read_approvals(change_dir)
+    times = [record.approvedAt for record in approvals if record.gate == "continuation"]
+    return max(times) if times else None
+
+
+def _route_next_capability(
+    delivery: PrdDelivery,
+    next_ordinal: int,
+    completed: list[str],
+    change_dir: Path,
+    root: Path,
+    change: str,
+    progress: TaskProgress,
+) -> tuple[SliceStatus, list[str]]:
+    """Build the SliceStatus for the next-planned capability.
+
+    Reuses the first-slice derivation logic but anchored on
+    ``next_ordinal`` so the route reflects the *newly selected*
+    capability. The selection NEVER requires future artifacts.
+    """
+    target = next(cap for cap in delivery.capabilities if cap.ordinal == next_ordinal)
+    target_ref = _capability_ref_from(target)
+    next_ref = _capability_ref_from(
+        delivery.capabilities[next_ordinal] if next_ordinal < len(delivery.capabilities) else None
+    )
+    risk = compute_effective_risk(target)
+    approvals, _ = _safe_read_approvals(change_dir)
+
+    spec_path, design_path, validation_path = _capability_artifact_paths(target)
+
+    # Optional change-wide design check for high-risk.
+    if risk.changeWideDesignRequired and not _non_empty_file(change_dir / "design.md"):
+        return (
+            _build_slice_status(
+                mode="sliced",
+                route="design",
+                current=target_ref,
+                next_capability=next_ref,
+                spec_path=spec_path,
+                design_path="design.md",
+                validation_path=validation_path,
+                progress=progress,
+                risk=risk,
+                approval=ApprovalStatus(gate="implementation", state="required"),
+            ),
+            ["Change-wide design is required before the next capability can be planned."],
+        )
+
+    if target.design == "slice" and not _non_empty_file(change_dir / design_path):
+        return (
+            _build_slice_status(
+                mode="sliced",
+                route="design",
+                current=target_ref,
+                next_capability=next_ref,
+                spec_path=spec_path,
+                design_path=design_path,
+                validation_path=validation_path,
+                progress=progress,
+                risk=risk,
+                approval=_approval_status_for_gate(approvals, "implementation", target.id, root, change),
+                completed=tuple(completed),
+            ),
+            [],
+        )
+
+    if not _non_empty_file(change_dir / spec_path):
+        return (
+            _build_slice_status(
+                mode="sliced",
+                route="specs",
+                current=target_ref,
+                next_capability=next_ref,
+                spec_path=spec_path,
+                design_path=design_path,
+                validation_path=validation_path,
+                progress=progress,
+                risk=risk,
+                approval=_approval_status_for_gate(approvals, "implementation", target.id, root, change),
+                completed=tuple(completed),
+            ),
+            [],
+        )
+
+    cap_state = _read_capability_state(root, change_dir, target)
+    if not cap_state.taskIds:
+        return (
+            _build_slice_status(
+                mode="sliced",
+                route="tasks",
+                current=target_ref,
+                next_capability=next_ref,
+                spec_path=spec_path,
+                design_path=design_path,
+                validation_path=validation_path,
+                progress=progress,
+                risk=risk,
+                approval=_approval_status_for_gate(approvals, "implementation", target.id, root, change),
+                completed=tuple(completed),
+            ),
+            [],
+        )
+
+    if risk.effectiveLevel == "high":
+        gate = _approval_status_for_gate(approvals, "implementation", target.id, root, change)
+        if gate.state != "valid":
+            return (
+                _build_slice_status(
+                    mode="sliced",
+                    route="approve-implementation",
+                    current=target_ref,
+                    next_capability=next_ref,
+                    spec_path=spec_path,
+                    design_path=design_path,
+                    validation_path=validation_path,
+                    progress=progress,
+                    risk=risk,
+                    approval=gate,
+                    completed=tuple(completed),
+                ),
+                [],
+            )
+
+    if not cap_state.progress.allComplete:
+        return (
+            _build_slice_status(
+                mode="sliced",
+                route="implement",
+                current=target_ref,
+                next_capability=next_ref,
+                spec_path=spec_path,
+                design_path=design_path,
+                validation_path=validation_path,
+                progress=progress,
+                risk=risk,
+                approval=ApprovalStatus(gate=None, state="not-required"),
+                completed=tuple(completed),
+            ),
+            [],
+        )
+
+    if not _non_empty_file(change_dir / validation_path):
+        return (
+            _build_slice_status(
+                mode="sliced",
+                route="validate-slice",
+                current=target_ref,
+                next_capability=next_ref,
+                spec_path=spec_path,
+                design_path=design_path,
+                validation_path=validation_path,
+                progress=progress,
+                risk=risk,
+                approval=ApprovalStatus(gate=None, state="not-required"),
+                completed=tuple(completed),
             ),
             [],
         )
@@ -599,7 +939,7 @@ def _derive_slice_status(
         _build_slice_status(
             mode="sliced",
             route="review-slice",
-            current=current_ref,
+            current=target_ref,
             next_capability=next_ref,
             spec_path=spec_path,
             design_path=design_path,
@@ -607,6 +947,7 @@ def _derive_slice_status(
             progress=progress,
             risk=risk,
             approval=ApprovalStatus(gate="continuation", state="required"),
+            completed=tuple(completed),
         ),
         [],
     )
@@ -663,6 +1004,7 @@ def _build_slice_status(
     progress: TaskProgress,
     risk: RiskAssessment | None,
     approval: ApprovalStatus,
+    completed: tuple[str, ...] = (),
 ) -> SliceStatus:
     """Construct a slice status with a stable field order."""
     return SliceStatus(
@@ -670,7 +1012,7 @@ def _build_slice_status(
         route=route,
         currentCapability=current,
         nextCapability=next_capability,
-        completedCapabilities=(),
+        completedCapabilities=completed,
         specPath=spec_path,
         designPath=design_path,
         validationPath=validation_path,
