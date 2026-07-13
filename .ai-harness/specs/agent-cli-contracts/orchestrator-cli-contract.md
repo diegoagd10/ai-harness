@@ -6,7 +6,8 @@ Give the `change-orchestrator` prompt a compact, local `## CLI contracts`
 section so the orchestrator stops probing `ai-harness --help` at runtime to
 rediscover the two change-lifecycle commands it actually runs. The section
 documents `ai-harness change-new {name}` and `ai-harness change-continue
-{name}`, mirrors the `ChangeStatus` JSON exactly, and carries the
+{name}`, mirrors the `ChangeStatus` JSON exactly (schema version 2,
+including the nullable `configContext` field), and carries the
 orchestrator-only rule for unknown ai-harness/workflow commands. This
 spec is a tracer-bullet slice over exactly one prompt file
 (`src/ai_harness/resources/change-agent/change-orchestrator.md`).
@@ -48,7 +49,7 @@ AND the body of that code block uses these exact field names:
 `schemaName`, `schemaVersion`, `changeName`, `changeRoot`,
 `artifactPaths`, `artifacts`, `taskProgress`, `dependencies`,
 `relationships`, `phaseInstructions`, `nextRecommended`,
-`blockedReasons`
+`blockedReasons`, `configContext`
 AND the example is a small realistic object (not the full dataclass
 dump).
 
@@ -63,12 +64,20 @@ orchestrator prose (so the renderer substring assertion
 `tests/test_renderers.py::test_change_agent_prompt_set_contains_expected_contract_keywords`
 keeps passing).
 
+#### Scenario: change-new version-2 shape declares nullable configContext
+GIVEN the version-2 ChangeStatus contract (additive `configContext`,
+`schemaVersion: 2`)
+WHEN the `change-new` `Expected success response` block is parsed
+THEN `configContext` is present and equal to JSON `null`
+AND `schemaVersion` equals the integer `2`.
+
 ### Requirement: orchestrator-contracts-section-documents-change-continue
 The `## CLI contracts` section in `change-orchestrator.md` MUST contain
 one entry for `ai-harness change-continue {name}` with: a short
 heading, a "How it works" block, a single-sentence "Use it to" block,
 and an `Expected success response` code block whose JSON mirrors the
-same `ChangeStatus` shape used for `change-new`.
+same `ChangeStatus` shape used for `change-new` and exposes the
+routed-phase `configContext` object.
 
 #### Scenario: change-continue entry carries the same JSON shape
 GIVEN the new `## CLI contracts` section in `change-orchestrator.md`
@@ -78,9 +87,42 @@ THEN the JSON object uses the exact same field names as the
 `change-new` example (`schemaName`, `schemaVersion`, `changeName`,
 `changeRoot`, `artifactPaths`, `artifacts`, `taskProgress`,
 `dependencies`, `relationships`, `phaseInstructions`,
-`nextRecommended`, `blockedReasons`)
+`nextRecommended`, `blockedReasons`, `configContext`)
 AND the `nextRecommended` key is present so the orchestrator's
 existing routing logic can read it without re-running the CLI.
+
+#### Scenario: change-continue representative response exposes routed configContext
+GIVEN the documented `prd` example in the `change-continue` entry
+WHEN the JSON block is parsed
+THEN `schemaVersion` equals `2`
+AND `nextRecommended` equals `"prd"`
+AND `configContext` is the object
+`{ "phase": "change_propose", "phase_rules": [<rules in source order>] }`
+AND `configContext.phase_rules` is an array, ordered exactly as
+`phase_rules` is written in the schema.
+
+### Requirement: orchestrator-prompt-requires-configcontext-forwarding
+The `## CLI contracts` section in `change-orchestrator.md` MUST contain
+a forwarding rule that, on every actionable `nextRecommended`, requires
+the orchestrator to forward the returned `configContext` object
+verbatim to the selected sub-agent, and that forbids independent
+configuration reads, alias reconstruction, or any rule-text synthesis.
+
+#### Scenario: forwarding rule targets only actionable routes
+GIVEN the forwarding prose is in place
+WHEN the orchestrator receives a `change-continue` response whose
+`nextRecommended` is an actionable phase token
+THEN the prose instructs it to forward the `configContext` JSON
+object verbatim to the sub-agent selected by `nextRecommended`
+AND the prose forbids independent reads of `.ai-harness/config.yml`
+or alias reconstruction.
+
+#### Scenario: forwarding rule excludes resolve-blockers
+GIVEN the forwarding prose is in place
+WHEN the orchestrator receives a `change-continue` response whose
+`nextRecommended` is `resolve-blockers` and `configContext` is `null`
+THEN the prose instructs it to forward nothing and to not invoke a
+phase sub-agent.
 
 ### Requirement: orchestrator-prompt-carries-unknown-command-rule
 `change-orchestrator.md` MUST carry exactly one prose rule that
@@ -130,3 +172,18 @@ test runs
 THEN neither `change start` nor `change ready` is introduced into
 `change-orchestrator.md`
 AND the negative assertion keeps passing.
+
+### Requirement: rendered-orchestrator-parity-mirrors-source
+The checked-in rendered expectation at
+`expected/change-orchestrator.md` MUST mirror the
+`configContext`-bearing version-2 contract documented in
+`src/ai_harness/resources/change-agent/change-orchestrator.md` so
+that every renderer reaches the same shape.
+
+#### Scenario: expected/change-orchestrator.md carries version-2 configContext
+GIVEN `expected/change-orchestrator.md`
+WHEN the file is read top-to-bottom
+THEN it mentions the `configContext` field
+AND it mentions `schemaVersion: 2`
+AND it forwards the same rule that the source prompt does for
+actionable routes and `resolve-blockers`.

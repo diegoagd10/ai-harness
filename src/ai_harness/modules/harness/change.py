@@ -42,14 +42,20 @@ the FSM without re-implementing the rules.
 from __future__ import annotations
 
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
+from ai_harness.modules.change_config import ChangeConfigAdministrator, ChangeConfigError
+from ai_harness.modules.change_config.models import ChangeConfigPromptContext
 from ai_harness.modules.harness.tasks import TaskProgress, TaskStoreError, task_progress
 
 _PHASES = ("explore", "prd", "design", "specs", "tasks", "implement", "validate", "archive")
 _SCHEMA_NAME = "ai-harness.change-status"
-_SCHEMA_VERSION = 1
+# Schema version 2 introduces the additive nullable ``configContext``
+# field. Version 1 omitted that field entirely; consumers rely on the
+# numeric version to detect the additive shape rather than silently
+# receiving a changed schema.
+_SCHEMA_VERSION = 2
 _ARTIFACT_FILENAMES = {
     "exploration": "exploration.md",
     "prd": "prd.md",
@@ -77,7 +83,16 @@ class ChangeStoreError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class ChangeStatus:
-    """Represent the derived file-backed state for one change."""
+    """Represent the derived file-backed state for one change.
+
+    Schema version 2 adds the final nullable ``configContext`` field
+    holding the routed phase's :class:`ChangeConfigPromptContext`, or
+    ``None`` when no phase context is required (``change-new``, or any
+    ``change-continue`` whose ``nextRecommended`` is the synthetic
+    ``resolve-blockers`` token). Existing v1 fields retain their order,
+    name, type, and meaning; this dataclass is still serialized to JSON
+    via the existing :func:`dataclasses.asdict` CLI edge.
+    """
 
     schemaName: str
     schemaVersion: int
@@ -91,6 +106,7 @@ class ChangeStatus:
     phaseInstructions: str | None
     nextRecommended: str
     blockedReasons: list[str]
+    configContext: ChangeConfigPromptContext | None
 
 
 def change_new(root: Path, change: str) -> ChangeStatus:
@@ -104,12 +120,60 @@ def change_new(root: Path, change: str) -> ChangeStatus:
 
 
 def change_continue(root: Path, change: str) -> ChangeStatus:
-    """Return status for an existing change folder."""
+    """Return status for an existing change folder.
+
+    Derives the file-backed status first, then enriches the response
+    with the routed phase's :class:`ChangeConfigPromptContext` (or
+    ``None`` for ``resolve-blockers``) using
+    :class:`ChangeConfigAdministrator`. The reusable
+    :func:`_derive_status` remains side-effect free; enrichment is the
+    behaviour-specific seam owned by ``change-continue``.
+
+    Sequence is fixed: derive → classify route → validate config →
+    read context → immutable replace. Reusing a cached administrator
+    or parsed configuration is forbidden so file edits between calls
+    become visible immediately.
+    """
     change_dir = _change_dir(root, change)
     if not change_dir.is_dir():
         raise ChangeStoreError(f"Change not found: {change}")
 
-    return _derive_status(root, change)
+    status = _derive_status(root, change)
+    context = _resolve_config_context(root, status.nextRecommended)
+    if context is not None:
+        return replace(status, configContext=context)
+    return status
+
+
+def _resolve_config_context(root: Path, next_recommended: str) -> ChangeConfigPromptContext | None:
+    """Return the routed phase's prompt context or ``None`` for blockers.
+
+    ``resolve-blockers`` is the synthetic non-routable token — no
+    sub-agent dispatches, so the configuration administrator is never
+    consulted and no canonical phase is invented. Actionable routes
+    instantiate a fresh administrator, validate
+    ``.ai-harness/config.yml``, and read context through the
+    administrator's ``get_context_by``. Validation warnings are
+    non-halting and never block context delivery.
+
+    Every halted outcome (missing file, malformed YAML, schema-invalid
+    config, read failure) is normalized to :class:`ChangeStoreError`
+    here so callers see one failure type across the derivation seam.
+    """
+    if next_recommended == "resolve-blockers":
+        return None
+
+    admin = ChangeConfigAdministrator(repo_root=root)
+    try:
+        validation = admin.validate_config()
+    except (ChangeConfigError, OSError) as exc:
+        raise ChangeStoreError(f"Change configuration is unavailable: {exc}") from exc
+    if not validation.is_valid:
+        raise ChangeStoreError("Change configuration is invalid; fix .ai-harness/config.yml before continuing.")
+    try:
+        return admin.get_context_by(next_recommended)
+    except (ChangeConfigError, OSError) as exc:
+        raise ChangeStoreError(f"Could not load change configuration context: {exc}") from exc
 
 
 def _derive_status(root: Path, change: str) -> ChangeStatus:
@@ -137,6 +201,7 @@ def _derive_status(root: Path, change: str) -> ChangeStatus:
         phaseInstructions=None,
         nextRecommended=_next_recommended(artifacts, dependencies),
         blockedReasons=[],
+        configContext=None,
     )
 
 
