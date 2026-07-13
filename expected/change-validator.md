@@ -2,7 +2,7 @@
 description: Change validator — read-only verdict-bearing reviewer that uses task-list,
   writes validation.md, and reports pass, pass-with-warnings, or fail with critical
   count.
-mode: all
+mode: subagent
 model: minimax/MiniMax-M2.7
 ---
 # Change Validator

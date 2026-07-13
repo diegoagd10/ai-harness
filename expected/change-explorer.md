@@ -2,7 +2,7 @@
 description: Change explorer — read-only phase-1 investigator for file-backed changes.
   Estimates LOC budget, writes exploration.md, and reports affected files, plan, and
   risks.
-mode: all
+mode: subagent
 model: minimax/MiniMax-M2.7
 ---
 # Change Explorer

@@ -1,7 +1,7 @@
 ---
 description: Change specs author — writes tracer-bullet specs from prd.md capabilities
   with RFC 2119 requirements and GIVEN/WHEN/THEN scenarios.
-mode: all
+mode: subagent
 model: minimax/MiniMax-M2.7
 ---
 # Specs

@@ -64,6 +64,7 @@ def test_change_status_serializes_populated_config_context_as_json_object() -> N
     populated = ChangeConfigPromptContext(
         phase="change_propose",
         phase_rules=("First rule", "Second rule"),
+        commit_format="[{change_name}][{task_id}] {slug}",
     )
     status = ChangeStatus(
         schemaName="ai-harness.change-status",
@@ -88,6 +89,7 @@ def test_change_status_serializes_populated_config_context_as_json_object() -> N
     assert serialized["configContext"] == {
         "phase": "change_propose",
         "phase_rules": ["First rule", "Second rule"],
+        "commit_format": "[{change_name}][{task_id}] {slug}",
     }
     # phaseInstructions remains the documented nullable string field with
     # its existing name and meaning; the additive change must not perturb it.
@@ -96,7 +98,9 @@ def test_change_status_serializes_populated_config_context_as_json_object() -> N
 
 def test_change_status_serializes_empty_rules_as_json_array() -> None:
     """An empty rules tuple serializes as a JSON array (not null and not omitted)."""
-    populated = ChangeConfigPromptContext(phase="change_explorer", phase_rules=())
+    populated = ChangeConfigPromptContext(
+        phase="change_explorer", phase_rules=(), commit_format="[{change_name}][{task_id}] {slug}"
+    )
     status = ChangeStatus(
         schemaName="ai-harness.change-status",
         schemaVersion=2,
@@ -125,6 +129,7 @@ def test_change_status_preserves_ordered_rules_in_source_order() -> None:
     populated = ChangeConfigPromptContext(
         phase="change_propose",
         phase_rules=("Observe", "Decide", "Report"),
+        commit_format="[{change_name}][{task_id}] {slug}",
     )
     status = ChangeStatus(
         schemaName="ai-harness.change-status",
@@ -149,7 +154,9 @@ def test_change_status_preserves_ordered_rules_in_source_order() -> None:
 
 def test_change_status_keeps_phase_instructions_alongside_config_context() -> None:
     """A non-null phaseInstructions survives the additive configContext field."""
-    populated = ChangeConfigPromptContext(phase="change_propose", phase_rules=("Only rule",))
+    populated = ChangeConfigPromptContext(
+        phase="change_propose", phase_rules=("Only rule",), commit_format="[{change_name}][{task_id}] {slug}"
+    )
     status = ChangeStatus(
         schemaName="ai-harness.change-status",
         schemaVersion=2,
@@ -308,6 +315,7 @@ def test_change_continue_attaches_canonical_explorer_context_for_explore_route(t
     assert status.configContext is not None
     assert status.configContext.phase == "change_explorer"
     assert status.configContext.phase_rules == ("Read the codebase", "Surface unknowns")
+    assert status.configContext.commit_format == "[{change_name}][{task_id}] {slug}"
 
 
 def test_change_continue_attaches_canonical_propose_context_for_prd_route(tmp_path: Path) -> None:
@@ -388,6 +396,9 @@ def test_change_continue_attaches_canonical_implementor_context_for_implement_ro
     assert status.configContext is not None
     assert status.configContext.phase == "change_implementor"
     assert status.configContext.phase_rules == ("TDD red/green/refactor", "One commit per task")
+    # The orchestrator inlines this into the change-implementor delegation
+    # block instead of reading CODING_STANDARDS.md.
+    assert status.configContext.commit_format == "[{change_name}][{task_id}] {slug}"
 
 
 def test_change_continue_attaches_canonical_validator_context_for_validate_route(tmp_path: Path) -> None:

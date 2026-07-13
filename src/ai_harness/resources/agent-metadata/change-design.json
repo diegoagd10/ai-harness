@@ -1,6 +1,6 @@
 {
   "description": "Change design author — writes design.md using the to-design deep-module structure.",
-  "mode": "all",
+  "mode": "subagent",
   "model": {
     "opencode": "minimax/MiniMax-M2.7",
     "claude": "sonnet"

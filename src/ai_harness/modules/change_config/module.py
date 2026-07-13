@@ -130,9 +130,12 @@ class ChangeConfigAdministrator:
         phases = data.get("phases", {}) if isinstance(data, dict) else {}
         phase = phases.get(canonical, {}) if isinstance(phases, dict) else {}
         rules = phase.get("rules", []) if isinstance(phase, dict) else []
+        commit = data.get("commit", {}) if isinstance(data, dict) else {}
+        commit_format = commit.get("format") if isinstance(commit, dict) else None
         return ChangeConfigPromptContext(
             phase=canonical,
             phase_rules=tuple(rules) if isinstance(rules, list) else (),
+            commit_format=commit_format if isinstance(commit_format, str) else _DEFAULT_COMMIT_FORMAT,
         )
 
     def _normalize_phase_key(self, raw: str) -> str:

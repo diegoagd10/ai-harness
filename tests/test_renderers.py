@@ -840,6 +840,7 @@ def test_change_orchestrator_frontmatter_uses_meta(tmp_path: Path) -> None:
 
     assert fm["description"] == meta.description
     assert fm["mode"] == "primary"
+    assert fm["color"] == "error"
     assert fm["model"] == meta.model["opencode"]
     assert fm["permission"] == {
         "question": "allow",
@@ -860,6 +861,36 @@ def test_opencode_subagents_have_no_color(tmp_path: Path) -> None:
         assert pair is not None, f"{name} not found in OpenCode output"
         fm = _parse_frontmatter(pair.content)
         assert "color" not in fm, f"{name}: should not have color, got {fm.get('color')!r}"
+
+
+def test_opencode_default_render_has_one_primary_and_eight_subagents(tmp_path: Path) -> None:
+    """Default OpenCode rendering yields exactly one primary agent and eight subagents.
+
+    Locks the install-hierarchy fix: no change agent may render with the
+    broad ``mode: all`` (which OpenCode exposes as both primary and
+    subagent), and only ``change-orchestrator`` may carry ``color``.
+    """
+    from ai_harness.utils import opencode_change_agents
+
+    pairs = ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(home=tmp_path, overrides={})
+
+    modes: dict[str, str] = {}
+    colors: dict[str, str | None] = {}
+    for pair in pairs:
+        name = Path(pair.install_path).stem
+        fm = _parse_frontmatter(pair.content)
+        modes[name] = fm["mode"]
+        colors[name] = fm.get("color")
+
+    assert set(modes) == set(opencode_change_agents())
+    assert modes["change-orchestrator"] == "primary"
+    assert colors["change-orchestrator"] == "error"
+    for name, mode in modes.items():
+        if name == "change-orchestrator":
+            continue
+        assert mode == "subagent", f"{name}: expected subagent, got {mode!r}"
+        assert colors[name] is None, f"{name}: should not have color, got {colors[name]!r}"
+    assert "all" not in modes.values()
 
 
 # ---------------------------------------------------------------------------
@@ -961,7 +992,7 @@ def test_get_agent_meta_partial_merge_preserves_defaults() -> None:
     meta = ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata("change-implementor", overrides=overrides)
 
     assert meta.description.startswith("Change implementor")
-    assert meta.mode == "all"
+    assert meta.mode == "subagent"
     # Different agent not in overrides keeps its defaults
     explorer_meta = ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata("change-explorer", overrides=overrides)
     assert explorer_meta.model["opencode"] == "minimax/MiniMax-M2.7"
@@ -1331,7 +1362,7 @@ def test_get_agent_meta_auto_load_partial_override_preserves_others(tmp_path: Pa
     assert implementor.model["opencode"] == "openai/gpt-5.4"
     assert dict(implementor.effort) == {"opencode": "high"}
     assert implementor.model["claude"] == "sonnet"  # not overridden → default
-    assert implementor.mode == "all"  # not in override → default
+    assert implementor.mode == "subagent"  # not in override → default
     # Explorer untouched
     assert explorer.model["opencode"] == "minimax/MiniMax-M2.7"
     assert "opencode" not in dict(explorer.effort)
@@ -1718,7 +1749,7 @@ def test_change_archiver_meta_declares_subagent_role() -> None:
     meta = ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata("change-archiver", overrides={})
 
     assert meta.description
-    assert meta.mode == "all"
+    assert meta.mode == "subagent"
     assert meta.model["opencode"] == "minimax/MiniMax-M2.7-highspeed"
     assert meta.model["claude"] == "sonnet"
 
@@ -2088,9 +2119,9 @@ def test_change_orchestrator_body_similarity_check_three_branch_contract(cli: Ag
 
 @pytest.mark.parametrize("cli", (AgentCli.OPENCODE, AgentCli.CLAUDE, AgentCli.COPILOT))
 def test_change_orchestrator_body_inlines_commit_format_directive(cli: AgentCli, tmp_path: Path) -> None:
-    """Subtask 2.2 — the orchestrator prompt instructs the spawned subagent to call
-    ``resolve_commit_format(repo_root)`` per delegation and inline the returned
-    string verbatim under ``Data injected for this delegation:`` as
+    """Subtask 2.2 — the orchestrator prompt instructs the spawned subagent to source the
+    commit format from the routed ``configContext.commit_format`` field and inline it
+    verbatim under ``Data injected for this delegation:`` as
     ``- commit-format: <format>`` (no surrounding backticks, no placeholder rewriting).
 
     Locks the read side of the orchestrator-injects pattern: every renderer must
@@ -2102,10 +2133,14 @@ def test_change_orchestrator_body_inlines_commit_format_directive(cli: AgentCli,
     assert "Data injected for this delegation:" in body, f"{cli}: directive block header missing"
     # The directive label appears verbatim.
     assert "commit-format:" in body, f"{cli}: commit-format directive label missing"
-    # The orchestrator is told to read the format string from CODING_STANDARDS.md
-    # (new body uses inline wording instead of `resolve_commit_format` helper).
-    assert "CODING_STANDARDS.md" in body and "Commits" in body, (
-        f"{cli}: instructions for reading commit-format from CODING_STANDARDS.md missing"
+    # The orchestrator is told to source the format string from configContext
+    # (routed through change-continue from .ai-harness/config.yml), never from
+    # CODING_STANDARDS.md.
+    assert "configContext.commit_format" in body or "commit_format" in body, (
+        f"{cli}: instructions for sourcing commit-format from configContext missing"
+    )
+    assert "Read the target repo's `CODING_STANDARDS.md`" not in body, (
+        f"{cli}: change-orchestrator body must not instruct reading CODING_STANDARDS.md for commit-format"
     )
     # The commit-format directive line itself carries the resolved format string.
     # The new body documents the source via a `<placeholder>` reference rather
@@ -2885,7 +2920,7 @@ def test_load_agent_metadata_decodes_typed_agent_metadata() -> None:
     meta = load_agent_metadata("change-explorer")
 
     assert meta.description.startswith("Change explorer")
-    assert meta.mode == "all"
+    assert meta.mode == "subagent"
     assert dict(meta.model) == {"opencode": "minimax/MiniMax-M2.7", "claude": "sonnet"}
     # Defaults when fields are absent.
     assert dict(meta.effort) == {}
@@ -3245,7 +3280,7 @@ def test_claude_administrator_get_agent_metadata_returns_typed_value(tmp_path: P
 
     assert isinstance(meta, AgentMetadata)
     assert meta.description.startswith("Change explorer")
-    assert meta.mode == "all"
+    assert meta.mode == "subagent"
     assert meta.model.get("claude") == "sonnet"
 
 
@@ -3333,7 +3368,7 @@ def test_opencode_administrator_frontmatter_has_description_mode_model(tmp_path:
 
     fm = yaml.safe_load(artifacts[0].content.split("---", 2)[1])
     assert fm["description"].startswith("Change explorer")
-    assert fm["mode"] == "all"
+    assert fm["mode"] == "subagent"
     assert fm["model"] == "minimax/MiniMax-M2.7"
 
 
@@ -3512,7 +3547,7 @@ def test_copilot_administrator_get_agent_metadata_resolves_overrides(tmp_path: P
     )
 
     assert meta.description == "Updated explorer description."
-    assert meta.mode == "all"
+    assert meta.mode == "subagent"
 
 
 # ---------------------------------------------------------------------------

@@ -79,6 +79,22 @@ def test_get_context_by_returns_empty_rules_for_known_phase_after_init(tmp_path:
     assert isinstance(context, ChangeConfigPromptContext)
     assert context.phase == "change_explorer"
     assert context.phase_rules == ()
+    assert context.commit_format == "[{change_name}][{task_id}] {slug}"
+
+
+def test_get_context_by_returns_user_commit_format_from_config(tmp_path: Path) -> None:
+    """After the user edits ``commit.format``, get_context_by returns the exact string they wrote."""
+    admin = ChangeConfigAdministrator(repo_root=tmp_path)
+    admin.initialize_config()
+
+    config_path = tmp_path / ".ai-harness" / "config.yml"
+    data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    data["commit"]["format"] = "{change_name}/{task_id}: {slug}"
+    config_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    context = admin.get_context_by("change_implementor")
+
+    assert context.commit_format == "{change_name}/{task_id}: {slug}"
 
 
 def test_get_context_by_returns_user_rules_for_known_phase(tmp_path: Path) -> None:

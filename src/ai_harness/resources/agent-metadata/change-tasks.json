@@ -1,6 +1,6 @@
 {
   "description": "Change task author — decomposes specs and design, then creates tasks through ai-harness task-create.",
-  "mode": "all",
+  "mode": "subagent",
   "model": {
     "opencode": "minimax/MiniMax-M2.7",
     "claude": "sonnet"

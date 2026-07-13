@@ -1,7 +1,7 @@
 ---
 description: Change PRD author — writes prd.md in the sdd-propose structure without
   publishing anywhere.
-mode: all
+mode: subagent
 model: minimax/MiniMax-M2.7
 ---
 # Propose

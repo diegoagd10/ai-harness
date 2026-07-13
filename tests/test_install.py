@@ -768,6 +768,46 @@ def test_cli_install_opencode_writes_agents(isolated_home: Path) -> None:
     )
 
 
+def test_cli_install_opencode_matches_golden_expected_files(isolated_home: Path) -> None:
+    """A default ``ai-harness install -o opencode`` matches the checked-in ``expected/`` goldens.
+
+    Golden byte comparison is independent of the metadata that drives
+    rendering, so it catches drift that a metadata-derived expectation
+    would miss. Only the isolated ``HOME`` (via the ``isolated_home``
+    fixture) is read from or written to — the real
+    ``~/.config/opencode/agent/`` is never touched. Also asserts the
+    installed frontmatter enforces the one-primary/eight-subagent
+    partition with ``color: error`` only on ``change-orchestrator``.
+    """
+    result = runner.invoke(app, ["install", "-o", "opencode"])
+    assert result.exit_code == 0, result.stderr
+
+    agent_dir = isolated_home / ".config" / "opencode" / "agent"
+    installed_names = {p.stem for p in agent_dir.glob("*.md")}
+    assert installed_names == set(opencode_change_agents())
+
+    modes: dict[str, str] = {}
+    colors: dict[str, str | None] = {}
+    for name in opencode_change_agents():
+        installed_path = agent_dir / f"{name}.md"
+        golden_path = Path("expected") / f"{name}.md"
+        assert installed_path.read_bytes() == golden_path.read_bytes(), (
+            f"{name}: installed OpenCode artifact drifted from expected/{name}.md"
+        )
+        fm = _read_frontmatter(installed_path)
+        modes[name] = fm["mode"]
+        colors[name] = fm.get("color")
+
+    assert modes["change-orchestrator"] == "primary"
+    assert colors["change-orchestrator"] == "error"
+    for name, mode in modes.items():
+        if name == "change-orchestrator":
+            continue
+        assert mode == "subagent", f"{name}: expected subagent, got {mode!r}"
+        assert colors[name] is None, f"{name}: should not have color, got {colors[name]!r}"
+    assert "all" not in modes.values()
+
+
 def test_cli_uninstall_opencode_removes_agents(isolated_home: Path) -> None:
     runner.invoke(app, ["install", "-o", "opencode"])
     result = runner.invoke(app, ["uninstall", "-o", "opencode"])

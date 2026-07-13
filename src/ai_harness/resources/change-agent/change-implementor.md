@@ -83,10 +83,11 @@ Expected success response:
 **This gate is your step zero.** Before running `task-next`, before
 reading any artifact, before writing any file: locate the
 `commit-format:` directive in the delegation block above. The
-orchestrator injects this directive per delegation by calling
-`resolve_commit_format(repo_root)` from `ai_harness.modules.commit`;
-the implementor never reads the standards file itself, never invents a
-format, and never substitutes a "reasonable default".
+orchestrator injects this directive per delegation from the
+`commit_format` field of the `configContext` object `change-continue`
+returned (sourced from `.ai-harness/config.yml`'s `commit.format`); the
+implementor never reads `.ai-harness/config.yml` itself, never invents
+a format, and never substitutes a "reasonable default".
 
 - **Missing directive.** If the `commit-format:` directive is absent from
   the delegation block (an orchestrator-level bug, not the normal flow),

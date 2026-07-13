@@ -8,7 +8,7 @@ renaming a field is a public-surface change.
 
 Public surface
 --------------
-ChangeConfigPromptContext      Phase name and rule list to inject.
+ChangeConfigPromptContext      Phase name, rule list, and commit format to inject.
 ChangeConfigValidationResults  Verdict and non-halting diagnostic list.
 """
 
@@ -26,10 +26,15 @@ class ChangeConfigPromptContext:
     *phase* is the canonical snake_case phase key the orchestrator asked
     for (post-normalization). *phase_rules* is the ordered rule list
     from ``config.yml`` — empty when the phase is absent or unknown.
+    *commit_format* is the repo-wide ``commit.format`` string from
+    ``config.yml`` — the orchestrator inlines it verbatim into the
+    ``change-implementor`` delegation block instead of reading
+    ``CODING_STANDARDS.md``.
     """
 
     phase: str
     phase_rules: tuple[str, ...]
+    commit_format: str
 
 
 @dataclass(frozen=True, slots=True)

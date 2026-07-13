@@ -1,6 +1,7 @@
 {
   "description": "Change orchestrator — coordinates work via sub-agents; stays thin.",
   "mode": "primary",
+  "color": "error",
   "model": {
     "opencode": "minimax/MiniMax-M3",
     "claude": "sonnet"

@@ -1,7 +1,7 @@
 ---
 description: Change design author — writes design.md using the to-design deep-module
   structure.
-mode: all
+mode: subagent
 model: minimax/MiniMax-M2.7
 ---
 # Design

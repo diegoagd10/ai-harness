@@ -2,7 +2,7 @@
 description: Change archiver — runs ai-harness change-archive for the target Change
   and commits the resulting .ai-harness archive/spec movement as a single scoped docs
   commit.
-mode: all
+mode: subagent
 model: minimax/MiniMax-M2.7-highspeed
 ---
 # Change Archiver

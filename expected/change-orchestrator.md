@@ -10,6 +10,7 @@ permission:
   edit: allow
   read: allow
   write: allow
+color: error
 ---
 # Change Orchestrator
 
@@ -345,22 +346,27 @@ again. On `blocked`, surface its errors verbatim and stop.
 directive, so every implementor delegation MUST carry one. Before
 spawning it:
 
-1. Read the target repo's `CODING_STANDARDS.md` and take the commit
-   format string from its `## Commits` section verbatim.
+1. Take the commit format string from `commit_format` on the
+   `configContext` object `change-continue` returned when
+   `nextRecommended` was `implement` — the same object the "Forward
+   `configContext` to the selected sub-agent" rule above already has
+   you passing along verbatim. Never read `CODING_STANDARDS.md` and
+   never independently parse `.ai-harness/config.yml` — `change-continue`
+   already resolved `commit.format` for you.
 2. Append this block to the delegation prompt, inlining the string
    exactly (no backticks, no rewriting of `{change_name}`, `{task_id}`,
    `{slug}` placeholders):
 
    ```
    Data injected for this delegation:
-   - commit-format: <format string from CODING_STANDARDS.md ## Commits>
+   - commit-format: <configContext.commit_format value>
    ```
 
-3. If `CODING_STANDARDS.md` is missing, has no `## Commits` heading, or
-   the section is empty: do NOT spawn `change-implementor`. Report
-   `status: blocked` naming the missing piece and suggest running
-   `ai-harness init` to scaffold the standards file. Never invent a
-   format and never let the implementor guess one.
+3. If `configContext` is `null` or has no `commit_format` value when
+   routing to `implement` (an orchestrator-level or CLI-level bug, not
+   the normal flow): do NOT spawn `change-implementor`. Report
+   `status: blocked` naming the missing piece. Never invent a format
+   and never let the implementor guess one.
 
 ## Sub-agent context protocol
 

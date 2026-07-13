@@ -1,7 +1,7 @@
 ---
 description: Change task author — decomposes specs and design, then creates tasks
   through ai-harness task-create.
-mode: all
+mode: subagent
 model: minimax/MiniMax-M2.7
 ---
 # Tasks
