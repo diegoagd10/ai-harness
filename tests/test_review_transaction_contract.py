@@ -1064,6 +1064,621 @@ def test_finding_lens_must_be_selected_by_transaction() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Comprehensive finding state-machine matrix (task 7)
+# ---------------------------------------------------------------------------
+
+
+_SEVERITIES_FOR_MATRIX: tuple[str, ...] = ("critical", "warning", "suggestion")
+_DESTINATIONS_FOR_MATRIX: tuple[str, ...] = ("open", "resolved", "accepted")
+
+
+@pytest.mark.parametrize("severity", _SEVERITIES_FOR_MATRIX)
+@pytest.mark.parametrize("destination", _DESTINATIONS_FOR_MATRIX)
+def test_state_machine_covers_all_severity_destination_pairs(
+    severity: str, destination: str
+) -> None:
+    """The closed state machine covers every severity/destination pair.
+
+    Per severity the legal edges are: ``critical`` -> ``resolved`` only;
+    ``warning`` and ``suggestion`` -> ``resolved`` or ``accepted``.
+    Any other combination must fail.
+    """
+
+    contract, selection, transaction, tx_id = _build_finding_fixture()
+    finding = _make_finding(contract, tx_id, severity=severity)
+    finding_id = contract.id_for(finding)
+
+    legal_destinations = (
+        {"resolved"} if severity == "critical" else {"resolved", "accepted"}
+    )
+
+    if destination == "open":
+        # Without a transition, only critical fails (cannot remain open).
+        if severity == "critical":
+            with pytest.raises(ReviewContractError) as exc:
+                contract.validate_transaction(
+                    transaction,
+                    lens_selection=selection,
+                    findings=(finding,),
+                )
+            assert exc.value.code == CODE_TRANSITION_INVALID
+        else:
+            # Warning/suggestion may remain open.
+            contract.validate_transaction(
+                transaction,
+                lens_selection=selection,
+                findings=(finding,),
+            )
+        return
+
+    correction: CorrectionFact | None = None
+    transition = _make_transition(
+        contract,
+        tx_id,
+        finding_id,
+        to_status=destination,
+        correction_fact_id=(
+            CorrectionFactId("sha256:" + ("f" * 64)) if destination == "resolved" else None
+        ),
+    )
+
+    if destination in legal_destinations:
+        if destination == "resolved":
+            correction = _build_correction(contract, transaction, (finding_id,))
+            transition = _make_transition(
+                contract,
+                tx_id,
+                finding_id,
+                to_status=destination,
+                correction_fact_id=contract.id_for(correction),
+            )
+            contract.validate_transaction(
+                transaction,
+                lens_selection=selection,
+                findings=(finding,),
+                transitions=(transition,),
+                correction_fact=correction,
+            )
+        else:
+            contract.validate_transaction(
+                transaction,
+                lens_selection=selection,
+                findings=(finding,),
+                transitions=(transition,),
+            )
+        return
+
+    # Illegal destination (e.g. critical -> accepted): expect failure.
+    if destination == "resolved":
+        with pytest.raises(ReviewContractError) as exc:
+            contract.validate_transaction(
+                transaction,
+                lens_selection=selection,
+                findings=(finding,),
+                transitions=(transition,),
+            )
+    else:
+        with pytest.raises(ReviewContractError) as exc:
+            contract.validate_transaction(
+                transaction,
+                lens_selection=selection,
+                findings=(finding,),
+                transitions=(transition,),
+            )
+    assert exc.value.code == CODE_TRANSITION_INVALID
+
+
+@pytest.mark.parametrize(
+    ("from_status", "to_status"),
+    [
+        ("open", "open"),
+        ("resolved", "resolved"),
+        ("accepted", "accepted"),
+        ("resolved", "accepted"),
+        ("accepted", "resolved"),
+    ],
+)
+def test_every_non_open_source_state_is_rejected(
+    from_status: str, to_status: str
+) -> None:
+    """`from_status` other than ``open`` is always rejected."""
+
+    contract, selection, transaction, tx_id = _build_finding_fixture()
+    finding = _make_finding(contract, tx_id, severity="warning")
+    finding_id = contract.id_for(finding)
+    transition = _make_transition(
+        contract,
+        tx_id,
+        finding_id,
+        from_status=from_status,
+        to_status=to_status,
+        correction_fact_id=(
+            CorrectionFactId("sha256:" + ("f" * 64)) if to_status == "resolved" else None
+        ),
+    )
+    with pytest.raises(ReviewContractError) as exc:
+        contract.validate_transaction(
+            transaction,
+            lens_selection=selection,
+            findings=(finding,),
+            transitions=(transition,),
+        )
+    assert exc.value.code == CODE_TRANSITION_INVALID
+
+
+def test_reference_recomputation_failure_for_unknown_finding() -> None:
+    """A transition referencing an unknown finding is rejected as id-invalid."""
+
+    contract, selection, transaction, tx_id = _build_finding_fixture()
+    bogus_id = FindingId("sha256:" + ("d" * 64))
+    transition = _make_transition(
+        contract,
+        tx_id,
+        bogus_id,
+        to_status="accepted",
+        correction_fact_id=None,
+    )
+    with pytest.raises(ReviewContractError) as exc:
+        contract.validate_transaction(
+            transaction,
+            lens_selection=selection,
+            transitions=(transition,),
+        )
+    assert exc.value.code == CODE_ID_INVALID
+
+
+def test_reference_recomputation_failure_for_cross_transaction_reference() -> None:
+    """A transition whose transaction reference differs is rejected as id-invalid."""
+
+    contract, selection, transaction, tx_id = _build_finding_fixture()
+    finding = _make_finding(contract, tx_id, severity="warning")
+    finding_id = contract.id_for(finding)
+
+    # Build a transition referencing a different transaction id.
+    other_tx_id = ReviewTransactionId("sha256:" + ("e" * 64))
+    bad_transition = FindingTransition(
+        schema_name=REVIEW_FINDING_TRANSITION_SCHEMA_NAME,  # type: ignore[arg-type]
+        schema_version=1,  # type: ignore[arg-type]
+        review_transaction_id=other_tx_id,
+        finding_id=finding_id,
+        from_status="open",
+        to_status="accepted",
+        correction_fact_id=None,
+    )
+    with pytest.raises(ReviewContractError) as exc:
+        contract.validate_transaction(
+            transaction,
+            lens_selection=selection,
+            findings=(finding,),
+            transitions=(bad_transition,),
+        )
+    assert exc.value.code == CODE_ID_INVALID
+
+
+def test_terminal_replay_rejection_for_resolved() -> None:
+    """A second transition after a resolved edge is rejected."""
+
+    contract, selection, transaction, tx_id = _build_finding_fixture()
+    finding = _make_finding(contract, tx_id, severity="warning")
+    finding_id = contract.id_for(finding)
+    correction = _build_correction(contract, transaction, (finding_id,))
+    first = _make_transition(
+        contract,
+        tx_id,
+        finding_id,
+        to_status="resolved",
+        correction_fact_id=contract.id_for(correction),
+    )
+    second = _make_transition(
+        contract,
+        tx_id,
+        finding_id,
+        from_status="resolved",  # source must equal derived state
+        to_status="accepted",
+        correction_fact_id=None,
+    )
+    with pytest.raises(ReviewContractError) as exc:
+        contract.validate_transaction(
+            transaction,
+            lens_selection=selection,
+            findings=(finding,),
+            transitions=(first, second),
+            correction_fact=correction,
+        )
+    assert exc.value.code == CODE_TRANSITION_INVALID
+
+
+def test_terminal_replay_rejection_for_accepted() -> None:
+    """A second transition after an accepted edge is rejected."""
+
+    contract, selection, transaction, tx_id = _build_finding_fixture()
+    finding = _make_finding(contract, tx_id, severity="warning")
+    finding_id = contract.id_for(finding)
+    first = _make_transition(
+        contract,
+        tx_id,
+        finding_id,
+        to_status="accepted",
+        correction_fact_id=None,
+    )
+    second = _make_transition(
+        contract,
+        tx_id,
+        finding_id,
+        from_status="accepted",
+        to_status="resolved",
+        correction_fact_id=CorrectionFactId("sha256:" + ("a" * 64)),
+    )
+    with pytest.raises(ReviewContractError) as exc:
+        contract.validate_transaction(
+            transaction,
+            lens_selection=selection,
+            findings=(finding,),
+            transitions=(first, second),
+        )
+    assert exc.value.code == CODE_TRANSITION_INVALID
+
+
+def test_correction_nullability_for_resolved_with_null_fails() -> None:
+    """Resolving with a null correction reference is rejected."""
+
+    contract, selection, transaction, tx_id = _build_finding_fixture()
+    finding = _make_finding(contract, tx_id, severity="warning")
+    finding_id = contract.id_for(finding)
+    transition = _make_transition(
+        contract,
+        tx_id,
+        finding_id,
+        to_status="resolved",
+        correction_fact_id=None,
+    )
+    with pytest.raises(ReviewContractError) as exc:
+        contract.validate_transaction(
+            transaction,
+            lens_selection=selection,
+            findings=(finding,),
+            transitions=(transition,),
+        )
+    assert exc.value.code == CODE_TRANSITION_INVALID
+
+
+def test_correction_nullability_for_accepted_with_id_fails() -> None:
+    """Accepting with a non-null correction reference is rejected."""
+
+    contract, selection, transaction, tx_id = _build_finding_fixture()
+    finding = _make_finding(contract, tx_id, severity="warning")
+    finding_id = contract.id_for(finding)
+    transition = _make_transition(
+        contract,
+        tx_id,
+        finding_id,
+        to_status="accepted",
+        correction_fact_id=CorrectionFactId("sha256:" + ("a" * 64)),
+    )
+    with pytest.raises(ReviewContractError) as exc:
+        contract.validate_transaction(
+            transaction,
+            lens_selection=selection,
+            findings=(finding,),
+            transitions=(transition,),
+        )
+    assert exc.value.code == CODE_TRANSITION_INVALID
+
+
+def test_unresolved_critical_finding_is_rejected_even_with_other_terminal_findings() -> None:
+    """An open critical alongside a resolved other critical fails."""
+
+    contract, selection, transaction, tx_id = _build_finding_fixture()
+    open_critical = _make_finding(contract, tx_id, severity="critical", summary="open")
+    resolved_critical = _make_finding(
+        contract,
+        tx_id,
+        severity="critical",
+        summary="resolved",
+        detail="resolved detail",
+    )
+    resolved_id = contract.id_for(resolved_critical)
+    correction = _build_correction(contract, transaction, (resolved_id,))
+    transition = _make_transition(
+        contract,
+        tx_id,
+        resolved_id,
+        to_status="resolved",
+        correction_fact_id=contract.id_for(correction),
+    )
+    with pytest.raises(ReviewContractError) as exc:
+        contract.validate_transaction(
+            transaction,
+            lens_selection=selection,
+            findings=(open_critical, resolved_critical),
+            transitions=(transition,),
+            correction_fact=correction,
+        )
+    assert exc.value.code == CODE_TRANSITION_INVALID
+
+
+def test_noncritical_findings_remain_open_with_no_transitions() -> None:
+    """Warning and suggestion findings may remain open without transitions."""
+
+    contract, selection, transaction, tx_id = _build_finding_fixture()
+    for severity in ("warning", "suggestion"):
+        finding = _make_finding(contract, tx_id, severity=severity)
+        contract.validate_transaction(
+            transaction,
+            lens_selection=selection,
+            findings=(finding,),
+        )
+
+
+def test_critical_finding_resolved_with_correction_passes() -> None:
+    """A critical finding with a resolving transition passes."""
+
+    contract, selection, transaction, tx_id = _build_finding_fixture()
+    finding = _make_finding(contract, tx_id, severity="critical")
+    finding_id = contract.id_for(finding)
+    correction = _build_correction(contract, transaction, (finding_id,))
+    transition = _make_transition(
+        contract,
+        tx_id,
+        finding_id,
+        to_status="resolved",
+        correction_fact_id=contract.id_for(correction),
+    )
+    contract.validate_transaction(
+        transaction,
+        lens_selection=selection,
+        findings=(finding,),
+        transitions=(transition,),
+        correction_fact=correction,
+    )
+
+
+def test_finding_transition_from_illegal_source_state_fails() -> None:
+    """`from_status` mismatches the derived current state and is rejected."""
+
+    contract, selection, transaction, tx_id = _build_finding_fixture()
+    finding = _make_finding(contract, tx_id, severity="warning")
+    finding_id = contract.id_for(finding)
+    # Source is "resolved" but the finding is born open.
+    transition = _make_transition(
+        contract,
+        tx_id,
+        finding_id,
+        from_status="resolved",
+        to_status="accepted",
+        correction_fact_id=None,
+    )
+    with pytest.raises(ReviewContractError) as exc:
+        contract.validate_transaction(
+            transaction,
+            lens_selection=selection,
+            findings=(finding,),
+            transitions=(transition,),
+        )
+    assert exc.value.code == CODE_TRANSITION_INVALID
+
+
+def test_finding_transition_with_unknown_to_status_fails() -> None:
+    """An unrecognized to_status fails the state machine."""
+
+    contract, selection, transaction, tx_id = _build_finding_fixture()
+    finding = _make_finding(contract, tx_id, severity="warning")
+    finding_id = contract.id_for(finding)
+    transition = FindingTransition(
+        schema_name=REVIEW_FINDING_TRANSITION_SCHEMA_NAME,  # type: ignore[arg-type]
+        schema_version=1,  # type: ignore[arg-type]
+        review_transaction_id=tx_id,
+        finding_id=finding_id,
+        from_status="open",
+        to_status="Rogue",  # not a closed status
+        correction_fact_id=None,
+    )
+    with pytest.raises(ReviewContractError) as exc:
+        contract.validate_transaction(
+            transaction,
+            lens_selection=selection,
+            findings=(finding,),
+            transitions=(transition,),
+        )
+    assert exc.value.code in {CODE_TRANSITION_INVALID, CODE_SCHEMA_INVALID}
+
+
+def test_duplicate_supplied_finding_ids_fail_graph_validation() -> None:
+    """Two identical findings share a recomputed ID and the graph rejects them."""
+
+    contract, selection, transaction, tx_id = _build_finding_fixture()
+    a = _make_finding(contract, tx_id, severity="warning")
+    b = _make_finding(contract, tx_id, severity="warning")
+    with pytest.raises(ReviewContractError) as exc:
+        contract.validate_transaction(
+            transaction,
+            lens_selection=selection,
+            findings=(a, b),
+        )
+    assert exc.value.code == CODE_ID_INVALID
+
+
+def test_finding_path_outside_scope_fails() -> None:
+    """A path outside the transaction scope fails with schema-invalid."""
+
+    contract, selection, transaction, tx_id = _build_finding_fixture()
+    bad = _make_finding(contract, tx_id, paths=("other/module.py",))
+    with pytest.raises(ReviewContractError) as exc:
+        contract.validate_transaction(
+            transaction,
+            lens_selection=selection,
+            findings=(bad,),
+        )
+    assert exc.value.code == CODE_SCHEMA_INVALID
+
+
+def test_finding_paths_within_scope_pass() -> None:
+    """Every path equal to or descending from the scope passes."""
+
+    contract, selection, transaction, tx_id = _build_finding_fixture()
+    finding = _make_finding(
+        contract, tx_id, paths=("src", "src/sub", "src/sub/deep/file.py")
+    )
+    contract.validate_transaction(
+        transaction,
+        lens_selection=selection,
+        findings=(finding,),
+    )
+
+
+def test_ordered_reduction_determines_state() -> None:
+    """Two ordered legal transitions reduce to a single terminal state."""
+
+    contract, selection, transaction, tx_id = _build_finding_fixture()
+    # Use two findings: one warning, one suggestion.
+    warning = _make_finding(contract, tx_id, severity="warning")
+    suggestion = _make_finding(
+        contract,
+        tx_id,
+        severity="suggestion",
+        summary="other summary",
+        detail="other detail",
+    )
+    warning_id = contract.id_for(warning)
+    suggestion_id = contract.id_for(suggestion)
+    accept_warning = _make_transition(
+        contract,
+        tx_id,
+        warning_id,
+        to_status="accepted",
+        correction_fact_id=None,
+    )
+    correction = _build_correction(contract, transaction, (suggestion_id,))
+    resolve_suggestion = _make_transition(
+        contract,
+        tx_id,
+        suggestion_id,
+        to_status="resolved",
+        correction_fact_id=contract.id_for(correction),
+    )
+    contract.validate_transaction(
+        transaction,
+        lens_selection=selection,
+        findings=(warning, suggestion),
+        transitions=(accept_warning, resolve_suggestion),
+        correction_fact=correction,
+    )
+
+
+def test_two_terminal_targets_for_critical_with_correction_pass() -> None:
+    """A single critical resolves with correction; accepted paths reject."""
+
+    contract, selection, transaction, tx_id = _build_finding_fixture()
+    critical = _make_finding(contract, tx_id, severity="critical")
+    finding_id = contract.id_for(critical)
+    correction = _build_correction(contract, transaction, (finding_id,))
+    transition = _make_transition(
+        contract,
+        tx_id,
+        finding_id,
+        to_status="resolved",
+        correction_fact_id=contract.id_for(correction),
+    )
+    contract.validate_transaction(
+        transaction,
+        lens_selection=selection,
+        findings=(critical,),
+        transitions=(transition,),
+        correction_fact=correction,
+    )
+
+
+def test_ordered_replay_after_terminal_state_fails() -> None:
+    """A second transition whose source mismatches the terminal state fails."""
+
+    contract, selection, transaction, tx_id = _build_finding_fixture()
+    warning = _make_finding(contract, tx_id, severity="warning")
+    finding_id = contract.id_for(warning)
+    first = _make_transition(
+        contract,
+        tx_id,
+        finding_id,
+        to_status="accepted",
+        correction_fact_id=None,
+    )
+    # Source is still "open" in the second transition.
+    second = _make_transition(
+        contract,
+        tx_id,
+        finding_id,
+        from_status="open",
+        to_status="accepted",
+        correction_fact_id=None,
+    )
+    with pytest.raises(ReviewContractError) as exc:
+        contract.validate_transaction(
+            transaction,
+            lens_selection=selection,
+            findings=(warning,),
+            transitions=(first, second),
+        )
+    assert exc.value.code == CODE_TRANSITION_INVALID
+
+
+def test_empty_transitions_with_critical_finding_fails() -> None:
+    """A critical finding without transitions is unresolved."""
+
+    contract, selection, transaction, tx_id = _build_finding_fixture()
+    critical = _make_finding(contract, tx_id, severity="critical")
+    with pytest.raises(ReviewContractError) as exc:
+        contract.validate_transaction(
+            transaction,
+            lens_selection=selection,
+            findings=(critical,),
+        )
+    assert exc.value.code == CODE_TRANSITION_INVALID
+
+
+def test_warning_resolved_with_correction_passes() -> None:
+    """A warning finding resolved with correction passes."""
+
+    contract, selection, transaction, tx_id = _build_finding_fixture()
+    warning = _make_finding(contract, tx_id, severity="warning")
+    finding_id = contract.id_for(warning)
+    correction = _build_correction(contract, transaction, (finding_id,))
+    transition = _make_transition(
+        contract,
+        tx_id,
+        finding_id,
+        to_status="resolved",
+        correction_fact_id=contract.id_for(correction),
+    )
+    contract.validate_transaction(
+        transaction,
+        lens_selection=selection,
+        findings=(warning,),
+        transitions=(transition,),
+        correction_fact=correction,
+    )
+
+
+def test_suggestion_accepted_with_no_correction_passes() -> None:
+    """A suggestion finding accepted with no correction passes."""
+
+    contract, selection, transaction, tx_id = _build_finding_fixture()
+    suggestion = _make_finding(contract, tx_id, severity="suggestion")
+    finding_id = contract.id_for(suggestion)
+    transition = _make_transition(
+        contract,
+        tx_id,
+        finding_id,
+        to_status="accepted",
+        correction_fact_id=None,
+    )
+    contract.validate_transaction(
+        transaction,
+        lens_selection=selection,
+        findings=(suggestion,),
+        transitions=(transition,),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Comprehensive lens-policy matrix (task 6)
 # ---------------------------------------------------------------------------
 
