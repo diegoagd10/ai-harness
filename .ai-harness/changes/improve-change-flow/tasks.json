@@ -370,25 +370,25 @@
       "depends_on": [
         "9"
       ],
-      "status": "pending",
+      "status": "done",
       "subtasks": [
         {
           "id": "11.1",
           "title": "Add a routingDiagnostic field to CapabilityTaskState",
           "scenario": "Unsafe references do not associate",
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "11.2",
           "title": "Populate routingDiagnostic from task_capability_state and surface it in slice status",
           "scenario": "Unsafe references do not associate",
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "11.3",
           "title": "Add tests covering the unsafe reference diagnostic",
           "scenario": "Unsafe references do not associate",
-          "status": "pending"
+          "status": "done"
         }
       ]
     },

@@ -62,6 +62,7 @@ def test_capability_state_dataclass_exposes_ordered_progress_and_digests() -> No
         "taskIds",
         "definitionDigest",
         "stateDigest",
+        "routingDiagnostic",
     )
 
 
@@ -299,3 +300,306 @@ def test_capability_state_rejects_storage_errors_safely(tmp_path: Path) -> None:
 
     with pytest.raises(TaskStoreError, match="Malformed tasks.json"):
         task_capability_state(root, "demo", "any-capability")
+
+
+# ---------------------------------------------------------------------------
+# Routing diagnostic for unsafe spec references
+# ---------------------------------------------------------------------------
+
+
+def test_routing_diagnostic_none_when_all_references_safe(tmp_path: Path) -> None:
+    """A task store with only safe references leaves the diagnostic empty."""
+    root = tmp_path
+    _make_change(root)
+    task_create(
+        root,
+        "demo",
+        TaskInput(
+            title="Safe",
+            spec="capability",
+            phase="implement",
+            depends_on=[],
+            subtasks=[SubtaskInput(title="step")],
+        ),
+    )
+
+    state = task_capability_state(root, "demo", "capability")
+
+    assert state.taskIds == ["1"]
+    assert state.routingDiagnostic is None
+
+
+def test_routing_diagnostic_lists_absolute_path_reference(tmp_path: Path) -> None:
+    """A task referencing an absolute spec path is reported in the diagnostic."""
+    root = tmp_path
+    _make_change(root)
+    # Inject an unsafe task directly so we can bypass the create-time
+    # validation that the CLI layer enforces.
+    import json
+
+    tasks_file = root / ".ai-harness" / "changes" / "demo" / "tasks.json"
+    payload = {
+        "tasks": [
+            {
+                "id": "1",
+                "title": "Absolute",
+                "spec": "/etc/specs/capability.md",
+                "phase": "implement",
+                "depends_on": [],
+                "status": "pending",
+                "subtasks": [],
+            }
+        ]
+    }
+    tasks_file.write_text(json.dumps(payload), encoding="utf-8")
+
+    state = task_capability_state(root, "demo", "capability")
+
+    assert state.taskIds == []
+    assert state.routingDiagnostic is not None
+    assert "absolute path" in state.routingDiagnostic
+    assert "1" in state.routingDiagnostic
+
+
+def test_routing_diagnostic_lists_parent_traversal(tmp_path: Path) -> None:
+    """A task using parent traversal is reported in the diagnostic."""
+    root = tmp_path
+    _make_change(root)
+    import json
+
+    tasks_file = root / ".ai-harness" / "changes" / "demo" / "tasks.json"
+    payload = {
+        "tasks": [
+            {
+                "id": "1",
+                "title": "Traversal",
+                "spec": "../capability.md",
+                "phase": "implement",
+                "depends_on": [],
+                "status": "pending",
+                "subtasks": [],
+            }
+        ]
+    }
+    tasks_file.write_text(json.dumps(payload), encoding="utf-8")
+
+    state = task_capability_state(root, "demo", "capability")
+
+    assert state.taskIds == []
+    assert state.routingDiagnostic is not None
+    assert "parent traversal" in state.routingDiagnostic
+
+
+def test_routing_diagnostic_lists_nested_path(tmp_path: Path) -> None:
+    """A task using a nested spec path is reported in the diagnostic."""
+    root = tmp_path
+    _make_change(root)
+    import json
+
+    tasks_file = root / ".ai-harness" / "changes" / "demo" / "tasks.json"
+    payload = {
+        "tasks": [
+            {
+                "id": "1",
+                "title": "Nested",
+                "spec": "nested/capability.md",
+                "phase": "implement",
+                "depends_on": [],
+                "status": "pending",
+                "subtasks": [],
+            }
+        ]
+    }
+    tasks_file.write_text(json.dumps(payload), encoding="utf-8")
+
+    state = task_capability_state(root, "demo", "capability")
+
+    assert state.taskIds == []
+    assert state.routingDiagnostic is not None
+    assert "nested path" in state.routingDiagnostic
+
+
+def test_routing_diagnostic_lists_different_capability(tmp_path: Path) -> None:
+    """A task referencing a different capability simply does not associate.
+
+    A reference to ``other-capability`` is a legitimate canonical
+    reference for that capability, not an unsafe reference. When the
+    router asks for ``capability``, the task correctly stays out of
+    the selected slice and no diagnostic is produced — the diagnostic
+    is reserved for truly unsafe references that cannot be audited.
+    """
+    root = tmp_path
+    _make_change(root)
+    import json
+
+    tasks_file = root / ".ai-harness" / "changes" / "demo" / "tasks.json"
+    payload = {
+        "tasks": [
+            {
+                "id": "1",
+                "title": "Other cap",
+                "spec": "other-capability",
+                "phase": "implement",
+                "depends_on": [],
+                "status": "pending",
+                "subtasks": [],
+            }
+        ]
+    }
+    tasks_file.write_text(json.dumps(payload), encoding="utf-8")
+
+    state = task_capability_state(root, "demo", "capability")
+
+    assert state.taskIds == []
+    assert state.routingDiagnostic is None
+
+
+def test_routing_diagnostic_lists_empty_spec(tmp_path: Path) -> None:
+    """A task with an empty spec reference is reported in the diagnostic."""
+    root = tmp_path
+    _make_change(root)
+    import json
+
+    tasks_file = root / ".ai-harness" / "changes" / "demo" / "tasks.json"
+    payload = {
+        "tasks": [
+            {
+                "id": "1",
+                "title": "Empty",
+                "spec": "",
+                "phase": "implement",
+                "depends_on": [],
+                "status": "pending",
+                "subtasks": [],
+            }
+        ]
+    }
+    tasks_file.write_text(json.dumps(payload), encoding="utf-8")
+
+    state = task_capability_state(root, "demo", "capability")
+
+    assert state.taskIds == []
+    assert state.routingDiagnostic is not None
+    assert "empty spec reference" in state.routingDiagnostic
+
+
+def test_routing_diagnostic_keeps_safe_tasks_associated(tmp_path: Path) -> None:
+    """Unsafe tasks are excluded but safe tasks remain associated with the capability."""
+    root = tmp_path
+    _make_change(root)
+    # Safe reference for the selected capability.
+    task_create(
+        root,
+        "demo",
+        TaskInput(
+            title="Safe",
+            spec="capability",
+            phase="implement",
+            depends_on=[],
+            subtasks=[SubtaskInput(title="step")],
+        ),
+    )
+    # Inject an unsafe task alongside the safe one.
+    import json
+
+    tasks_file = root / ".ai-harness" / "changes" / "demo" / "tasks.json"
+    raw = json.loads(tasks_file.read_text(encoding="utf-8"))
+    raw["tasks"].append(
+        {
+            "id": "2",
+            "title": "Absolute",
+            "spec": "/etc/specs/capability.md",
+            "phase": "implement",
+            "depends_on": [],
+            "status": "pending",
+            "subtasks": [],
+        }
+    )
+    tasks_file.write_text(json.dumps(raw), encoding="utf-8")
+
+    state = task_capability_state(root, "demo", "capability")
+
+    assert state.taskIds == ["1"]
+    assert state.routingDiagnostic is not None
+    assert "absolute path" in state.routingDiagnostic
+    assert "/etc/specs/capability.md" in state.routingDiagnostic
+
+
+def test_slice_status_surfaces_unsafe_reference_diagnostic(tmp_path: Path) -> None:
+    """The slice router surfaces the unsafe-reference diagnostic in ``blockedReasons``."""
+    import json
+    from dataclasses import asdict
+
+    import yaml
+
+    from ai_harness.modules.harness.change import change_continue
+
+    # Initialise the config so change_continue can resolve context.
+    config_path = tmp_path / ".ai-harness" / "config.yml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "commit": {"format": "[{change_name}][{task_id}] {slug}"},
+                "phases": {
+                    phase: {"rules": ["rule"]}
+                    for phase in (
+                        "change_explorer",
+                        "change_propose",
+                        "change_design",
+                        "change_specs",
+                        "change_tasks",
+                        "change_implementor",
+                        "change_validator",
+                        "change_archiver",
+                    )
+                },
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    change_dir = _make_change(tmp_path, "unsafe-ref")
+    prd = change_dir / "prd.md"
+    prd.write_text(
+        "---\n"
+        "changeFlow:\n"
+        "  schemaVersion: 1\n"
+        "  mode: sliced\n"
+        "  capabilities:\n"
+        "    - id: unsafe-ref\n"
+        "      title: U\n"
+        "      risk:\n"
+        "        level: normal\n"
+        "        reasons: []\n"
+        "      design: none\n"
+        "---\n",
+        encoding="utf-8",
+    )
+    (change_dir / "specs").mkdir()
+    (change_dir / "specs" / "unsafe-ref.md").write_text("# spec\n", encoding="utf-8")
+    tasks_file = change_dir / "tasks.json"
+    tasks_file.write_text(
+        json.dumps(
+            {
+                "tasks": [
+                    {
+                        "id": "1",
+                        "title": "Absolute",
+                        "spec": "/etc/specs/unsafe-ref.md",
+                        "phase": "implement",
+                        "depends_on": [],
+                        "status": "pending",
+                        "subtasks": [],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    status = change_continue(tmp_path, "unsafe-ref")
+    payload = json.loads(json.dumps(asdict(status)))
+    assert payload["sliceStatus"]["route"] == "tasks"
+    assert any("absolute path" in reason for reason in payload["blockedReasons"])

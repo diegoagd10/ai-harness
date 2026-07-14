@@ -87,12 +87,19 @@ class CapabilityTaskState:
     references, phases, dependencies, and subtask IDs/titles/scenarios,
     but excludes task statuses. ``stateDigest`` adds statuses on top so a
     normal pending→done transition invalidates only the state side.
+
+    ``routingDiagnostic`` is a non-null, actionable message when one or
+    more tasks use an unsafe spec reference (absolute path, parent
+    traversal, nested spec path, empty ID, or a different capability's
+    spec). The diagnostic lets the router surface the issue without
+    silently crediting the unsafe task to the selected capability.
     """
 
     progress: TaskProgress
     taskIds: list[TaskId]
     definitionDigest: str
     stateDigest: str
+    routingDiagnostic: str | None = None
 
 
 def task_create(root: Path, change: str, task_input: TaskInput) -> Task:
@@ -199,9 +206,10 @@ def task_capability_state(root: Path, change: str, spec_reference: str) -> Capab
     ``specs/<id>.md`` and any absolute/relative ``specs/<id>.md`` path
     whose tail matches the canonical ``specs/<id>.md`` shape. Unsafe
     references (absolute paths, parent traversal, nested spec paths,
-    empty IDs, or references to a different capability) silently leave
-    the task unassociated; the router receives a ``CapabilityTaskState``
-    filtered to safe, matching associations plus stable digests.
+    empty IDs, or references to a different capability) leave the task
+    unassociated; the router receives a ``CapabilityTaskState`` filtered
+    to safe, matching associations plus stable digests and a
+    ``routingDiagnostic`` explaining the exclusion.
 
     Raises :class:`TaskStoreError` only when the underlying tasks store
     is unreadable, so the seam surfaces a uniform error type when
@@ -231,6 +239,11 @@ def task_capability_state(root: Path, change: str, spec_reference: str) -> Capab
         associated = [task for task in tasks if _canonicalize_task_spec(task.spec) == canonical_spec]
         canonical_for_digest = canonical_spec
 
+    # Detect unsafe or unrelated references that live alongside safe
+    # associations so the router can surface a routing diagnostic
+    # without crediting those tasks to the selected capability.
+    routing_diagnostic = _build_routing_diagnostic(tasks, canonical_spec)
+
     ordered_ids = [task.id for task in associated]
     completed = sum(1 for task in associated if task.status == "done")
     total = len(associated)
@@ -251,6 +264,7 @@ def task_capability_state(root: Path, change: str, spec_reference: str) -> Capab
         taskIds=ordered_ids,
         definitionDigest=definition_digest,
         stateDigest=state_digest,
+        routingDiagnostic=routing_diagnostic,
     )
 
 
@@ -474,6 +488,49 @@ def _canonicalize_task_spec(spec_reference: str) -> str | None:
         return None
 
     return f"specs/{suffix}.md"
+
+
+def _build_routing_diagnostic(tasks: list[Task], canonical_spec: str | None) -> str | None:
+    """Return a routing diagnostic for unsafe task spec references.
+
+    The router must know when a task cannot be associated with the
+    selected capability so it can surface a safe diagnostic instead of
+    silently dropping the task. A "different capability's spec" is a
+    legitimate reference that associates with the other capability
+    rather than the selected one, so this helper only flags references
+    that fail canonicalization entirely (absolute paths, parent
+    traversal, nested paths, empty IDs, or non-string values).
+    """
+    if not tasks:
+        return None
+
+    issues: list[str] = []
+    for task in tasks:
+        if _canonicalize_task_spec(task.spec) is not None:
+            continue
+        if not isinstance(task.spec, str):
+            issues.append(f"task {task.id}: spec is not a string")
+            continue
+        candidate = task.spec.strip()
+        if not candidate:
+            issues.append(f"task {task.id}: empty spec reference")
+        elif ".." in Path(candidate).parts:
+            issues.append(f"task {task.id}: spec uses parent traversal ({task.spec!r})")
+        elif candidate.startswith(("/", "\\")) or re.match(r"^[A-Za-z]:[\\/]", candidate):
+            issues.append(f"task {task.id}: spec is an absolute path ({task.spec!r})")
+        elif "/" in candidate or "\\" in candidate:
+            issues.append(f"task {task.id}: spec uses a nested path ({task.spec!r})")
+        else:
+            issues.append(f"task {task.id}: spec {task.spec!r} does not match a known capability")
+
+    if not issues:
+        return None
+
+    if canonical_spec is not None:
+        header = f"Tasks referencing an unsafe spec are not associated with the selected capability {canonical_spec!r}:"
+    else:
+        header = "Tasks referencing an unsafe spec are not associated with the selected capability:"
+    return header + " " + "; ".join(issues)
 
 
 def _capability_digests(tasks: list[Task], canonical_spec: str | None) -> tuple[str, str]:

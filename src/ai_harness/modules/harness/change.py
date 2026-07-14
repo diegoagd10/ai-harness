@@ -522,7 +522,9 @@ def _derive_slice_status(
         )
 
     # Tasks gating: zero associated tasks (per spec reference) routes
-    # to ``tasks``.
+    # to ``tasks``. An unsafe or unrelated reference in the task store
+    # surfaces as a routing diagnostic so the slice never silently
+    # credits the unsafe task to the selected capability.
     cap_state = _read_capability_state(root, change_dir, selected_capability)
     if not cap_state.taskIds:
         return (
@@ -539,7 +541,7 @@ def _derive_slice_status(
                 approval=_approval_status_for_gate(approvals, "implementation", selected_capability.id, root, change),
                 completed=tuple(completed),
             ),
-            [],
+            [cap_state.routingDiagnostic] if cap_state.routingDiagnostic else [],
         )
 
     # Effective high-risk capabilities require a fresh implementation
@@ -900,7 +902,7 @@ def _route_next_capability(
                 approval=_approval_status_for_gate(approvals, "implementation", target.id, root, change),
                 completed=tuple(completed),
             ),
-            [],
+            [cap_state.routingDiagnostic] if cap_state.routingDiagnostic else [],
         )
 
     if risk.effectiveLevel == "high":
