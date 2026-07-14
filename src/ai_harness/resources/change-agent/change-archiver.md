@@ -33,16 +33,24 @@ and failure shape are local so the prompt never probes `ai-harness
 
 ### `change-archive`
 
-How it works — runs all-or-nothing structural preflight checks, then
-promotes the `specs/` subtree to `.ai-harness/specs/{change}/` and
-moves the remaining change folder to
-`.ai-harness/archive/{change}/`. On success prints exactly `done` to
-stdout and exits zero. On failure prints JSON shaped as
-{ "errors": [...] } to stdout and exits non-zero (failure is out of
-scope for the contract; the archiver surfaces the errors verbatim).
+How it works — runs all-or-nothing structural preflight checks (mode-aware
+task + approval + validation freshness + destination collisions) and a
+terminal receipt authorization that re-validates the current
+archive-eligible receipt against the live validation.md, candidate,
+run, and evidence. After successful preflight, promotes the `specs/`
+subtree to `.ai-harness/specs/{change}/` and moves the remaining
+change folder to `.ai-harness/archive/{change}/`. On success prints
+exactly `done` to stdout and exits zero. On failure prints JSON
+shaped as `{ "errors": [...] }` to stdout and exits non-zero.
+
+Receipt authorization is the final terminal check. Every receipt
+denial produces one stable, redacted error string in the array (no
+argv leaks, no environment values, no raw/retained output). The
+archiver DOES NOT retry, reseal, repair, or move files directly when
+this command fails — surface the failure verbatim and stop.
 
 Use it to — promote specs and archive the change folder in one
-transactional move.
+transactional move after the receipt gate authorises it.
 
 Expected success response:
 
@@ -114,6 +122,11 @@ When `ai-harness change-archive {change}` exits non-zero:
    safe to commit.
 2. Surface the failure to the human with the original `errors` array
    so they can decide how to proceed. Do not guess or retry blindly.
+3. If the error mentions `Receipt authorization failed`, refer the
+   operator to the validator/orchestrator: the change needs a fresh
+   `change-gates-run`, `validation.md` write, and `change-receipt-seal`
+   cycle before archive can succeed. Do not attempt to seal from
+   the archiver context.
 
 When the archive command succeeded but pre-commit verification finds
 unexpected staged paths, OR post-commit verification finds leftover
