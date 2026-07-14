@@ -12,6 +12,8 @@
 - 3b511fd744793188e1fbb888a242b08faa706ab0 — task 9: enforce-terminal-receipt-authorization-in-archive
 - 6c17ab99b45fef0f1e87fe2578dbbf756c287e68 — task 10: update-validator-and-archiver-protocol-resources
 - f5e2a1961967a471c04982b235006029b1102b97 — task 11: run-focused-receipt-workflow-regression-coverage
+- d29c763a85e8d7b280821bbb1d5986c81db4632f — task 11: validation-fix-receipt-integrity-security
+- 37b7dd76d6c8fcfd38ea4c5d30fd0c800c274b83 — task 11: validation-fix-secret-argv-and-persisted-grammar
 
 ## TDD Evidence
 
@@ -28,6 +30,8 @@
 | 9    | 3b511fd744793188e1fbb888a242b08faa706ab0 | src/ai_harness/modules/harness/change.py | tests/test_receipts_archive.py, tests/test_change.py, tests/test_change_sliced_archive.py | unit | passed: 7/7 | written | passed | Single | clean    |
 | 10   | 6c17ab99b45fef0f1e87fe2578dbbf756c287e68 | src/ai_harness/resources/change-agent/change-validator.md, src/ai_harness/resources/change-agent/change-archiver.md | expected/change-validator.md, expected/change-archiver.md | unit | passed: 257/257 | written | passed | Single | clean    |
 | 11   | f5e2a1961967a471c04982b235006029b1102b97 | src/ai_harness/modules/harness/receipts.py | tests/test_receipts_verify.py, tests/_receipts_fixtures.py | unit | passed: 893/893 | written | passed | Single | clean    |
+| 11   | d29c763a85e8d7b280821bbb1d5986c81db4632f | src/ai_harness/modules/harness/receipts.py, src/ai_harness/modules/harness/change.py | tests/test_change.py, tests/test_change_continuation.py, tests/test_change_sliced_archive.py, tests/test_receipts_archive.py, tests/test_receipts_candidate.py, tests/test_receipts_cli.py, tests/test_receipts_codec.py, tests/test_receipts_executor.py, tests/test_receipts_routing.py, tests/test_receipts_seal.py, tests/test_receipts_store.py, tests/test_receipts_verify.py | mixed | passed: 893/893 | written | passed | Single | clean |
+| 11   | 37b7dd76d6c8fcfd38ea4c5d30fd0c800c274b83 | src/ai_harness/modules/harness/receipts.py | tests/test_receipts_archive.py, tests/test_receipts_executor.py, tests/test_receipts_verify.py | unit | passed: 899/899 | written | passed | (6 cases) | clean |
 
 ## Remaining
 - none
