@@ -83,7 +83,7 @@ from ai_harness.modules.harness.tasks import (
     task_capability_state,
     task_progress,
 )
-from ai_harness.modules.harness.receipts import FinalValidationReceipts
+from ai_harness.modules.harness.receipts import FinalValidationReceipts, ReceiptError
 
 
 def _receipt_archive_eligible(repository_root: Path, change: str) -> bool:
@@ -1591,7 +1591,46 @@ def _archive_preflight(root: Path, change: str) -> list[str]:
     if archive_dest.exists():
         errors.append(f"Archive destination already exists: {archive_dest}")
 
+    # Terminal receipt authorization. We accumulate the failure as a
+    # single error so the CLI's { errors: [...] } shape stays stable and
+    # the existing two-stage move never sees a partial move.
+    if validation.is_file():
+        receipt_error = _receipt_archive_error(root, change)
+        if receipt_error is not None:
+            errors.append(receipt_error)
+
     return errors
+
+
+def _receipt_archive_error(repository_root: Path, change: str) -> str | None:
+    """Return a safe CLI-friendly error when current receipt is not eligible."""
+    try:
+        FinalValidationReceipts(repository_root).verify_for_archive(change=change)
+    except ReceiptError as exc:
+        # Translate code-prefixed errors into single, safe, user-facing
+        # strings. Never expose argv, evidence contents, env values, or
+        # secret material — ReceiptError messages are already vetted.
+        safe_message = exc.message
+        if exc.code == "receipt.missing":
+            safe_message = "no current archive-eligible receipt — run change-gates-run and change-receipt-seal first"
+        elif exc.code == "validation.stale":
+            safe_message = "root validation.md has been edited since sealing — re-seal the receipt"
+        elif exc.code == "validation.missing":
+            safe_message = "root validation.md is missing"
+        elif exc.code == "candidate.stale":
+            safe_message = "candidate has changed since the run — re-run gates"
+        elif exc.code == "run.missing":
+            safe_message = "the referenced native run is missing"
+        elif exc.code == "run.gates-failed":
+            safe_message = "the referenced native run recorded a failed gate"
+        elif exc.code == "receipt.not-eligible":
+            safe_message = "current receipt is not archive-eligible"
+        elif exc.code == "schema.unsupported":
+            safe_message = "current receipt uses an unsupported schema"
+        return f"Receipt authorization failed ({exc.code}): {safe_message}"
+    except Exception:  # pragma: no cover - defensive
+        return "Receipt authorization failed: verification raised an unexpected error"
+    return None
 
 
 def _evaluate_sliced_preflight(

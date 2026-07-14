@@ -1,0 +1,248 @@
+"""Tests for terminal receipt authorization in archive preflight."""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+from ai_harness.modules.harness.change import (
+    ChangeStoreError,
+    change_archive,
+)
+from ai_harness.modules.harness.receipts import (
+    FinalValidationReceipts,
+    decode_gate_declaration,
+)
+
+
+def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    completed = subprocess.run(
+        ["git", *args],
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+        check=False,
+        env={"GIT_TERMINAL_PROMPT": "0", "LC_ALL": "C.UTF-8", **os.environ},
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(
+            f"git {args} -> {completed.returncode}\nstdout={completed.stdout!r}\nstderr={completed.stderr!r}"
+        )
+    return completed
+
+
+def _init_repo(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    _git(path, "init", "-q", "--initial-branch=main")
+    _git(path, "config", "user.email", "test@example.com")
+    _git(path, "config", "user.name", "Tester")
+    _git(path, "config", "commit.gpgsign", "false")
+
+
+def _commit_all(path: Path, message: str = "init") -> None:
+    _git(path, "add", "-A")
+    _git(path, "commit", "-q", "-m", message, "--no-gpg-sign")
+
+
+@pytest.fixture(autouse=True)
+def _autouse_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Set up a minimal config and a working Git repo for each test."""
+
+    repo = tmp_path / "repo"
+    if not repo.exists():
+        _init_repo(repo)
+        (repo / "src.txt").write_text("first\n", encoding="utf-8")
+        _commit_all(repo, "initial")
+    config_path = repo / ".ai-harness" / "config.yml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        json.dumps(
+            {
+                "commit": {"format": "[{change_name}][{task_id}] {slug}"},
+                "phases": {"change_validator": {"rules": ["rule"]}, "change_archiver": {"rules": []}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(repo)
+    return repo
+
+
+def _stage_legacy_for_archive(repo: Path, change: str) -> Path:
+    """Stage a legacy change that is structurally archive-eligible."""
+    change_dir = repo / ".ai-harness" / "changes" / change
+    change_dir.mkdir(parents=True, exist_ok=True)
+    (change_dir / "exploration.md").write_text("# explore\n")
+    (change_dir / "prd.md").write_text("# prd\n")
+    (change_dir / "design.md").write_text("# design\n")
+    (change_dir / "specs").mkdir()
+    (change_dir / "specs" / "spec.md").write_text("# spec\n")
+    (change_dir / "tasks.json").write_text(
+        json.dumps(
+            {
+                "tasks": [
+                    {
+                        "id": "1",
+                        "title": "step",
+                        "spec": "spec.md",
+                        "phase": "implement",
+                        "depends_on": [],
+                        "status": "done",
+                        "subtasks": [{"id": "1.1", "title": "s", "scenario": None, "status": "done"}],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (change_dir / "implementation.md").write_text("# impl\n")
+    (change_dir / "validation.md").write_text(
+        "## Verdict\nverdict: pass\ncritical: 0\ngate-run: sha256:" + "0" * 64 + "\n",
+        encoding="utf-8",
+    )
+    return change_dir
+
+
+def _make_receipt(repo: Path, change: str) -> str:
+    """Run gates and seal to produce an archive-eligible receipt."""
+    receipts = FinalValidationReceipts(repo)
+    change_dir = repo / ".ai-harness" / "changes" / change
+    request = decode_gate_declaration(
+        {
+            "schema_name": "ai-harness.gate-declaration",
+            "schema_version": 1,
+            "gates": [
+                {
+                    "gate_id": "pass",
+                    "argv": [sys.executable, "-c", "print('ok')"],
+                    "cwd": ".",
+                    "timeout_seconds": 30,
+                }
+            ],
+        }
+    )
+    run_result = receipts.run_gates(change=change, request=request)
+    (change_dir / "validation.md").write_text(
+        "## Verdict\nverdict: pass\ncritical: 0\n"
+        f"gate-run: {run_result.run_id}\n",
+        encoding="utf-8",
+    )
+    seal = receipts.seal(change=change)
+    assert seal.archive_eligible is True
+    return seal.receipt_id
+
+
+def test_archive_denies_legacy_without_receipt(_autouse_config) -> None:
+    repo = _autouse_config
+    change = "demo"
+    _stage_legacy_for_archive(repo, change)
+
+    with pytest.raises(ChangeStoreError) as excinfo:
+        change_archive(repo, change)
+
+    errors = excinfo.value.errors
+    assert any("receipt" in err.lower() for err in errors)
+    # Source change must survive untouched.
+    assert (repo / ".ai-harness" / "changes" / change).is_dir()
+    # Specs/archive destinations must not exist.
+    assert not (repo / ".ai-harness" / "specs" / change).exists()
+    assert not (repo / ".ai-harness" / "archive" / change).exists()
+
+
+def test_archive_proceeds_when_receipt_is_valid(_autouse_config) -> None:
+    repo = _autouse_config
+    change = "demo"
+    _stage_legacy_for_archive(repo, change)
+    _make_receipt(repo, change)
+
+    change_archive(repo, change)
+
+    assert not (repo / ".ai-harness" / "changes" / change).exists()
+    assert (repo / ".ai-harness" / "archive" / change).is_dir()
+    assert (repo / ".ai-harness" / "specs" / change / "spec.md").is_file()
+
+
+def test_archive_denies_when_validation_md_edited_after_seal(_autouse_config) -> None:
+    repo = _autouse_config
+    change = "demo"
+    _stage_legacy_for_archive(repo, change)
+    _make_receipt(repo, change)
+    validation_path = repo / ".ai-harness" / "changes" / change / "validation.md"
+    validation_path.write_text(validation_path.read_text() + "## edit\n", encoding="utf-8")
+
+    with pytest.raises(ChangeStoreError) as excinfo:
+        change_archive(repo, change)
+
+    errors = excinfo.value.errors
+    assert any("validation" in err.lower() or "stale" in err.lower() for err in errors)
+    # No move occurred
+    assert (repo / ".ai-harness" / "changes" / change).is_dir()
+    assert not (repo / ".ai-harness" / "archive" / change).exists()
+
+
+def test_archive_denies_when_candidate_changed_after_seal(_autouse_config) -> None:
+    repo = _autouse_config
+    change = "demo"
+    _stage_legacy_for_archive(repo, change)
+    _make_receipt(repo, change)
+    (repo / "src.txt").write_text("MUTATED\n", encoding="utf-8")
+
+    with pytest.raises(ChangeStoreError) as excinfo:
+        change_archive(repo, change)
+
+    errors = excinfo.value.errors
+    assert any("candidate" in err.lower() or "stale" in err.lower() for err in errors)
+    assert (repo / ".ai-harness" / "changes" / change).is_dir()
+
+
+def test_archive_succeeds_for_legacy_full_path(_autouse_config) -> None:
+    repo = _autouse_config
+    change = "ok"
+    _stage_legacy_for_archive(repo, change)
+    _make_receipt(repo, change)
+    change_archive(repo, change)
+    assert (repo / ".ai-harness" / "archive" / change).is_dir()
+
+
+def test_archive_does_not_run_gates_during_verification(_autouse_config, monkeypatch) -> None:
+    repo = _autouse_config
+    change = "ok"
+    _stage_legacy_for_archive(repo, change)
+    _make_receipt(repo, change)
+
+    from ai_harness.modules.harness import receipts as receipts_mod
+
+    original_run = receipts_mod.subprocess.run
+
+    def _guarded_run(*args, **kwargs):
+        argv = args[0] if args else kwargs.get("args", [])
+        if isinstance(argv, list) and any("print('ok')" in str(arg) for arg in argv):
+            raise AssertionError("archive preflight must not run gates: argv=" + repr(argv))
+        return original_run(*args, **kwargs)
+
+    monkeypatch.setattr(receipts_mod.subprocess, "run", _guarded_run)
+
+    change_archive(repo, change)
+    assert (repo / ".ai-harness" / "archive" / change).is_dir()
+
+
+def test_archive_does_not_fall_back_to_historical_receipt(_autouse_config) -> None:
+    repo = _autouse_config
+    change = "ok"
+    _stage_legacy_for_archive(repo, change)
+    _make_receipt(repo, change)
+
+    # Break the current pointer without deleting the historical receipt.
+    receipts = FinalValidationReceipts(repo)
+    store = receipts.store_for(change)
+    (store.receipts_dir / "current").write_text("not-json\n", encoding="utf-8")
+
+    with pytest.raises(ChangeStoreError):
+        change_archive(repo, change)
+
+    assert (repo / ".ai-harness" / "changes" / change).is_dir()

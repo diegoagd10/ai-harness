@@ -10,6 +10,8 @@ status payloads.
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -90,6 +92,44 @@ def _archiveable_sliced_change(tmp_path: Path, change: str) -> Path:
     validation_path = change_dir / "validation.md"
     os.utime(validation_path, (future, future))
     return change_dir
+
+
+def _seal_archiveable_receipt(tmp_path: Path, change: str) -> None:
+    """Run native gates and seal an archive-eligible receipt for *change*."""
+    from ai_harness.modules.harness.receipts import (  # noqa: WPS433 - test helper
+        FinalValidationReceipts,
+        decode_gate_declaration,
+    )
+
+    if not (tmp_path / ".git").exists():
+        subprocess.run(["git", "init", "-q"], cwd=str(tmp_path), check=True)
+        subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=str(tmp_path), check=True)
+        subprocess.run(["git", "config", "user.name", "Tester"], cwd=str(tmp_path), check=True)
+
+    receipts = FinalValidationReceipts(tmp_path)
+    request = decode_gate_declaration(
+        {
+            "schema_name": "ai-harness.gate-declaration",
+            "schema_version": 1,
+            "gates": [
+                {
+                    "gate_id": "pass",
+                    "argv": [sys.executable, "-c", "print('ok')"],
+                    "cwd": ".",
+                    "timeout_seconds": 30,
+                }
+            ],
+        }
+    )
+    run_result = receipts.run_gates(change=change, request=request)
+    change_dir = tmp_path / ".ai-harness" / "changes" / change
+    (change_dir / "validation.md").write_text(
+        "## Verdict\nverdict: pass\ncritical: 0\n"
+        f"gate-run: {run_result.run_id}\n",
+        encoding="utf-8",
+    )
+    seal = receipts.seal(change=change)
+    assert seal.archive_eligible is True
 
 
 @pytest.fixture(autouse=True)
@@ -228,6 +268,7 @@ def test_sliced_archive_rejects_when_destination_collides(tmp_path: Path) -> Non
 def test_sliced_archive_moves_change_and_promotes_specs(tmp_path: Path) -> None:
     """A complete sliced change archives successfully."""
     _archiveable_sliced_change(tmp_path, "sliced-success")
+    _seal_archiveable_receipt(tmp_path, "sliced-success")
 
     change_archive(tmp_path, "sliced-success")
 
@@ -247,6 +288,7 @@ def test_sliced_archive_partial_move_is_rolled_back(tmp_path: Path, monkeypatch:
     import shutil
 
     change_dir = _archiveable_sliced_change(tmp_path, "rollback-test")
+    _seal_archiveable_receipt(tmp_path, "rollback-test")
 
     original_move = shutil.move
     calls: list[str] = []

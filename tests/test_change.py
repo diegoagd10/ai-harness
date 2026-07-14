@@ -870,6 +870,49 @@ def _build_archiveable_change(tmp_path: Path, name: str) -> Path:
     return change_dir
 
 
+def _seal_receipt_for_archive(tmp_path: Path, name: str) -> None:
+    """Run gates and seal an archive-eligible receipt for *name*."""
+    import subprocess as _subprocess
+    import sys as _sys
+
+    from ai_harness.modules.harness.receipts import (  # noqa: WPS433 - test helper
+        FinalValidationReceipts,
+        decode_gate_declaration,
+    )
+
+    if not (tmp_path / ".git").exists():
+        _subprocess.run(["git", "init", "-q"], cwd=str(tmp_path), check=True)
+        _subprocess.run(
+            ["git", "config", "user.email", "test@example.com"], cwd=str(tmp_path), check=True
+        )
+        _subprocess.run(["git", "config", "user.name", "Tester"], cwd=str(tmp_path), check=True)
+
+    receipts = FinalValidationReceipts(tmp_path)
+    request = decode_gate_declaration(
+        {
+            "schema_name": "ai-harness.gate-declaration",
+            "schema_version": 1,
+            "gates": [
+                {
+                    "gate_id": "pass",
+                    "argv": [_sys.executable, "-c", "print('ok')"],
+                    "cwd": ".",
+                    "timeout_seconds": 30,
+                }
+            ],
+        }
+    )
+    run_result = receipts.run_gates(change=name, request=request)
+    change_dir = tmp_path / ".ai-harness" / "changes" / name
+    (change_dir / "validation.md").write_text(
+        "## Verdict\nverdict: pass\ncritical: 0\n"
+        f"gate-run: {run_result.run_id}\n",
+        encoding="utf-8",
+    )
+    seal = receipts.seal(change=name)
+    assert seal.archive_eligible is True
+
+
 # ---------------------------------------------------------------------------
 # change_archive — preflight rejection paths
 # ---------------------------------------------------------------------------
@@ -1019,6 +1062,7 @@ def test_change_archive_preflight_does_not_mutate_on_failure(tmp_path: Path) -> 
 def test_change_archive_promotes_specs_and_moves_change_folder(tmp_path: Path) -> None:
     """Successful archive promotes specs and relocates the remaining change folder."""
     _build_archiveable_change(tmp_path, "demo")
+    _seal_receipt_for_archive(tmp_path, "demo")
     change_dir = tmp_path / ".ai-harness" / "changes" / "demo"
 
     change_archive(tmp_path, "demo")
@@ -1039,6 +1083,7 @@ def test_change_archive_promotes_specs_and_moves_change_folder(tmp_path: Path) -
 def test_change_archive_excludes_specs_subtree_from_archived_change(tmp_path: Path) -> None:
     """Archived change folder MUST NOT carry a duplicate specs/ subtree."""
     _build_archiveable_change(tmp_path, "demo")
+    _seal_receipt_for_archive(tmp_path, "demo")
     change_archive(tmp_path, "demo")
 
     archive_dest = tmp_path / ".ai-harness" / "archive" / "demo"
@@ -1050,6 +1095,7 @@ def test_change_archive_excludes_specs_subtree_from_archived_change(tmp_path: Pa
 def test_change_archive_uses_canonical_top_level_layout(tmp_path: Path) -> None:
     """Archive lands at .ai-harness/archive/{change}, never .ai-harness/changes/archive/{change}."""
     _build_archiveable_change(tmp_path, "demo")
+    _seal_receipt_for_archive(tmp_path, "demo")
     change_archive(tmp_path, "demo")
 
     assert (tmp_path / ".ai-harness" / "archive" / "demo").is_dir()
@@ -1063,6 +1109,7 @@ def test_change_archive_rolls_back_when_change_folder_move_fails(
 ) -> None:
     """A failure during the change-folder move restores the source tree intact."""
     _build_archiveable_change(tmp_path, "demo")
+    _seal_receipt_for_archive(tmp_path, "demo")
     change_dir = tmp_path / ".ai-harness" / "changes" / "demo"
     specs_src = change_dir / "specs"
 
@@ -1098,6 +1145,7 @@ def test_change_archive_leaves_source_intact_when_specs_move_fails(
 ) -> None:
     """A failure during the specs move leaves the change folder and archive untouched."""
     _build_archiveable_change(tmp_path, "demo")
+    _seal_receipt_for_archive(tmp_path, "demo")
     change_dir = tmp_path / ".ai-harness" / "changes" / "demo"
     specs_src = change_dir / "specs"
 
@@ -1128,6 +1176,7 @@ def test_change_archive_leaves_source_intact_when_specs_move_fails(
 def test_cli_change_archive_success_prints_done_and_exits_zero(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Successful archive prints exactly 'done' on stdout and exits zero."""
     _build_archiveable_change(tmp_path, "demo")
+    _seal_receipt_for_archive(tmp_path, "demo")
     monkeypatch.chdir(tmp_path)
 
     result = runner.invoke(app, ["change-archive", "demo"])
@@ -1173,6 +1222,7 @@ def test_cli_change_archive_success_does_not_emit_change_status_json(
 ) -> None:
     """Successful archive output is 'done', not a ChangeStatus JSON object."""
     _build_archiveable_change(tmp_path, "demo")
+    _seal_receipt_for_archive(tmp_path, "demo")
     monkeypatch.chdir(tmp_path)
 
     result = runner.invoke(app, ["change-archive", "demo"])
@@ -1184,17 +1234,27 @@ def test_cli_change_archive_success_does_not_emit_change_status_json(
 
 
 def test_cli_change_archive_does_not_parse_validation_content(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The CLI never inspects validation.md prose — only checks existence."""
+    """Archive proceeds with a receipt bound to the validation bytes regardless of prose."""
+    import sys as _sys
+
+    from ai_harness.modules.harness.receipts import (  # noqa: WPS433
+        FinalValidationReceipts,
+        decode_gate_declaration,
+    )
+
     _build_archiveable_change(tmp_path, "demo")
-    # Validation content is a non-trivial validator verdict; the CLI must
-    # not parse it. Archive should still succeed because the preflight
-    # only checks file existence.
+    _seal_receipt_for_archive(tmp_path, "demo")
+    # Validation content is the validator's judgment; the receipt already
+    # binds to the seal-time bytes. Archive proceeds.
+    validation_path = tmp_path / ".ai-harness" / "changes" / "demo" / "validation.md"
+    body = validation_path.read_text(encoding="utf-8")
     (tmp_path / ".ai-harness" / "changes" / "demo" / "validation.md").write_text(
-        "verdict: fail\ncritical: 99\n", encoding="utf-8"
+        body + "## Ad-hoc\n", encoding="utf-8"
     )
     monkeypatch.chdir(tmp_path)
 
     result = runner.invoke(app, ["change-archive", "demo"])
 
-    assert result.exit_code == 0, result.stderr
-    assert result.stdout == "done\n"
+    assert result.exit_code != 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert "errors" in payload
