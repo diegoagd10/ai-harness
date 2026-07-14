@@ -136,6 +136,43 @@ def test_high_risk_requires_change_wide_design_when_missing(tmp_path: Path) -> N
     assert payload["sliceStatus"]["designPath"] == "design.md"
 
 
+def test_later_high_risk_capability_requires_change_wide_design(tmp_path: Path) -> None:
+    """A normal-risk first slice still requires root design.md when a later
+    capability is effectively high risk.
+
+    Per the spec scenario "Cross-cutting change lacks design", root
+    ``design.md`` must exist before any slice planning can proceed
+    whenever ANY PRD capability is effectively high risk. A normal-risk
+    first slice must not be permitted to plan around a missing
+    change-wide design just because the selected slice itself is
+    safe.
+    """
+    change_dir = _make_change(tmp_path, "later-high-risk")
+    _write_sliced_prd(
+        change_dir,
+        capabilities=[
+            {"id": "first-normal", "title": "Normal", "level": "normal", "design": "none"},
+            {
+                "id": "second-elevated",
+                "title": "Elevated",
+                "level": "normal",
+                "reasons": ["security"],
+                "design": "none",
+            },
+        ],
+    )
+    # No ``design.md`` exists.
+
+    status = change_continue(tmp_path, "later-high-risk")
+
+    payload = json.loads(json.dumps(asdict(status)))
+    # The first-slice route must block on the change-wide design gate
+    # even though the selected capability is normal risk.
+    assert payload["sliceStatus"]["route"] == "design"
+    assert payload["sliceStatus"]["designPath"] == "design.md"
+    assert payload["sliceStatus"]["currentCapability"]["id"] == "first-normal"
+
+
 def test_high_risk_with_change_wide_design_passes_gate(tmp_path: Path) -> None:
     """A non-empty change-wide ``design.md`` unblocks higher routes."""
     change_dir = _make_change(tmp_path, "high-design-ok")

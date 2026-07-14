@@ -474,19 +474,19 @@
       "depends_on": [
         "14"
       ],
-      "status": "pending",
+      "status": "done",
       "subtasks": [
         {
           "id": "15.1",
           "title": "Make change-wide design gate consider every PRD capability's effective risk",
           "scenario": "Cross-cutting change lacks design",
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "15.2",
           "title": "Add a test confirming a later high-risk capability requires root design.md",
           "scenario": "Cross-cutting change lacks design",
-          "status": "pending"
+          "status": "done"
         }
       ]
     },

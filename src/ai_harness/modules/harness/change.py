@@ -462,7 +462,13 @@ def _derive_slice_status(
     risk = compute_effective_risk(selected_capability)
     spec_path, design_path, validation_path = _capability_artifact_paths(selected_capability)
 
-    if risk.changeWideDesignRequired and not _non_empty_file(change_dir / "design.md"):
+    # Any effectively high-risk capability in the PRD requires root
+    # ``design.md`` before slice planning can proceed — not only the
+    # currently selected capability. A normal-risk first slice
+    # therefore cannot plan around a missing change-wide design when a
+    # later sibling capability is elevated.
+    change_wide_required = _any_capability_requires_change_wide_design(delivery.capabilities)
+    if change_wide_required and not _non_empty_file(change_dir / "design.md"):
         # Elevated risk requires a change-wide design first. The
         # implementation gate is *also* implied because change-wide
         # design is a high-risk prerequisite, but the immediate
@@ -832,8 +838,12 @@ def _route_next_capability(
 
     spec_path, design_path, validation_path = _capability_artifact_paths(target)
 
-    # Optional change-wide design check for high-risk.
-    if risk.changeWideDesignRequired and not _non_empty_file(change_dir / "design.md"):
+    # Optional change-wide design check for high-risk: any PRD
+    # capability being effectively high risk gates the entire
+    # change-wide design. A normal-risk next capability must not
+    # bypass the gate just because it is safe in isolation.
+    change_wide_required = _any_capability_requires_change_wide_design(delivery.capabilities)
+    if change_wide_required and not _non_empty_file(change_dir / "design.md"):
         return (
             _build_slice_status(
                 mode="sliced",
@@ -1103,6 +1113,24 @@ def _capability_artifact_paths(capability: Capability) -> tuple[str, str, str]:
     design_path = f"designs/{capability.id}.md"
     validation_path = f"validations/{capability.id}.md"
     return spec_path, design_path, validation_path
+
+
+def _any_capability_requires_change_wide_design(
+    capabilities: tuple[Capability, ...],
+) -> bool:
+    """Return ``True`` when any PRD capability is effectively high risk.
+
+    Per the spec scenario "Cross-cutting change lacks design", root
+    ``design.md`` is required before slice planning can proceed
+    whenever ANY capability is effectively high risk — not only the
+    currently selected capability. A normal-risk first slice must
+    therefore not be permitted to plan around a missing change-wide
+    design just because the selected slice is safe in isolation.
+    """
+    for capability in capabilities:
+        if compute_effective_risk(capability).changeWideDesignRequired:
+            return True
+    return False
 
 
 def _non_empty_file(path: Path) -> bool:
