@@ -6,7 +6,9 @@ from ai_harness.commands.change import (
     change_approve_cmd,
     change_archive_cmd,
     change_continue_cmd,
+    change_gates_run_cmd,
     change_new_cmd,
+    change_receipt_seal_cmd,
     task_create_cmd,
     task_done_cmd,
     task_list_cmd,
@@ -26,6 +28,8 @@ app.command(name="change-new")(change_new_cmd)
 app.command(name="change-continue")(change_continue_cmd)
 app.command(name="change-approve")(change_approve_cmd)
 app.command(name="change-archive")(change_archive_cmd)
+app.command(name="change-gates-run")(change_gates_run_cmd)
+app.command(name="change-receipt-seal")(change_receipt_seal_cmd)
 app.command(name="task-create")(task_create_cmd)
 app.command(name="task-list")(task_list_cmd)
 app.command(name="task-next")(task_next_cmd)
