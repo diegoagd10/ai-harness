@@ -1435,10 +1435,22 @@ def _select_capability_for_gate(delivery: PrdDelivery, gate: str, capability_id:
 
 
 def _applicable_design_bytes(change_dir: Path, capability: Capability) -> bytes:
-    """Read the change-wide or slice-scoped design bytes for the capability."""
-    if capability.design == "change":
+    """Read the change-wide or slice-scoped design bytes for the capability.
+
+    The design file MUST be derived from the *effective* design scope
+    rather than the declared value, because effective risk forces
+    ``designScope`` to ``change`` for any elevated capability — even
+    one the PRD declares as ``design: none`` or ``design: slice``.
+    Using the declared value alone would let edits to the root
+    ``design.md`` leave a high-risk approval valid, which the
+    spec scenario "Implementation scope edit reopens approval"
+    explicitly forbids.
+    """
+    risk = compute_effective_risk(capability)
+    design_scope = risk.designScope
+    if design_scope == "change":
         design_file = change_dir / "design.md"
-    elif capability.design == "slice":
+    elif design_scope == "slice":
         design_file = change_dir / "designs" / f"{capability.id}.md"
     else:
         return b""

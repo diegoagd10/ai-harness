@@ -447,6 +447,107 @@ def test_continuation_scope_edit_reopens_slice_review(tmp_path: Path) -> None:
     assert payload["sliceStatus"]["approval"]["state"] in {"required", "stale"}
 
 
+def test_root_design_edit_invalidates_elevated_design_none_approval(tmp_path: Path) -> None:
+    """A root ``design.md`` edit invalidates an elevated approval even when
+    the capability was declared ``design: none``.
+
+    Per the spec scenario "Implementation scope edit reopens approval",
+    effective risk drives the design scope: a high-risk capability
+    declared ``design: none`` still requires root ``design.md`` to
+    be present, and editing that file MUST stale the existing
+    implementation approval. The previous implementation read the
+    declared ``capability.design`` directly, which never matched
+    ``design.md`` for elevated capabilities declared ``none``.
+    """
+    change_dir = _make_change(tmp_path, "elevated-design-none")
+    _write_sliced_prd(
+        change_dir,
+        capabilities=[
+            {
+                "id": "elevated-design-none",
+                "title": "T",
+                "level": "normal",
+                "reasons": ["security"],
+                "design": "none",
+            },
+        ],
+    )
+    _stage(change_dir, "design.md", content="# change-wide design\n")
+    _stage(change_dir, "specs/elevated-design-none.md")
+    task_create(
+        tmp_path,
+        "elevated-design-none",
+        TaskInput(
+            title="T",
+            spec="elevated-design-none",
+            phase="implement",
+            depends_on=[],
+            subtasks=[SubtaskInput(title="x")],
+        ),
+    )
+    change_approve(tmp_path, "elevated-design-none")
+
+    # Edit the root design file AFTER recording the approval.
+    design = change_dir / "design.md"
+    design.write_text("# change-wide design\n## Updated prose\n", encoding="utf-8")
+
+    status = change_continue(tmp_path, "elevated-design-none")
+    payload = json.loads(json.dumps(asdict(status)))
+    # The approval must be stale because the root design is part of the
+    # implementation scope for any effectively-high-risk capability.
+    assert payload["sliceStatus"]["approval"]["state"] in {"required", "stale"}
+    assert payload["sliceStatus"]["approval"]["gate"] == "implementation"
+
+
+def test_root_design_edit_invalidates_elevated_design_slice_approval(tmp_path: Path) -> None:
+    """A root ``design.md`` edit invalidates an elevated approval even when
+    the capability was declared ``design: slice``.
+
+    Effective risk forces the design scope to ``change`` for any
+    capability classified as high risk, regardless of the declared
+    ``design`` value. The scope fingerprint MUST therefore read the
+    root ``design.md`` so editing that file flips the digest and
+    invalidates the recorded approval.
+    """
+    change_dir = _make_change(tmp_path, "elevated-design-slice")
+    _write_sliced_prd(
+        change_dir,
+        capabilities=[
+            {
+                "id": "elevated-design-slice",
+                "title": "T",
+                "level": "normal",
+                "reasons": ["security"],
+                "design": "slice",
+            },
+        ],
+    )
+    _stage(change_dir, "design.md", content="# change-wide design\n")
+    _stage(change_dir, "designs/elevated-design-slice.md", content="# slice design\n")
+    _stage(change_dir, "specs/elevated-design-slice.md")
+    task_create(
+        tmp_path,
+        "elevated-design-slice",
+        TaskInput(
+            title="T",
+            spec="elevated-design-slice",
+            phase="implement",
+            depends_on=[],
+            subtasks=[SubtaskInput(title="x")],
+        ),
+    )
+    change_approve(tmp_path, "elevated-design-slice")
+
+    # Edit the root design file AFTER recording the approval.
+    design = change_dir / "design.md"
+    design.write_text("# change-wide design\n## Updated prose\n", encoding="utf-8")
+
+    status = change_continue(tmp_path, "elevated-design-slice")
+    payload = json.loads(json.dumps(asdict(status)))
+    assert payload["sliceStatus"]["approval"]["state"] in {"required", "stale"}
+    assert payload["sliceStatus"]["approval"]["gate"] == "implementation"
+
+
 # ---------------------------------------------------------------------------
 # Malformed approval file
 # ---------------------------------------------------------------------------
