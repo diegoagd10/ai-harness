@@ -456,3 +456,49 @@ def test_verify_rejects_run_with_too_many_gate_argv_entries(subprocess_env, repo
     with pytest.raises(ReceiptError) as excinfo:
         receipts.verify_for_archive(change="demo")
     assert excinfo.value.code == "run.invalid"
+
+
+def test_verify_rejects_run_with_missing_gate_cwd(subprocess_env, repo: Path) -> None:
+    """A stored gate cwd that resolves to nothing must fail transitive verification."""
+    receipts, _ = _make_archiveable_receipt(repo, "demo")
+    original_run_id = "sha256:" + _first_run_hex(receipts)
+
+    new_run_id = _publish_modified_run_bundle(
+        receipts,
+        change="demo",
+        run_id=original_run_id,
+        mutate_gate=lambda gate: gate.__setitem__("cwd", "missing"),
+    )
+    assert new_run_id != original_run_id
+    _rebind_receipt_to_run(receipts, change="demo", new_run_id=new_run_id)
+
+    with pytest.raises(ReceiptError) as excinfo:
+        receipts.verify_for_archive(change="demo")
+    assert excinfo.value.code == "run.invalid"
+
+
+def test_verify_rejects_run_with_symlink_escaping_gate_cwd(subprocess_env, repo: Path, tmp_path: Path) -> None:
+    """A stored gate cwd whose resolution escapes via an internal symlink must fail verification."""
+    receipts, _ = _make_archiveable_receipt(repo, "demo")
+    original_run_id = "sha256:" + _first_run_hex(receipts)
+
+    # Republish the mutated run bundle before installing the symlink so
+    # candidate capture during run_gates does not observe the escape.
+    new_run_id = _publish_modified_run_bundle(
+        receipts,
+        change="demo",
+        run_id=original_run_id,
+        mutate_gate=lambda gate: gate.__setitem__("cwd", "link_to_outside"),
+    )
+    assert new_run_id != original_run_id
+    _rebind_receipt_to_run(receipts, change="demo", new_run_id=new_run_id)
+
+    # Install the symlink AFTER the receipt was sealed so the strict
+    # transitive recheck is the layer that catches the escape.
+    outside_dir = tmp_path / "outside_target"
+    outside_dir.mkdir()
+    (repo / "link_to_outside").symlink_to(outside_dir)
+
+    with pytest.raises(ReceiptError) as excinfo:
+        receipts.verify_for_archive(change="demo")
+    assert excinfo.value.code == "run.invalid"

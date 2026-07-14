@@ -2202,7 +2202,7 @@ class FinalValidationReceipts:
 
         # Resolve the Git root and load the referenced run + evidence.
         repo_root = _resolve_git_top_level(self.repository_root)
-        run_payload = _load_run(store, envelope.gate_run)
+        run_payload = _load_run(store, envelope.gate_run, repo_root=repo_root)
 
         # Re-capture the candidate now and require it to match the
         # run's after-candidate. A run that mutated the candidate may be
@@ -2271,10 +2271,14 @@ class FinalValidationReceipts:
             raise ReceiptError(f"could not read current receipt: {exc.message}", code=code) from exc
 
         _validate_receipt_schema(receipt_payload)
+        # Resolve the Git top level before loading the run so stored
+        # gate cwd values can be transitively re-confirmed against the
+        # repository during strict verification.
+        repo_root = _resolve_git_top_level(self.repository_root)
         run_id = receipt_payload["gate_run"]
         semantic = receipt_payload["semantic"]
         native = receipt_payload["native"]
-        run_payload = _load_run(store, run_id)
+        run_payload = _load_run(store, run_id, repo_root=repo_root)
         if semantic["gate_run"] != run_id:
             raise ReceiptError("receipt semantic gate run does not match its run", code="receipt.invalid")
         if receipt_payload["candidate_id"] != run_payload["candidate_after"]["id"]:
@@ -2320,7 +2324,6 @@ class FinalValidationReceipts:
         ):
             raise ReceiptError("receipt archive eligibility is inconsistent", code="receipt.invalid")
 
-        repo_root = _resolve_git_top_level(self.repository_root)
         current_candidate = _capture_candidate(repo_root, change)
         if current_candidate.candidate_id != receipt_payload["candidate_id"]:
             raise ReceiptError(
@@ -2435,7 +2438,7 @@ def _capture_candidate_id(repo_root: Path, change: str) -> str:
     return _capture_candidate(repo_root, change).candidate_id
 
 
-def _load_run(store: ReceiptObjectStore, run_id: str) -> dict[str, Any]:
+def _load_run(store: ReceiptObjectStore, run_id: str, *, repo_root: Path) -> dict[str, Any]:
     """Load one run and verify every schema, redundant fact, and evidence byte."""
     try:
         validate_typed_id(run_id)
@@ -2446,7 +2449,7 @@ def _load_run(store: ReceiptObjectStore, run_id: str) -> dict[str, Any]:
         code = "run.missing" if "not found" in exc.message else "run.invalid"
         raise ReceiptError(f"run payload is unreadable: {exc.message}", code=code) from exc
 
-    _validate_run_schema(run_payload)
+    _validate_run_schema(run_payload, repo_root=repo_root)
     bundle = store.bundle_path(RECEIPT_OBJECT_KIND_RUNS, run_id)
     evidence_dir = bundle / "evidence"
     try:
@@ -2490,7 +2493,7 @@ def _load_run(store: ReceiptObjectStore, run_id: str) -> dict[str, Any]:
     return run_payload
 
 
-def _validate_run_schema(payload: Mapping[str, Any]) -> None:
+def _validate_run_schema(payload: Mapping[str, Any], *, repo_root: Path) -> None:
     """Validate the exact run schema and recompute all derived gate facts."""
     if set(payload) != CANONICAL_KEYS["gate-run"]:
         raise ReceiptError("stored run has unexpected top-level keys", code="run.invalid")
@@ -2510,7 +2513,7 @@ def _validate_run_schema(payload: Mapping[str, Any]) -> None:
         raise ReceiptError("stored run must contain one through 64 gates", code="run.invalid")
     seen: set[str] = set()
     for index, gate in enumerate(gates):
-        _validate_gate_record(gate, index=index)
+        _validate_gate_record(gate, index=index, repo_root=repo_root)
         gate_id = gate["gate_id"]
         if gate_id in seen:
             raise ReceiptError("stored run contains duplicate gate ids", code="run.invalid")
@@ -2654,7 +2657,7 @@ def _validate_candidate_record(record: Any, field: str) -> None:
             raise ReceiptError(f"candidate {field} content id is invalid", code="run.invalid") from exc
 
 
-def _validate_gate_record(gate: Any, *, index: int) -> None:
+def _validate_gate_record(gate: Any, *, index: int, repo_root: Path) -> None:
     if not isinstance(gate, dict) or set(gate) != CANONICAL_KEYS["gate-record"]:
         raise ReceiptError(f"gate record {index} has unexpected keys", code="run.invalid")
     if not isinstance(gate["gate_id"], str) or not GATE_ID_PATTERN.fullmatch(gate["gate_id"]):
@@ -2688,6 +2691,7 @@ def _validate_gate_record(gate: Any, *, index: int) -> None:
         or cwd.endswith("/..")
     ):
         raise ReceiptError(f"gate record {index} cwd is invalid", code="run.invalid")
+    _check_resolved_stored_cwd(repo_root, cwd, index=index)
     if gate["environment_policy"] != POLICY_INHERIT_REDACT_SECRETS:
         raise ReceiptError(f"gate record {index} environment policy is invalid", code="policy.unsupported")
     if (
@@ -2804,6 +2808,43 @@ def _resolve_confined_cwd(repo_root: Path, declared: str) -> Path:
             context={"gate_cwd": declared},
         )
     return candidate
+
+
+def _check_resolved_stored_cwd(repo_root: Path, declared: str, *, index: int) -> None:
+    """Confirm a stored gate ``cwd`` resolves to an existing in-repository directory.
+
+    Transitive seal/archive reads must reject stored cwd values whose resolution
+    against the Git top level is missing, escapes the repository through an
+    internal symlink, or is not an existing directory. Resolution follows
+    symlinks; the post-resolution path must remain inside ``repo_root`` and
+    point at a real directory.
+    """
+    try:
+        candidate = (repo_root / declared).resolve()
+    except OSError as exc:
+        raise ReceiptError(
+            f"gate record {index} cwd does not resolve",
+            code="run.invalid",
+        ) from exc
+    try:
+        candidate.relative_to(repo_root)
+    except ValueError as exc:
+        raise ReceiptError(
+            f"gate record {index} cwd resolves outside the repository",
+            code="run.invalid",
+        ) from exc
+    try:
+        candidate_stat = os.lstat(candidate)
+    except OSError as exc:
+        raise ReceiptError(
+            f"gate record {index} cwd does not exist",
+            code="run.invalid",
+        ) from exc
+    if not stat.S_ISDIR(candidate_stat.st_mode):
+        raise ReceiptError(
+            f"gate record {index} cwd is not a directory",
+            code="run.invalid",
+        )
 
 
 def _path_for_evidence_path(index: int, stream: str) -> str:

@@ -16,8 +16,10 @@ from ai_harness.modules.harness.change import (
     change_archive,
 )
 from ai_harness.modules.harness.receipts import (
+    RECEIPT_OBJECT_KIND_RECEIPTS,
     FinalValidationReceipts,
     decode_gate_declaration,
+    hash_validation_bytes,
 )
 
 
@@ -293,6 +295,101 @@ def test_archive_denies_run_with_traversing_gate_cwd(_autouse_config) -> None:
     receipt_payload["validation"]["digest"] = hash_validation_bytes(change, new_validation_body)
     new_receipt_id = store.publish_object(RECEIPT_OBJECT_KIND_RECEIPTS, receipt_payload)
     store.replace_current_pointer(new_receipt_id)
+
+    with pytest.raises(ChangeStoreError) as excinfo:
+        change_archive(repo, change)
+
+    errors = excinfo.value.errors
+    assert any("run" in err.lower() or "invalid" in err.lower() for err in errors)
+    # Source must remain untouched.
+    assert (repo / ".ai-harness" / "changes" / change).is_dir()
+    # Specs and archive destinations must not exist.
+    assert not (repo / ".ai-harness" / "specs" / change).exists()
+    assert not (repo / ".ai-harness" / "archive" / change).exists()
+
+
+def _mutate_run_cwd_and_rebind(
+    receipts: FinalValidationReceipts,
+    change: str,
+    new_cwd: str,
+) -> str:
+    """Mutate every stored gate cwd, re-publish, and rebind the receipt.
+
+    Returns the new run id.
+    """
+    repo = receipts.repository_root
+    store = receipts.store_for(change)
+    run_bundles = list((store.receipts_dir / "runs" / "sha256").iterdir())
+    assert run_bundles, "expected a stored run bundle"
+    bundle = run_bundles[0]
+    original_run_id = f"sha256:{bundle.name}"
+    run_payload = json.loads((bundle / "object.json").read_text(encoding="utf-8"))
+    for gate in run_payload["gates"]:
+        gate["cwd"] = new_cwd
+
+    evidence: dict[str, tuple[bytes, str]] = {}
+    for gate in run_payload["gates"]:
+        for stream_name in ("stdout", "stderr"):
+            metadata = gate[stream_name]
+            relative = metadata["path"].removeprefix("evidence/")
+            evidence[metadata["path"]] = (
+                store.read_run_evidence(original_run_id, relative),
+                metadata["digest"],
+            )
+    new_run_id = store.publish_run_bundle(run_payload=run_payload, evidence=evidence)
+    assert new_run_id != original_run_id
+
+    receipt_payload = json.loads(
+        (next(iter((store.receipts_dir / "receipts" / "sha256").iterdir())) / "object.json").read_text(encoding="utf-8")
+    )
+    receipt_payload["gate_run"] = new_run_id
+    receipt_payload["semantic"]["gate_run"] = new_run_id
+    new_validation_body = (f"## Verdict\nverdict: pass\ncritical: 0\ngate-run: {new_run_id}\n").encode()
+    (repo / ".ai-harness" / "changes" / change / "validation.md").write_bytes(new_validation_body)
+    receipt_payload["validation"]["digest"] = hash_validation_bytes(change, new_validation_body)
+    new_receipt_id = store.publish_object(RECEIPT_OBJECT_KIND_RECEIPTS, receipt_payload)
+    store.replace_current_pointer(new_receipt_id)
+    return new_run_id
+
+
+def test_archive_denies_run_with_missing_gate_cwd(_autouse_config) -> None:
+    """A stored gate cwd pointing to a missing directory must deny archive with no move."""
+    repo = _autouse_config
+    change = "demo"
+    _stage_legacy_for_archive(repo, change)
+    _make_receipt(repo, change)
+
+    receipts = FinalValidationReceipts(repo)
+    _mutate_run_cwd_and_rebind(receipts, change, "missing")
+
+    with pytest.raises(ChangeStoreError) as excinfo:
+        change_archive(repo, change)
+
+    errors = excinfo.value.errors
+    assert any("run" in err.lower() or "invalid" in err.lower() for err in errors)
+    # Source must remain untouched.
+    assert (repo / ".ai-harness" / "changes" / change).is_dir()
+    # Specs and archive destinations must not exist.
+    assert not (repo / ".ai-harness" / "specs" / change).exists()
+    assert not (repo / ".ai-harness" / "archive" / change).exists()
+
+
+def test_archive_denies_run_with_symlink_escaping_gate_cwd(_autouse_config, tmp_path: Path) -> None:
+    """A stored gate cwd whose resolution escapes via an internal symlink must deny archive."""
+    repo = _autouse_config
+    change = "demo"
+    _stage_legacy_for_archive(repo, change)
+    _make_receipt(repo, change)
+
+    # Install the symlink AFTER the receipt was sealed so candidate
+    # capture during run/seal did not see the escape; only the
+    # archive-time transitive recheck should observe it.
+    outside_dir = tmp_path / "outside_target"
+    outside_dir.mkdir()
+    (repo / "link_to_outside").symlink_to(outside_dir)
+
+    receipts = FinalValidationReceipts(repo)
+    _mutate_run_cwd_and_rebind(receipts, change, "link_to_outside")
 
     with pytest.raises(ChangeStoreError) as excinfo:
         change_archive(repo, change)

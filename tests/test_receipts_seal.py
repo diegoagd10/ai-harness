@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -408,3 +409,91 @@ def test_seal_rejects_orphan_validation_when_run_missing(subprocess_env, repo: P
     with pytest.raises(ReceiptError) as excinfo:
         receipts.seal(change=change)
     assert excinfo.value.code == "run.missing"
+
+
+# ---------------------------------------------------------------------------
+# Stored gate cwd transitive recheck at seal time
+# ---------------------------------------------------------------------------
+
+
+def _run_one_gate_and_mutate_cwd(repo: Path, change: str, new_cwd: str) -> str:
+    """Run one gate, mutate every gate record's cwd, and re-publish the run.
+
+    Returns the new run id.
+    """
+    receipts = FinalValidationReceipts(repo)
+    request = decode_gate_declaration(
+        {
+            "schema_name": "ai-harness.gate-declaration",
+            "schema_version": 1,
+            "gates": [
+                {
+                    "gate_id": "pass",
+                    "argv": [sys.executable, "-c", "print('ok')"],
+                    "cwd": ".",
+                    "timeout_seconds": 30,
+                }
+            ],
+        }
+    )
+    run_result = receipts.run_gates(change=change, request=request)
+    store = receipts.store_for(change)
+    hex_part = run_result.run_id.removeprefix("sha256:")
+    bundle = store.receipts_dir / "runs" / "sha256" / hex_part
+    run_payload = json.loads((bundle / "object.json").read_text(encoding="utf-8"))
+    for gate in run_payload["gates"]:
+        gate["cwd"] = new_cwd
+    evidence: dict[str, tuple[bytes, str]] = {}
+    for gate in run_payload["gates"]:
+        for stream_name in ("stdout", "stderr"):
+            metadata = gate[stream_name]
+            relative = metadata["path"].removeprefix("evidence/")
+            evidence[metadata["path"]] = (
+                store.read_run_evidence(run_result.run_id, relative),
+                metadata["digest"],
+            )
+    return store.publish_run_bundle(run_payload=run_payload, evidence=evidence)
+
+
+def test_seal_rejects_run_with_missing_gate_cwd(subprocess_env, repo: Path) -> None:
+    """A stored gate cwd that resolves to nothing must fail seal transitively."""
+    change = "demo"
+    (repo / ".ai-harness" / "changes" / change).mkdir(parents=True, exist_ok=True)
+    new_run_id = _run_one_gate_and_mutate_cwd(repo, change, "missing")
+    _write_validation(
+        repo,
+        change,
+        (f"## Verdict\nverdict: pass\ncritical: 0\ngate-run: {new_run_id}\n"),
+    )
+
+    receipts = FinalValidationReceipts(repo)
+    with pytest.raises(ReceiptError) as excinfo:
+        receipts.seal(change=change)
+    assert excinfo.value.code == "run.invalid"
+
+
+def test_seal_rejects_run_with_symlink_escaping_gate_cwd(subprocess_env, repo: Path, tmp_path: Path) -> None:
+    """A stored gate cwd using an internal symlink escaping the repo must fail seal."""
+    change = "demo"
+    (repo / ".ai-harness" / "changes" / change).mkdir(parents=True, exist_ok=True)
+
+    # Run gates BEFORE creating the symlink so candidate capture during
+    # run execution does not see the escape. The symlink is installed
+    # after the run bundle has been mutated and re-published, so only the
+    # seal-time transitive recheck observes it.
+    new_run_id = _run_one_gate_and_mutate_cwd(repo, change, "link_to_outside")
+
+    outside_dir = tmp_path / "outside_target"
+    outside_dir.mkdir()
+    (repo / "link_to_outside").symlink_to(outside_dir)
+
+    _write_validation(
+        repo,
+        change,
+        (f"## Verdict\nverdict: pass\ncritical: 0\ngate-run: {new_run_id}\n"),
+    )
+
+    receipts = FinalValidationReceipts(repo)
+    with pytest.raises(ReceiptError) as excinfo:
+        receipts.seal(change=change)
+    assert excinfo.value.code == "run.invalid"
