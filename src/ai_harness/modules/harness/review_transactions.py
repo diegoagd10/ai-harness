@@ -203,12 +203,18 @@ class LensSelectionId:
 
     value: str
 
+    def __post_init__(self) -> None:
+        _check_wire_id(self.value, description="LensSelectionId")
+
 
 @dataclass(frozen=True, slots=True)
 class ReviewTransactionId:
     """Typed identifier for a v1 review-transaction record."""
 
     value: str
+
+    def __post_init__(self) -> None:
+        _check_wire_id(self.value, description="ReviewTransactionId")
 
 
 @dataclass(frozen=True, slots=True)
@@ -217,6 +223,9 @@ class FindingId:
 
     value: str
 
+    def __post_init__(self) -> None:
+        _check_wire_id(self.value, description="FindingId")
+
 
 @dataclass(frozen=True, slots=True)
 class FindingTransitionId:
@@ -224,12 +233,18 @@ class FindingTransitionId:
 
     value: str
 
+    def __post_init__(self) -> None:
+        _check_wire_id(self.value, description="FindingTransitionId")
+
 
 @dataclass(frozen=True, slots=True)
 class CorrectionFactId:
     """Typed identifier for a v1 correction-fact record."""
 
     value: str
+
+    def __post_init__(self) -> None:
+        _check_wire_id(self.value, description="CorrectionFactId")
 
 
 # Validators for typed IDs — callers may pass them through functions
@@ -526,6 +541,49 @@ def _require_sorted_unique_strings(
     return tuple(parsed)
 
 
+def _require_unique_ordered_strings(
+    value: Any,
+    *,
+    field: str,
+    allow_empty: bool,
+    each_empty_allowed: bool,
+) -> tuple[str, ...]:
+    """Validate an ordered JSON array of unique NUL-free strings.
+
+    Used for ``required_lenses`` whose contractual order is part of the
+    contract and is therefore not coerced into alphabetical order. The
+    decoder only rejects duplicates and grammar failures; it never
+    re-orders entries.
+    """
+    if not isinstance(value, list):
+        raise ReviewContractError(
+            f"{field} must be a JSON array",
+            code=CODE_SCHEMA_INVALID,
+            context={"field": field},
+        )
+    if not value:
+        if allow_empty:
+            return ()
+        raise ReviewContractError(
+            f"{field} must be a non-empty JSON array",
+            code=CODE_SCHEMA_INVALID,
+            context={"field": field},
+        )
+    parsed: list[str] = []
+    for entry in value:
+        parsed.append(_require_strict_string(entry, field=f"{field}[]", allow_empty=each_empty_allowed))
+    seen: set[str] = set()
+    for entry in parsed:
+        if entry in seen:
+            raise ReviewContractError(
+                f"{field} must not contain duplicates",
+                code=CODE_SCHEMA_INVALID,
+                context={"field": field},
+            )
+        seen.add(entry)
+    return tuple(parsed)
+
+
 def _require_concrete_path(value: Any, *, field: str) -> str:
     """Validate a concrete POSIX repository-relative path.
 
@@ -817,7 +875,7 @@ def _decode_lens_selection_payload(payload: Mapping[str, Any]) -> LensSelection:
             context={"risk_level": risk_level},
         )
     expected_lenses = NORMAL_RISK_LENSES if risk_level == "normal" else HIGH_RISK_LENSES
-    declared = _require_sorted_unique_strings(
+    declared = _require_unique_ordered_strings(
         payload["required_lenses"],
         field="required_lenses",
         allow_empty=False,
@@ -1472,11 +1530,70 @@ class ReviewContractV1:
     ) -> None:
         """Validate the aggregate transaction graph.
 
-        Implemented in tasks 2-4 of the change; placeholder here keeps
-        the public surface available to callers that want to construct
-        records before the cross-record validation is wired in.
+        The validation runs in the fixed order documented in the design:
+
+        1. Recompute the lens-selection ID and bind it to the transaction
+           reference.
+        2. Recompute every supplied finding's identity, transaction
+           reference, selected lens, and scope containment.
+        3. Reduce the supplied ordered transitions against the closed
+           severity-specific state machine.
+        4. Validate the optional aggregate correction fact against the
+           transaction candidates, scope, and LOC budget.
+        5. Verify the bijection between ``resolved_finding_ids`` and the
+           resolved transitions attributed to the correction.
+        6. Reject any critical finding whose derived state remains open.
+
+        Success returns ``None``; every failure raises
+        :class:`ReviewContractError`. Stages 2-6 are wired in subsequent
+        tasks of this Change. This commit (task 2) implements stage 1
+        only; calling :meth:`validate_transaction` with non-empty
+        findings, transitions, or a correction before those stages land
+        raises :class:`ReviewContractError` because the cross-record
+        graph is not yet validated end-to-end.
         """
-        raise NotImplementedError("validate_transaction is implemented in tasks 2-4 of this change")
+
+        # Stage 1: lens-selection binding.
+        self._validate_lens_selection_binding(transaction, lens_selection)
+
+        # Stages 2-6 ship in tasks 3 and 4. Until they land we refuse
+        # cross-record inputs up front so callers cannot accidentally
+        # bypass unimplemented validation.
+        if findings or transitions or correction_fact is not None:
+            raise ReviewContractError(
+                "validate_transaction cross-record checks ship in tasks 3 and 4 of this change",
+                code=CODE_VERSION_UNSUPPORTED,
+                context={"stage": "pending"},
+            )
+
+    def _validate_lens_selection_binding(
+        self,
+        transaction: ReviewTransaction,
+        lens_selection: LensSelection,
+    ) -> None:
+        """Stage 1: recompute the lens-selection ID and bind it.
+
+        The supplied lens selection must recompute under the
+        lens-selection v1 label to the exact ID referenced by the
+        transaction; shape-equal IDs that do not match the recomputed
+        value are rejected as ``review.id-invalid`` so callers cannot
+        pass shape-only references.
+        """
+
+        _require_lens_selection_id(
+            transaction.lens_selection_id,
+            field="transaction.lens_selection_id",
+        )
+        expected = self.id_for(lens_selection)
+        if expected != transaction.lens_selection_id:
+            raise ReviewContractError(
+                "transaction lens_selection_id does not match the supplied lens selection",
+                code=CODE_ID_INVALID,
+                context={
+                    "expected": expected.value,
+                    "actual": transaction.lens_selection_id.value,
+                },
+            )
 
     def _spec_for_record(self, record: ReviewRecord) -> _SchemaSpec:
         kind = type(record)

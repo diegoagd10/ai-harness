@@ -648,3 +648,284 @@ def test_review_transaction_id_label_matches_record() -> None:
     )
     assert len(set(labels)) == 5
     assert all(label.endswith("/v1") for label in labels)
+
+
+# ---------------------------------------------------------------------------
+# Lens policy and transaction binding (task 2)
+# ---------------------------------------------------------------------------
+
+
+def _transaction_with_lens_selection(
+    lens_selection: LensSelection,
+) -> ReviewTransaction:
+    """Build a transaction whose lens_selection_id matches the selection."""
+
+    contract = ReviewContractV1()
+    return ReviewTransaction(
+        schema_name=REVIEW_TRANSACTION_SCHEMA_NAME,  # type: ignore[arg-type]
+        schema_version=1,  # type: ignore[arg-type]
+        change_name=CHANGE_NAME,
+        candidate_id=CANDIDATE_ID,
+        lens_selection_id=contract.id_for(lens_selection),
+        scope_paths=(),
+        loc_budget=0,
+    )
+
+
+def test_select_lenses_for_high_risk_is_closed_ordered_tuple() -> None:
+    """High risk selection returns the contractual four-lens ordered tuple."""
+
+    contract = ReviewContractV1()
+    selection = contract.select_lenses(policy=LENS_POLICY_NAME, risk_level="high")
+    assert selection.required_lenses == ("correctness", "tests", "architecture", "security")
+
+
+def test_select_lenses_for_normal_risk_is_closed_ordered_tuple() -> None:
+    """Normal risk selection returns the contractual dual-lens ordered tuple."""
+
+    contract = ReviewContractV1()
+    selection = contract.select_lenses(policy=LENS_POLICY_NAME, risk_level="normal")
+    assert selection.required_lenses == ("correctness", "tests")
+
+
+def test_select_lenses_rejects_unknown_risk_levels() -> None:
+    """Unknown risk levels fail with ``review.policy-invalid``."""
+
+    contract = ReviewContractV1()
+    for risk in ("medium", "low", "NORMAL", "", "Normal", None):
+        with pytest.raises(ReviewContractError) as exc:
+            contract.select_lenses(policy=LENS_POLICY_NAME, risk_level=risk)  # type: ignore[arg-type]
+        assert exc.value.code == CODE_POLICY_INVALID
+
+
+def test_select_lenses_rejects_unknown_policy_tokens() -> None:
+    """Unknown policy tokens fail with ``review.policy-invalid``."""
+
+    contract = ReviewContractV1()
+    for policy in ("", "v0", "native-review-lenses-v0", "lenses-v2"):
+        with pytest.raises(ReviewContractError) as exc:
+            contract.select_lenses(policy=policy, risk_level="normal")
+        assert exc.value.code == CODE_POLICY_INVALID
+
+
+def test_select_lenses_is_repeatable_for_normal_risk() -> None:
+    """Identical inputs always produce identical records, bytes, and IDs."""
+
+    contract = ReviewContractV1()
+    records = [
+        contract.select_lenses(policy=LENS_POLICY_NAME, risk_level="normal")
+        for _ in range(3)
+    ]
+    assert records[0] == records[1] == records[2]
+
+    bytes_set = {contract.encode(record) for record in records}
+    ids = {contract.id_for(record).value for record in records}
+    assert len(bytes_set) == 1
+    assert len(ids) == 1
+
+
+def test_select_lenses_is_repeatable_for_high_risk() -> None:
+    """Identical high-risk inputs always produce identical bytes and IDs."""
+
+    contract = ReviewContractV1()
+    records = [
+        contract.select_lenses(policy=LENS_POLICY_NAME, risk_level="high")
+        for _ in range(3)
+    ]
+    assert records[0] == records[1] == records[2]
+
+    bytes_set = {contract.encode(record) for record in records}
+    ids = {contract.id_for(record).value for record in records}
+    assert len(bytes_set) == 1
+    assert len(ids) == 1
+
+
+def test_decode_lens_selection_accepts_exact_risk_tuple_for_normal() -> None:
+    """A normal-risk selection decodes without modification."""
+
+    contract = ReviewContractV1()
+    payload = {
+        "schema_name": REVIEW_LENS_SELECTION_SCHEMA_NAME,
+        "schema_version": 1,
+        "policy": LENS_POLICY_NAME,
+        "risk_level": "normal",
+        "required_lenses": ["correctness", "tests"],
+    }
+    record = contract.decode(LensSelection, payload)
+    assert record.required_lenses == ("correctness", "tests")
+
+
+def test_decode_lens_selection_accepts_exact_risk_tuple_for_high() -> None:
+    """A high-risk selection decodes without modification."""
+
+    contract = ReviewContractV1()
+    payload = {
+        "schema_name": REVIEW_LENS_SELECTION_SCHEMA_NAME,
+        "schema_version": 1,
+        "policy": LENS_POLICY_NAME,
+        "risk_level": "high",
+        "required_lenses": ["correctness", "tests", "architecture", "security"],
+    }
+    record = contract.decode(LensSelection, payload)
+    assert record.required_lenses == ("correctness", "tests", "architecture", "security")
+
+
+def test_decode_lens_selection_rejects_reordered_lens_tuple() -> None:
+    """Reordering the contractual lens tuple is rejected."""
+
+    contract = ReviewContractV1()
+    payload = {
+        "schema_name": REVIEW_LENS_SELECTION_SCHEMA_NAME,
+        "schema_version": 1,
+        "policy": LENS_POLICY_NAME,
+        "risk_level": "normal",
+        "required_lenses": ["tests", "correctness"],
+    }
+    with pytest.raises(ReviewContractError) as exc:
+        contract.decode(LensSelection, payload)
+    assert exc.value.code == CODE_POLICY_INVALID
+
+
+def test_decode_lens_selection_rejects_extra_lens() -> None:
+    """Adding a non-contractual lens is rejected."""
+
+    contract = ReviewContractV1()
+    payload = {
+        "schema_name": REVIEW_LENS_SELECTION_SCHEMA_NAME,
+        "schema_version": 1,
+        "policy": LENS_POLICY_NAME,
+        "risk_level": "normal",
+        "required_lenses": ["correctness", "tests", "bonus"],
+    }
+    with pytest.raises(ReviewContractError) as exc:
+        contract.decode(LensSelection, payload)
+    assert exc.value.code == CODE_POLICY_INVALID
+
+
+def test_decode_lens_selection_rejects_unknown_lens_token() -> None:
+    """Replacing a contractual lens with an unknown token is rejected."""
+
+    contract = ReviewContractV1()
+    payload = {
+        "schema_name": REVIEW_LENS_SELECTION_SCHEMA_NAME,
+        "schema_version": 1,
+        "policy": LENS_POLICY_NAME,
+        "risk_level": "normal",
+        "required_lenses": ["correctness", "mystery"],
+    }
+    with pytest.raises(ReviewContractError) as exc:
+        contract.decode(LensSelection, payload)
+    assert exc.value.code == CODE_POLICY_INVALID
+
+
+def test_validate_transaction_binds_normal_lens_selection() -> None:
+    """A transaction whose lens-selection id matches the supplied selection passes."""
+
+    contract = ReviewContractV1()
+    selection = contract.select_lenses(policy=LENS_POLICY_NAME, risk_level="normal")
+    transaction = _transaction_with_lens_selection(selection)
+    # No findings, transitions, or correction — task 2 only binds lenses.
+    contract.validate_transaction(transaction, lens_selection=selection)
+
+
+def test_validate_transaction_binds_high_lens_selection() -> None:
+    """A high-risk selection binds the transaction correctly."""
+
+    contract = ReviewContractV1()
+    selection = contract.select_lenses(policy=LENS_POLICY_NAME, risk_level="high")
+    transaction = _transaction_with_lens_selection(selection)
+    contract.validate_transaction(transaction, lens_selection=selection)
+
+
+def test_validate_transaction_rejects_shape_only_lens_selection_id() -> None:
+    """A well-shaped lens ID that does not match the supplied selection is rejected."""
+
+    contract = ReviewContractV1()
+    selection = contract.select_lenses(policy=LENS_POLICY_NAME, risk_level="normal")
+    # Build a transaction with an unrelated well-formed sha256 id; it has
+    # valid wire form but does not match the supplied selection's content hash.
+    unrelated_id = LensSelectionId("sha256:" + ("0" * 64))
+    transaction = ReviewTransaction(
+        schema_name=REVIEW_TRANSACTION_SCHEMA_NAME,  # type: ignore[arg-type]
+        schema_version=1,  # type: ignore[arg-type]
+        change_name=CHANGE_NAME,
+        candidate_id=CANDIDATE_ID,
+        lens_selection_id=unrelated_id,
+        scope_paths=(),
+        loc_budget=0,
+    )
+    with pytest.raises(ReviewContractError) as exc:
+        contract.validate_transaction(transaction, lens_selection=selection)
+    assert exc.value.code == CODE_ID_INVALID
+
+
+def test_validate_transaction_rejects_wrong_risk_level_binding() -> None:
+    """Selecting ``high`` while the transaction references the ``normal`` ID fails."""
+
+    contract = ReviewContractV1()
+    normal_selection = contract.select_lenses(policy=LENS_POLICY_NAME, risk_level="normal")
+    transaction = _transaction_with_lens_selection(normal_selection)
+    high_selection = contract.select_lenses(policy=LENS_POLICY_NAME, risk_level="high")
+    with pytest.raises(ReviewContractError) as exc:
+        contract.validate_transaction(transaction, lens_selection=high_selection)
+    assert exc.value.code == CODE_ID_INVALID
+
+
+def test_validate_transaction_refuses_findings_until_later_tasks() -> None:
+    """Cross-record validation stages land in tasks 3 and 4; non-empty graph fails."""
+
+    contract = ReviewContractV1()
+    selection = contract.select_lenses(policy=LENS_POLICY_NAME, risk_level="normal")
+    transaction = _transaction_with_lens_selection(selection)
+    # The lens binding succeeds, but supplying non-empty findings trips
+    # the not-yet-implemented cross-record guard.
+    with pytest.raises(ReviewContractError):
+        contract.validate_transaction(
+            transaction,
+            lens_selection=selection,
+            findings=(
+                Finding(
+                    schema_name=REVIEW_FINDING_SCHEMA_NAME,  # type: ignore[arg-type]
+                    schema_version=1,  # type: ignore[arg-type]
+                    review_transaction_id=ReviewTransactionId("sha256:" + ("a" * 64)),
+                    lens="correctness",
+                    severity="warning",
+                    summary="s",
+                    detail="d",
+                    paths=(),
+                    status="open",  # type: ignore[arg-type]
+                ),
+            ),
+        )
+
+
+def test_validate_transaction_refuses_transitions_until_later_tasks() -> None:
+    """Transitions are validated in tasks 3 and 4."""
+
+    contract = ReviewContractV1()
+    selection = contract.select_lenses(policy=LENS_POLICY_NAME, risk_level="normal")
+    transaction = _transaction_with_lens_selection(selection)
+    with pytest.raises(ReviewContractError):
+        contract.validate_transaction(
+            transaction,
+            lens_selection=selection,
+            transitions=(
+                FindingTransition(
+                    schema_name=REVIEW_FINDING_TRANSITION_SCHEMA_NAME,  # type: ignore[arg-type]
+                    schema_version=1,  # type: ignore[arg-type]
+                    review_transaction_id=ReviewTransactionId("sha256:" + ("a" * 64)),
+                    finding_id=FindingId("sha256:" + ("b" * 64)),
+                    from_status="open",
+                    to_status="resolved",
+                    correction_fact_id=CorrectionFactId("sha256:" + ("c" * 64)),
+                ),
+            ),
+        )
+
+
+def test_lens_selection_id_wire_format_is_enforced() -> None:
+    """A malformed wire id fails the typed-id helpers."""
+
+    with pytest.raises(ReviewContractError) as exc:
+        LensSelectionId("not-a-canonical-id")
+    assert exc.value.code == CODE_ID_INVALID
