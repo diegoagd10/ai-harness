@@ -1,0 +1,41 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.1.0, pluggy-1.6.0
+rootdir: /home/diegoagd10/Projects/ai-harness
+configfile: pyproject.toml
+testpaths: tests
+plugins: cov-7.1.0
+collected 899 items
+
+tests/test_change.py ................................................    [  5%]
+tests/test_change_approvals.py ......................                    [  7%]
+tests/test_change_config.py ..................                           [  9%]
+tests/test_change_continuation.py ........                               [ 10%]
+tests/test_change_flow_internals.py ...................................  [ 14%]
+tests/test_change_slice_status.py ..................                     [ 16%]
+tests/test_change_sliced_archive.py ........                             [ 17%]
+tests/test_change_task_slice.py .....................                    [ 19%]
+tests/test_commit_format_resolver.py .....                               [ 20%]
+tests/test_init.py .................................                     [ 24%]
+tests/test_install.py .................................................. [ 29%]
+..................                                                       [ 31%]
+tests/test_receipts_archive.py ........                                  [ 32%]
+tests/test_receipts_candidate.py ..........                              [ 33%]
+tests/test_receipts_cli.py .......                                       [ 34%]
+tests/test_receipts_codec.py ...........                                 [ 35%]
+tests/test_receipts_executor.py ...........                              [ 36%]
+tests/test_receipts_routing.py ..                                        [ 37%]
+tests/test_receipts_seal.py .....................                        [ 39%]
+tests/test_receipts_store.py .............                               [ 40%]
+tests/test_receipts_verify.py ..................                         [ 42%]
+tests/test_renderers.py ................................................ [ 48%]
+........................................................................ [ 56%]
+........................................................................ [ 64%]
+.................................................................        [ 71%]
+tests/test_set_models.py ............................................... [ 76%]
+........................................................................ [ 84%]
+........................................................................ [ 92%]
+.........                                                                [ 93%]
+tests/test_tasks.py ................                                     [ 95%]
+tests/test_worktree.py .........................................         [100%]
+
+============================= 899 passed in 15.36s =============================
