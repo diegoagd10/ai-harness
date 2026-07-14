@@ -33,18 +33,27 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import stat
 import struct
-from collections.abc import Mapping, Sequence
+import subprocess
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Final, Literal
 
 __all__ = [
     "CANONICAL_KEYS",
     "CANDIDATE_SCHEMA_NAME",
     "CANDIDATE_SCHEMA_VERSION",
+    "CANDIDATE_ACCEPT_REGULAR",
+    "CANDIDATE_ACCEPT_SYMLINK",
     "CODE_NAMES",
     "CODEC_RECEIPT_ERROR_CODE",
+    "CandidateBuilderError",
+    "CandidateIdentity",
+    "CandidateManifest",
     "CodecError",
     "DECLARATION_INVALID_CODE",
     "EVIDENCE_SCHEMA_NAME",
@@ -75,11 +84,12 @@ __all__ = [
     "CANDIDATE_ID_LABEL",
     "EVIDENCE_ID_LABEL",
     "VALIDATION_ID_LABEL",
+    "build_candidate_identity",
     "decode_gate_declaration",
     "encode_canonical",
     "typed_hash",
     "validate_typed_id",
-]
+] 
 
 # Code-prefix groups used by the deep module. The codec raises its own
 # :data:`CODEC_RECEIPT_ERROR_CODE`; the deep module maps every other
@@ -519,3 +529,515 @@ def _validate_canonical_input(value: Any) -> None:
             _validate_canonical_input(item)
         return
     raise CodecError(f"unsupported canonical value type: {type(value).__name__}")
+
+
+# ===========================================================================
+# Candidate identity — fail-closed Git/topology capture
+# ===========================================================================
+
+
+# ``os.lstat`` flags we use to detect symlinks safely (``stat.S_ISLNK``).
+CANDIDATE_ACCEPT_REGULAR: Final[int] = 1
+CANDIDATE_ACCEPT_SYMLINK: Final[int] = 2
+
+GIT_PLUMBING_MODE_RE: Final[re.Pattern[str]] = re.compile(r"^[0-7]{6}$")
+GIT_OID_RE: Final[re.Pattern[str]] = re.compile(r"^[0-9a-f]{40,64}$")
+
+
+class CandidateBuilderError(RuntimeError):
+    """Raised when the candidate capture cannot produce a stable identity."""
+
+    code: str
+    message: str
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str,
+        category: str | None = None,
+        path: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.category = category
+        self.path = path
+
+
+@dataclass(frozen=True, slots=True)
+class CandidateIdentity:
+    """A captured Git/topology candidate and its typed identifier.
+
+    * ``policy`` is the versioned candidate policy (always
+      :data:`POLICY_GIT_WORKTREE` in v1).
+    * ``manifest`` is the canonical JSON-safe representation used to
+      compute the id; its keys match :data:`CANONICAL_KEYS` for
+      ``candidate`` exactly.
+    * ``candidate_id`` is the typed SHA-256 identifier over the
+      canonical manifest bytes.
+    """
+
+    policy: str
+    manifest: dict[str, Any]
+    candidate_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class CandidateManifest:
+    """The decoded manifest returned by :func:`build_candidate_identity`.
+
+    Exposed for callers that want to inspect *head*, *index*,
+    *worktree*, or *untracked* records without re-decoding the dict.
+    """
+
+    schema_name: str
+    schema_version: int
+    policy: str
+    head: dict[str, Any]
+    exclusions: dict[str, list[str]]
+    index: tuple[dict[str, Any], ...]
+    worktree: tuple[dict[str, Any], ...]
+    untracked: tuple[dict[str, Any], ...]
+
+
+def build_candidate_identity(root: Path, *, change: str) -> CandidateIdentity:
+    """Capture the fail-closed Git candidate identity for *change*.
+
+    The capture walks the Git top-level's HEAD or unborn state, every
+    index entry (with conflict stages preserved), every tracked
+    worktree byte under the recorded mode, and every non-ignored
+    untracked path. ``.git/``, Git-ignored paths, the target Change's
+    root ``validation.md``, and the target Change's ``.receipts/``
+    prefix are excluded.
+
+    The manifest is captured twice consecutively; both canonical byte
+    sequences must agree and the final identity is typed over the
+    second canonical encoding. Any disagreement is reported as
+    :class:`CandidateBuilderError` with a stable code.
+    """
+    _validate_change_name(change)
+
+    repo_root = _resolve_git_root(root)
+
+    first = _capture_manifest(repo_root, change)
+    second = _capture_manifest(repo_root, change)
+    if _manifest_payload(first) != _manifest_payload(second):
+        raise CandidateBuilderError(
+            "candidate capture observed state mutation between consecutive captures",
+            code="candidate.capture-failed",
+            category="manifest",
+        )
+
+    manifest_payload = _manifest_payload(second)
+    canonical = encode_canonical(manifest_payload)
+    candidate_id = typed_hash(CANDIDATE_ID_LABEL, canonical)
+    return CandidateIdentity(
+        policy=POLICY_GIT_WORKTREE,
+        manifest=manifest_payload,
+        candidate_id=candidate_id,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Internals — manifest capture pipeline
+# ---------------------------------------------------------------------------
+
+
+def _validate_change_name(change: str) -> None:
+    """Reject change names that are not a single relative path component."""
+    if not isinstance(change, str) or not change or change in {".", ".."}:
+        raise CandidateBuilderError(
+            "change name must be a non-empty single path component",
+            code="change.invalid",
+        )
+    if "/" in change or "\\" in change or "\x00" in change:
+        raise CandidateBuilderError(
+            "change name must be a single repository-relative component",
+            code="change.invalid",
+        )
+
+
+def _resolve_git_root(root: Path) -> Path:
+    """Return the Git top-level for *root* or raise a builder error."""
+    if not root.is_dir():
+        raise CandidateBuilderError(
+            f"candidate root is not a directory: {root}",
+            code="change.invalid",
+        )
+    try:
+        completed = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise CandidateBuilderError(
+            f"git not available for candidate capture: {exc}",
+            code="candidate.capture-failed",
+            category="git",
+        ) from exc
+    if completed.returncode != 0:
+        raise CandidateBuilderError(
+            f"root is not inside a Git work tree: {completed.stderr.strip() or completed.stdout.strip()}",
+            code="candidate.capture-failed",
+            category="git",
+        )
+    return Path(completed.stdout.strip()).resolve()
+
+
+def _capture_manifest(repo_root: Path, change: str) -> CandidateManifest:
+    """Capture one manifest pass for a validated Git top level."""
+    head = _capture_head(repo_root)
+    exclusions = _candidate_exclusions(repo_root, change)
+    exact = {path.rstrip("/") for path in exclusions.get("exact", [])}
+    prefixes = tuple(path.rstrip("/") + "/" for path in exclusions.get("prefix", []))
+
+    def _excluded(relpath: str) -> bool:
+        relpath = relpath.strip("/")
+        for prefix in prefixes:
+            if relpath == prefix.rstrip("/") or relpath.startswith(prefix):
+                return True
+        return relpath in exact
+
+    raw_index = _capture_index(repo_root)
+    raw_worktree = _capture_worktree(
+        repo_root, raw_index, is_excluded=_excluded
+    )
+    raw_untracked = _capture_untracked(repo_root, is_excluded=_excluded)
+
+    return CandidateManifest(
+        schema_name=CANDIDATE_SCHEMA_NAME,
+        schema_version=CANDIDATE_SCHEMA_VERSION,
+        policy=POLICY_GIT_WORKTREE,
+        head=head,
+        exclusions={
+            "exact": sorted(path.rstrip("/") for path in exclusions.get("exact", [])),
+            "prefix": sorted(exclusions.get("prefix", [])),
+        },
+        index=tuple(record for record in raw_index if not _excluded(record["path"])),
+        worktree=tuple(record for record in raw_worktree if not _excluded(record["path"])),
+        untracked=tuple(record for record in raw_untracked if not _excluded(record["path"])),
+    )
+
+
+def _manifest_payload(manifest: CandidateManifest) -> dict[str, Any]:
+    """Convert a :class:`CandidateManifest` to its canonical JSON-safe dict."""
+    return {
+        "schema_name": manifest.schema_name,
+        "schema_version": manifest.schema_version,
+        "policy": manifest.policy,
+        "head": manifest.head,
+        "exclusions": manifest.exclusions,
+        "index": list(manifest.index),
+        "worktree": list(manifest.worktree),
+        "untracked": list(manifest.untracked),
+    }
+
+
+def _candidate_exclusions(repo_root: Path, change: str) -> dict[str, list[str]]:
+    """Return the documented exclusions for the captured change.
+
+    The prefix entries keep their trailing slash so a path that exactly
+    matches ``<prefix>`` (excluding that slash) and one whose prefix
+    begins with ``<prefix>`` are both excluded at the same boundary.
+    """
+    base = f".ai-harness/changes/{change}"
+    return {
+        "exact": [f"{base}/validation.md"],
+        "prefix": [f"{base}/.receipts/"],
+    }
+
+
+def _capture_head(repo_root: Path) -> dict[str, Any]:
+    """Return the HEAD identity or the unborn-head marker."""
+    oid = _git_text(repo_root, "rev-parse", "--verify", "HEAD") or _git_text(repo_root, "rev-parse", "HEAD^{commit}")
+    if not oid:
+        return {"state": "unborn"}
+    return {"state": "commit", "oid": oid}
+
+
+def _capture_index(repo_root: Path) -> list[dict[str, Any]]:
+    """Capture every Git index entry with conflict stage preserved."""
+    output = _git_bytes(repo_root, "ls-files", "-z", "--stage")
+    records: list[dict[str, Any]] = []
+    for entry in _parse_nul_delimited(output):
+        if not entry:
+            continue
+        metadata, _, path_bytes = entry.partition(b"\t")
+        mode_str, oid_str, stage = _parse_ls_files_metadata(metadata)
+        if not GIT_OID_RE.match(oid_str):
+            raise CandidateBuilderError(
+                f"invalid git object id in index entry: {oid_str!r}",
+                code="candidate.capture-failed",
+                category="index",
+            )
+        path = _decode_utf8_path(path_bytes, category="index")
+        records.append(
+            {
+                "path": path,
+                "mode": mode_str,
+                "oid": oid_str,
+                "stage": stage,
+            }
+        )
+    records.sort(key=lambda record: (_sort_key_utf8(record["path"]), record["stage"]))
+    return records
+
+
+def _capture_worktree(
+    repo_root: Path,
+    index_records: list[dict[str, Any]],
+    *,
+    is_excluded: Callable[[str], bool] | None = None,
+) -> list[dict[str, Any]]:
+    """Capture worktree records matching the indexed paths."""
+    is_excluded = is_excluded or (lambda _path: False)
+    records: list[dict[str, Any]] = []
+    for index_record in index_records:
+        path = index_record["path"]
+        if is_excluded(path):
+            continue
+        fs_path = repo_root / path
+        records.append(_capture_path_record(fs_path, path, category="worktree"))
+    return records
+
+
+def _capture_untracked(
+    repo_root: Path,
+    *,
+    is_excluded: Callable[[str], bool] | None = None,
+) -> list[dict[str, Any]]:
+    """Capture every non-ignored untracked path reported by Git."""
+    is_excluded = is_excluded or (lambda _path: False)
+    output = _git_bytes(
+        repo_root,
+        "ls-files",
+        "-z",
+        "--others",
+        "--exclude-standard",
+        "--directory",
+        "--no-empty-directory",
+    )
+    paths = [_decode_utf8_path(entry, category="untracked") for entry in _parse_nul_delimited(output) if entry]
+    paths = [path for path in paths if not is_excluded(path)]
+    paths.sort(key=_sort_key_utf8)
+    records: list[dict[str, Any]] = []
+    for path in paths:
+        fs_path = repo_root / path
+        records.append(_capture_path_record(fs_path, path, category="untracked"))
+    return records
+
+
+def _capture_path_record(fs_path: Path, logical_path: str, *, category: str) -> dict[str, Any]:
+    """Capture one regular, symlink, deletion, or missing path record."""
+    # Path must stay inside the repository.
+    try:
+        lstat = os.lstat(fs_path)
+    except FileNotFoundError as exc:
+        return _missing_path_record(logical_path)
+    except OSError as exc:
+        raise CandidateBuilderError(
+            f"could not stat path {logical_path!r}: {exc}",
+            code="candidate.capture-failed",
+            category=category,
+            path=logical_path,
+        ) from exc
+
+    mode_kind = stat.S_IMODE(lstat.st_mode)
+    if stat.S_ISLNK(lstat.st_mode):
+        target_bytes = os.readlink(fs_path).encode("utf-8")
+        return {
+            "path": logical_path,
+            "kind": "symlink",
+            "mode": "120000",
+            "content": typed_hash("ai-harness/symlink-target/v1", target_bytes),
+        }
+
+    if not stat.S_ISREG(lstat.st_mode):
+        raise CandidateBuilderError(
+            f"unsupported path kind for candidate capture: {logical_path!r}",
+            code="candidate.capture-failed",
+            category=category,
+            path=logical_path,
+        )
+
+    try:
+        fd = os.open(fs_path, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError as exc:
+        raise CandidateBuilderError(
+            f"could not open path {logical_path!r}: {exc}",
+            code="candidate.capture-failed",
+            category=category,
+            path=logical_path,
+        ) from exc
+    try:
+        try:
+            file_stat_after = os.fstat(fd)
+        except OSError as exc:
+            raise CandidateBuilderError(
+                f"could not fstat path {logical_path!r}: {exc}",
+                code="candidate.capture-failed",
+                category=category,
+                path=logical_path,
+            ) from exc
+
+        if file_stat_after.st_ino != lstat.st_ino or file_stat_after.st_dev != lstat.st_dev:
+            raise CandidateBuilderError(
+                f"path {logical_path!r} changed identity during read",
+                code="candidate.capture-failed",
+                category=category,
+                path=logical_path,
+            )
+        size = file_stat_after.st_size
+        if size > 0:
+            try:
+                with os.fdopen(fd, "rb", closefd=False) as handle:
+                    data = handle.read()
+            except OSError as exc:
+                raise CandidateBuilderError(
+                    f"could not read path {logical_path!r}: {exc}",
+                    code="candidate.capture-failed",
+                    category=category,
+                    path=logical_path,
+                ) from exc
+            if len(data) != size:
+                raise CandidateBuilderError(
+                    f"path {logical_path!r} size changed during read",
+                    code="candidate.capture-failed",
+                    category=category,
+                    path=logical_path,
+                )
+        else:
+            data = b""
+
+        # Re-stat after read to detect post-read race.
+        final_lstat = os.lstat(fs_path)
+        if stat.S_IMODE(final_lstat.st_mode) != mode_kind:
+            raise CandidateBuilderError(
+                f"path {logical_path!r} mode changed during read",
+                code="candidate.capture-failed",
+                category=category,
+                path=logical_path,
+            )
+        if final_lstat.st_mtime_ns != lstat.st_mtime_ns or final_lstat.st_ino != lstat.st_ino:
+            raise CandidateBuilderError(
+                f"path {logical_path!r} changed identity after read",
+                code="candidate.capture-failed",
+                category=category,
+                path=logical_path,
+            )
+    finally:
+        os.close(fd)
+
+    digest = typed_hash("ai-harness/file-bytes/v1", data)
+    return {
+        "path": logical_path,
+        "kind": "regular",
+        "mode": _octal_mode(mode_kind),
+        "content": digest,
+    }
+
+
+def _missing_path_record(logical_path: str) -> dict[str, Any]:
+    return {"path": logical_path, "kind": "missing"}
+
+
+def _parse_nul_delimited(payload: bytes) -> list[bytes]:
+    """Split a NUL-terminated stream; trailing empty entries are stripped."""
+
+    return [segment for segment in payload.split(b"\x00")]
+
+
+def _parse_ls_files_metadata(metadata: bytes) -> tuple[str, str, int]:
+    """Parse ``<mode> <oid> <stage>`` from ``git ls-files --stage``."""
+    decoded = metadata.decode("ascii", errors="replace")
+    parts = decoded.split(" ")
+    if len(parts) != 3:
+        raise CandidateBuilderError(
+            f"malformed ls-files metadata: {decoded!r}",
+            code="candidate.capture-failed",
+            category="index",
+        )
+    mode, oid, stage_str = parts
+    if not GIT_PLUMBING_MODE_RE.match(mode):
+        raise CandidateBuilderError(
+            f"invalid git mode in index: {mode!r}",
+            code="candidate.capture-failed",
+            category="index",
+        )
+    try:
+        stage = int(stage_str)
+    except ValueError as exc:
+        raise CandidateBuilderError(
+            f"malformed ls-files stage: {stage_str!r}",
+            code="candidate.capture-failed",
+            category="index",
+        ) from exc
+    return mode, oid, stage
+
+
+def _decode_utf8_path(raw: bytes, *, category: str) -> str:
+    """Decode a path to UTF-8 strict — invalid byte sequences fail closed."""
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise CandidateBuilderError(
+            f"invalid utf-8 git path: {exc}",
+            code="candidate.capture-failed",
+            category=category,
+        ) from exc
+    if "\x00" in text:
+        raise CandidateBuilderError(
+            "git path contains NUL byte",
+            code="candidate.capture-failed",
+            category=category,
+        )
+    return text
+
+
+def _sort_key_utf8(path: str) -> bytes:
+    """Stable, locale-independent sort key for repository paths."""
+    return path.encode("utf-8")
+
+
+def _octal_mode(mode: int) -> str:
+    """Format a POSIX mode as a 6-digit octal string Git recognises."""
+    candidate = oct(mode & 0o777777)
+    if candidate.startswith("0o"):
+        candidate = candidate[2:]
+    return candidate.zfill(6)
+
+
+def _git_text(repo: Path, *args: str) -> str | None:
+    """Return ``git <args>`` stdout as text or ``None`` if no output."""
+    completed = subprocess.run(
+        ["git", *args],
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return None
+    return completed.stdout.strip()
+
+
+def _git_bytes(repo: Path, *args: str) -> bytes:
+    """Return ``git <args>`` stdout as bytes."""
+    completed = subprocess.run(
+        ["git", *args],
+        cwd=str(repo),
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise CandidateBuilderError(
+            f"git {' '.join(args)} failed: {completed.stderr.decode('utf-8', errors='replace').strip()}",
+            code="candidate.capture-failed",
+            category="git",
+        )
+    return completed.stdout
+
