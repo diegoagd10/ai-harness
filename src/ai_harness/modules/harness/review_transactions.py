@@ -1762,9 +1762,7 @@ class ReviewContractV1:
           severity-specific edge.
         """
 
-        derived: dict[FindingId, str] = {
-            fid: "open" for fid in finding_index
-        }
+        derived: dict[FindingId, str] = {fid: "open" for fid in finding_index}
         resolved_by_finding: dict[FindingId, FindingTransition] = {}
 
         if not transitions:
