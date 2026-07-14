@@ -14,6 +14,7 @@
 - f5e2a1961967a471c04982b235006029b1102b97 — task 11: run-focused-receipt-workflow-regression-coverage
 - d29c763a85e8d7b280821bbb1d5986c81db4632f — task 11: validation-fix-receipt-integrity-security
 - 37b7dd76d6c8fcfd38ea4c5d30fd0c800c274b83 — task 11: validation-fix-secret-argv-and-persisted-grammar
+- 3902c397d4eec2f01c798a035bd668d92f0b9637 — task 11: validation-fix-stored-cwd-transitive-resolution
 
 ## TDD Evidence
 
@@ -32,6 +33,7 @@
 | 11   | f5e2a1961967a471c04982b235006029b1102b97 | src/ai_harness/modules/harness/receipts.py | tests/test_receipts_verify.py, tests/_receipts_fixtures.py | unit | passed: 893/893 | written | passed | Single | clean    |
 | 11   | d29c763a85e8d7b280821bbb1d5986c81db4632f | src/ai_harness/modules/harness/receipts.py, src/ai_harness/modules/harness/change.py | tests/test_change.py, tests/test_change_continuation.py, tests/test_change_sliced_archive.py, tests/test_receipts_archive.py, tests/test_receipts_candidate.py, tests/test_receipts_cli.py, tests/test_receipts_codec.py, tests/test_receipts_executor.py, tests/test_receipts_routing.py, tests/test_receipts_seal.py, tests/test_receipts_store.py, tests/test_receipts_verify.py | mixed | passed: 893/893 | written | passed | Single | clean |
 | 11   | 37b7dd76d6c8fcfd38ea4c5d30fd0c800c274b83 | src/ai_harness/modules/harness/receipts.py | tests/test_receipts_archive.py, tests/test_receipts_executor.py, tests/test_receipts_verify.py | unit | passed: 899/899 | written | passed | (6 cases) | clean |
+| 11   | 3902c397d4eec2f01c798a035bd668d92f0b9637 | src/ai_harness/modules/harness/receipts.py | tests/test_receipts_archive.py, tests/test_receipts_seal.py, tests/test_receipts_verify.py | unit | passed: 905/905 | written | passed | (6 cases) | clean |
 
 ## Remaining
 - none
