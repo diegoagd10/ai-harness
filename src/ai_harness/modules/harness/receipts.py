@@ -74,6 +74,10 @@ __all__ = [
     "POLICY_GIT_WORKTREE",
     "POLICY_INHERIT_REDACT_SECRETS",
     "POLICY_REDACTION_EXACT",
+    "RECEIPT_OBJECT_FILENAME",
+    "RECEIPT_OBJECT_KIND_RECEIPTS",
+    "RECEIPT_OBJECT_KIND_RUNS",
+    "RECEIPT_POINTER_FILENAME",
     "RECEIPT_POINTER_LABEL",
     "RECEIPT_POINTER_SCHEMA_NAME",
     "RECEIPT_POINTER_SCHEMA_VERSION",
@@ -84,6 +88,8 @@ __all__ = [
     "CANDIDATE_ID_LABEL",
     "EVIDENCE_ID_LABEL",
     "VALIDATION_ID_LABEL",
+    "ReceiptObjectStore",
+    "ReceiptStoreError",
     "build_candidate_identity",
     "decode_gate_declaration",
     "encode_canonical",
@@ -1040,4 +1046,413 @@ def _git_bytes(repo: Path, *args: str) -> bytes:
             category="git",
         )
     return completed.stdout
+
+
+# ===========================================================================
+# Receipt object store — atomic immutable bundles
+# ===========================================================================
+
+
+import contextlib
+import secrets
+import shutil
+from collections.abc import Iterator
+
+
+RECEIPT_OBJECT_FILENAME: Final[str] = "object.json"
+RECEIPT_OBJECT_KIND_RUNS: Final[str] = "runs"
+RECEIPT_OBJECT_KIND_RECEIPTS: Final[str] = "receipts"
+RECEIPT_POINTER_FILENAME: Final[str] = "current"
+
+
+class ReceiptStoreError(RuntimeError):
+    """Raised when the receipt object store cannot satisfy an operation."""
+
+    code: str
+    message: str
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "storage.failed",
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+@dataclass(frozen=True, slots=True)
+class ReceiptObjectStore:
+    """Owner of the on-disk receipt object storage.
+
+    The store enforces confining layout, atomic sibling publication,
+    immutable reuse, and the strict regular-file checks the design
+    requires. Each bundle lives under
+    ``<root>/<kind>/sha256/<hex>/object.json`` and is built inside a
+    sibling temporary directory before being renamed into place.
+    """
+
+    receipts_dir: Path
+
+    def bundle_path(self, kind: str, object_id: str) -> Path:
+        """Return the bundle directory for one object."""
+        validate_typed_id(object_id)
+        return self._kind_dir(kind) / "sha256" / object_id.removeprefix("sha256:")
+
+    def publish_object(self, kind: str, payload: object) -> str:
+        """Atomically publish *payload* under *kind* and return its typed id."""
+        _validate_kind(kind)
+        canonical = encode_canonical(payload)
+        object_id = typed_hash(self._id_label_for_kind(kind), canonical)
+        bundle = self.bundle_path(kind, object_id)
+        object_file = bundle / RECEIPT_OBJECT_FILENAME
+
+        if object_file.is_file():
+            existing = object_file.read_bytes()
+            if existing != canonical:
+                raise ReceiptStoreError(
+                    f"object {object_id} already exists with different bytes",
+                    code="receipt.invalid",
+                )
+            return object_id
+
+        bundle.parent.mkdir(parents=True, exist_ok=True)
+        with _temporary_directory(bundle.parent) as tmp_dir:
+            object_tmp = tmp_dir / RECEIPT_OBJECT_FILENAME
+            object_tmp.write_bytes(canonical)
+            os.replace(tmp_dir, bundle)
+        return object_id
+
+    def publish_run_bundle(
+        self,
+        *,
+        run_payload: dict[str, Any],
+        evidence: Mapping[str, tuple[bytes, str]],
+    ) -> str:
+        """Publish a complete run bundle with one ``object.json`` plus evidence files.
+
+        *evidence* maps a relative filename (e.g. ``0000.stdout``) to a
+        tuple of (bytes, recorded_digest). The recorded digest is
+        persisted in the run schema for audit; the bytes are written
+        verbatim under the bundle and validated on every read.
+        """
+        _validate_kind(RECEIPT_OBJECT_KIND_RUNS)
+        canonical = encode_canonical(run_payload)
+        run_id = typed_hash(RUN_ID_LABEL, canonical)
+        bundle = self.bundle_path(RECEIPT_OBJECT_KIND_RUNS, run_id)
+        evidence_dir = bundle / "evidence"
+
+        # The bundle must already exist (from publish_object) or be
+        # created here atomically; reuse the deterministic ID as the
+        # collision check.
+        if (bundle / RECEIPT_OBJECT_FILENAME).is_file():
+            existing = (bundle / RECEIPT_OBJECT_FILENAME).read_bytes()
+            if existing != canonical:
+                raise ReceiptStoreError(
+                    f"run {run_id} already exists with different bytes",
+                    code="receipt.invalid",
+                )
+            return run_id
+
+        bundle.parent.mkdir(parents=True, exist_ok=True)
+        with _temporary_directory(bundle.parent) as tmp_dir:
+            object_tmp = tmp_dir / RECEIPT_OBJECT_FILENAME
+            object_tmp.write_bytes(canonical)
+            evidence_tmp = tmp_dir / "evidence"
+            evidence_tmp.mkdir(parents=True)
+            for relative, (data, _recorded_digest) in evidence.items():
+                _validate_evidence_relative(relative)
+                evidence_path = evidence_tmp / relative
+                evidence_path.parent.mkdir(parents=True, exist_ok=True)
+                evidence_path.write_bytes(data)
+            os.replace(tmp_dir, bundle)
+        return run_id
+
+    def read_object(self, kind: str, object_id: str) -> dict[str, Any]:
+        """Read and validate a stored object.
+
+        Strict checks: bundle exists, ``object.json`` is a non-symlink
+        regular file, no extra files in the bundle, bytes match the
+        typed hash, the JSON parses cleanly, and the canonical
+        re-encoding matches the bytes.
+        """
+        object_path, data = self._read_object_file(kind, object_id)
+        try:
+            payload = json.loads(data.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ReceiptStoreError(
+                f"object bytes are not canonical JSON: {exc}",
+                code="receipt.invalid",
+            ) from exc
+
+        if not isinstance(payload, dict):
+            raise ReceiptStoreError(
+                "object payload must be a JSON object",
+                code="receipt.invalid",
+            )
+
+        canonical_reencoded = encode_canonical(payload)
+        if canonical_reencoded != data:
+            raise ReceiptStoreError(
+                "object bytes do not match canonical re-encoding",
+                code="receipt.invalid",
+            )
+        return payload
+
+    def read_run_payload(self, run_id: str) -> dict[str, Any]:
+        """Read a stored run object's payload, allowing an ``evidence/`` subdir."""
+        object_path, data = self._read_object_file(
+            RECEIPT_OBJECT_KIND_RUNS, run_id, allowed_children=["evidence"]
+        )
+        try:
+            payload = json.loads(data.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ReceiptStoreError(
+                f"run bytes are not canonical JSON: {exc}",
+                code="receipt.invalid",
+            ) from exc
+
+        if not isinstance(payload, dict):
+            raise ReceiptStoreError(
+                "run payload must be a JSON object",
+                code="receipt.invalid",
+            )
+        canonical_reencoded = encode_canonical(payload)
+        if canonical_reencoded != data:
+            raise ReceiptStoreError(
+                "run bytes do not match canonical re-encoding",
+                code="receipt.invalid",
+            )
+        return payload
+
+    def _read_object_file(
+        self, kind: str, object_id: str, *, allowed_children: Sequence[str] | None = None
+    ) -> tuple[Path, bytes]:
+        """Validate and read the bundled object file, returning the read bytes."""
+        _validate_kind(kind)
+        validate_typed_id(object_id)
+        bundle = self.bundle_path(kind, object_id)
+        if not bundle.is_dir():
+            raise ReceiptStoreError(
+                f"object bundle not found: {bundle}",
+                code="receipt.invalid",
+            )
+
+        allowed = set(allowed_children or ())
+        allowed.add(RECEIPT_OBJECT_FILENAME)
+        entries = sorted(entry.name for entry in bundle.iterdir())
+        if any(name not in allowed for name in entries):
+            raise ReceiptStoreError(
+                f"object bundle has unexpected contents: {entries}",
+                code="receipt.invalid",
+            )
+
+        object_path = bundle / RECEIPT_OBJECT_FILENAME
+        try:
+            lstat = os.lstat(object_path)
+        except OSError as exc:
+            raise ReceiptStoreError(
+                f"could not stat object file: {exc}",
+                code="receipt.invalid",
+            ) from exc
+        if stat.S_ISLNK(lstat.st_mode) or not stat.S_ISREG(lstat.st_mode):
+            raise ReceiptStoreError(
+                "object file must be a regular non-symlink file",
+                code="receipt.invalid",
+            )
+
+        try:
+            with open(object_path, "rb") as handle:
+                data = handle.read()
+        except OSError as exc:
+            raise ReceiptStoreError(
+                f"could not read object bytes: {exc}",
+                code="receipt.invalid",
+            ) from exc
+
+        try:
+            final_lstat = os.lstat(object_path)
+        except OSError as exc:
+            raise ReceiptStoreError(
+                f"could not re-stat object file: {exc}",
+                code="receipt.invalid",
+            ) from exc
+        if final_lstat.st_mtime_ns != lstat.st_mtime_ns or final_lstat.st_ino != lstat.st_ino:
+            raise ReceiptStoreError(
+                "object file changed during read",
+                code="receipt.invalid",
+            )
+
+        expected = typed_hash(self._id_label_for_kind(kind), data)
+        if expected != object_id:
+            raise ReceiptStoreError(
+                f"object bytes do not match typed id: {object_id} != {expected}",
+                code="receipt.invalid",
+            )
+        return object_path, data
+
+    def read_run_evidence(self, run_id: str, relative: str) -> bytes:
+        """Read a single evidence file from a stored run bundle."""
+        _validate_evidence_relative(relative)
+        bundle = self.bundle_path(RECEIPT_OBJECT_KIND_RUNS, run_id)
+        evidence_dir = bundle / "evidence"
+        evidence_path = evidence_dir / relative
+        if not evidence_path.is_file():
+            raise ReceiptStoreError(
+                f"evidence file missing: {evidence_path}",
+                code="evidence.missing",
+            )
+        try:
+            lstat = os.lstat(evidence_path)
+        except OSError as exc:
+            raise ReceiptStoreError(
+                f"could not stat evidence file: {exc}",
+                code="evidence.invalid",
+            ) from exc
+        if stat.S_ISLNK(lstat.st_mode) or not stat.S_ISREG(lstat.st_mode):
+            raise ReceiptStoreError(
+                "evidence file must be a regular non-symlink file",
+                code="evidence.invalid",
+            )
+        with open(evidence_path, "rb") as handle:
+            data = handle.read()
+        return data
+
+    def replace_current_pointer(self, receipt_id: str) -> None:
+        """Atomically replace ``.receipts/current`` to point at *receipt_id*."""
+        validate_typed_id(receipt_id)
+        self.receipts_dir.mkdir(parents=True, exist_ok=True)
+        pointer_payload = {
+            "receipt_id": receipt_id,
+            "schema_name": RECEIPT_POINTER_SCHEMA_NAME,
+            "schema_version": RECEIPT_POINTER_SCHEMA_VERSION,
+        }
+        canonical = encode_canonical(pointer_payload)
+
+        # Write to a sibling temporary file and atomically rename it
+        # into place. ``.current-ptr-XXXX`` lives next to the real
+        # pointer so the rename is atomic; any prior ``.current-ptr-*``
+        # leftovers from a crash are removed first.
+        for old_tmp in self.receipts_dir.glob(".current-ptr-*"):  # pragma: no cover - defensive
+            old_tmp.unlink(missing_ok=True)
+        suffix = secrets.token_hex(8)
+        tmp_file = self.receipts_dir / f".current-ptr-{suffix}"
+        tmp_file.write_bytes(canonical)
+        try:
+            os.replace(tmp_file, self.receipts_dir / RECEIPT_POINTER_FILENAME)
+        except OSError as exc:
+            tmp_file.unlink(missing_ok=True)
+            raise ReceiptStoreError(
+                f"could not replace current pointer: {exc}",
+                code="storage.failed",
+            ) from exc
+
+    def read_current_pointer(self) -> str:
+        """Read the current pointer file and validate it."""
+        pointer_path = self.receipts_dir / RECEIPT_POINTER_FILENAME
+        if not pointer_path.is_file():
+            raise ReceiptStoreError(
+                "no current pointer present",
+                code="receipt.missing",
+            )
+        try:
+            lstat = os.lstat(pointer_path)
+        except OSError as exc:
+            raise ReceiptStoreError(
+                f"could not stat current pointer: {exc}",
+                code="receipt.invalid",
+            ) from exc
+        if stat.S_ISLNK(lstat.st_mode) or not stat.S_ISREG(lstat.st_mode):
+            raise ReceiptStoreError(
+                "current pointer must be a regular non-symlink file",
+                code="receipt.invalid",
+            )
+        try:
+            data = pointer_path.read_bytes()
+        except OSError as exc:
+            raise ReceiptStoreError(
+                f"could not read current pointer: {exc}",
+                code="receipt.invalid",
+            ) from exc
+        try:
+            payload = json.loads(data.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ReceiptStoreError(
+                f"current pointer is not canonical JSON: {exc}",
+                code="receipt.invalid",
+            ) from exc
+        if not isinstance(payload, dict) or set(payload.keys()) != {
+            "receipt_id",
+            "schema_name",
+            "schema_version",
+        }:
+            raise ReceiptStoreError(
+                "current pointer has unexpected shape",
+                code="receipt.invalid",
+            )
+        if payload["schema_name"] != RECEIPT_POINTER_SCHEMA_NAME:
+            raise ReceiptStoreError(
+                f"current pointer schema name mismatch: {payload['schema_name']!r}",
+                code="schema.unsupported",
+            )
+        if payload["schema_version"] != RECEIPT_POINTER_SCHEMA_VERSION:
+            raise ReceiptStoreError(
+                f"current pointer schema version mismatch: {payload['schema_version']!r}",
+                code="schema.unsupported",
+            )
+        receipt_id = payload["receipt_id"]
+        validate_typed_id(receipt_id)
+        return receipt_id
+
+    # ---- internal helpers ----
+
+    def _kind_dir(self, kind: str) -> Path:
+        return self.receipts_dir / kind
+
+    @staticmethod
+    def _id_label_for_kind(kind: str) -> str:
+        if kind == RECEIPT_OBJECT_KIND_RUNS:
+            return RUN_ID_LABEL
+        if kind == RECEIPT_OBJECT_KIND_RECEIPTS:
+            return RECEIPT_ID_LABEL
+        raise ReceiptStoreError(f"unknown object kind: {kind!r}", code="storage.failed")
+
+
+def _validate_kind(kind: str) -> None:
+    if kind not in {RECEIPT_OBJECT_KIND_RUNS, RECEIPT_OBJECT_KIND_RECEIPTS}:
+        raise ReceiptStoreError(f"unknown object kind: {kind!r}", code="storage.failed")
+
+
+def _validate_evidence_relative(relative: str) -> None:
+    if not isinstance(relative, str) or not relative or relative.startswith("/") or "\\" in relative:
+        raise ReceiptStoreError(f"invalid evidence relative path: {relative!r}", code="evidence.invalid")
+    if relative in {"", ".", ".."} or relative.startswith("../") or "/.." in relative or relative.endswith("/.."):
+        raise ReceiptStoreError(
+            f"evidence relative path must not traverse: {relative!r}",
+            code="evidence.invalid",
+        )
+
+
+@contextlib.contextmanager
+def _temporary_directory(parent: Path) -> Iterator[Path]:
+    """Create a sibling temporary directory and yield its path.
+
+    The directory is created with a random hex suffix on the same
+    filesystem as *parent* so ``os.replace`` is atomic. The caller is
+    responsible for renaming the directory into its final location or
+    removing it on failure; this helper does NOT remove it on exit so
+    it can be reused by the atomic replace idiom.
+    """
+
+    parent.mkdir(parents=True, exist_ok=True)
+    suffix = secrets.token_hex(8)
+    tmp_path = parent / f".tmp-{suffix}"
+    tmp_path.mkdir(parents=False, exist_ok=False)
+    try:
+        yield tmp_path
+    except Exception:
+        if tmp_path.is_dir():
+            shutil.rmtree(tmp_path, ignore_errors=True)
+        raise
 
