@@ -2105,14 +2105,16 @@ class FinalValidationReceipts:
         # Snapshot the environment exactly once.
         env_snapshot = dict(os.environ)
         secrets = classify_environment(env_snapshot)
-        # Reject secret values in argv before any launch. The spec checks
-        # each argv element in full; substring matches inside larger
-        # strings are tolerated and handled by the redactor at output.
+        # Reject a classified non-empty secret value anywhere within an
+        # argv element before any launch. Equality-only checks would let
+        # ``--token=<secret>`` or any other concatenation leak the value
+        # into immutable run metadata; a containment match closes that
+        # bypass without ever persisting the argv element or secret.
         for declaration in request.gates:
             for entry in declaration.argv:
                 encoded = entry.encode("utf-8", errors="surrogateescape")
                 for secret in secrets:
-                    if secret.value and encoded == secret.value:
+                    if secret.value and secret.value in encoded:
                         raise ReceiptError(
                             "argv contains a classified secret value",
                             code="declaration.invalid",
@@ -2661,10 +2663,30 @@ def _validate_gate_record(gate: Any, *, index: int) -> None:
     if (
         not isinstance(argv, list)
         or not argv
+        or len(argv) > MAX_GATE_ARGV_COUNT
         or not all(isinstance(item, str) and item and "\x00" not in item for item in argv)
     ):
         raise ReceiptError(f"gate record {index} argv is invalid", code="run.invalid")
-    if not isinstance(gate["cwd"], str) or not gate["cwd"] or gate["cwd"].startswith("/"):
+    total_argv_bytes = 0
+    for entry in argv:
+        encoded = entry.encode("utf-8")
+        if len(encoded) > MAX_GATE_ARGV_BYTES:
+            raise ReceiptError(f"gate record {index} argv is invalid", code="run.invalid")
+        total_argv_bytes += len(encoded)
+    if total_argv_bytes > MAX_GATE_ARGV_TOTAL_BYTES:
+        raise ReceiptError(f"gate record {index} argv is invalid", code="run.invalid")
+    cwd = gate["cwd"]
+    if (
+        not isinstance(cwd, str)
+        or not cwd
+        or "\x00" in cwd
+        or "\\" in cwd
+        or cwd.startswith("/")
+        or cwd == ".."
+        or cwd.startswith("../")
+        or "/.." in cwd
+        or cwd.endswith("/..")
+    ):
         raise ReceiptError(f"gate record {index} cwd is invalid", code="run.invalid")
     if gate["environment_policy"] != POLICY_INHERIT_REDACT_SECRETS:
         raise ReceiptError(f"gate record {index} environment policy is invalid", code="policy.unsupported")

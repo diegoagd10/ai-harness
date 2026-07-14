@@ -7,7 +7,9 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -17,6 +19,7 @@ from ai_harness.modules.harness.receipts import (
     ReceiptError,
     ReceiptObjectStore,
     decode_gate_declaration,
+    hash_validation_bytes,
 )
 
 
@@ -295,3 +298,161 @@ def test_verify_does_not_recompute_validation_without_rereading(subprocess_env, 
     with pytest.raises(ReceiptError) as excinfo:
         receipts.verify_for_archive(change="demo")
     assert excinfo.value.code == "validation.stale"
+
+
+# ---------------------------------------------------------------------------
+# Helpers and tests for persisted gate-record grammar enforcement.
+# ---------------------------------------------------------------------------
+
+
+def _first_run_hex(receipts: FinalValidationReceipts) -> str:
+    """Return the hex directory name of the first stored run bundle."""
+    store = receipts.store_for("demo")
+    bundles = list((store.receipts_dir / "runs" / "sha256").iterdir())
+    assert bundles, "expected a run bundle to be present"
+    return bundles[0].name
+
+
+def _read_gate_record_evidence(
+    receipts: FinalValidationReceipts, change: str, run_id: str, run_payload: dict[str, Any]
+) -> dict[str, tuple[bytes, str]]:
+    """Read all evidence bytes currently on disk for *run_id*."""
+    receipts_store = receipts.store_for(change)
+    evidence: dict[str, tuple[bytes, str]] = {}
+    for gate in run_payload["gates"]:
+        for stream_name in ("stdout", "stderr"):
+            metadata = gate[stream_name]
+            relative = metadata["path"].removeprefix("evidence/")
+            stored = receipts_store.read_run_evidence(run_id, relative)
+            evidence[metadata["path"]] = (stored, metadata["digest"])
+    return evidence
+
+
+def _publish_modified_run_bundle(
+    receipts: FinalValidationReceipts,
+    *,
+    change: str,
+    run_id: str,
+    mutate_gate: Callable[[dict[str, Any]], None],
+) -> str:
+    """Re-publish the run bundle for *run_id* with one mutated gate record.
+
+    Returns the new run id.
+    """
+    store = receipts.store_for(change)
+    hex_part = run_id.removeprefix("sha256:")
+    bundle = store.receipts_dir / "runs" / "sha256" / hex_part
+    run_payload = json.loads((bundle / "object.json").read_text(encoding="utf-8"))
+    for gate in run_payload["gates"]:
+        mutate_gate(gate)
+    evidence = _read_gate_record_evidence(receipts, change, run_id, run_payload)
+    new_run_id = store.publish_run_bundle(run_payload=run_payload, evidence=evidence)
+    return new_run_id
+
+
+def _rebind_receipt_to_run(
+    receipts: FinalValidationReceipts,
+    *,
+    change: str,
+    new_run_id: str,
+) -> str:
+    """Re-publish the receipt so it references *new_run_id* and update the pointer."""
+    store = receipts.store_for(change)
+    receipts_dir = store.receipts_dir / "receipts" / "sha256"
+    receipt_bundles = list(receipts_dir.iterdir())
+    assert receipt_bundles, "expected a receipt bundle to be present"
+    receipt_bundle = receipt_bundles[0]
+    receipt_payload = json.loads((receipt_bundle / "object.json").read_text(encoding="utf-8"))
+    receipt_payload["gate_run"] = new_run_id
+    receipt_payload["semantic"]["gate_run"] = new_run_id
+
+    validation_path = receipts.repository_root / ".ai-harness" / "changes" / change / "validation.md"
+    new_validation_body = (f"## Verdict\nverdict: pass\ncritical: 0\ngate-run: {new_run_id}\n").encode()
+    validation_path.write_bytes(new_validation_body)
+    receipt_payload["validation"]["digest"] = hash_validation_bytes(change, new_validation_body)
+
+    new_receipt_id = store.publish_object(RECEIPT_OBJECT_KIND_RECEIPTS, receipt_payload)
+    store.replace_current_pointer(new_receipt_id)
+    return new_receipt_id
+
+
+def test_verify_rejects_run_with_traversing_gate_cwd(subprocess_env, repo: Path) -> None:
+    """A stored gate with a traversing cwd must fail transitive verification."""
+    receipts, _ = _make_archiveable_receipt(repo, "demo")
+    original_run_id = "sha256:" + _first_run_hex(receipts)
+
+    new_run_id = _publish_modified_run_bundle(
+        receipts,
+        change="demo",
+        run_id=original_run_id,
+        mutate_gate=lambda gate: gate.__setitem__("cwd", "../escape"),
+    )
+    assert new_run_id != original_run_id
+    _rebind_receipt_to_run(receipts, change="demo", new_run_id=new_run_id)
+
+    with pytest.raises(ReceiptError) as excinfo:
+        receipts.verify_for_archive(change="demo")
+    assert excinfo.value.code == "run.invalid"
+
+
+def test_verify_rejects_run_with_backslash_in_gate_cwd(subprocess_env, repo: Path) -> None:
+    """A stored gate with a Windows-style backslash must fail transitive verification."""
+    receipts, _ = _make_archiveable_receipt(repo, "demo")
+    original_run_id = "sha256:" + _first_run_hex(receipts)
+
+    new_run_id = _publish_modified_run_bundle(
+        receipts,
+        change="demo",
+        run_id=original_run_id,
+        mutate_gate=lambda gate: gate.__setitem__("cwd", "subdir\\..\\outside"),
+    )
+    assert new_run_id != original_run_id
+    _rebind_receipt_to_run(receipts, change="demo", new_run_id=new_run_id)
+
+    with pytest.raises(ReceiptError) as excinfo:
+        receipts.verify_for_archive(change="demo")
+    assert excinfo.value.code == "run.invalid"
+
+
+def test_verify_rejects_run_with_oversized_gate_argv(subprocess_env, repo: Path) -> None:
+    """A stored gate argv exceeding the per-entry byte cap must fail transitive verification."""
+    receipts, _ = _make_archiveable_receipt(repo, "demo")
+    original_run_id = "sha256:" + _first_run_hex(receipts)
+
+    def _grow_argv(gate: dict[str, Any]) -> None:
+        gate["argv"] = [gate["argv"][0], "x" * 5000]
+
+    new_run_id = _publish_modified_run_bundle(
+        receipts,
+        change="demo",
+        run_id=original_run_id,
+        mutate_gate=_grow_argv,
+    )
+    assert new_run_id != original_run_id
+    _rebind_receipt_to_run(receipts, change="demo", new_run_id=new_run_id)
+
+    with pytest.raises(ReceiptError) as excinfo:
+        receipts.verify_for_archive(change="demo")
+    assert excinfo.value.code == "run.invalid"
+
+
+def test_verify_rejects_run_with_too_many_gate_argv_entries(subprocess_env, repo: Path) -> None:
+    """A stored gate with more than 256 argv entries must fail transitive verification."""
+    receipts, _ = _make_archiveable_receipt(repo, "demo")
+    original_run_id = "sha256:" + _first_run_hex(receipts)
+
+    def _grow_argv(gate: dict[str, Any]) -> None:
+        gate["argv"] = [gate["argv"][0]] + ["e"] * 300
+
+    new_run_id = _publish_modified_run_bundle(
+        receipts,
+        change="demo",
+        run_id=original_run_id,
+        mutate_gate=_grow_argv,
+    )
+    assert new_run_id != original_run_id
+    _rebind_receipt_to_run(receipts, change="demo", new_run_id=new_run_id)
+
+    with pytest.raises(ReceiptError) as excinfo:
+        receipts.verify_for_archive(change="demo")
+    assert excinfo.value.code == "run.invalid"

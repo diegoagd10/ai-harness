@@ -156,6 +156,39 @@ def test_run_gates_rejects_secret_in_argv(subprocess_env, repo: Path, monkeypatc
     assert excinfo.value.code == "declaration.invalid"
 
 
+def test_run_gates_rejects_secret_embedded_in_argv(subprocess_env, repo: Path, monkeypatch) -> None:
+    """A classified secret value embedded inside a longer argument must be rejected.
+
+    Equality-only checking would let ``--token=supersecret`` or
+    ``prefix-supersecret-suffix`` slip through and persist the secret
+    value into immutable run metadata. The fix rejects on any
+    non-empty classified value appearing anywhere in an argv element.
+    """
+    monkeypatch.setenv("MY_TEST_TOKEN", "supersecret")
+    receipts = FinalValidationReceipts(repo)
+    (repo / ".ai-harness" / "changes" / "demo").mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_name": "ai-harness.gate-declaration",
+        "schema_version": 1,
+        "gates": [
+            {
+                "gate_id": "leak",
+                "argv": [sys.executable, "-c", "pass", "prefix-supersecret-suffix"],
+                "cwd": ".",
+                "timeout_seconds": 30,
+            }
+        ],
+    }
+    request = decode_gate_declaration(payload)
+
+    with pytest.raises(ReceiptError) as excinfo:
+        receipts.run_gates(change="demo", request=request)
+    assert excinfo.value.code == "declaration.invalid"
+    # The error message and context must never carry the argv element or secret value.
+    assert "supersecret" not in str(excinfo.value)
+    assert "prefix" not in str(excinfo.value)
+
+
 def test_run_gates_no_shell_metacharacters_literal(subprocess_env, repo: Path) -> None:
     """Shell metacharacters in argv are passed literally to the executable."""
     receipts = FinalValidationReceipts(repo)
@@ -188,6 +221,9 @@ def test_run_gates_redacts_secret_values(subprocess_env, repo: Path, monkeypatch
 
     receipts = FinalValidationReceipts(repo)
     (repo / ".ai-harness" / "changes" / "demo").mkdir(parents=True, exist_ok=True)
+    # Secrets must be passed through the environment, not argv; the
+    # script reads the env var and prints it so the redactor observes
+    # the value on stdout without the argv ever containing the literal.
     payload = {
         "schema_name": "ai-harness.gate-declaration",
         "schema_version": 1,
@@ -197,7 +233,7 @@ def test_run_gates_redacts_secret_values(subprocess_env, repo: Path, monkeypatch
                 "argv": [
                     sys.executable,
                     "-c",
-                    "import os; print('secret=topsecretvalue')",
+                    "import os; print('secret=' + os.environ['MY_TEST_TOKEN'])",
                 ],
                 "cwd": ".",
                 "timeout_seconds": 30,
