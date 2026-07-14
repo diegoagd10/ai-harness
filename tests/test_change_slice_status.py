@@ -29,6 +29,24 @@ from ai_harness.modules.harness.tasks import (
     task_create,
     task_done,
 )
+from tests._change_flow_fixtures import (
+    ROUTED_PHASES as _PHASES,
+)
+from tests._change_flow_fixtures import (
+    create_other_capability_task as _create_other_capability_task,
+)
+from tests._change_flow_fixtures import (
+    init_config as _initialize_config,
+)
+from tests._change_flow_fixtures import (
+    make_change as _make_change,
+)
+from tests._change_flow_fixtures import (
+    stage as _stage_artifact,
+)
+from tests._change_flow_fixtures import (
+    write_sliced_prd as _write_sliced_prd,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -41,88 +59,7 @@ def _config_for_change_continue(tmp_path: Path) -> None:
     autouse fixture keeps each test self-sufficient without ad-hoc
     setup or ``monkeypatch``.
     """
-    _initialize_config(
-        tmp_path,
-        "change_explorer",
-        "change_propose",
-        "change_design",
-        "change_specs",
-        "change_tasks",
-        "change_implementor",
-        "change_validator",
-        "change_archiver",
-    )
-
-
-def _initialize_config(tmp_path: Path, *phases: str) -> None:
-    """Initialize a minimal config so ``change_continue`` can resolve context."""
-    config_path = tmp_path / ".ai-harness" / "config.yml"
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "commit": {"format": "[{change_name}][{task_id}] {slug}"},
-        "phases": {phase: {"rules": ["rule"]} for phase in phases},
-    }
-    import yaml
-
-    config_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
-
-
-def _make_change(tmp_path: Path, change: str = "demo") -> Path:
-    change_dir = tmp_path / ".ai-harness" / "changes" / change
-    change_dir.mkdir(parents=True)
-    return change_dir
-
-
-def _write_sliced_prd(change_dir: Path, *, capabilities: list[dict[str, object]]) -> Path:
-    """Write a valid sliced ``prd.md`` containing the supplied capabilities.
-
-    Each capability dict must declare ``id``, ``title``, ``level``, optional
-    ``reasons`` (default ``[]``), and ``design``. Caller controls risk.
-    """
-    yaml_capabilities = "\n".join(_render_capability(capability) for capability in capabilities)
-    body = f"""---
-changeFlow:
-  schemaVersion: 1
-  mode: sliced
-  capabilities:
-{yaml_capabilities}
----
-
-## Capabilities
-
-The router reads only the front matter.
-"""
-    prd = change_dir / "prd.md"
-    prd.write_text(body, encoding="utf-8")
-    return prd
-
-
-def _render_capability(capability: dict[str, object]) -> str:
-    cap_id = capability["id"]
-    title = capability["title"]
-    level = capability["level"]
-    reasons = capability.get("reasons", [])
-    design = capability["design"]
-    reasons_yaml = _render_reasons(reasons)
-    return f"""    - id: {cap_id}
-      title: {title}
-      risk:
-        level: {level}
-{reasons_yaml}      design: {design}"""
-
-
-def _render_reasons(reasons: object) -> str:
-    if not reasons:
-        return "        reasons: []\n"
-    rendered = "\n".join(f"          - {reason}" for reason in reasons)
-    return f"        reasons:\n{rendered}\n"
-
-
-def _stage_artifact(change_dir: Path, relative: str, content: str = "x\n") -> None:
-    """Write a content file at ``<change_dir>/<relative>`` creating parents."""
-    target = change_dir / relative
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(content, encoding="utf-8")
+    _initialize_config(tmp_path, *_PHASES)
 
 
 # ---------------------------------------------------------------------------
@@ -517,18 +454,8 @@ def test_existing_task_progress_remains_global(tmp_path: Path) -> None:
     )
     _stage_artifact(change_dir, "specs/global-progress.md")
     # Unrelated task for "other-capability".
-    other = task_create(
-        tmp_path,
-        "global-progress",
-        TaskInput(
-            title="Other",
-            spec="other-capability",
-            phase="implement",
-            depends_on=[],
-            subtasks=[SubtaskInput(title="build")],
-        ),
-    )
-    task_done(tmp_path, "global-progress", other.id)
+    other_id = _create_other_capability_task(tmp_path, "global-progress", subtask_title="build")
+    task_done(tmp_path, "global-progress", other_id)
     # Unrelated pending task.
     task_create(
         tmp_path,

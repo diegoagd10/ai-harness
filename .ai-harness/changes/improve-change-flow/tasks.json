@@ -402,19 +402,19 @@
         "10",
         "11"
       ],
-      "status": "pending",
+      "status": "done",
       "subtasks": [
         {
           "id": "12.1",
           "title": "Extract shared change-flow fixtures into a single test helpers module",
           "scenario": "Supported toolchain runs focused coverage",
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "12.2",
           "title": "Update owned test files to import the shared fixtures",
           "scenario": "Supported toolchain runs focused coverage",
-          "status": "pending"
+          "status": "done"
         }
       ]
     },

@@ -530,52 +530,29 @@ def test_slice_status_surfaces_unsafe_reference_diagnostic(tmp_path: Path) -> No
     import json
     from dataclasses import asdict
 
-    import yaml
-
     from ai_harness.modules.harness.change import change_continue
-
-    # Initialise the config so change_continue can resolve context.
-    config_path = tmp_path / ".ai-harness" / "config.yml"
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    config_path.write_text(
-        yaml.safe_dump(
-            {
-                "commit": {"format": "[{change_name}][{task_id}] {slug}"},
-                "phases": {
-                    phase: {"rules": ["rule"]}
-                    for phase in (
-                        "change_explorer",
-                        "change_propose",
-                        "change_design",
-                        "change_specs",
-                        "change_tasks",
-                        "change_implementor",
-                        "change_validator",
-                        "change_archiver",
-                    )
-                },
-            },
-            sort_keys=False,
-        ),
-        encoding="utf-8",
+    from tests._change_flow_fixtures import (
+        ROUTED_PHASES as _PHASES,
+    )
+    from tests._change_flow_fixtures import (
+        init_config as _initialize_config,
+    )
+    from tests._change_flow_fixtures import (
+        make_change as _make_change,
+    )
+    from tests._change_flow_fixtures import (
+        write_sliced_prd as _write_sliced_prd,
     )
 
+    # Initialise the config so change_continue can resolve context.
+    _initialize_config(tmp_path, *_PHASES)
+
     change_dir = _make_change(tmp_path, "unsafe-ref")
-    prd = change_dir / "prd.md"
-    prd.write_text(
-        "---\n"
-        "changeFlow:\n"
-        "  schemaVersion: 1\n"
-        "  mode: sliced\n"
-        "  capabilities:\n"
-        "    - id: unsafe-ref\n"
-        "      title: U\n"
-        "      risk:\n"
-        "        level: normal\n"
-        "        reasons: []\n"
-        "      design: none\n"
-        "---\n",
-        encoding="utf-8",
+    _write_sliced_prd(
+        change_dir,
+        capabilities=[
+            {"id": "unsafe-ref", "title": "U", "level": "normal", "design": "none"},
+        ],
     )
     (change_dir / "specs").mkdir()
     (change_dir / "specs" / "unsafe-ref.md").write_text("# spec\n", encoding="utf-8")

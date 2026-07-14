@@ -27,84 +27,24 @@ from ai_harness.modules.harness.tasks import (
     task_create,
     task_done,
 )
-
-
-def _config(tmp_path: Path, *phases: str) -> None:
-    config_path = tmp_path / ".ai-harness" / "config.yml"
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    import yaml
-
-    payload = {
-        "commit": {"format": "[{change_name}][{task_id}] {slug}"},
-        "phases": {phase: {"rules": ["rule"]} for phase in phases},
-    }
-    config_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
-
-
-def _make_change(tmp_path: Path, change: str = "demo") -> Path:
-    change_dir = tmp_path / ".ai-harness" / "changes" / change
-    change_dir.mkdir(parents=True)
-    return change_dir
-
-
-def _stage(change_dir: Path, relative: str, content: str = "x\n") -> None:
-    target = change_dir / relative
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(content, encoding="utf-8")
-
-
-def _write_sliced_prd(change_dir: Path, *, capabilities: list[dict[str, object]]) -> Path:
-    yaml_capabilities = "\n".join(_render_capability(cap) for cap in capabilities)
-    body = f"""---
-changeFlow:
-  schemaVersion: 1
-  mode: sliced
-  capabilities:
-{yaml_capabilities}
----
-"""
-    prd = change_dir / "prd.md"
-    prd.write_text(body, encoding="utf-8")
-    return prd
-
-
-def _render_capability(capability: dict[str, object]) -> str:
-    reasons = capability.get("reasons", [])
-    reasons_yaml = "        reasons: []\n"
-    if reasons:
-        rendered = "\n".join(f"          - {reason}" for reason in reasons)
-        reasons_yaml = f"        reasons:\n{rendered}\n"
-    return f"""    - id: {capability["id"]}
-      title: {capability["title"]}
-      risk:
-        level: {capability["level"]}
-{reasons_yaml}      design: {capability["design"]}"""
-
-
-def _complete_capability(tmp_path: Path, change: str, capability_id: str) -> None:
-    """Stage spec, validation, and one completed associated task for a capability.
-
-    The slice validation is written after the associated task is
-    completed so its mtime is strictly newer than the tasks.json
-    store; this mirrors the natural workflow and prevents the
-    initial-validation freshness check from falsely flagging the
-    validation as stale.
-    """
-    change_dir = tmp_path / ".ai-harness" / "changes" / change
-    _stage(change_dir, f"specs/{capability_id}.md")
-    task = task_create(
-        tmp_path,
-        change,
-        TaskInput(
-            title=f"Wrap {capability_id}",
-            spec=capability_id,
-            phase="implement",
-            depends_on=[],
-            subtasks=[SubtaskInput(title="step")],
-        ),
-    )
-    task_done(tmp_path, change, task.id)
-    _stage(change_dir, f"validations/{capability_id}.md", content="verdict: pass\n")
+from tests._change_flow_fixtures import (
+    ROUTED_PHASES as _PHASES,
+)
+from tests._change_flow_fixtures import (
+    complete_capability as _complete_capability,
+)
+from tests._change_flow_fixtures import (
+    init_config as _initialize_config,
+)
+from tests._change_flow_fixtures import (
+    make_change as _make_change,
+)
+from tests._change_flow_fixtures import (
+    stage as _stage,
+)
+from tests._change_flow_fixtures import (
+    write_sliced_prd as _write_sliced_prd,
+)
 
 
 def _archiveable_legacy_change(tmp_path: Path, change: str) -> Path:
@@ -154,17 +94,7 @@ def _archiveable_sliced_change(tmp_path: Path, change: str) -> Path:
 
 @pytest.fixture(autouse=True)
 def _autouse_config(tmp_path: Path):
-    _config(
-        tmp_path,
-        "change_explorer",
-        "change_propose",
-        "change_design",
-        "change_specs",
-        "change_tasks",
-        "change_implementor",
-        "change_validator",
-        "change_archiver",
-    )
+    _initialize_config(tmp_path, *_PHASES)
 
 
 # ---------------------------------------------------------------------------

@@ -24,97 +24,30 @@ from ai_harness.modules.harness.tasks import (
     task_create,
     task_done,
 )
-
-
-def _config(tmp_path: Path, *phases: str) -> None:
-    """Initialize a minimal config for routed phase tests."""
-    config_path = tmp_path / ".ai-harness" / "config.yml"
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "commit": {"format": "[{change_name}][{task_id}] {slug}"},
-        "phases": {phase: {"rules": ["rule"]} for phase in phases},
-    }
-    import yaml
-
-    config_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
-
-
-def _make_change(tmp_path: Path, change: str = "demo") -> Path:
-    change_dir = tmp_path / ".ai-harness" / "changes" / change
-    change_dir.mkdir(parents=True)
-    return change_dir
-
-
-def _write_sliced_prd(change_dir: Path, *, capabilities: list[dict[str, object]]) -> Path:
-    """Write a sliced ``prd.md`` with the supplied capabilities."""
-    yaml_capabilities = "\n".join(_render_capability(cap) for cap in capabilities)
-    body = f"""---
-changeFlow:
-  schemaVersion: 1
-  mode: sliced
-  capabilities:
-{yaml_capabilities}
----
-"""
-    prd = change_dir / "prd.md"
-    prd.write_text(body, encoding="utf-8")
-    return prd
-
-
-def _render_capability(capability: dict[str, object]) -> str:
-    reasons = capability.get("reasons", [])
-    reasons_yaml = "        reasons: []\n"
-    if reasons:
-        rendered = "\n".join(f"          - {reason}" for reason in reasons)
-        reasons_yaml = f"        reasons:\n{rendered}\n"
-    return f"""    - id: {capability["id"]}
-      title: {capability["title"]}
-      risk:
-        level: {capability["level"]}
-{reasons_yaml}      design: {capability["design"]}"""
-
-
-def _stage(change_dir: Path, relative: str, content: str = "x\n") -> None:
-    """Write a content file at ``<change_dir>/<relative>``."""
-    target = change_dir / relative
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(content, encoding="utf-8")
-
-
-def _stage_artifact(change_dir: Path, relative: str, content: str = "x\n") -> None:
-    """Write a content file at ``<change_dir>/<relative>`` creating parents."""
-    target = change_dir / relative
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(content, encoding="utf-8")
-
-
-def _initialize_config(tmp_path: Path, *phases: str) -> None:
-    """Initialize a minimal config so ``change_continue`` can resolve context."""
-    config_path = tmp_path / ".ai-harness" / "config.yml"
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "commit": {"format": "[{change_name}][{task_id}] {slug}"},
-        "phases": {phase: {"rules": ["rule"]} for phase in phases},
-    }
-    import yaml
-
-    config_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+from tests._change_flow_fixtures import (
+    ROUTED_PHASES as _PHASES,
+)
+from tests._change_flow_fixtures import (
+    init_config as _initialize_config,
+)
+from tests._change_flow_fixtures import (
+    make_change as _make_change,
+)
+from tests._change_flow_fixtures import (
+    stage as _stage,
+)
+from tests._change_flow_fixtures import (
+    stage as _stage_artifact,
+)
+from tests._change_flow_fixtures import (
+    write_sliced_prd as _write_sliced_prd,
+)
 
 
 @pytest.fixture(autouse=True)
 def _autouse_config(tmp_path: Path):
     """Write a complete config so change_continue and change_approve succeed."""
-    _config(
-        tmp_path,
-        "change_explorer",
-        "change_propose",
-        "change_design",
-        "change_specs",
-        "change_tasks",
-        "change_implementor",
-        "change_validator",
-        "change_archiver",
-    )
+    _initialize_config(tmp_path, *_PHASES)
 
 
 # ---------------------------------------------------------------------------
