@@ -31,14 +31,17 @@ This module intentionally duplicates no policy from
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
 import re
+import secrets
+import shutil
 import stat
 import struct
 import subprocess
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final, Literal
@@ -97,7 +100,7 @@ __all__ = [
     "parse_validation_envelope",
     "typed_hash",
     "validate_typed_id",
-] 
+]
 
 # Code-prefix groups used by the deep module. The codec raises its own
 # :data:`CODEC_RECEIPT_ERROR_CODE`; the deep module maps every other
@@ -842,7 +845,7 @@ def _capture_path_record(fs_path: Path, logical_path: str, *, category: str) -> 
     # Path must stay inside the repository.
     try:
         lstat = os.lstat(fs_path)
-    except FileNotFoundError as exc:
+    except FileNotFoundError:
         return _missing_path_record(logical_path)
     except OSError as exc:
         raise CandidateBuilderError(
@@ -1053,12 +1056,6 @@ def _git_bytes(repo: Path, *args: str) -> bytes:
 # ===========================================================================
 
 
-import contextlib
-import secrets
-import shutil
-from collections.abc import Iterator
-
-
 RECEIPT_OBJECT_FILENAME: Final[str] = "object.json"
 RECEIPT_OBJECT_KIND_RUNS: Final[str] = "runs"
 RECEIPT_OBJECT_KIND_RECEIPTS: Final[str] = "receipts"
@@ -1141,7 +1138,6 @@ class ReceiptObjectStore:
         canonical = encode_canonical(run_payload)
         run_id = typed_hash(RUN_ID_LABEL, canonical)
         bundle = self.bundle_path(RECEIPT_OBJECT_KIND_RUNS, run_id)
-        evidence_dir = bundle / "evidence"
 
         # The bundle must already exist (from publish_object) or be
         # created here atomically; reuse the deterministic ID as the
@@ -1516,12 +1512,10 @@ def classify_environment(environ: Mapping[str, str]) -> tuple[SecretClass, ...]:
         if not isinstance(raw, str) or not raw:
             continue
         upper = name.upper()
-        if upper in _EXPLICIT_SECRET_VARS:
-            classified.setdefault(raw.encode("utf-8", errors="surrogateescape"), SecretClass(name, raw.encode("utf-8", errors="surrogateescape")))
+        if upper not in _EXPLICIT_SECRET_VARS and not _matches_token_pattern(upper):
             continue
-        if not _matches_token_pattern(upper):
-            continue
-        classified.setdefault(raw.encode("utf-8", errors="surrogateescape"), SecretClass(name, raw.encode("utf-8", errors="surrogateescape")))
+        encoded_bytes = raw.encode("utf-8", errors="surrogateescape")
+        classified.setdefault(encoded_bytes, SecretClass(name, encoded_bytes))
     return tuple(sorted(classified.values(), key=lambda secret: (-len(secret.value), secret.value)))
 
 
@@ -1851,7 +1845,7 @@ class FinalValidationReceipts:
             object_tmp.write_bytes(run_canonical)
             evidence_tmp = tmp_dir / "evidence"
             evidence_tmp.mkdir(parents=True)
-            for index, record in enumerate(gate_records):
+            for index, _record in enumerate(gate_records):
                 stdout_bytes = _EVIDENCE_RAW.pop(f"{index:04d}.stdout", b"")
                 stderr_bytes = _EVIDENCE_RAW.pop(f"{index:04d}.stderr", b"")
                 (evidence_tmp / f"{index:04d}.stdout").write_bytes(stdout_bytes)

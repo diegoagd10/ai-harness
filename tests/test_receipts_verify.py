@@ -11,11 +11,10 @@ from pathlib import Path
 import pytest
 
 from ai_harness.modules.harness.receipts import (
+    RECEIPT_OBJECT_KIND_RECEIPTS,
     FinalValidationReceipts,
     ReceiptError,
     ReceiptObjectStore,
-    RECEIPT_OBJECT_KIND_RECEIPTS,
-    RECEIPT_OBJECT_KIND_RUNS,
     decode_gate_declaration,
 )
 
@@ -180,7 +179,6 @@ def test_verify_rejects_when_receipt_altered_bytewise(subprocess_env, repo: Path
 
 def test_verify_rejects_when_evidence_tampered(subprocess_env, repo: Path) -> None:
     receipts, _ = _make_archiveable_receipt(repo, "demo")
-    store = receipts.store_for("demo")
 
     # Find the run bundle and corrupt evidence
     receipts_dir = repo / ".ai-harness" / "changes" / "demo" / ".receipts"
