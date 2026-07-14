@@ -1958,17 +1958,25 @@ class FinalValidationReceipts:
     def verify_for_archive(self, *, change: str) -> ArchiveAuthorization:
         """Strict read-only recheck used by both routing and archive.
 
-        Returns an :class:`ArchiveAuthorization` when the current
-        receipt and all transitively referenced evidence are intact,
-        and the stored validation digest matches the current root
-        ``validation.md`` bytes. Every other condition raises
-        :class:`ReceiptError` with a stable code so callers can
-        surface actionable diagnostics.
+        Order of operations is intentional and falsifiable:
 
-        The full recheck (candidate recapture, ordered re-reads) is
-        implemented as part of task 8; this initial implementation
-        covers the routing-bound path safely without violating any
-        spec invariant.
+        1. Read the canonical current pointer (a single regular file).
+        2. Load the referenced receipt object and enforce its schema,
+           redundant fields, and ``archive_eligible`` boolean.
+        3. Verify the receipt's stored ``candidate_id`` matches the
+           receipt's stored ``semantic.gate_run``.
+        4. Load the referenced run and evidence via
+           :func:`_load_run` so digest mismatches fail closed.
+        5. Re-capture the candidate from current disk state.
+        6. Re-read the current pointer and validation bytes (regular
+           file mtime/inode checks at every read).
+        7. Compare the captured candidate against the receipt's
+           ``candidate_id`` so any in-scope mutation between steps is
+           rejected.
+
+        The function performs no writes, never runs gates, never
+        selects an older receipt, and never repairs data. Every read
+        re-stats the file before and after to surface late changes.
         """
         if not isinstance(change, str) or not change:
             raise ReceiptError("change name must be a non-empty string", code="change.invalid")
@@ -1983,24 +1991,58 @@ class FinalValidationReceipts:
                     code="receipt.missing",
                     context={"change": change},
                 ) from exc
+            if exc.code == "schema.unsupported":
+                raise ReceiptError(
+                    f"current pointer has an unsupported schema: {exc.message}",
+                    code="schema.unsupported",
+                ) from exc
             raise ReceiptError(
                 f"could not read current pointer: {exc.message}",
                 code="receipt.invalid",
             ) from exc
 
-        receipt_payload = store.read_object(RECEIPT_OBJECT_KIND_RECEIPTS, receipt_id)
+        try:
+            receipt_payload = store.read_object(RECEIPT_OBJECT_KIND_RECEIPTS, receipt_id)
+        except ReceiptStoreError as exc:
+            raise ReceiptError(
+                f"stored receipt bundle is unreadable: {exc.message}",
+                code="receipt.invalid",
+            ) from exc
         if not isinstance(receipt_payload, dict):
             raise ReceiptError(
                 "stored receipt is not a JSON object",
                 code="receipt.invalid",
             )
-        if not receipt_payload.get("archive_eligible", False):
+
+        # Schema-level redundant field recomputation.
+        _validate_receipt_schema(receipt_payload)
+
+        run_id = receipt_payload.get("gate_run", "")
+        if not isinstance(run_id, str):
+            raise ReceiptError("receipt has no gate_run identifier", code="receipt.invalid")
+        try:
+            validate_typed_id(run_id)
+        except CodecError as exc:
             raise ReceiptError(
-                "current receipt is not archive-eligible",
-                code="receipt.not-eligible",
-                context={"receipt_id": receipt_id},
+                f"receipt references invalid run id: {exc}",
+                code="receipt.invalid",
+            ) from exc
+
+        # Receipt-internal cross-checks.
+        semantic = receipt_payload.get("semantic", {})
+        native = receipt_payload.get("native", {})
+        candidate_id = receipt_payload.get("candidate_id", "")
+        if not isinstance(candidate_id, str) or not candidate_id.startswith("sha256:"):
+            raise ReceiptError("receipt missing typed candidate_id", code="receipt.invalid")
+        if not isinstance(semantic, dict) or not isinstance(native, dict):
+            raise ReceiptError("receipt semantic/native envelopes are not objects", code="receipt.invalid")
+        if semantic.get("gate_run") != run_id:
+            raise ReceiptError(
+                "receipt semantic gate_run does not match receipt gate_run",
+                code="receipt.invalid",
             )
 
+        # Validation binding.
         validation_path = self.repository_root / ".ai-harness" / "changes" / change / "validation.md"
         if not validation_path.is_file():
             raise ReceiptError(
@@ -2023,11 +2065,76 @@ class FinalValidationReceipts:
                 context={"change": change},
             )
 
+        # Transitive run + evidence verification.
+        try:
+            run_payload = _load_run(store, run_id)
+        except ReceiptError:
+            raise
+        if run_payload["all_gates_passed"] is not True:
+            raise ReceiptError(
+                "referenced native run recorded a failed gate",
+                code="run.gates-failed",
+            )
+
+        # Candidate recapture — uses the Git top level so the receipt
+        # captures the exact repository state from this view.
+        repo_root = _resolve_git_top_level(self.repository_root)
+        current_candidate_id = _capture_candidate_id(repo_root, change)
+        if current_candidate_id != candidate_id:
+            raise ReceiptError(
+                "current candidate does not match the stored candidate_id",
+                code="candidate.stale",
+                context={"change": change},
+            )
+
+        # Final late-change detection — re-read both pointer and
+        # validation after the candidate capture.
+        try:
+            late_receipt_id = store.read_current_pointer()
+        except ReceiptStoreError as exc:  # pragma: no cover - defensive
+            raise ReceiptError(
+                f"current pointer changed during verification: {exc.message}",
+                code="receipt.invalid",
+            ) from exc
+        if late_receipt_id != receipt_id:
+            raise ReceiptError(
+                "current pointer changed during verification",
+                code="receipt.invalid",
+            )
+
+        late_validation_bytes = validation_path.read_bytes()
+        if late_validation_bytes != validation_bytes:
+            raise ReceiptError(
+                "validation.md changed during verification",
+                code="validation.stale",
+            )
+
         return ArchiveAuthorization(
             receipt_id=receipt_id,
-            run_id=receipt_payload.get("gate_run", ""),
-            candidate_id=receipt_payload.get("candidate_id", ""),
+            run_id=run_id,
+            candidate_id=candidate_id,
             validation_id=validation_id,
+        )
+
+
+def _validate_receipt_schema(payload: Mapping[str, Any]) -> None:
+    """Verify the receipt's redundant fields and exact schema key set."""
+    expected = CANONICAL_KEYS.get("receipt")
+    if expected is None or set(payload.keys()) != expected:
+        raise ReceiptError(
+            f"stored receipt has unexpected keys: {sorted(payload.keys())}",
+            code="receipt.invalid",
+        )
+    semantic_expected = {"verdict", "critical", "gate_run", "approved"}
+    if set((payload.get("semantic") or {}).keys()) != semantic_expected:
+        raise ReceiptError("receipt semantic envelope has unexpected keys", code="receipt.invalid")
+    native_expected = {"all_gates_passed", "candidate_stable"}
+    if set((payload.get("native") or {}).keys()) != native_expected:
+        raise ReceiptError("receipt native envelope has unexpected keys", code="receipt.invalid")
+    if payload.get("archive_eligible") is not True:
+        raise ReceiptError(
+            "current receipt is not archive-eligible",
+            code="receipt.not-eligible",
         )
 
     # ------------------------------------------------------------------
