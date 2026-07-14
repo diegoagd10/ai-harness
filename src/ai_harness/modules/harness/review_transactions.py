@@ -674,6 +674,58 @@ def _require_scope_path(value: Any, *, field: str) -> str:
     return text
 
 
+class _Scope:
+    """Internal scope-containment helper.
+
+    A concrete path is *in scope* when the transaction scope is the
+    whole-repository sentinel ``.``, when the path equals a declared
+    scope path, or when the path begins with a declared scope path plus
+    ``/``. Prefix *text* match is not segment match: ``src-old`` is not
+    contained by ``src``.
+    """
+
+    @staticmethod
+    def contains(scope: tuple[str, ...], path: str) -> bool:
+        """Return whether *path* is in the transaction *scope*."""
+
+        if "." in scope:
+            # Whole-repository scope ignores entries; the only entry must
+            # be ``.`` itself, which is enforced at decode time.
+            return True
+        if not scope:
+            # Empty scope admits only the empty path set. Callers
+            # disallow non-empty finding/change-path collections when
+            # the scope is empty, so we can short-circuit.
+            return False
+        for entry in scope:
+            if path == entry or path.startswith(entry + "/"):
+                return True
+        return False
+
+
+def _enforce_no_unresolved_critical(
+    findings: tuple[Finding, ...],
+    finding_index: dict[FindingId, Finding],
+    derived_states: dict[FindingId, str],
+) -> None:
+    """Reject any supplied critical finding whose derived state is ``open``.
+
+    Warning and suggestion findings may remain ``open`` at this contract
+    layer; downstream finalization policy may require them to reach a
+    terminal state.
+    """
+
+    del findings  # Used implicitly via finding_index.
+
+    for fid, finding in finding_index.items():
+        if finding.severity == "critical" and derived_states[fid] == "open":
+            raise ReviewContractError(
+                "critical finding remains open without a resolving transition",
+                code=CODE_TRANSITION_INVALID,
+                context={"finding_id": fid.value},
+            )
+
+
 # ---------------------------------------------------------------------------
 # Canonical-object decoder (duplicate-key rejection + re-encode check)
 # ---------------------------------------------------------------------------
@@ -1556,12 +1608,29 @@ class ReviewContractV1:
         # Stage 1: lens-selection binding.
         self._validate_lens_selection_binding(transaction, lens_selection)
 
-        # Stages 2-6 ship in tasks 3 and 4. Until they land we refuse
-        # cross-record inputs up front so callers cannot accidentally
-        # bypass unimplemented validation.
-        if findings or transitions or correction_fact is not None:
+        # Stage 2: finding bindings.
+        finding_index = self._validate_findings(transaction, lens_selection, findings)
+
+        # Stage 3: transition reduction. Returns a per-finding map of
+        # derived current state and a map of resolved-transitions keyed
+        # by finding id.
+        derived_states, resolved_by_finding = self._validate_transitions(
+            transaction,
+            finding_index,
+            transitions,
+        )
+
+        # Stage 6: critical findings must not remain open. Wired in
+        # before correction validation so unresolved-critical is reported
+        # independently of whether a correction was supplied.
+        _enforce_no_unresolved_critical(findings, finding_index, derived_states)
+
+        # Stage 4-5 (correction validation) ships in task 4. Until it
+        # lands we refuse a supplied correction up front so callers
+        # cannot bypass unimplemented validation.
+        if correction_fact is not None:
             raise ReviewContractError(
-                "validate_transaction cross-record checks ship in tasks 3 and 4 of this change",
+                "validate_transaction correction-fact checks ship in task 4 of this change",
                 code=CODE_VERSION_UNSUPPORTED,
                 context={"stage": "pending"},
             )
@@ -1593,6 +1662,220 @@ class ReviewContractV1:
                     "expected": expected.value,
                     "actual": transaction.lens_selection_id.value,
                 },
+            )
+
+    def _validate_findings(
+        self,
+        transaction: ReviewTransaction,
+        lens_selection: LensSelection,
+        findings: tuple[Finding, ...],
+    ) -> dict[FindingId, Finding]:
+        """Stage 2: bind findings to the transaction, lens selection, and scope.
+
+        Returns ``finding_index`` mapping the recomputed ID to the
+        supplied record. Failures are classified deterministically:
+
+        * Prose, status, path, severity, or lens errors are
+          ``review.schema-invalid`` (the local grammar; the design
+          says "A finding path outside transaction scope is
+          schema-invalid" because it violates the transaction-relative
+          finding grammar).
+        * Cross-record identity mismatches are ``review.id-invalid``.
+        """
+
+        # Findings are optional but unique when supplied.
+        finding_index: dict[FindingId, Finding] = {}
+        transaction_id = self.id_for(transaction)
+
+        for finding in findings:
+            finding_id = self.id_for(finding)
+            if finding_id in finding_index:
+                raise ReviewContractError(
+                    "validate_transaction received duplicate finding identities",
+                    code=CODE_ID_INVALID,
+                    context={"finding_id": finding_id.value},
+                )
+
+            if finding.review_transaction_id != transaction_id:
+                raise ReviewContractError(
+                    "finding review_transaction_id does not match the supplied transaction",
+                    code=CODE_ID_INVALID,
+                    context={"finding_id": finding_id.value},
+                )
+
+            if finding.status != "open":
+                raise ReviewContractError(
+                    "finding initial status must be 'open'",
+                    code=CODE_SCHEMA_INVALID,
+                    context={"finding_id": finding_id.value, "status": finding.status},
+                )
+
+            if finding.severity not in SEVERITIES:
+                raise ReviewContractError(
+                    f"unknown severity: {finding.severity!r}",
+                    code=CODE_SCHEMA_INVALID,
+                    context={"finding_id": finding_id.value, "severity": finding.severity},
+                )
+
+            if finding.lens not in lens_selection.required_lenses:
+                raise ReviewContractError(
+                    "finding lens is not in the transaction's required lens selection",
+                    code=CODE_SCHEMA_INVALID,
+                    context={"finding_id": finding_id.value, "lens": finding.lens},
+                )
+
+            for path in finding.paths:
+                if not _Scope.contains(transaction.scope_paths, path):
+                    raise ReviewContractError(
+                        "finding path is outside the transaction's declared scope",
+                        code=CODE_SCHEMA_INVALID,
+                        context={"finding_id": finding_id.value, "path": path},
+                    )
+
+            finding_index[finding_id] = finding
+
+        return finding_index
+
+    def _validate_transitions(
+        self,
+        transaction: ReviewTransaction,
+        finding_index: dict[FindingId, Finding],
+        transitions: tuple[FindingTransition, ...],
+    ) -> tuple[dict[FindingId, str], dict[FindingId, FindingTransition]]:
+        """Stage 3: reduce ordered transitions against the state machine.
+
+        Returns ``derived_states`` (the reduced current state per
+        finding) and ``resolved_by_finding`` (the resolved transition
+        recorded for that finding, if any). Failures fall into:
+
+        * ``review.id-invalid`` — the transition references an unknown
+          transaction/finding, a cross-transaction pair, or a finding
+          that was not supplied.
+        * ``review.transition-invalid`` — illegal edge, replay, wrong
+          source state, or wrong correction nullability for the
+          severity-specific edge.
+        """
+
+        derived: dict[FindingId, str] = {
+            fid: "open" for fid in finding_index
+        }
+        resolved_by_finding: dict[FindingId, FindingTransition] = {}
+
+        if not transitions:
+            return derived, resolved_by_finding
+
+        transaction_id = self.id_for(transaction)
+
+        for transition in transitions:
+            transition_tx = _require_review_transaction_id(
+                transition.review_transaction_id,
+                field="finding_transition.review_transaction_id",
+            )
+            if transition_tx != transaction_id:
+                raise ReviewContractError(
+                    "finding transition references a different transaction",
+                    code=CODE_ID_INVALID,
+                    context={
+                        "expected": transaction_id.value,
+                        "actual": transition_tx.value,
+                    },
+                )
+
+            transition_finding = _require_finding_id(
+                transition.finding_id,
+                field="finding_transition.finding_id",
+            )
+            if transition_finding not in finding_index:
+                raise ReviewContractError(
+                    "finding transition references an unknown finding",
+                    code=CODE_ID_INVALID,
+                    context={"finding_id": transition_finding.value},
+                )
+
+            finding = finding_index[transition_finding]
+            current = derived[transition_finding]
+
+            if transition.from_status != current:
+                raise ReviewContractError(
+                    "finding transition from_status does not match the derived current state",
+                    code=CODE_TRANSITION_INVALID,
+                    context={
+                        "finding_id": transition_finding.value,
+                        "expected": current,
+                        "actual": transition.from_status,
+                    },
+                )
+
+            self._validate_transition_edge(finding, transition)
+
+            derived[transition_finding] = transition.to_status
+            if transition.to_status == "resolved":
+                resolved_by_finding[transition_finding] = transition
+
+        return derived, resolved_by_finding
+
+    @staticmethod
+    def _validate_transition_edge(finding: Finding, transition: FindingTransition) -> None:
+        """Stage 3 (edge classification): severity-specific transition rule.
+
+        Critical findings can only ``open -> resolved`` and the resolved
+        transition must carry a correction reference. Warning and
+        suggestion findings can resolve (with a correction reference) or
+        be accepted (with a null correction reference). Self-transitions
+        and any other ``from_status``/``to_status`` pair is rejected.
+        """
+
+        # Two correctness checks for correction_fact_id nullability
+        # appear here. The decoder also rejects mismatched nullability,
+        # but aggregate validation must classify this as a transition
+        # failure rather than a schema failure when an unrelated kind
+        # of failure would otherwise mask it.
+        if transition.from_status == transition.to_status:
+            raise ReviewContractError(
+                "finding transition has identical source and destination statuses",
+                code=CODE_TRANSITION_INVALID,
+                context={"finding_id": transition.finding_id.value},
+            )
+        if transition.from_status != "open":
+            raise ReviewContractError(
+                "finding transition source must be 'open'",
+                code=CODE_TRANSITION_INVALID,
+                context={
+                    "finding_id": transition.finding_id.value,
+                    "from_status": transition.from_status,
+                },
+            )
+
+        if transition.to_status == "resolved":
+            if transition.correction_fact_id is None:
+                raise ReviewContractError(
+                    "resolved transition must reference a correction fact",
+                    code=CODE_TRANSITION_INVALID,
+                    context={"finding_id": transition.finding_id.value},
+                )
+        elif transition.to_status == "accepted":
+            if transition.correction_fact_id is not None:
+                raise ReviewContractError(
+                    "accepted transition must not reference a correction fact",
+                    code=CODE_TRANSITION_INVALID,
+                    context={"finding_id": transition.finding_id.value},
+                )
+        else:
+            raise ReviewContractError(
+                f"unknown to_status: {transition.to_status!r}",
+                code=CODE_TRANSITION_INVALID,
+                context={
+                    "finding_id": transition.finding_id.value,
+                    "to_status": transition.to_status,
+                },
+            )
+
+        # Critical findings never accept.
+        if finding.severity == "critical" and transition.to_status == "accepted":
+            raise ReviewContractError(
+                "critical findings may not transition to 'accepted'",
+                code=CODE_TRANSITION_INVALID,
+                context={"finding_id": transition.finding_id.value},
             )
 
     def _spec_for_record(self, record: ReviewRecord) -> _SchemaSpec:
