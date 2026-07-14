@@ -15,6 +15,7 @@
 - 9eaa2d6460d38ab493dbe4d61ab560bcbac64cb2 — task 12: Deduplicate change-flow test fixtures for the pylint gate
 - 01bc2799580cf7105c992c2e49b00fea58687610 — task 14: Diagnose different-capability task references in routing diagnostic
 - a2d713c4ae5be8edd1b9f90d07d7c318f8297ec8 — task 15: Require change-wide root design for any effectively high-risk capability
+- 6d6e0213ebd9789941bec3b19f93a3caf5b31352 — task 16: Fingerprint the effective-risk design so root edits invalidate elevated approvals
 
 ## TDD Evidence
 
@@ -34,6 +35,7 @@
 | 12 | 9eaa2d6460d38ab493dbe4d61ab560bcbac64cb2 | tests/__init__.py, tests/_change_flow_fixtures.py, tests/test_change_approvals.py, tests/test_change_continuation.py, tests/test_change_slice_status.py, tests/test_change_sliced_archive.py, tests/test_change_task_slice.py, .ai-harness/changes/improve-change-flow/tasks.json | tests/test_change_approvals.py, tests/test_change_continuation.py, tests/test_change_slice_status.py, tests/test_change_sliced_archive.py, tests/test_change_task_slice.py | unit | passed: 789/789 | written | passed | N/A: refactor only | clean |
 | 14 | 01bc2799580cf7105c992c2e49b00fea58687610 | src/ai_harness/modules/harness/tasks.py, .ai-harness/changes/improve-change-flow/tasks.json | tests/test_change_task_slice.py | unit | passed: 21/21 | written | passed | 2 cases | clean |
 | 15 | a2d713c4ae5be8edd1b9f90d07d7c318f8297ec8 | src/ai_harness/modules/harness/change.py, .ai-harness/changes/improve-change-flow/tasks.json | tests/test_change_approvals.py | unit | passed: 20/20 | written | passed | Single | clean |
+| 16 | 6d6e0213ebd9789941bec3b19f93a3caf5b31352 | src/ai_harness/modules/harness/change.py | tests/test_change_approvals.py | unit | passed: 22/22 | written | passed | 2 cases | clean |
 
 ## Remaining
 - none — all task records closed; final regression gate passes with 789/789 pytest, 29/29 e2e, ruff clean, pylint duplicate-code clean.
