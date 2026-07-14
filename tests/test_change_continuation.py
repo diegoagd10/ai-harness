@@ -231,8 +231,8 @@ def test_stale_final_validation_rejected(tmp_path: Path) -> None:
     assert payload["sliceStatus"]["route"] in {"final-validate", "validate"}
 
 
-def test_current_final_validation_routes_to_archive(tmp_path: Path) -> None:
-    """Root ``validation.md`` newer than the latest approval routes to ``archive``."""
+def test_current_final_validation_without_receipt_routes_to_final_validate(tmp_path: Path) -> None:
+    """Fresh root validation still needs a current eligible receipt before archive."""
     import os
     import time
 
@@ -256,7 +256,7 @@ def test_current_final_validation_routes_to_archive(tmp_path: Path) -> None:
 
     status = change_continue(tmp_path, "ready-archive")
     payload = json.loads(json.dumps(asdict(status)))
-    assert payload["sliceStatus"]["route"] == "archive"
+    assert payload["sliceStatus"]["route"] == "final-validate"
 
 
 def test_slice_validation_cannot_substitute_for_final(tmp_path: Path) -> None:

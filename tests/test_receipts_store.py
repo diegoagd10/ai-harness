@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """Tests for the immutable receipt object store.
 
 These tests exercise ``publish_object`` and ``read_object`` against
@@ -14,10 +15,8 @@ from pathlib import Path
 import pytest
 
 from ai_harness.modules.harness.receipts import (
-    ReceiptStoreError,
-    typed_hash,
-    encode_canonical,
     ReceiptObjectStore,
+    ReceiptStoreError,
 )
 
 
@@ -75,7 +74,12 @@ def test_publish_object_rejects_conflicting_payload_for_existing_id(store: Recei
     base = store.bundle_path("runs", object_id)
     base.mkdir(parents=True, exist_ok=True)
     (base / "object.json").write_text(
-        json.dumps({"schema_name": "ai-harness.example", "schema_version": 1, "value": 2}, sort_keys=True, separators=(",", ":")) + "\n",
+        json.dumps(
+            {"schema_name": "ai-harness.example", "schema_version": 1, "value": 2},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n",
         encoding="utf-8",
     )
 

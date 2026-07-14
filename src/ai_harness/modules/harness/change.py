@@ -351,13 +351,11 @@ def _apply_receipt_route_override(
     """
     if fallback_route != "archive":
         return fallback_route
-    if slice_status.mode != "legacy":
-        return fallback_route
     if artifacts.get("validate") != "done":
         return fallback_route
     if _receipt_archive_eligible(root, change):
         return fallback_route
-    return "validate"
+    return "validate" if slice_status.mode == "legacy" else "final-validate"
 
 
 def _change_dir(root: Path, change: str) -> Path:
@@ -501,7 +499,7 @@ def _derive_slice_status(
     if selected_ordinal is None:
         # Every capability has a valid continuation approval — terminal
         # route (final-validate or archive).
-        return _archive_route_after_all_complete(delivery, completed, change_dir, progress)
+        return _archive_route_after_all_complete(delivery, completed, change_dir, progress, root)
 
     selected_capability = next(cap for cap in delivery.capabilities if cap.ordinal == selected_ordinal)
     next_capability = delivery.capabilities[selected_ordinal] if selected_ordinal < len(delivery.capabilities) else None
@@ -729,6 +727,7 @@ def _derive_slice_status(
             completed,
             change_dir,
             progress,
+            root,
         )
 
     # Continuation approval is valid but another capability is still

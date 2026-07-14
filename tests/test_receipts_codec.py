@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """Tests for canonical receipt codec, schemas, and typed identifiers.
 
 These tests pin the *external* behaviour of the codec primitives from
@@ -14,16 +15,16 @@ import json
 import pytest
 
 from ai_harness.modules.harness.receipts import (
-    CANONICAL_KEYS,
-    CANDIDATE_SCHEMA_VERSION,
     CANDIDATE_SCHEMA_NAME,
-    CodecError,
+    CANDIDATE_SCHEMA_VERSION,
+    CANONICAL_KEYS,
     GATE_DECLARATION_SCHEMA_NAME,
     GATE_DECLARATION_SCHEMA_VERSION,
     GATE_RUN_SCHEMA_NAME,
     GATE_RUN_SCHEMA_VERSION,
     RECEIPT_SCHEMA_NAME,
     RECEIPT_SCHEMA_VERSION,
+    CodecError,
     GateDeclaration,
     GateRunRequest,
     decode_gate_declaration,
@@ -126,11 +127,11 @@ def test_gate_declaration_is_frozen_with_slots() -> None:
         cwd=".",
         timeout_seconds=60,
     )
-    with pytest.raises(Exception):
+    with pytest.raises(AttributeError):
         declaration.gate_id = "other"  # type: ignore[misc]
 
     # Tuple immutability comes from the tuple type itself.
-    with pytest.raises(Exception):
+    with pytest.raises(TypeError):
         declaration.argv[0] = "other"  # type: ignore[index]
 
 
@@ -193,7 +194,11 @@ def test_decode_gate_declaration_rejects_extra_or_missing_fields() -> None:
         decode_gate_declaration(extra_top)
 
     # Unknown gate-level field
-    extra_gate = {"schema_name": base["schema_name"], "schema_version": 1, "gates": [dict(base["gates"][0], verdict="pass")]}
+    extra_gate = {
+        "schema_name": base["schema_name"],
+        "schema_version": 1,
+        "gates": [dict(base["gates"][0], verdict="pass")],
+    }
     with pytest.raises(CodecError):
         decode_gate_declaration(extra_gate)
 

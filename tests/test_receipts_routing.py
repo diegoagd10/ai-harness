@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """Tests for receipt-aware terminal routing in change lifecycle."""
 
 from __future__ import annotations
@@ -60,7 +61,6 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def _autouse_config(tmp_path: Path) -> None:
     from tests._change_flow_fixtures import init_config
 
-    config_path = tmp_path / "repo" / ".ai-harness" / "config.yml"
     init_config(tmp_path / "repo", "change_validator", "change_archiver")
 
 
@@ -87,12 +87,7 @@ def _make_receipt(repo: Path, change: str) -> str:
     run_result = receipts.run_gates(change=change, request=request)
 
     (change_dir / "validation.md").write_text(
-        (
-            "## Verdict\n"
-            "verdict: pass\n"
-            "critical: 0\n"
-            f"gate-run: {run_result.run_id}\n"
-        ),
+        (f"## Verdict\nverdict: pass\ncritical: 0\ngate-run: {run_result.run_id}\n"),
         encoding="utf-8",
     )
 
@@ -130,8 +125,7 @@ def _archiveable_legacy_change(repo: Path, change: str) -> Path:
     )
     (change_dir / "implementation.md").write_text("# impl\n")
     (change_dir / "validation.md").write_text(
-        "## Verdict\nverdict: pass\ncritical: 0\ngate-run: sh"
-        "a256:" + "0" * 64 + "\n",
+        "## Verdict\nverdict: pass\ncritical: 0\ngate-run: sha256:" + "0" * 64 + "\n",
         encoding="utf-8",
     )
     return change_dir

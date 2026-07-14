@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """Tests for the change module and its CLI adapter."""
 
 from __future__ import annotations
@@ -461,8 +462,7 @@ def test_change_continue_attaches_canonical_archiver_context_for_archive_route(t
     )
     change_dir = tmp_path / ".ai-harness" / "changes" / "demo"
     (change_dir / "validation.md").write_text(
-        "## Verdict\nverdict: pass\ncritical: 0\n"
-        f"gate-run: {run_result.run_id}\n",
+        f"## Verdict\nverdict: pass\ncritical: 0\ngate-run: {run_result.run_id}\n",
         encoding="utf-8",
     )
     seal = receipts.seal(change="demo")
@@ -666,8 +666,7 @@ def test_archive_requires_validation_and_non_empty_complete_tasks(tmp_path: Path
         ),
     )
     (change_dir / "validation.md").write_text(
-        "## Verdict\nverdict: pass\ncritical: 0\n"
-        f"gate-run: {run_result.run_id}\n",
+        f"## Verdict\nverdict: pass\ncritical: 0\ngate-run: {run_result.run_id}\n",
         encoding="utf-8",
     )
     seal = receipts.seal(change="demo")
@@ -882,9 +881,7 @@ def _seal_receipt_for_archive(tmp_path: Path, name: str) -> None:
 
     if not (tmp_path / ".git").exists():
         _subprocess.run(["git", "init", "-q"], cwd=str(tmp_path), check=True)
-        _subprocess.run(
-            ["git", "config", "user.email", "test@example.com"], cwd=str(tmp_path), check=True
-        )
+        _subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=str(tmp_path), check=True)
         _subprocess.run(["git", "config", "user.name", "Tester"], cwd=str(tmp_path), check=True)
 
     receipts = FinalValidationReceipts(tmp_path)
@@ -905,8 +902,7 @@ def _seal_receipt_for_archive(tmp_path: Path, name: str) -> None:
     run_result = receipts.run_gates(change=name, request=request)
     change_dir = tmp_path / ".ai-harness" / "changes" / name
     (change_dir / "validation.md").write_text(
-        "## Verdict\nverdict: pass\ncritical: 0\n"
-        f"gate-run: {run_result.run_id}\n",
+        f"## Verdict\nverdict: pass\ncritical: 0\ngate-run: {run_result.run_id}\n",
         encoding="utf-8",
     )
     seal = receipts.seal(change=name)
@@ -1235,12 +1231,6 @@ def test_cli_change_archive_success_does_not_emit_change_status_json(
 
 def test_cli_change_archive_does_not_parse_validation_content(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Archive proceeds with a receipt bound to the validation bytes regardless of prose."""
-    import sys as _sys
-
-    from ai_harness.modules.harness.receipts import (  # noqa: WPS433
-        FinalValidationReceipts,
-        decode_gate_declaration,
-    )
 
     _build_archiveable_change(tmp_path, "demo")
     _seal_receipt_for_archive(tmp_path, "demo")
@@ -1248,9 +1238,7 @@ def test_cli_change_archive_does_not_parse_validation_content(tmp_path: Path, mo
     # binds to the seal-time bytes. Archive proceeds.
     validation_path = tmp_path / ".ai-harness" / "changes" / "demo" / "validation.md"
     body = validation_path.read_text(encoding="utf-8")
-    (tmp_path / ".ai-harness" / "changes" / "demo" / "validation.md").write_text(
-        body + "## Ad-hoc\n", encoding="utf-8"
-    )
+    (tmp_path / ".ai-harness" / "changes" / "demo" / "validation.md").write_text(body + "## Ad-hoc\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
     result = runner.invoke(app, ["change-archive", "demo"])

@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """Tests for terminal receipt authorization in archive preflight."""
 
 from __future__ import annotations
@@ -128,8 +129,7 @@ def _make_receipt(repo: Path, change: str) -> str:
     )
     run_result = receipts.run_gates(change=change, request=request)
     (change_dir / "validation.md").write_text(
-        "## Verdict\nverdict: pass\ncritical: 0\n"
-        f"gate-run: {run_result.run_id}\n",
+        f"## Verdict\nverdict: pass\ncritical: 0\ngate-run: {run_result.run_id}\n",
         encoding="utf-8",
     )
     seal = receipts.seal(change=change)

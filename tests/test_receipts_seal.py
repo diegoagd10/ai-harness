@@ -1,8 +1,8 @@
+# pylint: disable=duplicate-code
 """Tests for semantic validation parsing and the sealing protocol."""
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import sys
@@ -13,7 +13,6 @@ import pytest
 from ai_harness.modules.harness.receipts import (
     FinalValidationReceipts,
     ReceiptError,
-    ReceiptObjectStore,
     decode_gate_declaration,
     parse_validation_envelope,
 )
@@ -79,12 +78,7 @@ def _write_validation(repo: Path, change: str, body: str) -> Path:
 
 def test_parse_validation_recognises_pass_with_zero_critical() -> None:
     text = (
-        "# Validation\n"
-        "\n"
-        "## Verdict\n"
-        "verdict: pass\n"
-        "critical: 0\n"
-        'gate-run: sha256:{"a" * 64}\n'  # placeholder
+        '# Validation\n\n## Verdict\nverdict: pass\ncritical: 0\ngate-run: sha256:{"a" * 64}\n'  # placeholder
     ).replace('{"a" * 64}', "a" * 64)
 
     body = text
@@ -96,23 +90,13 @@ def test_parse_validation_recognises_pass_with_zero_critical() -> None:
 
 
 def test_parse_validation_recognises_pass_with_warnings() -> None:
-    body = (
-        "## Verdict\n"
-        "verdict: pass-with-warnings\n"
-        "critical: 0\n"
-        f"gate-run: sha256:{'a' * 64}\n"
-    )
+    body = f"## Verdict\nverdict: pass-with-warnings\ncritical: 0\ngate-run: sha256:{'a' * 64}\n"
     envelope = parse_validation_envelope(body)
     assert envelope.approved is True
 
 
 def test_parse_validation_recognises_well_formed_denial() -> None:
-    body = (
-        "## Verdict\n"
-        "verdict: fail\n"
-        "critical: 3\n"
-        f"gate-run: sha256:{'a' * 64}\n"
-    )
+    body = f"## Verdict\nverdict: fail\ncritical: 3\ngate-run: sha256:{'a' * 64}\n"
     envelope = parse_validation_envelope(body)
     assert envelope.approved is False
     assert envelope.verdict == "fail"
@@ -127,104 +111,58 @@ def test_parse_validation_rejects_missing_section() -> None:
 
 
 def test_parse_validation_rejects_missing_field() -> None:
-    body = (
-        "## Verdict\n"
-        "verdict: pass\n"
-        "critical: 0\n"
-    )
+    body = "## Verdict\nverdict: pass\ncritical: 0\n"
     with pytest.raises(ReceiptError) as excinfo:
         parse_validation_envelope(body)
     assert excinfo.value.code in {"validation.malformed", "validation.contradictory"}
 
 
 def test_parse_validation_rejects_unknown_line() -> None:
-    body = (
-        "## Verdict\n"
-        "verdict: pass\n"
-        "critical: 0\n"
-        f"gate-run: sha256:{'a' * 64}\n"
-        "extra: noise\n"
-    )
+    body = f"## Verdict\nverdict: pass\ncritical: 0\ngate-run: sha256:{'a' * 64}\nextra: noise\n"
     with pytest.raises(ReceiptError):
         parse_validation_envelope(body)
 
 
 def test_parse_validation_rejects_duplicate_field() -> None:
-    body = (
-        "## Verdict\n"
-        "verdict: pass\n"
-        "verdict: pass\n"
-        "critical: 0\n"
-        f"gate-run: sha256:{'a' * 64}\n"
-    )
+    body = f"## Verdict\nverdict: pass\nverdict: pass\ncritical: 0\ngate-run: sha256:{'a' * 64}\n"
     with pytest.raises(ReceiptError):
         parse_validation_envelope(body)
 
 
 def test_parse_validation_rejects_pass_with_positive_critical() -> None:
-    body = (
-        "## Verdict\n"
-        "verdict: pass\n"
-        "critical: 1\n"
-        f"gate-run: sha256:{'a' * 64}\n"
-    )
+    body = f"## Verdict\nverdict: pass\ncritical: 1\ngate-run: sha256:{'a' * 64}\n"
     with pytest.raises(ReceiptError) as excinfo:
         parse_validation_envelope(body)
     assert excinfo.value.code == "validation.contradictory"
 
 
 def test_parse_validation_rejects_fail_with_zero_critical() -> None:
-    body = (
-        "## Verdict\n"
-        "verdict: fail\n"
-        "critical: 0\n"
-        f"gate-run: sha256:{'a' * 64}\n"
-    )
+    body = f"## Verdict\nverdict: fail\ncritical: 0\ngate-run: sha256:{'a' * 64}\n"
     with pytest.raises(ReceiptError) as excinfo:
         parse_validation_envelope(body)
     assert excinfo.value.code == "validation.contradictory"
 
 
 def test_parse_validation_rejects_leading_zero_critical() -> None:
-    body = (
-        "## Verdict\n"
-        "verdict: fail\n"
-        "critical: 01\n"
-        f"gate-run: sha256:{'a' * 64}\n"
-    )
+    body = f"## Verdict\nverdict: fail\ncritical: 01\ngate-run: sha256:{'a' * 64}\n"
     with pytest.raises(ReceiptError):
         parse_validation_envelope(body)
 
 
 def test_parse_validation_rejects_unknown_verdict() -> None:
-    body = (
-        "## Verdict\n"
-        "verdict: maybe\n"
-        "critical: 0\n"
-        f"gate-run: sha256:{'a' * 64}\n"
-    )
+    body = f"## Verdict\nverdict: maybe\ncritical: 0\ngate-run: sha256:{'a' * 64}\n"
     with pytest.raises(ReceiptError):
         parse_validation_envelope(body)
 
 
 def test_parse_validation_rejects_invalid_gate_run_id() -> None:
-    body = (
-        "## Verdict\n"
-        "verdict: pass\n"
-        "critical: 0\n"
-        "gate-run: not-an-id\n"
-    )
+    body = "## Verdict\nverdict: pass\ncritical: 0\ngate-run: not-an-id\n"
     with pytest.raises(ReceiptError):
         parse_validation_envelope(body)
 
 
 def test_parse_validation_rejects_bom() -> None:
-    body = (
-        "\ufeff## Verdict\n"
-        "verdict: pass\n"
-        "critical: 0\n"
-        f"gate-run: sha256:{'a' * 64}\n"
-    )
+    body = f"\ufeff## Verdict\nverdict: pass\ncritical: 0\ngate-run: sha256:{'a' * 64}\n"
     with pytest.raises(ReceiptError):
         parse_validation_envelope(body)
 
@@ -265,12 +203,7 @@ def test_seal_publishes_archive_eligible_receipt(subprocess_env, repo: Path) -> 
     _write_validation(
         repo,
         change,
-        (
-            "## Verdict\n"
-            "verdict: pass\n"
-            "critical: 0\n"
-            f"gate-run: {run_result.run_id}\n"
-        ),
+        (f"## Verdict\nverdict: pass\ncritical: 0\ngate-run: {run_result.run_id}\n"),
     )
 
     result = receipts.seal(change=change)
@@ -311,12 +244,7 @@ def test_seal_records_non_eligible_receipt_for_denial(subprocess_env, repo: Path
     _write_validation(
         repo,
         change,
-        (
-            "## Verdict\n"
-            "verdict: fail\n"
-            "critical: 1\n"
-            f"gate-run: {run_result.run_id}\n"
-        ),
+        (f"## Verdict\nverdict: fail\ncritical: 1\ngate-run: {run_result.run_id}\n"),
     )
 
     result = receipts.seal(change=change)
@@ -351,12 +279,7 @@ def test_seal_is_idempotent_when_validation_unchanged(subprocess_env, repo: Path
     _write_validation(
         repo,
         change,
-        (
-            "## Verdict\n"
-            "verdict: pass\n"
-            "critical: 0\n"
-            f"gate-run: {run_result.run_id}\n"
-        ),
+        (f"## Verdict\nverdict: pass\ncritical: 0\ngate-run: {run_result.run_id}\n"),
     )
 
     first = receipts.seal(change=change)
@@ -386,18 +309,13 @@ def test_seal_rejects_when_run_reference_mismatches(subprocess_env, repo: Path) 
             ],
         }
     )
-    run_result = receipts.run_gates(change=change, request=request)
+    _run_result = receipts.run_gates(change=change, request=request)
 
     fake_run_id = "sha256:" + "f" * 64
     _write_validation(
         repo,
         change,
-        (
-            "## Verdict\n"
-            "verdict: pass\n"
-            "critical: 0\n"
-            f"gate-run: {fake_run_id}\n"
-        ),
+        (f"## Verdict\nverdict: pass\ncritical: 0\ngate-run: {fake_run_id}\n"),
     )
 
     with pytest.raises(ReceiptError) as excinfo:
@@ -430,12 +348,7 @@ def test_seal_rejects_when_candidate_changed(subprocess_env, repo: Path) -> None
     _write_validation(
         repo,
         change,
-        (
-            "## Verdict\n"
-            "verdict: pass\n"
-            "critical: 0\n"
-            f"gate-run: {run_result.run_id}\n"
-        ),
+        (f"## Verdict\nverdict: pass\ncritical: 0\ngate-run: {run_result.run_id}\n"),
     )
 
     # Mutate a tracked file after running validation
@@ -466,17 +379,12 @@ def test_seal_rejects_malformed_validation(subprocess_env, repo: Path) -> None:
             ],
         }
     )
-    run_result = receipts.run_gates(change=change, request=request)
+    _run_result = receipts.run_gates(change=change, request=request)
 
     _write_validation(
         repo,
         change,
-        (
-            "## Verdict\n"
-            "verdict: pass\n"
-            "critical: 0\n"
-            "gate-run: not-an-id\n"
-        ),
+        ("## Verdict\nverdict: pass\ncritical: 0\ngate-run: not-an-id\n"),
     )
 
     with pytest.raises(ReceiptError) as excinfo:
@@ -494,12 +402,7 @@ def test_seal_rejects_orphan_validation_when_run_missing(subprocess_env, repo: P
     _write_validation(
         repo,
         change,
-        (
-            "## Verdict\n"
-            "verdict: pass\n"
-            "critical: 0\n"
-            f"gate-run: {fake_run_id}\n"
-        ),
+        (f"## Verdict\nverdict: pass\ncritical: 0\ngate-run: {fake_run_id}\n"),
     )
 
     with pytest.raises(ReceiptError) as excinfo:

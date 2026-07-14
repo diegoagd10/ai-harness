@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """Tests for the native gate executor and redacted evidence pipeline.
 
 These tests exercise the executor with controlled local subprocesses
@@ -19,15 +20,15 @@ import pytest
 from ai_harness.modules.harness.receipts import (
     GATE_RUN_SCHEMA_NAME,
     GATE_RUN_SCHEMA_VERSION,
-    GateRunRequest,
     POLICY_GIT_WORKTREE,
     POLICY_INHERIT_REDACT_SECRETS,
     POLICY_REDACTION_EXACT,
     FinalValidationReceipts,
+    GateRunRequest,
     ReceiptError,
     decode_gate_declaration,
 )
-from tests._receipts_fixtures import subprocess_env  # noqa: F401  (pytest fixture import)
+from tests._receipts_fixtures import subprocess_env as _subprocess_env  # noqa: F401  (pytest fixture import)
 
 
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:

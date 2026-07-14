@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """Tests for the receipt CLI commands change-gates-run and change-receipt-seal."""
 
 from __future__ import annotations
@@ -194,18 +195,15 @@ def test_change_receipt_seal_returns_seal_summary(subprocess_env, repo: Path) ->
     if runner_result.exit_code != 0:
         import traceback
 
-        traceback.print_exception(type(runner_result.exception), runner_result.exception, runner_result.exception.__traceback__)
+        traceback.print_exception(
+            type(runner_result.exception), runner_result.exception, runner_result.exception.__traceback__
+        )
     assert runner_result.exit_code == 0, runner_result.output
     run_summary = json.loads(runner_result.output)
 
     # Write validation referencing the run
     (change_dir / "validation.md").write_text(
-        (
-            "## Verdict\n"
-            "verdict: pass\n"
-            "critical: 0\n"
-            f"gate-run: {run_summary['run_id']}\n"
-        ),
+        (f"## Verdict\nverdict: pass\ncritical: 0\ngate-run: {run_summary['run_id']}\n"),
         encoding="utf-8",
     )
 
@@ -244,12 +242,7 @@ def test_change_receipt_seal_reports_denial(subprocess_env, repo: Path) -> None:
     run_summary = json.loads(runner_result.output)
 
     (change_dir / "validation.md").write_text(
-        (
-            "## Verdict\n"
-            "verdict: fail\n"
-            "critical: 1\n"
-            f"gate-run: {run_summary['run_id']}\n"
-        ),
+        (f"## Verdict\nverdict: fail\ncritical: 1\ngate-run: {run_summary['run_id']}\n"),
         encoding="utf-8",
     )
 
@@ -294,12 +287,7 @@ def test_receipt_commands_never_invoke_questionary(subprocess_env, repo: Path, m
     assert runner_result.exit_code == 0, runner_result.output
     summary = json.loads(runner_result.output)
     (change_dir / "validation.md").write_text(
-        (
-            "## Verdict\n"
-            "verdict: pass\n"
-            "critical: 0\n"
-            f"gate-run: {summary['run_id']}\n"
-        ),
+        (f"## Verdict\nverdict: pass\ncritical: 0\ngate-run: {summary['run_id']}\n"),
         encoding="utf-8",
     )
     runner.invoke(app, ["change-receipt-seal", "demo"])

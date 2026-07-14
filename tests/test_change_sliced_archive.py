@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """Tests for the sliced archive preflight added in task 6.
 
 The terminal ``ChangeLifecycle.archive`` operation must recompute
@@ -124,8 +125,7 @@ def _seal_archiveable_receipt(tmp_path: Path, change: str) -> None:
     run_result = receipts.run_gates(change=change, request=request)
     change_dir = tmp_path / ".ai-harness" / "changes" / change
     (change_dir / "validation.md").write_text(
-        "## Verdict\nverdict: pass\ncritical: 0\n"
-        f"gate-run: {run_result.run_id}\n",
+        f"## Verdict\nverdict: pass\ncritical: 0\ngate-run: {run_result.run_id}\n",
         encoding="utf-8",
     )
     seal = receipts.seal(change=change)

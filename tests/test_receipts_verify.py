@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """Tests for strict read-only archive verification."""
 
 from __future__ import annotations
@@ -78,8 +79,7 @@ def _make_archiveable_receipt(repo: Path, change: str) -> tuple[FinalValidationR
     )
     run_result = receipts.run_gates(change=change, request=request)
     (change_dir / "validation.md").write_text(
-        "## Verdict\nverdict: pass\ncritical: 0\n"
-        f"gate-run: {run_result.run_id}\n",
+        f"## Verdict\nverdict: pass\ncritical: 0\ngate-run: {run_result.run_id}\n",
         encoding="utf-8",
     )
     seal = receipts.seal(change=change)
@@ -271,9 +271,7 @@ def test_verify_does_not_run_gates(subprocess_env, repo: Path, monkeypatch) -> N
     def _guarded_run(*args, **kwargs):
         argv = args[0] if args else kwargs.get("args", [])
         if isinstance(argv, list) and any("print('ok')" in str(arg) for arg in argv):
-            raise AssertionError(
-                "verify_for_archive must not re-run gate commands: argv=" + repr(argv)
-            )
+            raise AssertionError("verify_for_archive must not re-run gate commands: argv=" + repr(argv))
         return original_run(*args, **kwargs)
 
     monkeypatch.setattr(receipts_mod.subprocess, "run", _guarded_run)

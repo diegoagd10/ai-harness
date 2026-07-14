@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """Tests for the Git candidate identity builder.
 
 These tests use temporary real Git repositories created through
@@ -11,7 +12,6 @@ the resulting manifest contents or stable error codes.
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -23,7 +23,6 @@ from ai_harness.modules.harness.receipts import (
     POLICY_GIT_WORKTREE,
     CandidateBuilderError,
     CandidateIdentity,
-    CandidateManifest,
     build_candidate_identity,
 )
 
@@ -59,7 +58,7 @@ def _init_repo(path: Path) -> None:
 def _commit_all(path: Path, message: str = "init") -> str:
     """Stage and commit everything, returning the new HEAD OID."""
     _git(path, "add", "-A")
-    committed = _git(path, "commit", "-q", "-m", message, "--no-gpg-sign")
+    _git(path, "commit", "-q", "-m", message, "--no-gpg-sign")
     head = _git(path, "rev-parse", "HEAD").stdout.strip()
     return head
 
