@@ -426,19 +426,19 @@
       "depends_on": [
         "12"
       ],
-      "status": "pending",
+      "status": "done",
       "subtasks": [
         {
           "id": "13.1",
           "title": "Use full commit SHAs and comma-separated file paths in every TDD evidence row",
           "scenario": "Supported toolchain runs focused coverage",
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "13.2",
           "title": "Restore RED/GREEN literals and resolve the task 8 commit-report discrepancy",
           "scenario": "Supported toolchain runs focused coverage",
-          "status": "pending"
+          "status": "done"
         }
       ]
     }

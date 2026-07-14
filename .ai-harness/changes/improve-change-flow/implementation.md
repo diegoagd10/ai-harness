@@ -32,4 +32,4 @@
 | 12 | 9eaa2d6460d38ab493dbe4d61ab560bcbac64cb2 | tests/__init__.py, tests/_change_flow_fixtures.py, tests/test_change_approvals.py, tests/test_change_continuation.py, tests/test_change_slice_status.py, tests/test_change_sliced_archive.py, tests/test_change_task_slice.py, .ai-harness/changes/improve-change-flow/tasks.json | tests/test_change_approvals.py, tests/test_change_continuation.py, tests/test_change_slice_status.py, tests/test_change_sliced_archive.py, tests/test_change_task_slice.py | unit | passed: 789/789 | written | passed | N/A: refactor only | clean |
 
 ## Remaining
-- task 13: Restore TDD evidence grammar and full commit SHAs
+- none — all task records closed; final regression gate passes with 789/789 pytest, 29/29 e2e, ruff clean, pylint duplicate-code clean.
