@@ -441,6 +441,102 @@
           "status": "done"
         }
       ]
+    },
+    {
+      "id": "14",
+      "title": "Diagnose different-capability task references in routing diagnostic",
+      "spec": "safe-normal-risk-first-slice",
+      "phase": "fix",
+      "depends_on": [
+        "11"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "14.1",
+          "title": "Surface a routing diagnostic for tasks referencing a different valid capability",
+          "scenario": "Unsafe references do not associate",
+          "status": "done"
+        },
+        {
+          "id": "14.2",
+          "title": "Add a test asserting the different-capability reference is reported",
+          "scenario": "Unsafe references do not associate",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "15",
+      "title": "Require change-wide root design for any effectively high-risk capability",
+      "spec": "risk-and-scope-governance",
+      "phase": "fix",
+      "depends_on": [
+        "14"
+      ],
+      "status": "pending",
+      "subtasks": [
+        {
+          "id": "15.1",
+          "title": "Make change-wide design gate consider every PRD capability's effective risk",
+          "scenario": "Cross-cutting change lacks design",
+          "status": "pending"
+        },
+        {
+          "id": "15.2",
+          "title": "Add a test confirming a later high-risk capability requires root design.md",
+          "scenario": "Cross-cutting change lacks design",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "16",
+      "title": "Fingerprint the effective-risk design so root edits invalidate elevated approvals",
+      "spec": "risk-and-scope-governance",
+      "phase": "fix",
+      "depends_on": [
+        "15"
+      ],
+      "status": "pending",
+      "subtasks": [
+        {
+          "id": "16.1",
+          "title": "Make _applicable_design_bytes use the effective design scope, not the declared one",
+          "scenario": "Implementation scope edit reopens approval",
+          "status": "pending"
+        },
+        {
+          "id": "16.2",
+          "title": "Add a test confirming root design edits stale an elevated approval",
+          "scenario": "Implementation scope edit reopens approval",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "17",
+      "title": "Reject malformed approval timestamps and scope digest syntax at read time",
+      "spec": "risk-and-scope-governance",
+      "phase": "fix",
+      "depends_on": [
+        "16"
+      ],
+      "status": "pending",
+      "subtasks": [
+        {
+          "id": "17.1",
+          "title": "Reject malformed approvedAt values and validate sha256 digest syntax in _record_from_raw",
+          "scenario": "Malformed approval data blocks routing",
+          "status": "pending"
+        },
+        {
+          "id": "17.2",
+          "title": "Add tests covering the new malformed-approval rejection paths",
+          "scenario": "Malformed approval data blocks routing",
+          "status": "pending"
+        }
+      ]
     }
   ]
 }

@@ -420,13 +420,14 @@ def test_routing_diagnostic_lists_nested_path(tmp_path: Path) -> None:
 
 
 def test_routing_diagnostic_lists_different_capability(tmp_path: Path) -> None:
-    """A task referencing a different capability simply does not associate.
+    """A task referencing a different capability is reported in the diagnostic.
 
     A reference to ``other-capability`` is a legitimate canonical
-    reference for that capability, not an unsafe reference. When the
-    router asks for ``capability``, the task correctly stays out of
-    the selected slice and no diagnostic is produced — the diagnostic
-    is reserved for truly unsafe references that cannot be audited.
+    reference for *that* capability, but it is still not associated
+    with the selected ``capability``. Silently excluding it would let
+    the slice router believe the task set is empty when the task
+    actually belongs to a different slice; the diagnostic surfaces
+    the exclusion so the operator can review it.
     """
     root = tmp_path
     _make_change(root)
@@ -451,7 +452,57 @@ def test_routing_diagnostic_lists_different_capability(tmp_path: Path) -> None:
     state = task_capability_state(root, "demo", "capability")
 
     assert state.taskIds == []
-    assert state.routingDiagnostic is None
+    assert state.routingDiagnostic is not None
+    assert "other-capability" in state.routingDiagnostic
+    assert "1" in state.routingDiagnostic
+
+
+def test_routing_diagnostic_combines_different_capability_with_safe_task(tmp_path: Path) -> None:
+    """Safe associations stay associated while sibling-capability tasks are diagnosed.
+
+    Triangulating the diagnostic against a mixed store proves the
+    exclusion does not bleed into safe associations: the selected
+    capability's task is associated, the sibling-capability task is
+    reported in the diagnostic, and neither is double-counted.
+    """
+    root = tmp_path
+    _make_change(root)
+    task_create(
+        root,
+        "demo",
+        TaskInput(
+            title="Safe",
+            spec="capability",
+            phase="implement",
+            depends_on=[],
+            subtasks=[SubtaskInput(title="step")],
+        ),
+    )
+    import json
+
+    tasks_file = root / ".ai-harness" / "changes" / "demo" / "tasks.json"
+    raw = json.loads(tasks_file.read_text(encoding="utf-8"))
+    raw["tasks"].append(
+        {
+            "id": "2",
+            "title": "Sibling",
+            "spec": "sibling-capability",
+            "phase": "implement",
+            "depends_on": [],
+            "status": "pending",
+            "subtasks": [],
+        }
+    )
+    tasks_file.write_text(json.dumps(raw), encoding="utf-8")
+
+    state = task_capability_state(root, "demo", "capability")
+
+    assert state.taskIds == ["1"]
+    assert state.routingDiagnostic is not None
+    assert "sibling-capability" in state.routingDiagnostic
+    assert "2" in state.routingDiagnostic
+    # The diagnostic must not flag the safely-associated task.
+    assert ": references a different capability" in state.routingDiagnostic
 
 
 def test_routing_diagnostic_lists_empty_spec(tmp_path: Path) -> None:

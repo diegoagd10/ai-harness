@@ -90,9 +90,11 @@ class CapabilityTaskState:
 
     ``routingDiagnostic`` is a non-null, actionable message when one or
     more tasks use an unsafe spec reference (absolute path, parent
-    traversal, nested spec path, empty ID, or a different capability's
-    spec). The diagnostic lets the router surface the issue without
-    silently crediting the unsafe task to the selected capability.
+    traversal, nested spec path, empty ID, or a malformed spec) OR
+    when a task canonicalizes successfully but references a different
+    capability than the selected one. Both classes are reported so the
+    router can surface every exclusion without silently crediting the
+    excluded task to the selected capability.
     """
 
     progress: TaskProgress
@@ -491,22 +493,37 @@ def _canonicalize_task_spec(spec_reference: str) -> str | None:
 
 
 def _build_routing_diagnostic(tasks: list[Task], canonical_spec: str | None) -> str | None:
-    """Return a routing diagnostic for unsafe task spec references.
+    """Return a routing diagnostic for tasks excluded from the selected slice.
 
     The router must know when a task cannot be associated with the
     selected capability so it can surface a safe diagnostic instead of
-    silently dropping the task. A "different capability's spec" is a
-    legitimate reference that associates with the other capability
-    rather than the selected one, so this helper only flags references
-    that fail canonicalization entirely (absolute paths, parent
-    traversal, nested paths, empty IDs, or non-string values).
+    silently dropping the task. A task is excluded from the selected
+    slice for two distinct reasons:
+
+    - The reference fails canonicalization entirely (absolute paths,
+      parent traversal, nested paths, empty IDs, or non-string values).
+      These are *unsafe* references that cannot be audited.
+    - The reference canonicalizes successfully but targets a
+      *different* valid capability. The reference is legitimate but
+      belongs to a sibling slice; the router must know the task is
+      present and credited to the other slice rather than to the one
+      it just asked about.
+
+    Both classes of exclusion are reported so the operator sees every
+    task that is not associated with the currently selected slice.
     """
     if not tasks:
         return None
 
     issues: list[str] = []
     for task in tasks:
-        if _canonicalize_task_spec(task.spec) is not None:
+        canonicalized = _canonicalize_task_spec(task.spec)
+        if canonicalized is not None:
+            if canonical_spec is not None and canonicalized != canonical_spec:
+                issues.append(
+                    f"task {task.id}: references a different capability ({canonicalized!r}) "
+                    f"than the selected slice ({canonical_spec!r})"
+                )
             continue
         if not isinstance(task.spec, str):
             issues.append(f"task {task.id}: spec is not a string")
@@ -527,9 +544,11 @@ def _build_routing_diagnostic(tasks: list[Task], canonical_spec: str | None) -> 
         return None
 
     if canonical_spec is not None:
-        header = f"Tasks referencing an unsafe spec are not associated with the selected capability {canonical_spec!r}:"
+        header = (
+            f"Tasks not associated with the selected capability {canonical_spec!r}:"
+        )
     else:
-        header = "Tasks referencing an unsafe spec are not associated with the selected capability:"
+        header = "Tasks not associated with the selected capability:"
     return header + " " + "; ".join(issues)
 
 
