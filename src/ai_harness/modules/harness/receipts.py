@@ -1456,3 +1456,718 @@ def _temporary_directory(parent: Path) -> Iterator[Path]:
             shutil.rmtree(tmp_path, ignore_errors=True)
         raise
 
+
+# ===========================================================================
+# Environment & redaction policy
+# ===========================================================================
+
+
+_SECRET_TOKENS: Final[tuple[str, ...]] = (
+    "TOKEN",
+    "SECRET",
+    "PASSWORD",
+    "PASSWD",
+    "PRIVATE_KEY",
+    "API_KEY",
+    "ACCESS_KEY",
+    "AUTH",
+)
+
+_EXPLICIT_SECRET_VARS: Final[frozenset[str]] = frozenset(
+    {
+        "GITHUB_TOKEN",
+        "GH_TOKEN",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "AWS_SECRET_ACCESS_KEY",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+    }
+)
+
+REDACTION_MARKER: Final[bytes] = b"<redacted:secret>"
+
+
+@dataclass(frozen=True, slots=True)
+class SecretClass:
+    """A single classified secret value used by :class:`BoundedRedactor`."""
+
+    name: str
+    value: bytes
+
+
+def classify_environment(environ: Mapping[str, str]) -> tuple[SecretClass, ...]:
+    """Return deduplicated, byte-sorted secret values from *environ*.
+
+    Classification rules (deterministic, fail-closed):
+
+    * names that match ``_TOKEN``, ``_SECRET``, ``_PASSWORD``,
+      ``_PASSWD``, ``_PRIVATE_KEY``, ``_API_KEY``, ``_ACCESS_KEY``, or
+      ``_AUTH`` as ``_TOKEN``-style word boundaries (start/end or
+      surrounded by ``_``); or
+    * explicit names in :data:`_EXPLICIT_SECRET_VARS`.
+
+    Empty values are ignored. Values are encoded with ``surrogateescape``
+    so undecodable bytes round-trip through :func:`os.environb` lookups.
+    The result is ordered longest-first, then by encoded length, so the
+    redactor picks the most specific match first.
+    """
+    classified: dict[bytes, SecretClass] = {}
+    for name, raw in environ.items():
+        if not isinstance(raw, str) or not raw:
+            continue
+        upper = name.upper()
+        if upper in _EXPLICIT_SECRET_VARS:
+            classified.setdefault(raw.encode("utf-8", errors="surrogateescape"), SecretClass(name, raw.encode("utf-8", errors="surrogateescape")))
+            continue
+        if not _matches_token_pattern(upper):
+            continue
+        classified.setdefault(raw.encode("utf-8", errors="surrogateescape"), SecretClass(name, raw.encode("utf-8", errors="surrogateescape")))
+    return tuple(sorted(classified.values(), key=lambda secret: (-len(secret.value), secret.value)))
+
+
+def _matches_token_pattern(upper_name: str) -> bool:
+    """Return ``True`` if the uppercased name contains a recognised token."""
+    if not upper_name:
+        return False
+    pieces = upper_name.replace("-", "_").split("_")
+    for token in _SECRET_TOKENS:
+        if token in pieces:
+            return True
+    return False
+
+
+@dataclass(frozen=True, slots=True)
+class RedactedStreamResult:
+    """Outcome of streaming one output channel through :class:`BoundedRedactor`.
+
+    * ``data`` is the bounded redacted bytes retained on disk.
+    * ``complete`` is ``True`` when the entire stream was observed and
+      persisted; ``False`` means more bytes were generated than the
+      budget allows (truncation observed) OR the producer was killed
+      before it could finish.
+    * ``replacement_count`` is the number of redaction markers written.
+    * ``truncated`` distinguishes output-overflow truncation from
+      process-termination cuts so callers can pick the right
+      ``termination`` enum.
+    """
+
+    data: bytes
+    complete: bool
+    replacement_count: int
+    truncated: bool
+
+
+@dataclass(frozen=True, slots=True)
+class BoundedRedactor:
+    """Streaming deterministic redaction over binary bytes.
+
+    Replaces each classified secret value with :data:`REDACTION_MARKER`
+    using a longest-first match, so an exact substring of a longer
+    secret is replaced once as part of the longer match. Overlapping
+    matches are intentionally NOT supported — secrets are emitted in
+    length order and each replacement is a fresh string of bytes, but
+    the algorithm does not rescan within emitted bytes (callers that
+    need overlapping coverage can broaden the secret set).
+
+    Both the raw observed budget and the retained budget are bounded to
+    ``max_bytes`` (1 MiB by default). Hitting either budget truncates
+    the stream and sets ``truncated=True``.
+    """
+
+    secrets: tuple[SecretClass, ...]
+    max_bytes: int = 1024 * 1024
+    marker: bytes = REDACTION_MARKER
+
+    def process(self, chunks: Iterable[bytes]) -> RedactedStreamResult:
+        """Consume *chunks* of raw bytes and return the bounded redacted form."""
+
+        retained = bytearray()
+        observed = 0
+        replacement_count = 0
+        complete = True
+
+        for chunk in chunks:
+            observed += len(chunk)
+            if observed > self.max_bytes:
+                # Cap further reading without rewriting prior retained bytes.
+                complete = False
+                break
+
+            replaced = self._redact_chunk(bytes(chunk))
+            replacement_count += _count_marker(replaced)
+            if len(retained) >= self.max_bytes:
+                # Retained cap hit — stop accumulating but stay consistent.
+                complete = False
+                continue
+            remaining = self.max_bytes - len(retained)
+            if len(replaced) > remaining:
+                retained.extend(replaced[:remaining])
+                complete = False
+            else:
+                retained.extend(replaced)
+
+        return RedactedStreamResult(
+            data=bytes(retained),
+            complete=complete,
+            replacement_count=replacement_count,
+            truncated=not complete,
+        )
+
+    def _redact_chunk(self, chunk: bytes) -> bytes:
+        """Replace every secret substring in *chunk* with the marker."""
+        if not self.secrets:
+            return chunk
+        result = chunk
+        for secret in self.secrets:
+            if not secret.value:
+                continue
+            result = result.replace(secret.value, self.marker)
+        return result
+
+
+def _count_marker(data: bytes) -> int:
+    """Return the number of non-overlapping marker occurrences in *data*."""
+    count = 0
+    index = 0
+    while True:
+        position = data.find(REDACTION_MARKER, index)
+        if position < 0:
+            return count
+        count += 1
+        index = position + len(REDACTION_MARKER)
+
+
+# ===========================================================================
+# Gate executor — shell-free, bounded, redacted
+# ===========================================================================
+
+
+@dataclass(frozen=True, slots=True)
+class _EvidenceMetadata:
+    """Persisted evidence metadata for one stream."""
+
+    path: str
+    bytes_count: int
+    digest: str
+    complete: bool
+    redaction_policy: str
+    replacement_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class GateOutcomeSummary:
+    """Public summary of one gate's outcome (no raw evidence contents)."""
+
+    gate_id: str
+    launch: Literal["ok", "not-found", "permission-denied", "os-error"]
+    termination: Literal["exited", "launch-error", "timeout", "output-overflow"]
+    return_code: int | None
+    passed: bool
+
+
+@dataclass(frozen=True, slots=True)
+class GateRunResult:
+    """Public result of :meth:`FinalValidationReceipts.run_gates`."""
+
+    run_id: str
+    candidate_before: str
+    candidate_after: str
+    all_gates_passed: bool
+    gates: tuple[GateOutcomeSummary, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class SealResult:
+    """Public result of :meth:`FinalValidationReceipts.seal`."""
+
+    receipt_id: str
+    gate_run: str
+    semantic_approval: bool
+    native_all_gates_passed: bool
+    archive_eligible: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ArchiveAuthorization:
+    """Authorization identity returned by :meth:`FinalValidationReceipts.verify_for_archive`."""
+
+    receipt_id: str
+    run_id: str
+    candidate_id: str
+    validation_id: str
+
+
+# Public, machine-readable error class used by the deep receipts module
+# for every failure that surfaces through public operations.
+class ReceiptError(RuntimeError):
+    """Stable, code-bearing error returned by the receipts module.
+
+    Every public operation in :class:`FinalValidationReceipts` raises
+    either :class:`ReceiptError` (infrastructure / binding problem) or
+    returns a result with explicit boolean fields (fact-recording
+    problem). The ``code`` is one of the documented stable codes; the
+    ``context`` is a mapping of additional key/value pairs (e.g.
+    ``gate``, ``category``, ``path``) suitable for CLI surfacing.
+    """
+
+    code: str
+    message: str
+    context: dict[str, str]
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str,
+        context: Mapping[str, str] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.context = dict(context or {})
+
+
+@dataclass(frozen=True, slots=True)
+class FinalValidationReceipts:
+    """Public deep seam for receipts.
+
+    Composes the candidate identity, gate execution, redaction, evidence
+    publication, validation parsing, sealing, and verification helpers
+    behind three operations:
+
+    * :meth:`run_gates` — execute the declared gates and persist facts.
+    * :meth:`seal` — bind the current root ``validation.md`` and
+      current run into a single archive-eligible receipt.
+    * :meth:`verify_for_archive` — strict read-only recheck before
+      archive.
+    """
+
+    repository_root: Path
+
+    def store_for(self, change: str) -> ReceiptObjectStore:
+        """Return the receipt object store for the supplied *change*."""
+        return ReceiptObjectStore(self._receipts_dir_for(change))
+
+    def _receipts_dir_for(self, change: str) -> Path:
+        return self.repository_root / ".ai-harness" / "changes" / change / ".receipts"
+
+    # ------------------------------------------------------------------
+    # Public seam operations
+    # ------------------------------------------------------------------
+
+    def run_gates(self, *, change: str, request: GateRunRequest) -> GateRunResult:
+        """Execute *request* and persist one immutable run bundle.
+
+        Validation happens before any launch:
+
+        * the request schema has already been verified by
+          :func:`decode_gate_declaration`;
+        * secret values detected in argv are rejected without launch;
+        * each declaration's ``cwd`` is resolved against the Git top
+          level and re-checked to stay inside the repository.
+        """
+        if not isinstance(request, GateRunRequest):
+            raise ReceiptError("gate-run request must be a GateRunRequest", code="declaration.invalid")
+
+        repo_root = _resolve_git_top_level(self.repository_root)
+
+        # Resolve and confine every gate's cwd before launching.
+        confirmed_cwds: list[Path] = []
+        for declaration in request.gates:
+            confirmed_cwds.append(_resolve_confined_cwd(repo_root, declaration.cwd))
+
+        # Snapshot the environment exactly once.
+        env_snapshot = dict(os.environ)
+        secrets = classify_environment(env_snapshot)
+        # Reject secret values in argv before any launch. The spec checks
+        # each argv element in full; substring matches inside larger
+        # strings are tolerated and handled by the redactor at output.
+        for declaration in request.gates:
+            for entry in declaration.argv:
+                encoded = entry.encode("utf-8", errors="surrogateescape")
+                for secret in secrets:
+                    if secret.value and encoded == secret.value:
+                        raise ReceiptError(
+                            "argv contains a classified secret value",
+                            code="declaration.invalid",
+                            context={"gate_id": declaration.gate_id},
+                        )
+
+        candidate_before = _capture_candidate_id(repo_root, change)
+        gate_records: list[dict[str, Any]] = []
+        outcome_summaries: list[GateOutcomeSummary] = []
+
+        all_passed_pre_evidence = True
+        store = self.store_for(change)
+        for index, (declaration, cwd) in enumerate(zip(request.gates, confirmed_cwds, strict=True)):
+            record, outcome = _run_single_gate(
+                change=change,
+                declaration=declaration,
+                repo_root=repo_root,
+                resolved_cwd=cwd,
+                env_snapshot=env_snapshot,
+                secrets=secrets,
+                store=store,
+                index=index,
+            )
+            gate_records.append(record)
+            outcome_summaries.append(outcome)
+            if not outcome.passed:
+                all_passed_pre_evidence = False
+
+        candidate_after = _capture_candidate_id(repo_root, change)
+        candidate_stable = candidate_before == candidate_after
+        all_gates_passed = all_passed_pre_evidence and candidate_stable
+
+        for record in gate_records:
+            record["stdout"].pop("raw", None)
+            record["stderr"].pop("raw", None)
+
+        run_payload: dict[str, Any] = {
+            "schema_name": GATE_RUN_SCHEMA_NAME,
+            "schema_version": GATE_RUN_SCHEMA_VERSION,
+            "candidate_policy": POLICY_GIT_WORKTREE,
+            "candidate_before": {"id": candidate_before},
+            "candidate_after": {"id": candidate_after},
+            "gates": gate_records,
+            "all_gates_passed": all_gates_passed,
+        }
+
+        # Persist the canonical run payload and the evidence files. We
+        # write evidence files into the bundle directory the publish
+        # creates, using the deterministic run_id derived from the
+        # payload. The bundle directory is created from a sibling tmp
+        # rename by ``publish_object``; we write the evidence files
+        # before publishing so the final directory already contains
+        # the evidence when the bundle lands at its target.
+        run_canonical = encode_canonical(run_payload)
+        run_id = typed_hash(RUN_ID_LABEL, run_canonical)
+
+        bundle = store.bundle_path(RECEIPT_OBJECT_KIND_RUNS, run_id)
+        bundle.parent.mkdir(parents=True, exist_ok=True)
+
+        with _temporary_directory(bundle.parent) as tmp_dir:
+            object_tmp = tmp_dir / RECEIPT_OBJECT_FILENAME
+            object_tmp.write_bytes(run_canonical)
+            evidence_tmp = tmp_dir / "evidence"
+            evidence_tmp.mkdir(parents=True)
+            for index, record in enumerate(gate_records):
+                stdout_bytes = _EVIDENCE_RAW.pop(f"{index:04d}.stdout", b"")
+                stderr_bytes = _EVIDENCE_RAW.pop(f"{index:04d}.stderr", b"")
+                (evidence_tmp / f"{index:04d}.stdout").write_bytes(stdout_bytes)
+                (evidence_tmp / f"{index:04d}.stderr").write_bytes(stderr_bytes)
+            os.replace(tmp_dir, bundle)
+
+        return GateRunResult(
+            run_id=run_id,
+            candidate_before=candidate_before,
+            candidate_after=candidate_after,
+            all_gates_passed=all_gates_passed,
+            gates=tuple(outcome_summaries),
+        )
+
+    def seal(self, *, change: str) -> SealResult:  # pragma: no cover - implemented in next task
+        raise ReceiptError(
+            "seal() is implemented in the next task",
+            code="receipt.invalid",
+        )
+
+    def verify_for_archive(self, *, change: str) -> ArchiveAuthorization:  # pragma: no cover - implemented in later task
+        raise ReceiptError(
+            "verify_for_archive() is implemented in a later task",
+            code="receipt.invalid",
+        )
+
+    # ------------------------------------------------------------------
+    # Internals
+    # ------------------------------------------------------------------
+
+
+# Side-table used only by run_gates to ferry per-gate raw bytes between
+# the executor and the publish step. Cleared on every run.
+_EVIDENCE_RAW: dict[str, bytes] = {}
+
+
+def _capture_candidate_id(repo_root: Path, change: str) -> str:
+    """Capture the candidate twice and return the typed identifier."""
+    identity = build_candidate_identity(repo_root, change=change)
+    return identity.candidate_id
+
+
+def _resolve_git_top_level(root: Path) -> Path:
+    """Return the Git top level for *root* or raise a builder error."""
+    if not isinstance(root, Path):
+        root = Path(root)
+    if not root.is_dir():
+        raise ReceiptError(
+            f"repository root is not a directory: {root}",
+            code="change.invalid",
+        )
+    try:
+        completed = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise ReceiptError(
+            f"git not available for candidate capture: {exc}",
+            code="candidate.capture-failed",
+            context={"category": "git"},
+        ) from exc
+    if completed.returncode != 0:
+        raise ReceiptError(
+            f"root is not inside a Git work tree: {completed.stderr.strip() or completed.stdout.strip()}",
+            code="candidate.capture-failed",
+            context={"category": "git"},
+        )
+    return Path(completed.stdout.strip()).resolve()
+
+
+def _resolve_confined_cwd(repo_root: Path, declared: str) -> Path:
+    """Resolve a declared cwd to an in-repository directory."""
+    candidate = (repo_root / declared).resolve()
+    try:
+        candidate.relative_to(repo_root)
+    except ValueError as exc:
+        raise ReceiptError(
+            f"declared cwd {declared!r} resolves outside the repository",
+            code="declaration.invalid",
+            context={"gate_cwd": declared},
+        ) from exc
+    if not (candidate == repo_root or candidate.is_dir()):
+        raise ReceiptError(
+            f"declared cwd {declared!r} is not a directory",
+            code="declaration.invalid",
+            context={"gate_cwd": declared},
+        )
+    return candidate
+
+
+def _path_for_evidence_path(index: int, stream: str) -> str:
+    """Build an evidence relative path that lives inside the bundle."""
+    return f"{index:04d}.{stream}"
+
+
+def _run_single_gate(
+    *,
+    change: str,
+    declaration: GateDeclaration,
+    repo_root: Path,
+    resolved_cwd: Path,
+    env_snapshot: Mapping[str, str],
+    secrets: tuple[SecretClass, ...],
+    store: ReceiptObjectStore,
+    index: int,
+) -> tuple[dict[str, Any], GateOutcomeSummary]:
+    """Execute one gate and return the persisted record and summary."""
+
+    _check_launched_in_repo(resolved_cwd, repo_root)
+
+    stdout_path = _path_for_evidence_path(index, "stdout")
+    stderr_path = _path_for_evidence_path(index, "stderr")
+
+    stdout_payload: dict[str, Any] = {
+        "path": stdout_path,
+        "bytes": 0,
+        "digest": "",
+        "complete": False,
+        "redaction_policy": POLICY_REDACTION_EXACT,
+        "replacement_count": 0,
+    }
+    stderr_payload: dict[str, Any] = {
+        "path": stderr_path,
+        "bytes": 0,
+        "digest": "",
+        "complete": False,
+        "redaction_policy": POLICY_REDACTION_EXACT,
+        "replacement_count": 0,
+    }
+
+    record: dict[str, Any] = {
+        "gate_id": declaration.gate_id,
+        "argv": list(declaration.argv),
+        "cwd": declaration.cwd,
+        "environment_policy": POLICY_INHERIT_REDACT_SECRETS,
+        "timeout_seconds": declaration.timeout_seconds,
+        "launch": "os-error",
+        "termination": "launch-error",
+        "return_code": None,
+        "stdout": stdout_payload,
+        "stderr": stderr_payload,
+        "passed": False,
+    }
+    summary = GateOutcomeSummary(
+        gate_id=declaration.gate_id,
+        launch="os-error",
+        termination="launch-error",
+        return_code=None,
+        passed=False,
+    )
+
+    redactor = BoundedRedactor(secrets=secrets)
+
+    try:
+        process = subprocess.Popen(
+            list(declaration.argv),
+            cwd=str(resolved_cwd),
+            env=dict(env_snapshot),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            bufsize=0,
+            shell=False,
+            start_new_session=True,
+        )
+    except FileNotFoundError:
+        record["launch"] = "not-found"
+        record["termination"] = "launch-error"
+        record["passed"] = False
+        return record, GateOutcomeSummary(
+            gate_id=declaration.gate_id,
+            launch="not-found",
+            termination="launch-error",
+            return_code=None,
+            passed=False,
+        )
+    except PermissionError:
+        record["launch"] = "permission-denied"
+        record["termination"] = "launch-error"
+        record["passed"] = False
+        return record, GateOutcomeSummary(
+            gate_id=declaration.gate_id,
+            launch="permission-denied",
+            termination="launch-error",
+            return_code=None,
+            passed=False,
+        )
+    except OSError:
+        record["launch"] = "os-error"
+        record["termination"] = "launch-error"
+        record["passed"] = False
+        return record, GateOutcomeSummary(
+            gate_id=declaration.gate_id,
+            launch="os-error",
+            termination="launch-error",
+            return_code=None,
+            passed=False,
+        )
+
+    record["launch"] = "ok"
+    timeout_seconds = declaration.timeout_seconds
+    timed_out = False
+    try:
+        stdout_bytes, stderr_bytes = process.communicate(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        _terminate_process_group(process)
+        try:
+            process.wait(timeout=2)
+        except subprocess.TimeoutExpired:  # pragma: no cover - defensive
+            process.kill()
+            process.wait(timeout=2)
+        timed_out = True
+        # ``communicate`` returns whatever partial bytes were captured.
+        try:
+            stdout_bytes, stderr_bytes = (
+                process.stdout.read() if process.stdout else b"",
+                process.stderr.read() if process.stderr else b"",
+            )
+        except (OSError, ValueError):
+            stdout_bytes = b""
+            stderr_bytes = b""
+        record["termination"] = "timeout"
+        record["return_code"] = None
+    else:
+        if process.returncode is not None:
+            record["termination"] = "exited"
+            record["return_code"] = int(process.returncode)
+        else:
+            record["termination"] = "exited"
+            record["return_code"] = 0
+
+    stdout_result = redactor.process([stdout_bytes])
+    stderr_result = redactor.process([stderr_bytes])
+
+    overflow = stdout_result.truncated or stderr_result.truncated
+    if overflow and not timed_out:
+        record["termination"] = "output-overflow"
+
+    stdout_payload["bytes"] = len(stdout_result.data)
+    stdout_payload["digest"] = typed_hash("ai-harness/stream/v1", stdout_result.data)
+    stdout_payload["complete"] = stdout_result.complete and not timed_out
+    stdout_payload["replacement_count"] = stdout_result.replacement_count
+
+    stderr_payload["bytes"] = len(stderr_result.data)
+    stderr_payload["digest"] = typed_hash("ai-harness/stream/v1", stderr_result.data)
+    stderr_payload["complete"] = stderr_result.complete and not timed_out
+    stderr_payload["replacement_count"] = stderr_result.replacement_count
+
+    _EVIDENCE_RAW[stdout_payload["path"]] = stdout_result.data
+    _EVIDENCE_RAW[stderr_payload["path"]] = stderr_result.data
+
+    passed = (
+        record["termination"] == "exited"
+        and record["return_code"] == 0
+        and stdout_payload["complete"]
+        and stderr_payload["complete"]
+    )
+    record["passed"] = passed
+
+    summary = GateOutcomeSummary(
+        gate_id=declaration.gate_id,
+        launch="ok",
+        termination=record["termination"],
+        return_code=record["return_code"],
+        passed=passed,
+    )
+    return record, summary
+
+
+def _check_launched_in_repo(resolved_cwd: Path, repo_root: Path) -> None:
+    """Ensure the resolved cwd is still inside the Git top level at launch."""
+
+    try:
+        completed = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=str(resolved_cwd),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise ReceiptError(
+            f"git not available during gate launch: {exc}",
+            code="candidate.capture-failed",
+            context={"category": "git"},
+        ) from exc
+    if completed.returncode != 0:
+        raise ReceiptError(
+            f"gate cwd resolved outside the work tree: {completed.stderr.strip()}",
+            code="declaration.invalid",
+            context={"gate_cwd": str(resolved_cwd)},
+        )
+    top_level = Path(completed.stdout.strip()).resolve()
+    try:
+        top_level.relative_to(repo_root)
+    except ValueError as exc:
+        raise ReceiptError(
+            f"gate cwd resolved outside the repository: {resolved_cwd}",
+            code="declaration.invalid",
+            context={"gate_cwd": str(resolved_cwd)},
+        ) from exc
+
+
+def _terminate_process_group(process: subprocess.Popen[bytes]) -> None:
+    """Best-effort termination of the spawned process group."""
+    try:
+        import signal
+
+        os.killpg(process.pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            process.terminate()
+        except OSError:
+            pass
+
