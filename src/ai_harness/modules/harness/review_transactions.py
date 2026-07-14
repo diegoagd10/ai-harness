@@ -316,6 +316,9 @@ class LensSelection:
 
     Fields are exactly the contract payload, in declaration order.
     ``required_lenses`` is a tuple of lens tokens in contractual order.
+    Construction rejects invalid schema literals, primitives, and lens
+    tuples so an instance cannot be encoded or hashed before every
+    invariant is satisfied.
     """
 
     schema_name: Literal["ai-harness.review-lens-selection"]
@@ -323,6 +326,71 @@ class LensSelection:
     policy: str
     risk_level: str
     required_lenses: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        # Schema literals — name and version are pinned by the contract.
+        if self.schema_name != REVIEW_LENS_SELECTION_SCHEMA_NAME:
+            raise ReviewContractError(
+                f"LensSelection.schema_name must be {REVIEW_LENS_SELECTION_SCHEMA_NAME!r}",
+                code=CODE_VERSION_UNSUPPORTED,
+                context={"field": "schema_name"},
+            )
+        if (
+            _is_bool(self.schema_version)
+            or not isinstance(self.schema_version, int)
+            or self.schema_version != REVIEW_SCHEMA_VERSION
+        ):
+            raise ReviewContractError(
+                "LensSelection.schema_version must be the integer literal 1",
+                code=CODE_SCHEMA_INVALID,
+                context={"field": "schema_version"},
+            )
+        # Policy and risk-level vocabulary.
+        policy = _require_strict_string(self.policy, field="policy", allow_empty=False)
+        if policy != LENS_POLICY_NAME:
+            raise ReviewContractError(
+                f"unsupported lens policy: {policy!r}",
+                code=CODE_POLICY_INVALID,
+                context={"policy": policy},
+            )
+        risk_level = _require_strict_string(self.risk_level, field="risk_level", allow_empty=False)
+        if risk_level not in ("normal", "high"):
+            raise ReviewContractError(
+                f"unsupported lens risk level: {risk_level!r}",
+                code=CODE_POLICY_INVALID,
+                context={"risk_level": risk_level},
+            )
+        # required_lenses must be a tuple of unique non-empty lens tokens
+        # whose order matches the closed selection matrix.
+        if not isinstance(self.required_lenses, tuple):
+            raise ReviewContractError(
+                "LensSelection.required_lenses must be a tuple of strings",
+                code=CODE_SCHEMA_INVALID,
+                context={"field": "required_lenses"},
+            )
+        if not self.required_lenses:
+            raise ReviewContractError(
+                "LensSelection.required_lenses must be non-empty",
+                code=CODE_POLICY_INVALID,
+                context={"field": "required_lenses"},
+            )
+        seen: set[str] = set()
+        for entry in self.required_lenses:
+            _require_strict_string(entry, field="required_lenses[]", allow_empty=False)
+            if entry in seen:
+                raise ReviewContractError(
+                    "LensSelection.required_lenses must not contain duplicates",
+                    code=CODE_POLICY_INVALID,
+                    context={"field": "required_lenses"},
+                )
+            seen.add(entry)
+        expected = NORMAL_RISK_LENSES if risk_level == "normal" else HIGH_RISK_LENSES
+        if self.required_lenses != expected:
+            raise ReviewContractError(
+                f"LensSelection.required_lenses do not match policy {policy} / risk_level {risk_level}",
+                code=CODE_POLICY_INVALID,
+                context={"policy": policy, "risk_level": risk_level},
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -333,6 +401,8 @@ class ReviewTransaction:
     whose recomputed ID must match at aggregate validation time. The
     transaction itself contains no candidate-comparison field beyond
     its initial ``candidate_id`` and the ``loc_budget`` ceiling.
+    Construction rejects invalid schema literals, change names,
+    candidate wire IDs, typed references, scope paths, and LOC budgets.
     """
 
     schema_name: Literal["ai-harness.review-transaction"]
@@ -343,6 +413,68 @@ class ReviewTransaction:
     scope_paths: tuple[str, ...]
     loc_budget: int
 
+    def __post_init__(self) -> None:
+        # Schema literals.
+        if self.schema_name != REVIEW_TRANSACTION_SCHEMA_NAME:
+            raise ReviewContractError(
+                f"ReviewTransaction.schema_name must be {REVIEW_TRANSACTION_SCHEMA_NAME!r}",
+                code=CODE_VERSION_UNSUPPORTED,
+                context={"field": "schema_name"},
+            )
+        if (
+            _is_bool(self.schema_version)
+            or not isinstance(self.schema_version, int)
+            or self.schema_version != REVIEW_SCHEMA_VERSION
+        ):
+            raise ReviewContractError(
+                "ReviewTransaction.schema_version must be the integer literal 1",
+                code=CODE_SCHEMA_INVALID,
+                context={"field": "schema_version"},
+            )
+        # Change name and candidate wire ID.
+        _require_change_name(self.change_name, field="change_name")
+        _require_candidate_id(self.candidate_id, field="candidate_id")
+        # Typed reference — only the matching ID class is acceptable.
+        _require_lens_selection_id(
+            self.lens_selection_id,
+            field="lens_selection_id",
+        )
+        # scope_paths is a tuple of concrete POSIX scope paths in
+        # ascending Unicode code-point order; the single '.' sentinel
+        # may only appear as the sole entry.
+        if not isinstance(self.scope_paths, tuple):
+            raise ReviewContractError(
+                "ReviewTransaction.scope_paths must be a tuple of strings",
+                code=CODE_SCHEMA_INVALID,
+                context={"field": "scope_paths"},
+            )
+        seen_scope: set[str] = set()
+        previous_scope: str | None = None
+        for entry in self.scope_paths:
+            _require_scope_path(entry, field="scope_paths[]")
+            if previous_scope is not None and not (previous_scope < entry):
+                raise ReviewContractError(
+                    "ReviewTransaction.scope_paths must be in ascending Unicode code-point order without duplicates",
+                    code=CODE_SCHEMA_INVALID,
+                    context={"field": "scope_paths"},
+                )
+            previous_scope = entry
+            if entry in seen_scope:
+                raise ReviewContractError(
+                    "ReviewTransaction.scope_paths must not contain duplicates",
+                    code=CODE_SCHEMA_INVALID,
+                    context={"field": "scope_paths"},
+                )
+            seen_scope.add(entry)
+        if "." in self.scope_paths and len(self.scope_paths) != 1:
+            raise ReviewContractError(
+                "ReviewTransaction.scope_paths' '.' sentinel must be the only entry",
+                code=CODE_SCHEMA_INVALID,
+                context={"field": "scope_paths"},
+            )
+        # loc_budget must be a non-bool integer in [0, 2**53 - 1].
+        _require_loc_int(self.loc_budget, field="loc_budget")
+
 
 @dataclass(frozen=True, slots=True)
 class Finding:
@@ -350,7 +482,8 @@ class Finding:
 
     ``status`` is typed to the literal ``"open"`` because every finding
     begins open; transitions are modelled by :class:`FindingTransition`
-    records.
+    records. Construction rejects wrong transaction ID kinds, unknown
+    severities, non-open initial status, and invalid path collections.
     """
 
     schema_name: Literal["ai-harness.review-finding"]
@@ -363,6 +496,73 @@ class Finding:
     paths: tuple[str, ...]
     status: Literal["open"]
 
+    def __post_init__(self) -> None:
+        # Schema literals.
+        if self.schema_name != REVIEW_FINDING_SCHEMA_NAME:
+            raise ReviewContractError(
+                f"Finding.schema_name must be {REVIEW_FINDING_SCHEMA_NAME!r}",
+                code=CODE_VERSION_UNSUPPORTED,
+                context={"field": "schema_name"},
+            )
+        if (
+            _is_bool(self.schema_version)
+            or not isinstance(self.schema_version, int)
+            or self.schema_version != REVIEW_SCHEMA_VERSION
+        ):
+            raise ReviewContractError(
+                "Finding.schema_version must be the integer literal 1",
+                code=CODE_SCHEMA_INVALID,
+                context={"field": "schema_version"},
+            )
+        # Typed reference.
+        _require_review_transaction_id(
+            self.review_transaction_id,
+            field="review_transaction_id",
+        )
+        # Lens, severity, and prose.
+        _require_strict_string(self.lens, field="lens", allow_empty=False)
+        severity = _require_strict_string(self.severity, field="severity", allow_empty=False)
+        if severity not in SEVERITIES:
+            raise ReviewContractError(
+                f"unknown severity: {severity!r}",
+                code=CODE_SCHEMA_INVALID,
+                context={"field": "severity", "value": severity},
+            )
+        _require_strict_string(self.summary, field="summary", allow_empty=False)
+        _require_strict_string(self.detail, field="detail", allow_empty=False)
+        # Paths — sorted unique tuple of concrete POSIX paths.
+        if not isinstance(self.paths, tuple):
+            raise ReviewContractError(
+                "Finding.paths must be a tuple of strings",
+                code=CODE_SCHEMA_INVALID,
+                context={"field": "paths"},
+            )
+        previous: str | None = None
+        seen_paths: set[str] = set()
+        for entry in self.paths:
+            _require_concrete_path(entry, field="paths[]")
+            if previous is not None and not (previous < entry):
+                raise ReviewContractError(
+                    "Finding.paths must be in ascending Unicode code-point order without duplicates",
+                    code=CODE_SCHEMA_INVALID,
+                    context={"field": "paths"},
+                )
+            previous = entry
+            if entry in seen_paths:
+                raise ReviewContractError(
+                    "Finding.paths must not contain duplicates",
+                    code=CODE_SCHEMA_INVALID,
+                    context={"field": "paths"},
+                )
+            seen_paths.add(entry)
+        # Initial status is always 'open'.
+        if self.status != "open":
+            raise ReviewContractError(
+                "Finding.status must be the literal 'open' at construction",
+                code=CODE_SCHEMA_INVALID,
+                context={"field": "status", "value": self.status},
+            )
+
 
 @dataclass(frozen=True, slots=True)
 class FindingTransition:
@@ -373,6 +573,8 @@ class FindingTransition:
     ``accepted`` carries ``None``. The transition references the
     :class:`Finding` whose state is being changed; severity is owned
     by the finding and validated during aggregate graph validation.
+    Construction rejects unknown statuses, cross-kind typed
+    references, and mismatched correction_fact_id nullability.
     """
 
     schema_name: Literal["ai-harness.review-finding-transition"]
@@ -382,6 +584,65 @@ class FindingTransition:
     from_status: str
     to_status: str
     correction_fact_id: CorrectionFactId | None
+
+    def __post_init__(self) -> None:
+        # Schema literals.
+        if self.schema_name != REVIEW_FINDING_TRANSITION_SCHEMA_NAME:
+            raise ReviewContractError(
+                f"FindingTransition.schema_name must be {REVIEW_FINDING_TRANSITION_SCHEMA_NAME!r}",
+                code=CODE_VERSION_UNSUPPORTED,
+                context={"field": "schema_name"},
+            )
+        if (
+            _is_bool(self.schema_version)
+            or not isinstance(self.schema_version, int)
+            or self.schema_version != REVIEW_SCHEMA_VERSION
+        ):
+            raise ReviewContractError(
+                "FindingTransition.schema_version must be the integer literal 1",
+                code=CODE_SCHEMA_INVALID,
+                context={"field": "schema_version"},
+            )
+        # Typed references.
+        _require_review_transaction_id(
+            self.review_transaction_id,
+            field="review_transaction_id",
+        )
+        _require_finding_id(self.finding_id, field="finding_id")
+        # Status vocabulary.
+        from_status = _require_strict_string(self.from_status, field="from_status", allow_empty=False)
+        if from_status not in FINDING_STATUSES:
+            raise ReviewContractError(
+                f"unknown from_status: {from_status!r}",
+                code=CODE_SCHEMA_INVALID,
+                context={"field": "from_status", "value": from_status},
+            )
+        to_status = _require_strict_string(self.to_status, field="to_status", allow_empty=False)
+        if to_status not in FINDING_STATUSES:
+            raise ReviewContractError(
+                f"unknown to_status: {to_status!r}",
+                code=CODE_SCHEMA_INVALID,
+                context={"field": "to_status", "value": to_status},
+            )
+        # correction_fact_id nullability: only 'accepted' accepts None.
+        if self.correction_fact_id is None:
+            if to_status != "accepted":
+                raise ReviewContractError(
+                    "FindingTransition.correction_fact_id may be null only for transitions to 'accepted'",
+                    code=CODE_TRANSITION_INVALID,
+                    context={"field": "correction_fact_id", "to_status": to_status},
+                )
+        else:
+            _require_correction_fact_id(
+                self.correction_fact_id,
+                field="correction_fact_id",
+            )
+            if to_status != "resolved":
+                raise ReviewContractError(
+                    "FindingTransition.correction_fact_id is only allowed for transitions to 'resolved'",
+                    code=CODE_TRANSITION_INVALID,
+                    context={"field": "correction_fact_id", "to_status": to_status},
+                )
 
 
 @dataclass(frozen=True, slots=True)
@@ -393,7 +654,12 @@ class CorrectionFact:
     findings; ``resolved_finding_ids`` is a sorted tuple of typed
     finding IDs. ``loc_actual`` must equal ``loc_added + loc_deleted``
     and must not exceed the transaction budget; both rules are checked
-    during aggregate validation.
+    during aggregate validation. Construction rejects invalid schema
+    literals, cross-kind typed references, non-canonical candidate
+    wire IDs, equal before/after candidates, unsorted or duplicate
+    resolved finding IDs, invalid changed-path collections, and any
+    LOC value that is non-integer, out-of-bounds, or breaks the
+    arithmetic invariant.
     """
 
     schema_name: Literal["ai-harness.review-correction-fact"]
@@ -406,6 +672,113 @@ class CorrectionFact:
     loc_added: int
     loc_deleted: int
     loc_actual: int
+
+    def __post_init__(self) -> None:
+        # Schema literals.
+        if self.schema_name != REVIEW_CORRECTION_FACT_SCHEMA_NAME:
+            raise ReviewContractError(
+                f"CorrectionFact.schema_name must be {REVIEW_CORRECTION_FACT_SCHEMA_NAME!r}",
+                code=CODE_VERSION_UNSUPPORTED,
+                context={"field": "schema_name"},
+            )
+        if (
+            _is_bool(self.schema_version)
+            or not isinstance(self.schema_version, int)
+            or self.schema_version != REVIEW_SCHEMA_VERSION
+        ):
+            raise ReviewContractError(
+                "CorrectionFact.schema_version must be the integer literal 1",
+                code=CODE_SCHEMA_INVALID,
+                context={"field": "schema_version"},
+            )
+        # Typed reference.
+        _require_review_transaction_id(
+            self.review_transaction_id,
+            field="review_transaction_id",
+        )
+        # resolved_finding_ids — tuple of typed IDs in ascending order,
+        # unique, non-empty.
+        if not isinstance(self.resolved_finding_ids, tuple):
+            raise ReviewContractError(
+                "CorrectionFact.resolved_finding_ids must be a tuple of FindingId",
+                code=CODE_SCHEMA_INVALID,
+                context={"field": "resolved_finding_ids"},
+            )
+        if not self.resolved_finding_ids:
+            raise ReviewContractError(
+                "CorrectionFact.resolved_finding_ids must list at least one finding",
+                code=CODE_CORRECTION_INVALID,
+                context={"field": "resolved_finding_ids"},
+            )
+        previous_value: str | None = None
+        seen_ids: set[str] = set()
+        for entry in self.resolved_finding_ids:
+            _require_finding_id(entry, field="resolved_finding_ids[]")
+            if previous_value is not None and not (previous_value < entry.value):
+                raise ReviewContractError(
+                    "CorrectionFact.resolved_finding_ids must be in ascending order without duplicates",
+                    code=CODE_SCHEMA_INVALID,
+                    context={"field": "resolved_finding_ids"},
+                )
+            previous_value = entry.value
+            if entry.value in seen_ids:
+                raise ReviewContractError(
+                    "CorrectionFact.resolved_finding_ids must not contain duplicates",
+                    code=CODE_SCHEMA_INVALID,
+                    context={"field": "resolved_finding_ids"},
+                )
+            seen_ids.add(entry.value)
+        # Candidate wire IDs — distinct canonical sha256 strings.
+        _require_candidate_id(self.candidate_before, field="candidate_before")
+        _require_candidate_id(self.candidate_after, field="candidate_after")
+        if self.candidate_after == self.candidate_before:
+            raise ReviewContractError(
+                "CorrectionFact.candidate_after must differ from candidate_before",
+                code=CODE_CORRECTION_INVALID,
+                context={"field": "candidate_after"},
+            )
+        # changed_paths — tuple of concrete POSIX paths in ascending
+        # Unicode code-point order with no duplicates.
+        if not isinstance(self.changed_paths, tuple):
+            raise ReviewContractError(
+                "CorrectionFact.changed_paths must be a tuple of strings",
+                code=CODE_SCHEMA_INVALID,
+                context={"field": "changed_paths"},
+            )
+        previous_path: str | None = None
+        seen_paths: set[str] = set()
+        for entry in self.changed_paths:
+            _require_concrete_path(entry, field="changed_paths[]")
+            if previous_path is not None and not (previous_path < entry):
+                raise ReviewContractError(
+                    "CorrectionFact.changed_paths must be in ascending Unicode code-point order without duplicates",
+                    code=CODE_SCHEMA_INVALID,
+                    context={"field": "changed_paths"},
+                )
+            previous_path = entry
+            if entry in seen_paths:
+                raise ReviewContractError(
+                    "CorrectionFact.changed_paths must not contain duplicates",
+                    code=CODE_SCHEMA_INVALID,
+                    context={"field": "changed_paths"},
+                )
+            seen_paths.add(entry)
+        # LOC arithmetic — every LOC field is a non-bool non-negative
+        # bounded integer and loc_actual equals loc_added + loc_deleted.
+        loc_added = _require_loc_int(self.loc_added, field="loc_added")
+        loc_deleted = _require_loc_int(self.loc_deleted, field="loc_deleted")
+        loc_actual = _require_loc_int(self.loc_actual, field="loc_actual")
+        if loc_actual != loc_added + loc_deleted:
+            raise ReviewContractError(
+                "CorrectionFact.loc_actual must equal loc_added + loc_deleted",
+                code=CODE_CORRECTION_INVALID,
+                context={
+                    "field": "loc_actual",
+                    "loc_added": str(loc_added),
+                    "loc_deleted": str(loc_deleted),
+                    "loc_actual": str(loc_actual),
+                },
+            )
 
 
 RecordT = TypeVar(

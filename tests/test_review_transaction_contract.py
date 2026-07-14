@@ -1229,12 +1229,14 @@ def test_omitted_resolution_attribution_fails() -> None:
     contract, selection, transaction, tx_id = _build_finding_fixture()
     finding = _make_finding(contract, tx_id, severity="warning")
     finding_id = contract.id_for(finding)
-    # No findings listed in the correction; we'll supply a transition.
+    # The correction lists an unrelated finding id so the bijection check
+    # fails to attribute the supplied transition.
+    unrelated_finding_id = FindingId("sha256:" + ("d" * 64))
     correction = CorrectionFact(
         schema_name=REVIEW_CORRECTION_FACT_SCHEMA_NAME,  # type: ignore[arg-type]
         schema_version=1,  # type: ignore[arg-type]
         review_transaction_id=tx_id,
-        resolved_finding_ids=(),
+        resolved_finding_ids=(unrelated_finding_id,),
         candidate_before=transaction.candidate_id,
         candidate_after="sha256:" + ("d" * 64),
         changed_paths=("src/a.py",),
@@ -1585,7 +1587,7 @@ def test_empty_scope_rejects_non_empty_changed_paths() -> None:
         schema_name=REVIEW_CORRECTION_FACT_SCHEMA_NAME,  # type: ignore[arg-type]
         schema_version=1,  # type: ignore[arg-type]
         review_transaction_id=tx_id,
-        resolved_finding_ids=(),
+        resolved_finding_ids=(FindingId("sha256:" + ("d" * 64)),),
         candidate_before=transaction.candidate_id,
         candidate_after="sha256:" + ("d" * 64),
         changed_paths=("src/a.py",),
@@ -1665,7 +1667,7 @@ def test_loc_exceeds_budget_at_validation() -> None:
         schema_name=REVIEW_CORRECTION_FACT_SCHEMA_NAME,  # type: ignore[arg-type]
         schema_version=1,  # type: ignore[arg-type]
         review_transaction_id=tx_id,
-        resolved_finding_ids=(),
+        resolved_finding_ids=(FindingId("sha256:" + ("d" * 64)),),
         candidate_before=transaction.candidate_id,
         candidate_after="sha256:" + ("d" * 64),
         changed_paths=("src/a.py",),
@@ -1771,7 +1773,7 @@ def test_zero_paths_with_positive_actual_loc_fails() -> None:
         schema_name=REVIEW_CORRECTION_FACT_SCHEMA_NAME,  # type: ignore[arg-type]
         schema_version=1,  # type: ignore[arg-type]
         review_transaction_id=tx_id,
-        resolved_finding_ids=(),
+        resolved_finding_ids=(FindingId("sha256:" + ("d" * 64)),),
         candidate_before=transaction.candidate_id,
         candidate_after="sha256:" + ("d" * 64),
         changed_paths=(),
@@ -1807,7 +1809,7 @@ def test_zero_budget_with_nonzero_loc_fails() -> None:
         schema_name=REVIEW_CORRECTION_FACT_SCHEMA_NAME,  # type: ignore[arg-type]
         schema_version=1,  # type: ignore[arg-type]
         review_transaction_id=tx_id,
-        resolved_finding_ids=(),
+        resolved_finding_ids=(FindingId("sha256:" + ("d" * 64)),),
         candidate_before=transaction.candidate_id,
         candidate_after="sha256:" + ("d" * 64),
         changed_paths=("src/a.py",),
@@ -2009,29 +2011,23 @@ def test_no_correction_no_resolved_findings_is_valid() -> None:
 
 
 def test_malformed_candidate_after_at_validation_fails() -> None:
-    """A non-canonical candidate_after fails validation (canonical id check)."""
+    """A non-canonical candidate_after fails at construction (canonical id check)."""
 
     contract, selection, transaction, tx_id = _build_finding_fixture()
     finding = _make_finding(contract, tx_id, severity="warning")
     finding_id = contract.id_for(finding)
-    correction = CorrectionFact(
-        schema_name=REVIEW_CORRECTION_FACT_SCHEMA_NAME,  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        review_transaction_id=tx_id,
-        resolved_finding_ids=(finding_id,),
-        candidate_before=transaction.candidate_id,
-        candidate_after="not-a-canonical-id",
-        changed_paths=("src/a.py",),
-        loc_added=1,
-        loc_deleted=0,
-        loc_actual=1,
-    )
     with pytest.raises(ReviewContractError) as exc:
-        contract.validate_transaction(
-            transaction,
-            lens_selection=selection,
-            findings=(finding,),
-            correction_fact=correction,
+        CorrectionFact(
+            schema_name=REVIEW_CORRECTION_FACT_SCHEMA_NAME,  # type: ignore[arg-type]
+            schema_version=1,  # type: ignore[arg-type]
+            review_transaction_id=tx_id,
+            resolved_finding_ids=(finding_id,),
+            candidate_before=transaction.candidate_id,
+            candidate_after="not-a-canonical-id",
+            changed_paths=("src/a.py",),
+            loc_added=1,
+            loc_deleted=0,
+            loc_actual=1,
         )
     assert exc.value.code in {CODE_CORRECTION_INVALID, CODE_ID_INVALID}
 
@@ -2052,6 +2048,19 @@ def test_every_non_open_source_state_is_rejected(from_status: str, to_status: st
     contract, selection, transaction, tx_id = _build_finding_fixture()
     finding = _make_finding(contract, tx_id, severity="warning")
     finding_id = contract.id_for(finding)
+    if (from_status, to_status) == ("open", "open"):
+        # Construction itself rejects the non-terminal destination.
+        with pytest.raises(ReviewContractError) as exc:
+            _make_transition(
+                contract,
+                tx_id,
+                finding_id,
+                from_status=from_status,
+                to_status=to_status,
+                correction_fact_id=(CorrectionFactId("sha256:" + ("f" * 64)) if to_status == "resolved" else None),
+            )
+        assert exc.value.code == CODE_TRANSITION_INVALID
+        return
     transition = _make_transition(
         contract,
         tx_id,
@@ -2184,47 +2193,35 @@ def test_terminal_replay_rejection_for_accepted() -> None:
 
 
 def test_correction_nullability_for_resolved_with_null_fails() -> None:
-    """Resolving with a null correction reference is rejected."""
+    """Resolving with a null correction reference is rejected at construction."""
 
     contract, selection, transaction, tx_id = _build_finding_fixture()
     finding = _make_finding(contract, tx_id, severity="warning")
     finding_id = contract.id_for(finding)
-    transition = _make_transition(
-        contract,
-        tx_id,
-        finding_id,
-        to_status="resolved",
-        correction_fact_id=None,
-    )
     with pytest.raises(ReviewContractError) as exc:
-        contract.validate_transaction(
-            transaction,
-            lens_selection=selection,
-            findings=(finding,),
-            transitions=(transition,),
+        _make_transition(
+            contract,
+            tx_id,
+            finding_id,
+            to_status="resolved",
+            correction_fact_id=None,
         )
     assert exc.value.code == CODE_TRANSITION_INVALID
 
 
 def test_correction_nullability_for_accepted_with_id_fails() -> None:
-    """Accepting with a non-null correction reference is rejected."""
+    """Accepting with a non-null correction reference is rejected at construction."""
 
     contract, selection, transaction, tx_id = _build_finding_fixture()
     finding = _make_finding(contract, tx_id, severity="warning")
     finding_id = contract.id_for(finding)
-    transition = _make_transition(
-        contract,
-        tx_id,
-        finding_id,
-        to_status="accepted",
-        correction_fact_id=CorrectionFactId("sha256:" + ("a" * 64)),
-    )
     with pytest.raises(ReviewContractError) as exc:
-        contract.validate_transaction(
-            transaction,
-            lens_selection=selection,
-            findings=(finding,),
-            transitions=(transition,),
+        _make_transition(
+            contract,
+            tx_id,
+            finding_id,
+            to_status="accepted",
+            correction_fact_id=CorrectionFactId("sha256:" + ("a" * 64)),
         )
     assert exc.value.code == CODE_TRANSITION_INVALID
 
@@ -2323,26 +2320,20 @@ def test_finding_transition_from_illegal_source_state_fails() -> None:
 
 
 def test_finding_transition_with_unknown_to_status_fails() -> None:
-    """An unrecognized to_status fails the state machine."""
+    """An unrecognized to_status fails at construction."""
 
     contract, selection, transaction, tx_id = _build_finding_fixture()
     finding = _make_finding(contract, tx_id, severity="warning")
     finding_id = contract.id_for(finding)
-    transition = FindingTransition(
-        schema_name=REVIEW_FINDING_TRANSITION_SCHEMA_NAME,  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        review_transaction_id=tx_id,
-        finding_id=finding_id,
-        from_status="open",
-        to_status="Rogue",  # not a closed status
-        correction_fact_id=None,
-    )
     with pytest.raises(ReviewContractError) as exc:
-        contract.validate_transaction(
-            transaction,
-            lens_selection=selection,
-            findings=(finding,),
-            transitions=(transition,),
+        FindingTransition(
+            schema_name=REVIEW_FINDING_TRANSITION_SCHEMA_NAME,  # type: ignore[arg-type]
+            schema_version=1,  # type: ignore[arg-type]
+            review_transaction_id=tx_id,
+            finding_id=finding_id,
+            from_status="open",
+            to_status="Rogue",  # not a closed status
+            correction_fact_id=None,
         )
     assert exc.value.code in {CODE_TRANSITION_INVALID, CODE_SCHEMA_INVALID}
 
@@ -3287,29 +3278,23 @@ def test_correction_with_mismatched_before_candidate_fails() -> None:
 
 
 def test_correction_with_equal_candidates_fails() -> None:
-    """Before and after candidates must differ."""
+    """Before and after candidates must differ (rejected at construction)."""
 
     contract, selection, transaction, tx_id = _build_finding_fixture()
     finding = _make_finding(contract, tx_id, severity="warning")
     finding_id = contract.id_for(finding)
-    same_after = CorrectionFact(
-        schema_name=REVIEW_CORRECTION_FACT_SCHEMA_NAME,  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        review_transaction_id=tx_id,
-        resolved_finding_ids=(finding_id,),
-        candidate_before=transaction.candidate_id,
-        candidate_after=transaction.candidate_id,
-        changed_paths=("src/a.py",),
-        loc_added=1,
-        loc_deleted=1,
-        loc_actual=2,
-    )
     with pytest.raises(ReviewContractError) as exc:
-        contract.validate_transaction(
-            transaction,
-            lens_selection=selection,
-            findings=(finding,),
-            correction_fact=same_after,
+        CorrectionFact(
+            schema_name=REVIEW_CORRECTION_FACT_SCHEMA_NAME,  # type: ignore[arg-type]
+            schema_version=1,  # type: ignore[arg-type]
+            review_transaction_id=tx_id,
+            resolved_finding_ids=(finding_id,),
+            candidate_before=transaction.candidate_id,
+            candidate_after=transaction.candidate_id,
+            changed_paths=("src/a.py",),
+            loc_added=1,
+            loc_deleted=1,
+            loc_actual=2,
         )
     assert exc.value.code == CODE_CORRECTION_INVALID
 
@@ -3399,7 +3384,7 @@ def test_correction_with_omitted_resolution_fails() -> None:
         schema_name=REVIEW_CORRECTION_FACT_SCHEMA_NAME,  # type: ignore[arg-type]
         schema_version=1,  # type: ignore[arg-type]
         review_transaction_id=tx_id,
-        resolved_finding_ids=(),  # omitted!
+        resolved_finding_ids=(finding_id,),
         candidate_before=transaction.candidate_id,
         candidate_after="sha256:" + ("d" * 64),
         changed_paths=("src/a.py",),
@@ -3407,6 +3392,9 @@ def test_correction_with_omitted_resolution_fails() -> None:
         loc_deleted=1,
         loc_actual=2,
     )
+    # Transition's correction_fact_id does not match the correction's id,
+    # so the bijection between resolved findings and the supplied
+    # correction fact is broken even though the finding is listed.
     transition = _make_transition(
         contract,
         tx_id,
@@ -3685,7 +3673,7 @@ def test_empty_scope_rejects_nonempty_changed_paths() -> None:
         schema_name=REVIEW_CORRECTION_FACT_SCHEMA_NAME,  # type: ignore[arg-type]
         schema_version=1,  # type: ignore[arg-type]
         review_transaction_id=tx_id,
-        resolved_finding_ids=(),
+        resolved_finding_ids=(FindingId("sha256:" + ("d" * 64)),),
         candidate_before=transaction.candidate_id,
         candidate_after="sha256:" + ("d" * 64),
         changed_paths=("src/a.py",),  # non-empty paths but empty scope
@@ -3749,28 +3737,21 @@ def test_no_resolution_needs_no_correction() -> None:
 
 
 def test_correction_with_null_but_resolved_finding_fails() -> None:
-    """`resolved_finding_ids` empty fails (correction resolves nothing)."""
+    """`resolved_finding_ids` empty is rejected at construction."""
 
     contract, selection, transaction, tx_id = _build_finding_fixture()
-    finding = _make_finding(contract, tx_id, severity="warning")
-    correction = CorrectionFact(
-        schema_name=REVIEW_CORRECTION_FACT_SCHEMA_NAME,  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        review_transaction_id=tx_id,
-        resolved_finding_ids=(),
-        candidate_before=transaction.candidate_id,
-        candidate_after="sha256:" + ("d" * 64),
-        changed_paths=("src/a.py",),
-        loc_added=1,
-        loc_deleted=0,
-        loc_actual=1,
-    )
     with pytest.raises(ReviewContractError) as exc:
-        contract.validate_transaction(
-            transaction,
-            lens_selection=selection,
-            findings=(finding,),
-            correction_fact=correction,
+        CorrectionFact(
+            schema_name=REVIEW_CORRECTION_FACT_SCHEMA_NAME,  # type: ignore[arg-type]
+            schema_version=1,  # type: ignore[arg-type]
+            review_transaction_id=tx_id,
+            resolved_finding_ids=(),
+            candidate_before=transaction.candidate_id,
+            candidate_after="sha256:" + ("d" * 64),
+            changed_paths=("src/a.py",),
+            loc_added=1,
+            loc_deleted=0,
+            loc_actual=1,
         )
     assert exc.value.code == CODE_CORRECTION_INVALID
 
@@ -3852,25 +3833,20 @@ def test_correction_with_sorted_resolved_ids_is_accepted() -> None:
 
 
 def test_finding_with_unknown_severity_is_rejected() -> None:
-    """A severity outside the closed vocabulary is rejected at validation."""
+    """A severity outside the closed vocabulary is rejected at construction."""
 
     contract, selection, transaction, tx_id = _build_finding_fixture()
-    bad_finding = Finding(
-        schema_name=REVIEW_FINDING_SCHEMA_NAME,  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        review_transaction_id=tx_id,
-        lens="correctness",
-        severity="fatal",  # invalid
-        summary="s",
-        detail="d",
-        paths=(),
-        status="open",  # type: ignore[arg-type]
-    )
     with pytest.raises(ReviewContractError) as exc:
-        contract.validate_transaction(
-            transaction,
-            lens_selection=selection,
-            findings=(bad_finding,),
+        Finding(
+            schema_name=REVIEW_FINDING_SCHEMA_NAME,  # type: ignore[arg-type]
+            schema_version=1,  # type: ignore[arg-type]
+            review_transaction_id=tx_id,
+            lens="correctness",
+            severity="fatal",  # invalid
+            summary="s",
+            detail="d",
+            paths=(),
+            status="open",  # type: ignore[arg-type]
         )
     assert exc.value.code in {CODE_SCHEMA_INVALID, CODE_ID_INVALID}
 
@@ -4028,25 +4004,19 @@ def test_critical_finding_cannot_be_accepted() -> None:
 
 
 def test_self_transition_is_rejected() -> None:
-    """Source equals destination is rejected."""
+    """Source equals destination is rejected at construction (non-terminal destination)."""
 
     contract, selection, transaction, tx_id = _build_finding_fixture()
     finding = _make_finding(contract, tx_id, severity="warning")
     finding_id = contract.id_for(finding)
-    transition = _make_transition(
-        contract,
-        tx_id,
-        finding_id,
-        from_status="open",
-        to_status="open",
-        correction_fact_id=None,
-    )
     with pytest.raises(ReviewContractError) as exc:
-        contract.validate_transaction(
-            transaction,
-            lens_selection=selection,
-            findings=(finding,),
-            transitions=(transition,),
+        _make_transition(
+            contract,
+            tx_id,
+            finding_id,
+            from_status="open",
+            to_status="open",
+            correction_fact_id=None,
         )
     assert exc.value.code == CODE_TRANSITION_INVALID
 
@@ -4088,19 +4058,13 @@ def test_resolved_transition_requires_correction_id() -> None:
     contract, selection, transaction, tx_id = _build_finding_fixture()
     finding = _make_finding(contract, tx_id, severity="warning")
     finding_id = contract.id_for(finding)
-    transition = _make_transition(
-        contract,
-        tx_id,
-        finding_id,
-        to_status="resolved",
-        correction_fact_id=None,  # resolved must carry a correction
-    )
     with pytest.raises(ReviewContractError) as exc:
-        contract.validate_transaction(
-            transaction,
-            lens_selection=selection,
-            findings=(finding,),
-            transitions=(transition,),
+        _make_transition(
+            contract,
+            tx_id,
+            finding_id,
+            to_status="resolved",
+            correction_fact_id=None,  # resolved must carry a correction
         )
     assert exc.value.code == CODE_TRANSITION_INVALID
 
@@ -4111,19 +4075,13 @@ def test_accepted_transition_must_not_carry_correction_id() -> None:
     contract, selection, transaction, tx_id = _build_finding_fixture()
     finding = _make_finding(contract, tx_id, severity="warning")
     finding_id = contract.id_for(finding)
-    transition = _make_transition(
-        contract,
-        tx_id,
-        finding_id,
-        to_status="accepted",
-        correction_fact_id=CorrectionFactId("sha256:" + ("a" * 64)),  # accepted must be null
-    )
     with pytest.raises(ReviewContractError) as exc:
-        contract.validate_transaction(
-            transaction,
-            lens_selection=selection,
-            findings=(finding,),
-            transitions=(transition,),
+        _make_transition(
+            contract,
+            tx_id,
+            finding_id,
+            to_status="accepted",
+            correction_fact_id=CorrectionFactId("sha256:" + ("a" * 64)),  # accepted must be null
         )
     assert exc.value.code == CODE_TRANSITION_INVALID
 
@@ -4316,3 +4274,474 @@ def test_whole_repository_scope_accepts_any_concrete_path() -> None:
         lens_selection=selection,
         findings=(finding,),
     )
+
+
+# ---------------------------------------------------------------------------
+# Constructor-local invariants (validation fixup task 11)
+# ---------------------------------------------------------------------------
+
+
+def test_lens_selection_constructor_rejects_wrong_schema_name() -> None:
+    """A wrong schema_name literal is rejected at construction."""
+
+    with pytest.raises(ReviewContractError) as exc:
+        LensSelection(
+            schema_name="rogue",  # type: ignore[arg-type]
+            schema_version=1,
+            policy=LENS_POLICY_NAME,
+            risk_level="normal",
+            required_lenses=NORMAL_RISK_LENSES,
+        )
+    assert exc.value.code == CODE_VERSION_UNSUPPORTED
+
+
+def test_lens_selection_constructor_rejects_boolean_schema_version() -> None:
+    """`schema_version=True` is not the integer literal 1."""
+
+    with pytest.raises(ReviewContractError) as exc:
+        LensSelection(
+            schema_name=REVIEW_LENS_SELECTION_SCHEMA_NAME,  # type: ignore[arg-type]
+            schema_version=True,  # type: ignore[arg-type]
+            policy=LENS_POLICY_NAME,
+            risk_level="normal",
+            required_lenses=NORMAL_RISK_LENSES,
+        )
+    assert exc.value.code == CODE_SCHEMA_INVALID
+
+
+def test_lens_selection_constructor_rejects_unknown_policy() -> None:
+    """An unknown policy token is rejected at construction."""
+
+    with pytest.raises(ReviewContractError) as exc:
+        LensSelection(
+            schema_name=REVIEW_LENS_SELECTION_SCHEMA_NAME,  # type: ignore[arg-type]
+            schema_version=1,  # type: ignore[arg-type]
+            policy="rogue-policy",
+            risk_level="normal",
+            required_lenses=NORMAL_RISK_LENSES,
+        )
+    assert exc.value.code == CODE_POLICY_INVALID
+
+
+def test_lens_selection_constructor_rejects_unknown_risk_level() -> None:
+    """An unknown risk_level is rejected at construction."""
+
+    with pytest.raises(ReviewContractError) as exc:
+        LensSelection(
+            schema_name=REVIEW_LENS_SELECTION_SCHEMA_NAME,  # type: ignore[arg-type]
+            schema_version=1,  # type: ignore[arg-type]
+            policy=LENS_POLICY_NAME,
+            risk_level="extreme",
+            required_lenses=NORMAL_RISK_LENSES,
+        )
+    assert exc.value.code == CODE_POLICY_INVALID
+
+
+def test_lens_selection_constructor_rejects_forged_required_lenses() -> None:
+    """A forged required_lenses tuple is rejected at construction."""
+
+    with pytest.raises(ReviewContractError) as exc:
+        LensSelection(
+            schema_name=REVIEW_LENS_SELECTION_SCHEMA_NAME,  # type: ignore[arg-type]
+            schema_version=1,  # type: ignore[arg-type]
+            policy=LENS_POLICY_NAME,
+            risk_level="normal",
+            required_lenses=("correctness", "rogue"),
+        )
+    assert exc.value.code == CODE_POLICY_INVALID
+
+
+def test_lens_selection_constructor_rejects_non_tuple_required_lenses() -> None:
+    """A list (mutable) is rejected in place of the tuple contract."""
+
+    with pytest.raises(ReviewContractError) as exc:
+        LensSelection(
+            schema_name=REVIEW_LENS_SELECTION_SCHEMA_NAME,  # type: ignore[arg-type]
+            schema_version=1,  # type: ignore[arg-type]
+            policy=LENS_POLICY_NAME,
+            risk_level="normal",
+            required_lenses=list(NORMAL_RISK_LENSES),
+        )
+    assert exc.value.code == CODE_SCHEMA_INVALID
+
+
+def test_review_transaction_constructor_rejects_invalid_change_name() -> None:
+    """A change_name containing '/' or '\\' is rejected at construction."""
+
+    contract = ReviewContractV1()
+    selection = contract.select_lenses(policy=LENS_POLICY_NAME, risk_level="normal")
+    with pytest.raises(ReviewContractError) as exc:
+        ReviewTransaction(
+            schema_name=REVIEW_TRANSACTION_SCHEMA_NAME,  # type: ignore[arg-type]
+            schema_version=1,  # type: ignore[arg-type]
+            change_name="bad/name",
+            candidate_id=CANDIDATE_ID,
+            lens_selection_id=contract.id_for(selection),
+            scope_paths=("src",),
+            loc_budget=10,
+        )
+    assert exc.value.code == CODE_SCHEMA_INVALID
+
+
+def test_review_transaction_constructor_rejects_malformed_candidate_id() -> None:
+    """A non-canonical candidate_id is rejected at construction."""
+
+    contract = ReviewContractV1()
+    selection = contract.select_lenses(policy=LENS_POLICY_NAME, risk_level="normal")
+    with pytest.raises(ReviewContractError) as exc:
+        ReviewTransaction(
+            schema_name=REVIEW_TRANSACTION_SCHEMA_NAME,  # type: ignore[arg-type]
+            schema_version=1,  # type: ignore[arg-type]
+            change_name=CHANGE_NAME,
+            candidate_id="not-a-canonical-id",
+            lens_selection_id=contract.id_for(selection),
+            scope_paths=("src",),
+            loc_budget=10,
+        )
+    assert exc.value.code == CODE_ID_INVALID
+
+
+def test_review_transaction_constructor_rejects_wrong_typed_lens_selection_id() -> None:
+    """A typed ID of the wrong class is rejected at construction."""
+
+    contract = ReviewContractV1()
+    selection = contract.select_lenses(policy=LENS_POLICY_NAME, risk_level="normal")
+    wrong_kind = ReviewTransactionId(contract.id_for(selection).value)
+    with pytest.raises(ReviewContractError) as exc:
+        ReviewTransaction(
+            schema_name=REVIEW_TRANSACTION_SCHEMA_NAME,  # type: ignore[arg-type]
+            schema_version=1,  # type: ignore[arg-type]
+            change_name=CHANGE_NAME,
+            candidate_id=CANDIDATE_ID,
+            lens_selection_id=wrong_kind,
+            scope_paths=("src",),
+            loc_budget=10,
+        )
+    assert exc.value.code == CODE_ID_INVALID
+
+
+def test_review_transaction_constructor_rejects_unsorted_scope_paths() -> None:
+    """Unsorted scope_paths are rejected at construction."""
+
+    contract = ReviewContractV1()
+    selection = contract.select_lenses(policy=LENS_POLICY_NAME, risk_level="normal")
+    with pytest.raises(ReviewContractError) as exc:
+        ReviewTransaction(
+            schema_name=REVIEW_TRANSACTION_SCHEMA_NAME,  # type: ignore[arg-type]
+            schema_version=1,  # type: ignore[arg-type]
+            change_name=CHANGE_NAME,
+            candidate_id=CANDIDATE_ID,
+            lens_selection_id=contract.id_for(selection),
+            scope_paths=("src", "aaa"),
+            loc_budget=10,
+        )
+    assert exc.value.code == CODE_SCHEMA_INVALID
+
+
+def test_review_transaction_constructor_rejects_dot_sentinel_with_other_paths() -> None:
+    """The '.' sentinel must be the sole entry in scope_paths."""
+
+    contract = ReviewContractV1()
+    selection = contract.select_lenses(policy=LENS_POLICY_NAME, risk_level="normal")
+    with pytest.raises(ReviewContractError) as exc:
+        ReviewTransaction(
+            schema_name=REVIEW_TRANSACTION_SCHEMA_NAME,  # type: ignore[arg-type]
+            schema_version=1,  # type: ignore[arg-type]
+            change_name=CHANGE_NAME,
+            candidate_id=CANDIDATE_ID,
+            lens_selection_id=contract.id_for(selection),
+            scope_paths=(".", "src"),
+            loc_budget=10,
+        )
+    assert exc.value.code == CODE_SCHEMA_INVALID
+
+
+def test_review_transaction_constructor_rejects_boolean_loc_budget() -> None:
+    """`loc_budget=True` is not an integer and is rejected."""
+
+    contract = ReviewContractV1()
+    selection = contract.select_lenses(policy=LENS_POLICY_NAME, risk_level="normal")
+    with pytest.raises(ReviewContractError) as exc:
+        ReviewTransaction(
+            schema_name=REVIEW_TRANSACTION_SCHEMA_NAME,  # type: ignore[arg-type]
+            schema_version=1,  # type: ignore[arg-type]
+            change_name=CHANGE_NAME,
+            candidate_id=CANDIDATE_ID,
+            lens_selection_id=contract.id_for(selection),
+            scope_paths=("src",),
+            loc_budget=True,  # type: ignore[arg-type]
+        )
+    assert exc.value.code == CODE_SCHEMA_INVALID
+
+
+def test_finding_constructor_rejects_wrong_transaction_id_kind() -> None:
+    """A Finding whose transaction_id is the wrong ID class is rejected."""
+
+    wrong_kind = LensSelectionId("sha256:" + ("a" * 64))
+    with pytest.raises(ReviewContractError) as exc:
+        Finding(
+            schema_name=REVIEW_FINDING_SCHEMA_NAME,  # type: ignore[arg-type]
+            schema_version=1,  # type: ignore[arg-type]
+            review_transaction_id=wrong_kind,
+            lens="correctness",
+            severity="warning",
+            summary="s",
+            detail="d",
+            paths=(),
+            status="open",  # type: ignore[arg-type]
+        )
+    assert exc.value.code == CODE_ID_INVALID
+
+
+def test_finding_constructor_rejects_unknown_severity() -> None:
+    """A severity outside the closed vocabulary is rejected."""
+
+    with pytest.raises(ReviewContractError) as exc:
+        Finding(
+            schema_name=REVIEW_FINDING_SCHEMA_NAME,  # type: ignore[arg-type]
+            schema_version=1,  # type: ignore[arg-type]
+            review_transaction_id=ReviewTransactionId("sha256:" + ("a" * 64)),
+            lens="correctness",
+            severity="fatal",
+            summary="s",
+            detail="d",
+            paths=(),
+            status="open",  # type: ignore[arg-type]
+        )
+    assert exc.value.code == CODE_SCHEMA_INVALID
+
+
+def test_finding_constructor_rejects_non_open_initial_status() -> None:
+    """A Finding whose initial status is not 'open' is rejected."""
+
+    with pytest.raises(ReviewContractError) as exc:
+        Finding(
+            schema_name=REVIEW_FINDING_SCHEMA_NAME,  # type: ignore[arg-type]
+            schema_version=1,  # type: ignore[arg-type]
+            review_transaction_id=ReviewTransactionId("sha256:" + ("a" * 64)),
+            lens="correctness",
+            severity="warning",
+            summary="s",
+            detail="d",
+            paths=(),
+            status="resolved",  # type: ignore[arg-type]
+        )
+    assert exc.value.code == CODE_SCHEMA_INVALID
+
+
+def test_finding_constructor_rejects_invalid_concrete_path() -> None:
+    """A path with a backslash or leading '/' is rejected at construction."""
+
+    with pytest.raises(ReviewContractError) as exc:
+        Finding(
+            schema_name=REVIEW_FINDING_SCHEMA_NAME,  # type: ignore[arg-type]
+            schema_version=1,  # type: ignore[arg-type]
+            review_transaction_id=ReviewTransactionId("sha256:" + ("a" * 64)),
+            lens="correctness",
+            severity="warning",
+            summary="s",
+            detail="d",
+            paths=("src\\bad",),
+            status="open",  # type: ignore[arg-type]
+        )
+    assert exc.value.code == CODE_SCHEMA_INVALID
+
+
+def test_finding_constructor_rejects_unsorted_paths() -> None:
+    """Unsorted paths are rejected at construction."""
+
+    with pytest.raises(ReviewContractError) as exc:
+        Finding(
+            schema_name=REVIEW_FINDING_SCHEMA_NAME,  # type: ignore[arg-type]
+            schema_version=1,  # type: ignore[arg-type]
+            review_transaction_id=ReviewTransactionId("sha256:" + ("a" * 64)),
+            lens="correctness",
+            severity="warning",
+            summary="s",
+            detail="d",
+            paths=("src/b", "src/a"),
+            status="open",  # type: ignore[arg-type]
+        )
+    assert exc.value.code == CODE_SCHEMA_INVALID
+
+
+def test_finding_transition_constructor_rejects_wrong_finding_id_kind() -> None:
+    """A FindingTransition with the wrong finding_id class is rejected."""
+
+    wrong_kind = CorrectionFactId("sha256:" + ("a" * 64))
+    with pytest.raises(ReviewContractError) as exc:
+        FindingTransition(
+            schema_name=REVIEW_FINDING_TRANSITION_SCHEMA_NAME,  # type: ignore[arg-type]
+            schema_version=1,  # type: ignore[arg-type]
+            review_transaction_id=ReviewTransactionId("sha256:" + ("b" * 64)),
+            finding_id=wrong_kind,
+            from_status="open",
+            to_status="accepted",
+            correction_fact_id=None,
+        )
+    assert exc.value.code == CODE_ID_INVALID
+
+
+def test_finding_transition_constructor_rejects_unknown_to_status() -> None:
+    """An unknown to_status is rejected at construction."""
+
+    with pytest.raises(ReviewContractError) as exc:
+        FindingTransition(
+            schema_name=REVIEW_FINDING_TRANSITION_SCHEMA_NAME,  # type: ignore[arg-type]
+            schema_version=1,  # type: ignore[arg-type]
+            review_transaction_id=ReviewTransactionId("sha256:" + ("b" * 64)),
+            finding_id=FindingId("sha256:" + ("a" * 64)),
+            from_status="open",
+            to_status="rogue",
+            correction_fact_id=None,
+        )
+    assert exc.value.code == CODE_SCHEMA_INVALID
+
+
+def test_finding_transition_constructor_rejects_resolved_without_correction() -> None:
+    """A resolved transition must carry a correction reference."""
+
+    with pytest.raises(ReviewContractError) as exc:
+        FindingTransition(
+            schema_name=REVIEW_FINDING_TRANSITION_SCHEMA_NAME,  # type: ignore[arg-type]
+            schema_version=1,  # type: ignore[arg-type]
+            review_transaction_id=ReviewTransactionId("sha256:" + ("b" * 64)),
+            finding_id=FindingId("sha256:" + ("a" * 64)),
+            from_status="open",
+            to_status="resolved",
+            correction_fact_id=None,
+        )
+    assert exc.value.code == CODE_TRANSITION_INVALID
+
+
+def test_finding_transition_constructor_rejects_accepted_with_correction() -> None:
+    """An accepted transition must not carry a correction reference."""
+
+    with pytest.raises(ReviewContractError) as exc:
+        FindingTransition(
+            schema_name=REVIEW_FINDING_TRANSITION_SCHEMA_NAME,  # type: ignore[arg-type]
+            schema_version=1,  # type: ignore[arg-type]
+            review_transaction_id=ReviewTransactionId("sha256:" + ("b" * 64)),
+            finding_id=FindingId("sha256:" + ("a" * 64)),
+            from_status="open",
+            to_status="accepted",
+            correction_fact_id=CorrectionFactId("sha256:" + ("c" * 64)),
+        )
+    assert exc.value.code == CODE_TRANSITION_INVALID
+
+
+def test_correction_fact_constructor_rejects_empty_resolved_finding_ids() -> None:
+    """A correction with no resolved findings is rejected at construction."""
+
+    with pytest.raises(ReviewContractError) as exc:
+        CorrectionFact(
+            schema_name=REVIEW_CORRECTION_FACT_SCHEMA_NAME,  # type: ignore[arg-type]
+            schema_version=1,  # type: ignore[arg-type]
+            review_transaction_id=ReviewTransactionId("sha256:" + ("a" * 64)),
+            resolved_finding_ids=(),
+            candidate_before=CANDIDATE_ID,
+            candidate_after="sha256:" + ("d" * 64),
+            changed_paths=("src/a.py",),
+            loc_added=1,
+            loc_deleted=1,
+            loc_actual=2,
+        )
+    assert exc.value.code == CODE_CORRECTION_INVALID
+
+
+def test_correction_fact_constructor_rejects_equal_candidate_pair() -> None:
+    """A correction whose before and after candidates match is rejected."""
+
+    with pytest.raises(ReviewContractError) as exc:
+        CorrectionFact(
+            schema_name=REVIEW_CORRECTION_FACT_SCHEMA_NAME,  # type: ignore[arg-type]
+            schema_version=1,  # type: ignore[arg-type]
+            review_transaction_id=ReviewTransactionId("sha256:" + ("a" * 64)),
+            resolved_finding_ids=(FindingId("sha256:" + ("a" * 64)),),
+            candidate_before=CANDIDATE_ID,
+            candidate_after=CANDIDATE_ID,
+            changed_paths=("src/a.py",),
+            loc_added=1,
+            loc_deleted=1,
+            loc_actual=2,
+        )
+    assert exc.value.code == CODE_CORRECTION_INVALID
+
+
+def test_correction_fact_constructor_rejects_unsorted_resolved_finding_ids() -> None:
+    """Unsorted resolved_finding_ids are rejected at construction."""
+
+    with pytest.raises(ReviewContractError) as exc:
+        CorrectionFact(
+            schema_name=REVIEW_CORRECTION_FACT_SCHEMA_NAME,  # type: ignore[arg-type]
+            schema_version=1,  # type: ignore[arg-type]
+            review_transaction_id=ReviewTransactionId("sha256:" + ("a" * 64)),
+            resolved_finding_ids=(
+                FindingId("sha256:" + ("b" * 64)),
+                FindingId("sha256:" + ("a" * 64)),
+            ),
+            candidate_before=CANDIDATE_ID,
+            candidate_after="sha256:" + ("d" * 64),
+            changed_paths=("src/a.py",),
+            loc_added=1,
+            loc_deleted=1,
+            loc_actual=2,
+        )
+    assert exc.value.code == CODE_SCHEMA_INVALID
+
+
+def test_correction_fact_constructor_rejects_loc_arithmetic_mismatch() -> None:
+    """A correction whose loc_actual != loc_added + loc_deleted is rejected."""
+
+    with pytest.raises(ReviewContractError) as exc:
+        CorrectionFact(
+            schema_name=REVIEW_CORRECTION_FACT_SCHEMA_NAME,  # type: ignore[arg-type]
+            schema_version=1,  # type: ignore[arg-type]
+            review_transaction_id=ReviewTransactionId("sha256:" + ("a" * 64)),
+            resolved_finding_ids=(FindingId("sha256:" + ("a" * 64)),),
+            candidate_before=CANDIDATE_ID,
+            candidate_after="sha256:" + ("d" * 64),
+            changed_paths=("src/a.py",),
+            loc_added=1,
+            loc_deleted=1,
+            loc_actual=3,
+        )
+    assert exc.value.code == CODE_CORRECTION_INVALID
+
+
+def test_correction_fact_constructor_rejects_boolean_loc_value() -> None:
+    """A correction whose loc_added is True is rejected as non-integer."""
+
+    with pytest.raises(ReviewContractError) as exc:
+        CorrectionFact(
+            schema_name=REVIEW_CORRECTION_FACT_SCHEMA_NAME,  # type: ignore[arg-type]
+            schema_version=1,  # type: ignore[arg-type]
+            review_transaction_id=ReviewTransactionId("sha256:" + ("a" * 64)),
+            resolved_finding_ids=(FindingId("sha256:" + ("a" * 64)),),
+            candidate_before=CANDIDATE_ID,
+            candidate_after="sha256:" + ("d" * 64),
+            changed_paths=("src/a.py",),
+            loc_added=True,  # type: ignore[arg-type]
+            loc_deleted=1,
+            loc_actual=2,
+        )
+    assert exc.value.code == CODE_SCHEMA_INVALID
+
+
+def test_correction_fact_constructor_rejects_invalid_changed_paths() -> None:
+    """A correction whose changed_paths include an invalid path is rejected."""
+
+    with pytest.raises(ReviewContractError) as exc:
+        CorrectionFact(
+            schema_name=REVIEW_CORRECTION_FACT_SCHEMA_NAME,  # type: ignore[arg-type]
+            schema_version=1,  # type: ignore[arg-type]
+            review_transaction_id=ReviewTransactionId("sha256:" + ("a" * 64)),
+            resolved_finding_ids=(FindingId("sha256:" + ("a" * 64)),),
+            candidate_before=CANDIDATE_ID,
+            candidate_after="sha256:" + ("d" * 64),
+            changed_paths=("/leading-slash.py",),
+            loc_added=1,
+            loc_deleted=1,
+            loc_actual=2,
+        )
+    assert exc.value.code == CODE_SCHEMA_INVALID
