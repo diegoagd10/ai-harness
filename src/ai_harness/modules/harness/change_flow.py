@@ -403,9 +403,7 @@ class ApprovalStore:
 
         records: list[ApprovalRecord] = []
         for entry in approvals_raw:
-            record = _record_from_raw(entry)
-            if record is not None:
-                records.append(record)
+            records.append(_record_from_raw(entry))
         return tuple(records)
 
     def write(self, record: ApprovalRecord, *, existing: tuple[ApprovalRecord, ...]) -> tuple[ApprovalRecord, ...]:
@@ -439,14 +437,16 @@ class ApprovalStore:
         temp_file.replace(path)
 
 
-def _record_from_raw(raw: object) -> ApprovalRecord | None:
+def _record_from_raw(raw: object) -> ApprovalRecord:
     """Convert one raw JSON object into an :class:`ApprovalRecord`.
 
-    Returns ``None`` for unrecognized shapes; the caller treats those
-    as data corruption and surfaces the underlying error.
+    Raises :class:`ApprovalStoreError` for any malformed entry shape
+    so the caller can block sliced routing rather than silently
+    ignoring the bad data. Silently dropping an entry could let an
+    approval stand that cannot be audited against the schema.
     """
     if not isinstance(raw, dict):
-        return None
+        raise ApprovalStoreError(f"approvals.json entry must be an object, got {type(raw).__name__}.")
     try:
         capability_id = raw["capabilityId"]
         gate = raw["gate"]
@@ -455,11 +455,14 @@ def _record_from_raw(raw: object) -> ApprovalRecord | None:
     except KeyError as exc:
         raise ApprovalStoreError(f"approvals.json entry missing required field: {exc.args[0]!r}") from exc
     if not all(isinstance(value, str) for value in (capability_id, gate, scope_digest, approved_at)):
-        return None
+        raise ApprovalStoreError(
+            "approvals.json entry fields must all be strings; "
+            f"got {[type(v).__name__ for v in (capability_id, gate, scope_digest, approved_at)]}."
+        )
     if gate not in {"implementation", "continuation"}:
-        return None
+        raise ApprovalStoreError(f"approvals.json entry gate must be 'implementation' or 'continuation'; got {gate!r}.")
     if not scope_digest.startswith("sha256:"):
-        return None
+        raise ApprovalStoreError(f"approvals.json entry scopeDigest must start with 'sha256:'; got {scope_digest!r}.")
     return ApprovalRecord(
         capabilityId=capability_id,
         gate=gate,

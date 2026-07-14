@@ -510,3 +510,135 @@ def test_approval_store_unsupported_schema_blocks(tmp_path: Path) -> None:
 
     with pytest.raises(ApprovalStoreError, match="schemaVersion"):
         store.read()
+
+
+def test_approval_store_rejects_non_dict_entry(tmp_path: Path) -> None:
+    """A non-object entry inside the approvals list raises rather than being dropped.
+
+    Silently dropping a malformed entry would let an unrecognised
+    approval escape audit; the store MUST raise so the sliced router
+    can block routing.
+    """
+    change_dir = _make_change(tmp_path)
+    (change_dir / "approvals.json").write_text(
+        json.dumps(
+            {
+                "schemaName": "ai-harness.change-approvals",
+                "schemaVersion": 1,
+                "approvals": ["not-a-dict"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    store = ApprovalStore(change_dir)
+
+    with pytest.raises(ApprovalStoreError, match="object"):
+        store.read()
+
+
+def test_approval_store_rejects_missing_required_field(tmp_path: Path) -> None:
+    """An entry missing ``gate`` is rejected rather than silently skipped."""
+    change_dir = _make_change(tmp_path)
+    (change_dir / "approvals.json").write_text(
+        json.dumps(
+            {
+                "schemaName": "ai-harness.change-approvals",
+                "schemaVersion": 1,
+                "approvals": [
+                    {
+                        "capabilityId": "cap",
+                        "scopeDigest": "sha256:abc",
+                        "approvedAt": "2026-07-13T12:00:00Z",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    store = ApprovalStore(change_dir)
+
+    with pytest.raises(ApprovalStoreError, match="gate"):
+        store.read()
+
+
+def test_approval_store_rejects_non_string_field(tmp_path: Path) -> None:
+    """An entry whose ``gate`` is not a string fails safe rather than being dropped."""
+    change_dir = _make_change(tmp_path)
+    (change_dir / "approvals.json").write_text(
+        json.dumps(
+            {
+                "schemaName": "ai-harness.change-approvals",
+                "schemaVersion": 1,
+                "approvals": [
+                    {
+                        "capabilityId": "cap",
+                        "gate": 42,
+                        "scopeDigest": "sha256:abc",
+                        "approvedAt": "2026-07-13T12:00:00Z",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    store = ApprovalStore(change_dir)
+
+    with pytest.raises(ApprovalStoreError, match="strings"):
+        store.read()
+
+
+def test_approval_store_rejects_unknown_gate(tmp_path: Path) -> None:
+    """An entry whose gate is not ``implementation``/``continuation`` fails safe."""
+    change_dir = _make_change(tmp_path)
+    (change_dir / "approvals.json").write_text(
+        json.dumps(
+            {
+                "schemaName": "ai-harness.change-approvals",
+                "schemaVersion": 1,
+                "approvals": [
+                    {
+                        "capabilityId": "cap",
+                        "gate": "unknown-gate",
+                        "scopeDigest": "sha256:abc",
+                        "approvedAt": "2026-07-13T12:00:00Z",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    store = ApprovalStore(change_dir)
+
+    with pytest.raises(ApprovalStoreError, match="gate"):
+        store.read()
+
+
+def test_approval_store_rejects_invalid_scope_digest_prefix(tmp_path: Path) -> None:
+    """An entry whose ``scopeDigest`` lacks the ``sha256:`` prefix fails safe."""
+    change_dir = _make_change(tmp_path)
+    (change_dir / "approvals.json").write_text(
+        json.dumps(
+            {
+                "schemaName": "ai-harness.change-approvals",
+                "schemaVersion": 1,
+                "approvals": [
+                    {
+                        "capabilityId": "cap",
+                        "gate": "implementation",
+                        "scopeDigest": "md5:abc",
+                        "approvedAt": "2026-07-13T12:00:00Z",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    store = ApprovalStore(change_dir)
+
+    with pytest.raises(ApprovalStoreError, match="sha256"):
+        store.read()

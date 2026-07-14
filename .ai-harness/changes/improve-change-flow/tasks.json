@@ -346,19 +346,19 @@
       "depends_on": [
         "9"
       ],
-      "status": "pending",
+      "status": "done",
       "subtasks": [
         {
           "id": "10.1",
           "title": "Raise ApprovalStoreError for malformed approval entries instead of silently dropping them",
           "scenario": "Malformed approval data blocks routing",
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "10.2",
           "title": "Add tests covering the malformed entry blocking path",
           "scenario": "Malformed approval data blocks routing",
-          "status": "pending"
+          "status": "done"
         }
       ]
     },
