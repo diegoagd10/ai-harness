@@ -437,6 +437,10 @@ class ApprovalStore:
         temp_file.replace(path)
 
 
+_APPROVED_AT_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+_SHA256_HEX_PATTERN = re.compile(r"^sha256:[0-9a-fA-F]{64}$")
+
+
 def _record_from_raw(raw: object) -> ApprovalRecord:
     """Convert one raw JSON object into an :class:`ApprovalRecord`.
 
@@ -444,6 +448,13 @@ def _record_from_raw(raw: object) -> ApprovalRecord:
     so the caller can block sliced routing rather than silently
     ignoring the bad data. Silently dropping an entry could let an
     approval stand that cannot be audited against the schema.
+
+    Every field is checked at read time so the entire entry is
+    validated against the same fail-closed boundary: malformed
+    timestamps, non-hex or short ``scopeDigest`` bodies, and any
+    field that fails the type contract all raise here rather than
+    producing an inauditable approval that the routing layer would
+    later accept on digest alone.
     """
     if not isinstance(raw, dict):
         raise ApprovalStoreError(f"approvals.json entry must be an object, got {type(raw).__name__}.")
@@ -461,8 +472,15 @@ def _record_from_raw(raw: object) -> ApprovalRecord:
         )
     if gate not in {"implementation", "continuation"}:
         raise ApprovalStoreError(f"approvals.json entry gate must be 'implementation' or 'continuation'; got {gate!r}.")
-    if not scope_digest.startswith("sha256:"):
-        raise ApprovalStoreError(f"approvals.json entry scopeDigest must start with 'sha256:'; got {scope_digest!r}.")
+    if not _SHA256_HEX_PATTERN.match(scope_digest):
+        raise ApprovalStoreError(
+            f"approvals.json entry scopeDigest must match 'sha256:' + 64 hex chars; got {scope_digest!r}."
+        )
+    if not _APPROVED_AT_PATTERN.match(approved_at):
+        raise ApprovalStoreError(
+            f"approvals.json entry approvedAt must be a UTC ISO 8601 'YYYY-MM-DDTHH:MM:SSZ' "
+            f"timestamp; got {approved_at!r}."
+        )
     return ApprovalRecord(
         capabilityId=capability_id,
         gate=gate,

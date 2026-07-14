@@ -456,7 +456,7 @@ def test_approval_store_atomic_write_and_read(tmp_path: Path) -> None:
     record = ApprovalRecord(
         capabilityId="cap",
         gate="implementation",
-        scopeDigest="sha256:abc",
+        scopeDigest="sha256:" + "a" * 64,
         approvedAt="2026-07-13T12:00:00Z",
     )
     store.write(record, existing=())
@@ -477,8 +477,18 @@ def test_approval_store_replaces_existing_entry_same_key(tmp_path: Path) -> None
     change_dir = _make_change(tmp_path)
     store = ApprovalStore(change_dir)
 
-    first = ApprovalRecord("a", "implementation", "sha256:aaa", "2026-01-01T00:00:00Z")
-    second = ApprovalRecord("a", "implementation", "sha256:bbb", "2026-02-01T00:00:00Z")
+    first = ApprovalRecord(
+        "a",
+        "implementation",
+        "sha256:" + "a" * 64,
+        "2026-01-01T00:00:00Z",
+    )
+    second = ApprovalRecord(
+        "a",
+        "implementation",
+        "sha256:" + "b" * 64,
+        "2026-02-01T00:00:00Z",
+    )
     merged = store.write(second, existing=(first,))
 
     assert tuple(r for r in merged if r.capabilityId == "a" and r.gate == "implementation") == (second,)
@@ -642,3 +652,167 @@ def test_approval_store_rejects_invalid_scope_digest_prefix(tmp_path: Path) -> N
 
     with pytest.raises(ApprovalStoreError, match="sha256"):
         store.read()
+
+
+def test_approval_store_rejects_non_hex_scope_digest(tmp_path: Path) -> None:
+    """A ``scopeDigest`` whose hex body is malformed fails safe at read time.
+
+    Per the validator suggestion "Validate approval timestamps and
+    SHA-256 digest syntax at approval-file read time so all malformed
+    entries are rejected at the same fail-closed boundary", the store
+    must check the full ``sha256:`` + 64-hex-char body shape rather
+    than only the prefix. A non-hex body would otherwise be accepted
+    as a valid scope digest.
+    """
+    change_dir = _make_change(tmp_path)
+    (change_dir / "approvals.json").write_text(
+        json.dumps(
+            {
+                "schemaName": "ai-harness.change-approvals",
+                "schemaVersion": 1,
+                "approvals": [
+                    {
+                        "capabilityId": "cap",
+                        "gate": "implementation",
+                        "scopeDigest": "sha256:not-a-hex-digest-zzz",
+                        "approvedAt": "2026-07-13T12:00:00Z",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    store = ApprovalStore(change_dir)
+
+    with pytest.raises(ApprovalStoreError, match="scopeDigest"):
+        store.read()
+
+
+def test_approval_store_rejects_short_scope_digest(tmp_path: Path) -> None:
+    """A ``scopeDigest`` whose hex body is shorter than 64 chars fails safe."""
+    change_dir = _make_change(tmp_path)
+    (change_dir / "approvals.json").write_text(
+        json.dumps(
+            {
+                "schemaName": "ai-harness.change-approvals",
+                "schemaVersion": 1,
+                "approvals": [
+                    {
+                        "capabilityId": "cap",
+                        "gate": "implementation",
+                        "scopeDigest": "sha256:deadbeef",
+                        "approvedAt": "2026-07-13T12:00:00Z",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    store = ApprovalStore(change_dir)
+
+    with pytest.raises(ApprovalStoreError, match="scopeDigest"):
+        store.read()
+
+
+def test_approval_store_rejects_malformed_approved_at(tmp_path: Path) -> None:
+    """A non-ISO-8601 ``approvedAt`` value fails safe at read time.
+
+    Per the validator finding for task 10, a matching digest with a
+    malformed timestamp was previously accepted as a valid approval.
+    The store must reject the entry so sliced routing cannot be
+    silently satisfied by an inauditable timestamp.
+    """
+    change_dir = _make_change(tmp_path)
+    (change_dir / "approvals.json").write_text(
+        json.dumps(
+            {
+                "schemaName": "ai-harness.change-approvals",
+                "schemaVersion": 1,
+                "approvals": [
+                    {
+                        "capabilityId": "cap",
+                        "gate": "implementation",
+                        "scopeDigest": "sha256:" + "a" * 64,
+                        "approvedAt": "yesterday",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    store = ApprovalStore(change_dir)
+
+    with pytest.raises(ApprovalStoreError, match="approvedAt"):
+        store.read()
+
+
+def test_approval_store_rejects_timezone_offset_approved_at(tmp_path: Path) -> None:
+    """A non-UTC ``approvedAt`` value fails safe at read time.
+
+    The store writes ``approvedAt`` as a UTC ``Z`` timestamp and the
+    routing logic relies on lexicographic comparison of those
+    strings. Accepting a non-Z offset would silently break the
+    freshness comparison and the archive preflight. The read-time
+    check rejects any non-Z timestamp so the failure surface stays at
+    the same fail-closed boundary.
+    """
+    change_dir = _make_change(tmp_path)
+    (change_dir / "approvals.json").write_text(
+        json.dumps(
+            {
+                "schemaName": "ai-harness.change-approvals",
+                "schemaVersion": 1,
+                "approvals": [
+                    {
+                        "capabilityId": "cap",
+                        "gate": "implementation",
+                        "scopeDigest": "sha256:" + "b" * 64,
+                        "approvedAt": "2026-07-13T12:00:00+02:00",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    store = ApprovalStore(change_dir)
+
+    with pytest.raises(ApprovalStoreError, match="approvedAt"):
+        store.read()
+
+
+def test_approval_store_accepts_well_formed_entry(tmp_path: Path) -> None:
+    """A fully well-formed approval entry round-trips without error.
+
+    Locks the positive path so the new read-time checks do not
+    regress any legitimate entry shape. The hex body is intentionally
+    the correct length and the timestamp is the canonical UTC ``Z``
+    form.
+    """
+    change_dir = _make_change(tmp_path)
+    (change_dir / "approvals.json").write_text(
+        json.dumps(
+            {
+                "schemaName": "ai-harness.change-approvals",
+                "schemaVersion": 1,
+                "approvals": [
+                    {
+                        "capabilityId": "cap",
+                        "gate": "implementation",
+                        "scopeDigest": "sha256:" + "c" * 64,
+                        "approvedAt": "2026-07-13T12:00:00Z",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    store = ApprovalStore(change_dir)
+    records = store.read()
+    assert len(records) == 1
+    assert records[0].scopeDigest == "sha256:" + "c" * 64
+    assert records[0].approvedAt == "2026-07-13T12:00:00Z"
