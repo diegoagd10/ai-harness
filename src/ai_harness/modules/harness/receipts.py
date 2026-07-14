@@ -90,9 +90,11 @@ __all__ = [
     "VALIDATION_ID_LABEL",
     "ReceiptObjectStore",
     "ReceiptStoreError",
+    "ValidationEnvelope",
     "build_candidate_identity",
     "decode_gate_declaration",
     "encode_canonical",
+    "parse_validation_envelope",
     "typed_hash",
     "validate_typed_id",
 ] 
@@ -824,8 +826,6 @@ def _capture_untracked(
         "-z",
         "--others",
         "--exclude-standard",
-        "--directory",
-        "--no-empty-directory",
     )
     paths = [_decode_utf8_path(entry, category="untracked") for entry in _parse_nul_delimited(output) if entry]
     paths = [path for path in paths if not is_excluded(path)]
@@ -1866,10 +1866,93 @@ class FinalValidationReceipts:
             gates=tuple(outcome_summaries),
         )
 
-    def seal(self, *, change: str) -> SealResult:  # pragma: no cover - implemented in next task
-        raise ReceiptError(
-            "seal() is implemented in the next task",
-            code="receipt.invalid",
+    def seal(self, *, change: str) -> SealResult:
+        """Bind the current root ``validation.md`` and current native run
+        into an immutable receipt.
+
+        Validation envelope is parsed, the referenced run is loaded and
+        its evidence verified, the candidate is recaptured, the
+        validation body is hash-bound, and the receipt is published.
+        A receipt with semantic denial or failed native gates is still
+        published for diagnosis, but only the conjunction of all three
+        facts (``semantic.approved``, ``native.all_gates_passed``, and
+        ``candidate_stable``) flips ``archive_eligible`` to true.
+        """
+        if not isinstance(change, str) or not change:
+            raise ReceiptError("change name must be a non-empty string", code="change.invalid")
+
+        store = self.store_for(change)
+        validation_path = self.repository_root / ".ai-harness" / "changes" / change / "validation.md"
+        if not validation_path.is_file():
+            raise ReceiptError(
+                f"validation.md not found for {change!r}",
+                code="validation.missing",
+                context={"change": change},
+            )
+        validation_bytes = validation_path.read_bytes()
+        try:
+            envelope = parse_validation_envelope(validation_bytes)
+        except ReceiptError:
+            raise
+        except Exception as exc:  # pragma: no cover - defensive guard
+            raise ReceiptError(
+                f"could not parse validation envelope: {exc}",
+                code="validation.malformed",
+            ) from exc
+
+        # Resolve the Git root and load the referenced run + evidence.
+        repo_root = _resolve_git_top_level(self.repository_root)
+        run_payload = _load_run(store, envelope.gate_run)
+
+        # Re-capture the candidate now and require it to match the
+        # run's after-candidate.
+        candidate_id = _capture_candidate_id(repo_root, change)
+        after_candidate_id = run_payload["candidate_after"]["id"]
+        candidate_stable = candidate_id == after_candidate_id
+        if not candidate_stable:
+            raise ReceiptError(
+                "current candidate does not match the run's after-candidate",
+                code="candidate.stale",
+                context={"change": change},
+            )
+
+        # Build the receipt payload (semantic and native fields derived).
+        validation_id = hash_validation_bytes(change, validation_bytes)
+        semantic_payload = {
+            "verdict": envelope.verdict,
+            "critical": envelope.critical,
+            "gate_run": envelope.gate_run,
+            "approved": envelope.approved,
+        }
+        native_payload = {
+            "all_gates_passed": bool(run_payload["all_gates_passed"]),
+            "candidate_stable": candidate_stable,
+        }
+        receipt_payload: dict[str, Any] = {
+            "schema_name": RECEIPT_SCHEMA_NAME,
+            "schema_version": RECEIPT_SCHEMA_VERSION,
+            "candidate_policy": POLICY_GIT_WORKTREE,
+            "candidate_id": candidate_id,
+            "gate_run": envelope.gate_run,
+            "validation": {
+                "path": "validation.md",
+                "digest": validation_id,
+            },
+            "semantic": semantic_payload,
+            "native": native_payload,
+            "archive_eligible": envelope.approved and native_payload["all_gates_passed"] and candidate_stable,
+        }
+
+        # Publish the receipt bundle and update the current pointer.
+        receipt_id = store.publish_object(RECEIPT_OBJECT_KIND_RECEIPTS, receipt_payload)
+        store.replace_current_pointer(receipt_id)
+
+        return SealResult(
+            receipt_id=receipt_id,
+            gate_run=envelope.gate_run,
+            semantic_approval=envelope.approved,
+            native_all_gates_passed=native_payload["all_gates_passed"],
+            archive_eligible=receipt_payload["archive_eligible"],
         )
 
     def verify_for_archive(self, *, change: str) -> ArchiveAuthorization:  # pragma: no cover - implemented in later task
@@ -1892,6 +1975,79 @@ def _capture_candidate_id(repo_root: Path, change: str) -> str:
     """Capture the candidate twice and return the typed identifier."""
     identity = build_candidate_identity(repo_root, change=change)
     return identity.candidate_id
+
+
+def _load_run(store: ReceiptObjectStore, run_id: str) -> dict[str, Any]:
+    """Load and verify a stored run plus its evidence."""
+    validate_typed_id(run_id)
+    try:
+        run_payload = store.read_run_payload(run_id)
+    except ReceiptStoreError as exc:
+        if exc.code == "receipt.invalid" and "object bundle not found" in exc.message:
+            raise ReceiptError(
+                f"referenced run not found: {run_id}",
+                code="run.missing",
+            ) from exc
+        if exc.code in {"storage.failed", "receipt.invalid"}:
+            raise ReceiptError(
+                f"run payload is unreadable: {exc.message}",
+                code="run.invalid",
+            ) from exc
+        raise
+    try:
+        bundle = store.bundle_path(RECEIPT_OBJECT_KIND_RUNS, run_id)
+        expected_files = {"object.json", "evidence"}
+        actual_files = {entry.name for entry in bundle.iterdir()}
+        if actual_files != expected_files:
+            raise ReceiptError(
+                f"run bundle has unexpected contents: {sorted(actual_files)}",
+                code="run.invalid",
+            )
+
+        gates = run_payload.get("gates", [])
+        if not isinstance(gates, list) or not gates:
+            raise ReceiptError("run payload must declare at least one gate", code="run.invalid")
+
+        for index, gate in enumerate(gates):
+            if not isinstance(gate, dict):
+                raise ReceiptError(
+                    f"gate record {index} is not an object",
+                    code="run.invalid",
+                )
+            for stream_name in ("stdout", "stderr"):
+                metadata = gate.get(stream_name)
+                if not isinstance(metadata, dict):
+                    raise ReceiptError(
+                        f"gate {index} {stream_name} metadata missing",
+                        code="run.invalid",
+                    )
+                relative = metadata.get("path")
+                if not isinstance(relative, str):
+                    raise ReceiptError(
+                        f"gate {index} {stream_name} metadata has no path",
+                        code="run.invalid",
+                    )
+                stored_bytes = store.read_run_evidence(run_id, relative)
+                expected_digest = metadata.get("digest")
+                if not isinstance(expected_digest, str):
+                    raise ReceiptError(
+                        f"gate {index} {stream_name} metadata has no digest",
+                        code="run.invalid",
+                    )
+                actual_digest = typed_hash("ai-harness/stream/v1", stored_bytes)
+                if actual_digest != expected_digest:
+                    raise ReceiptError(
+                        f"evidence digest mismatch for gate {index} {stream_name}",
+                        code="run.invalid",
+                    )
+    except ReceiptStoreError as exc:
+        if exc.code == "evidence.missing":
+            raise ReceiptError(
+                f"referenced run evidence missing: {exc.message}",
+                code="run.invalid",
+            ) from exc
+        raise
+    return run_payload
 
 
 def _resolve_git_top_level(root: Path) -> Path:
@@ -2170,4 +2326,208 @@ def _terminate_process_group(process: subprocess.Popen[bytes]) -> None:
             process.terminate()
         except OSError:
             pass
+
+
+# ===========================================================================
+# Validation envelope parser
+# ===========================================================================
+
+
+@dataclass(frozen=True, slots=True)
+class ValidationEnvelope:
+    """Parsed root ``## Verdict`` section of a Change's validation.md.
+
+    * ``verdict`` is the literal verdict value (``pass``,
+      ``pass-with-warnings``, or ``fail``).
+    * ``critical`` is the parsed non-negative integer count of CRITICAL
+      findings.
+    * ``gate_run`` is the typed SHA-256 identifier of the referenced
+      native gate run.
+    * ``approved`` is the semantic approval boolean the design derives
+      from ``verdict`` and ``critical`` alone.
+    """
+
+    verdict: str
+    critical: int
+    gate_run: str
+    approved: bool
+
+
+_KNOWN_VERDICTS: Final[frozenset[str]] = frozenset({"pass", "pass-with-warnings", "fail"})
+
+
+def parse_validation_envelope(text: str | bytes) -> ValidationEnvelope:
+    """Parse a root ``validation.md`` body into a :class:`ValidationEnvelope`.
+
+    Strict envelope rules (mirrors the design's `_ValidationEnvelopeParser`):
+
+    * input must be valid UTF-8 with no BOM;
+    * exactly one unfenced, level-2 ``## Verdict`` section;
+    * inside the section: blank lines plus exactly one each of
+      ``verdict:``, ``critical:``, and ``gate-run:`` are allowed;
+    * duplicate keys, unknown non-blank lines, leading-zero or negative
+      ``critical``, malformed ``gate-run``, or contradictory
+      ``verdict``/``critical`` combinations raise
+      :class:`ReceiptError`.
+    """
+    if isinstance(text, bytes):
+        try:
+            text = text.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ReceiptError("validation bytes are not valid UTF-8", code="validation.malformed") from exc
+    if text.startswith("\ufeff"):
+        raise ReceiptError("validation bytes must not contain a UTF-8 BOM", code="validation.malformed")
+
+    sections = _split_verdict_sections(text)
+    if len(sections) != 1:
+        raise ReceiptError(
+            "validation must have exactly one '## Verdict' section",
+            code="validation.malformed",
+        )
+
+    body = sections[0]
+    fields = _parse_verdict_lines(body)
+    try:
+        _validate_verdict_fields(fields)
+    except CodecError as exc:
+        raise ReceiptError(
+            f"invalid gate-run identifier in '## Verdict': {exc}",
+            code="validation.malformed",
+        ) from exc
+    return _envelope_from_fields(fields)
+
+
+def hash_validation_bytes(change: str, body: bytes) -> str:
+    """Return the typed identifier for *body*'s validation bytes."""
+    if not isinstance(change, str) or not change:
+        raise ReceiptError("change name is required to hash validation", code="change.invalid")
+    return typed_hash(VALIDATION_ID_LABEL, body)
+
+
+def _split_verdict_sections(text: str) -> list[str]:
+    """Return the bodies of every unfenced, level-2 ``## Verdict`` section.
+
+    Section boundaries are the next level-1 ``#`` heading, the next
+    level-2 ``## X`` heading (where ``X`` is not ``Verdict``), or EOF.
+    Fenced code blocks (`` ``` `` or four-space indented) do not
+    terminate a section so a verdict discussion can quote code without
+    splitting the envelope.
+    """
+    lines = text.splitlines()
+    sections: list[list[str]] = []
+    inside_fence = False
+    in_verdict = False
+    buffer: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            inside_fence = not inside_fence
+            if in_verdict:
+                buffer.append(line)
+            continue
+        if not inside_fence and stripped.startswith("#"):
+            if in_verdict:
+                sections.append(buffer)
+                buffer = []
+                in_verdict = False
+            if stripped.lower() == "## verdict":
+                in_verdict = True
+                continue
+            if stripped.startswith("##"):
+                # Different level-2 heading ends the run.
+                in_verdict = False
+                continue
+            if stripped.startswith("#"):
+                # Level 1 heading ends the run too.
+                in_verdict = False
+                continue
+        if in_verdict:
+            buffer.append(line)
+    if in_verdict:
+        sections.append(buffer)
+    return ["\n".join(section) for section in sections]
+
+
+def _parse_verdict_lines(body: str) -> dict[str, str]:
+    """Parse the field lines of one ``## Verdict`` section body."""
+    fields: dict[str, str] = {}
+    for line in body.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        key, separator, value = stripped.partition(":")
+        if not separator:
+            raise ReceiptError(
+                f"unknown non-blank line in '## Verdict' section: {line!r}",
+                code="validation.malformed",
+            )
+        key = key.strip().lower()
+        value = value.strip()
+        if key in fields:
+            raise ReceiptError(
+                f"duplicate field in '## Verdict' section: {key}",
+                code="validation.malformed",
+            )
+        fields[key] = value
+    return fields
+
+
+def _validate_verdict_fields(fields: Mapping[str, str]) -> None:
+    """Enforce the exact field set and value grammar on a parsed verdict block."""
+
+    expected = {"verdict", "critical", "gate-run"}
+    extras = set(fields.keys()) - expected
+    missing = expected - set(fields.keys())
+    if extras or missing:
+        raise ReceiptError(
+            f"'## Verdict' must contain exactly {sorted(expected)}; missing {sorted(missing)} extra {sorted(extras)}",
+            code="validation.malformed",
+        )
+
+    verdict = fields["verdict"]
+    if verdict not in _KNOWN_VERDICTS:
+        raise ReceiptError(
+            f"unknown verdict value: {verdict!r}",
+            code="validation.malformed",
+        )
+
+    critical_raw = fields["critical"]
+    if not critical_raw.isdigit() or critical_raw != str(int(critical_raw)):
+        raise ReceiptError(
+            f"critical must be a non-negative integer without leading zeros: {critical_raw!r}",
+            code="validation.malformed",
+        )
+    critical = int(critical_raw)
+
+    gate_run = fields["gate-run"]
+    validate_typed_id(gate_run)
+
+    if verdict.startswith("pass") and critical > 0:
+        raise ReceiptError(
+            "verdict declares pass-like outcome but critical count is positive",
+            code="validation.contradictory",
+        )
+    if verdict == "fail" and critical == 0:
+        raise ReceiptError(
+            "verdict is fail but critical count is zero",
+            code="validation.contradictory",
+        )
+
+
+def _envelope_from_fields(fields: Mapping[str, str]) -> ValidationEnvelope:
+    """Build the typed envelope after all checks passed."""
+    verdict = fields["verdict"]
+    critical = int(fields["critical"])
+    gate_run = fields["gate-run"]
+    approved = (verdict in {"pass", "pass-with-warnings"}) and critical == 0
+    return ValidationEnvelope(verdict=verdict, critical=critical, gate_run=gate_run, approved=approved)
+
+
+# ---------------------------------------------------------------------------
+# FinalValidationReceipts.seal implementation
+# ---------------------------------------------------------------------------
+
+
+# Replace the placeholder seal method with the real implementation.
+
 

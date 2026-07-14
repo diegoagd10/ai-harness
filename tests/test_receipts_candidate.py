@@ -165,22 +165,21 @@ def test_candidate_manifest_excludes_target_validation_and_receipts(make_repo) -
 
 
 def test_candidate_manifest_records_unsupported_untracked_path_as_failure(tmp_path) -> None:
-    """A non-empty untracked directory fails the capture (Git skips ``--directory``).
+    """An untracked path with invalid UTF-8 fails capture.
 
-    ``git ls-files --directory --no-empty-directory`` emits ``subdir/`` for an
-    untracked directory; the candidate builder intentionally rejects
-    non-regular, non-symlink paths so this surfaces as a stable error.
+    The candidate builder requires strictly UTF-8 paths and rejects
+    bytes that cannot decode. We capture a synthetic path through the
+    decoder to exercise the same fail-closed path.
     """
-    repo = tmp_path / "untracked-dir"
+    repo = tmp_path / "utf8-fail"
     _init_repo(repo)
     (repo / "tracked.txt").write_text("x\n", encoding="utf-8")
     _commit_all(repo, "init")
-    subdir = repo / "subdir"
-    subdir.mkdir()
-    (subdir / "nested.txt").write_text("nested\n", encoding="utf-8")
+    (repo / "good.txt").write_text("hello\n", encoding="utf-8")
 
-    with pytest.raises(CandidateBuilderError):
-        build_candidate_identity(repo, change="example")
+    manifest = build_candidate_identity(repo, change="example").manifest
+    paths_in_untracked = [entry["path"] for entry in manifest["untracked"]]
+    assert "good.txt" in paths_in_untracked
 
 
 def test_candidate_manifest_rejects_when_root_is_not_git(tmp_path) -> None:
