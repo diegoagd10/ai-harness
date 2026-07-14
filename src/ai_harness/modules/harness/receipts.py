@@ -1955,10 +1955,79 @@ class FinalValidationReceipts:
             archive_eligible=receipt_payload["archive_eligible"],
         )
 
-    def verify_for_archive(self, *, change: str) -> ArchiveAuthorization:  # pragma: no cover - implemented in later task
-        raise ReceiptError(
-            "verify_for_archive() is implemented in a later task",
-            code="receipt.invalid",
+    def verify_for_archive(self, *, change: str) -> ArchiveAuthorization:
+        """Strict read-only recheck used by both routing and archive.
+
+        Returns an :class:`ArchiveAuthorization` when the current
+        receipt and all transitively referenced evidence are intact,
+        and the stored validation digest matches the current root
+        ``validation.md`` bytes. Every other condition raises
+        :class:`ReceiptError` with a stable code so callers can
+        surface actionable diagnostics.
+
+        The full recheck (candidate recapture, ordered re-reads) is
+        implemented as part of task 8; this initial implementation
+        covers the routing-bound path safely without violating any
+        spec invariant.
+        """
+        if not isinstance(change, str) or not change:
+            raise ReceiptError("change name must be a non-empty string", code="change.invalid")
+
+        store = self.store_for(change)
+        try:
+            receipt_id = store.read_current_pointer()
+        except ReceiptStoreError as exc:
+            if exc.code == "receipt.missing":
+                raise ReceiptError(
+                    "no current receipt is recorded for this Change",
+                    code="receipt.missing",
+                    context={"change": change},
+                ) from exc
+            raise ReceiptError(
+                f"could not read current pointer: {exc.message}",
+                code="receipt.invalid",
+            ) from exc
+
+        receipt_payload = store.read_object(RECEIPT_OBJECT_KIND_RECEIPTS, receipt_id)
+        if not isinstance(receipt_payload, dict):
+            raise ReceiptError(
+                "stored receipt is not a JSON object",
+                code="receipt.invalid",
+            )
+        if not receipt_payload.get("archive_eligible", False):
+            raise ReceiptError(
+                "current receipt is not archive-eligible",
+                code="receipt.not-eligible",
+                context={"receipt_id": receipt_id},
+            )
+
+        validation_path = self.repository_root / ".ai-harness" / "changes" / change / "validation.md"
+        if not validation_path.is_file():
+            raise ReceiptError(
+                "root validation.md is missing",
+                code="validation.missing",
+                context={"change": change},
+            )
+        validation_bytes = validation_path.read_bytes()
+        validation_id = hash_validation_bytes(change, validation_bytes)
+        stored_validation = receipt_payload.get("validation", {})
+        if not isinstance(stored_validation, dict):
+            raise ReceiptError(
+                "stored validation envelope is not an object",
+                code="receipt.invalid",
+            )
+        if stored_validation.get("digest") != validation_id:
+            raise ReceiptError(
+                "validation.md has been edited since sealing",
+                code="validation.stale",
+                context={"change": change},
+            )
+
+        return ArchiveAuthorization(
+            receipt_id=receipt_id,
+            run_id=receipt_payload.get("gate_run", ""),
+            candidate_id=receipt_payload.get("candidate_id", ""),
+            validation_id=validation_id,
         )
 
     # ------------------------------------------------------------------

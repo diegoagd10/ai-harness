@@ -83,6 +83,23 @@ from ai_harness.modules.harness.tasks import (
     task_capability_state,
     task_progress,
 )
+from ai_harness.modules.harness.receipts import FinalValidationReceipts
+
+
+def _receipt_archive_eligible(repository_root: Path, change: str) -> bool:
+    """Return ``True`` when an archive-eligible current receipt exists.
+
+    Routes through :class:`FinalValidationReceipts.verify_for_archive`
+    so the same strict recheck governs both archive and routing. The
+    helper swallows every receipt failure (missing, stale, tampered,
+    missing pointer) and returns ``False`` — the caller only needs the
+    boolean to drive the route and surface actionable diagnostics.
+    """
+    try:
+        FinalValidationReceipts(repository_root).verify_for_archive(change=change)
+    except Exception:
+        return False
+    return True
 
 _PHASES = ("explore", "prd", "design", "specs", "tasks", "implement", "validate", "archive")
 _SCHEMA_NAME = "ai-harness.change-status"
@@ -288,9 +305,13 @@ def _derive_status(root: Path, change: str) -> ChangeStatus:
     # produce rich routes that the projector below maps back to the
     # existing phase tokens so older consumers see no change.
     slice_status, blocked_reasons = _derive_slice_status(root, change, change_dir, progress)
+    fallback_route = _next_recommended(artifacts, dependencies)
+    fallback_route = _apply_receipt_route_override(
+        root, change, fallback_route, artifacts, slice_status
+    )
     next_recommended = _project_slice_route_to_next_recommended(
         slice_status.route,
-        fallback=_next_recommended(artifacts, dependencies),
+        fallback=fallback_route,
     )
 
     return ChangeStatus(
@@ -309,6 +330,35 @@ def _derive_status(root: Path, change: str) -> ChangeStatus:
         configContext=None,
         sliceStatus=slice_status,
     )
+
+
+def _apply_receipt_route_override(
+    root: Path,
+    change: str,
+    fallback_route: str,
+    artifacts: dict[str, str],
+    slice_status: SliceStatus,
+) -> str:
+    """Decide whether the receipt gate sends the change back to validate.
+
+    Both legacy and sliced terminal ``archive`` routes require an
+    archive-eligible current receipt. The receipt gate is additive:
+    existing structural rules remain authoritative, so we only act
+    when the legacy FSM would otherwise have produced ``archive``.
+
+    Legacy mode maps the absence of an archive-eligible receipt onto
+    ``validate``; sliced mode keeps the rich ``final-validate`` route
+    that the projector then surfaces as ``validate``.
+    """
+    if fallback_route != "archive":
+        return fallback_route
+    if slice_status.mode != "legacy":
+        return fallback_route
+    if artifacts.get("validate") != "done":
+        return fallback_route
+    if _receipt_archive_eligible(root, change):
+        return fallback_route
+    return "validate"
 
 
 def _change_dir(root: Path, change: str) -> Path:
@@ -743,11 +793,14 @@ def _archive_route_after_all_complete(
     completed: list[str],
     change_dir: Path,
     progress: TaskProgress,
+    repository_root: Path | None = None,
 ) -> tuple[SliceStatus, list[str]]:
     """Return the archive-or-final-validate SliceStatus for a fully completed PRD."""
     completion_approvals = _latest_continuation_approval_time(change_dir)
     root_validation = change_dir / "validation.md"
-    route, reason = _finalize_route(root_validation, completion_approvals)
+    route, reason = _finalize_route(
+        root_validation, completion_approvals, change_dir.name, repository_root
+    )
 
     status = _build_slice_status(
         mode="sliced",
@@ -765,12 +818,25 @@ def _archive_route_after_all_complete(
     return status, [reason] if reason else []
 
 
-def _finalize_route(root_validation: Path, completion_approval_time: str | None) -> tuple[str, str]:
+def _finalize_route(
+    root_validation: Path,
+    completion_approval_time: str | None,
+    change: str,
+    repository_root: Path | None = None,
+) -> tuple[str, str]:
     """Return ``(archive | final-validate, diagnostic)``.
 
-    Archive routing requires a non-empty, current root ``validation.md``
-    newer than the most recent continuation approval. Slice validations
-    never substitute for the archive gate.
+    Archive routing requires:
+
+    * a non-empty root ``validation.md``;
+    * a validation mtime newer than the most recent continuation
+      approval (when one exists);
+    * a current archive-eligible receipt bound to the same change.
+
+    Sliced and legacy deliveries share this requirement: slice
+    validations, legacy root validations without receipts, and
+    stale/tampered receipts route the Change back to
+    ``final-validate``.
     """
     if not _non_empty_file(root_validation):
         return "final-validate", "Root validation.md is missing — write it before archive."
@@ -780,23 +846,29 @@ def _finalize_route(root_validation: Path, completion_approval_time: str | None)
         # is implicitly current. This branch shouldn't fire in practice
         # (we only call this from the completed-all path) but guards
         # against future regressions.
-        return "archive", ""
+        pass
+    else:
+        import re
 
-    validation_mtime = root_validation.stat().st_mtime
-    # ISO 8601 strings sort lexicographically by design — but
-    # :meth:`ApprovalStore.write` round-trips with a UTC ``Z``
-    # timestamp, so the comparison is safe.
-    import re
+        match = re.match(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})Z$", completion_approval_time)
+        if match is None:
+            return "final-validate", "Continuation approval timestamp is malformed."
+        validation_mtime = root_validation.stat().st_mtime
+        approval_epoch = _iso_to_epoch(match.group(1))
+        if validation_mtime <= approval_epoch:
+            return "final-validate", "Root validation.md is older than the latest continuation approval."
 
-    match = re.match(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})Z$", completion_approval_time)
-    if match is None:
-        return "final-validate", "Continuation approval timestamp is malformed."
-    approval_epoch = _iso_to_epoch(match.group(1))
-    return (
-        ("archive", "")
-        if validation_mtime > approval_epoch
-        else ("final-validate", "Root validation.md is older than the latest continuation approval.")
-    )
+    # Receipt authorization is an additive terminal gate. Existing
+    # structural rules remain authoritative; absence of a current
+    # archive-eligible receipt pushes the Change back to its
+    # final-validation phase rather than to archive.
+    if repository_root is not None and not _receipt_archive_eligible(repository_root, change):
+        return "final-validate", (
+            "Final-validation receipt is missing, stale, or not archive-eligible — "
+            "re-run gates, write validation.md, and run change-receipt-seal."
+        )
+
+    return "archive", ""
 
 
 def _iso_to_epoch(iso_timestamp: str) -> float:
