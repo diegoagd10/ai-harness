@@ -498,19 +498,19 @@
       "depends_on": [
         "15"
       ],
-      "status": "pending",
+      "status": "done",
       "subtasks": [
         {
           "id": "16.1",
           "title": "Make _applicable_design_bytes use the effective design scope, not the declared one",
           "scenario": "Implementation scope edit reopens approval",
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "16.2",
           "title": "Add a test confirming root design edits stale an elevated approval",
           "scenario": "Implementation scope edit reopens approval",
-          "status": "pending"
+          "status": "done"
         }
       ]
     },
@@ -522,19 +522,19 @@
       "depends_on": [
         "16"
       ],
-      "status": "pending",
+      "status": "done",
       "subtasks": [
         {
           "id": "17.1",
           "title": "Reject malformed approvedAt values and validate sha256 digest syntax in _record_from_raw",
           "scenario": "Malformed approval data blocks routing",
-          "status": "pending"
+          "status": "done"
         },
         {
           "id": "17.2",
           "title": "Add tests covering the new malformed-approval rejection paths",
           "scenario": "Malformed approval data blocks routing",
-          "status": "pending"
+          "status": "done"
         }
       ]
     }

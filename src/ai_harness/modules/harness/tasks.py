@@ -544,9 +544,7 @@ def _build_routing_diagnostic(tasks: list[Task], canonical_spec: str | None) -> 
         return None
 
     if canonical_spec is not None:
-        header = (
-            f"Tasks not associated with the selected capability {canonical_spec!r}:"
-        )
+        header = f"Tasks not associated with the selected capability {canonical_spec!r}:"
     else:
         header = "Tasks not associated with the selected capability:"
     return header + " " + "; ".join(issues)

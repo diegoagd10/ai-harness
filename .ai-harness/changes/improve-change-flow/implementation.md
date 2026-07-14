@@ -13,6 +13,7 @@
 - 36a45f0c62da1d9598d5bdc0f6a39f6df8185b20 — task 10: Block sliced routing when approval entries are malformed
 - 2612d21a8e009f83d62920ae181aee1bc4eb3a4a — task 11: Surface a safe routing diagnostic for unsafe task spec references
 - 9eaa2d6460d38ab493dbe4d61ab560bcbac64cb2 — task 12: Deduplicate change-flow test fixtures for the pylint gate
+- abe71f5f28bc0d2baaa08cf7275f44f5a98ec10d — task 13: Restore TDD evidence grammar and full commit SHAs
 - 01bc2799580cf7105c992c2e49b00fea58687610 — task 14: Diagnose different-capability task references in routing diagnostic
 - a2d713c4ae5be8edd1b9f90d07d7c318f8297ec8 — task 15: Require change-wide root design for any effectively high-risk capability
 - 6d6e0213ebd9789941bec3b19f93a3caf5b31352 — task 16: Fingerprint the effective-risk design so root edits invalidate elevated approvals
@@ -34,6 +35,7 @@
 | 10 | 36a45f0c62da1d9598d5bdc0f6a39f6df8185b20 | src/ai_harness/modules/harness/change_flow.py, .ai-harness/changes/improve-change-flow/tasks.json | tests/test_change_flow_internals.py | unit | passed: 5/5 | written | passed | 5 cases | clean |
 | 11 | 2612d21a8e009f83d62920ae181aee1bc4eb3a4a | src/ai_harness/modules/harness/tasks.py, src/ai_harness/modules/harness/change.py, .ai-harness/changes/improve-change-flow/tasks.json | tests/test_change_task_slice.py | unit | passed: 8/8 | written | passed | 8 cases | clean |
 | 12 | 9eaa2d6460d38ab493dbe4d61ab560bcbac64cb2 | tests/__init__.py, tests/_change_flow_fixtures.py, tests/test_change_approvals.py, tests/test_change_continuation.py, tests/test_change_slice_status.py, tests/test_change_sliced_archive.py, tests/test_change_task_slice.py, .ai-harness/changes/improve-change-flow/tasks.json | tests/test_change_approvals.py, tests/test_change_continuation.py, tests/test_change_slice_status.py, tests/test_change_sliced_archive.py, tests/test_change_task_slice.py | unit | passed: 789/789 | written | passed | N/A: refactor only | clean |
+| 13 | abe71f5f28bc0d2baaa08cf7275f44f5a98ec10d | .ai-harness/changes/improve-change-flow/implementation.md, .ai-harness/changes/improve-change-flow/tasks.json | tests/test_change_task_slice.py, tests/test_change_approvals.py, tests/test_change_continuation.py, tests/test_change_slice_status.py, tests/test_change_sliced_archive.py, tests/test_change_flow_internals.py, tests/test_renderers.py, tests/test_change.py | unit | passed: 789/789 | written | passed | N/A: evidence grammar | clean |
 | 14 | 01bc2799580cf7105c992c2e49b00fea58687610 | src/ai_harness/modules/harness/tasks.py, .ai-harness/changes/improve-change-flow/tasks.json | tests/test_change_task_slice.py | unit | passed: 21/21 | written | passed | 2 cases | clean |
 | 15 | a2d713c4ae5be8edd1b9f90d07d7c318f8297ec8 | src/ai_harness/modules/harness/change.py, .ai-harness/changes/improve-change-flow/tasks.json | tests/test_change_approvals.py | unit | passed: 20/20 | written | passed | Single | clean |
 | 16 | 6d6e0213ebd9789941bec3b19f93a3caf5b31352 | src/ai_harness/modules/harness/change.py | tests/test_change_approvals.py | unit | passed: 22/22 | written | passed | 2 cases | clean |
