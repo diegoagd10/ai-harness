@@ -77,13 +77,13 @@ from ai_harness.modules.harness.change_flow import (
     hash_scope_digest,
     read_prd_delivery,
 )
+from ai_harness.modules.harness.receipts import FinalValidationReceipts, ReceiptError
 from ai_harness.modules.harness.tasks import (
     TaskProgress,
     TaskStoreError,
     task_capability_state,
     task_progress,
 )
-from ai_harness.modules.harness.receipts import FinalValidationReceipts, ReceiptError
 
 
 def _receipt_archive_eligible(repository_root: Path, change: str) -> bool:
@@ -100,6 +100,7 @@ def _receipt_archive_eligible(repository_root: Path, change: str) -> bool:
     except Exception:
         return False
     return True
+
 
 _PHASES = ("explore", "prd", "design", "specs", "tasks", "implement", "validate", "archive")
 _SCHEMA_NAME = "ai-harness.change-status"
@@ -306,9 +307,7 @@ def _derive_status(root: Path, change: str) -> ChangeStatus:
     # existing phase tokens so older consumers see no change.
     slice_status, blocked_reasons = _derive_slice_status(root, change, change_dir, progress)
     fallback_route = _next_recommended(artifacts, dependencies)
-    fallback_route = _apply_receipt_route_override(
-        root, change, fallback_route, artifacts, slice_status
-    )
+    fallback_route = _apply_receipt_route_override(root, change, fallback_route, artifacts, slice_status)
     next_recommended = _project_slice_route_to_next_recommended(
         slice_status.route,
         fallback=fallback_route,
@@ -798,9 +797,7 @@ def _archive_route_after_all_complete(
     """Return the archive-or-final-validate SliceStatus for a fully completed PRD."""
     completion_approvals = _latest_continuation_approval_time(change_dir)
     root_validation = change_dir / "validation.md"
-    route, reason = _finalize_route(
-        root_validation, completion_approvals, change_dir.name, repository_root
-    )
+    route, reason = _finalize_route(root_validation, completion_approvals, change_dir.name, repository_root)
 
     status = _build_slice_status(
         mode="sliced",

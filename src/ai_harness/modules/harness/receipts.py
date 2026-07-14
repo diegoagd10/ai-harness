@@ -212,7 +212,7 @@ CANONICAL_KEYS: Final[Mapping[str, frozenset[str]]] = {
             "receipt_id",
             "schema_name",
             "schema_version",
-         }
+        }
     ),
 }
 
@@ -714,9 +714,7 @@ def _capture_manifest(repo_root: Path, change: str) -> CandidateManifest:
         return relpath in exact
 
     raw_index = _capture_index(repo_root)
-    raw_worktree = _capture_worktree(
-        repo_root, raw_index, is_excluded=_excluded
-    )
+    raw_worktree = _capture_worktree(repo_root, raw_index, is_excluded=_excluded)
     raw_untracked = _capture_untracked(repo_root, is_excluded=_excluded)
 
     return CandidateManifest(
@@ -1198,9 +1196,7 @@ class ReceiptObjectStore:
 
     def read_run_payload(self, run_id: str) -> dict[str, Any]:
         """Read a stored run object's payload, allowing an ``evidence/`` subdir."""
-        object_path, data = self._read_object_file(
-            RECEIPT_OBJECT_KIND_RUNS, run_id, allowed_children=["evidence"]
-        )
+        object_path, data = self._read_object_file(RECEIPT_OBJECT_KIND_RUNS, run_id, allowed_children=["evidence"])
         try:
             payload = json.loads(data.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -2699,5 +2695,3 @@ def _envelope_from_fields(fields: Mapping[str, str]) -> ValidationEnvelope:
 
 
 # Replace the placeholder seal method with the real implementation.
-
-
