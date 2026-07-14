@@ -10,6 +10,7 @@
 - 9c5b3d9a3351ccd1ac03bf299402fe735b677482 — task 7: Update change agents for capability-bound execution
 - eb0f082e3d9b5555acea8efa7b37d6c61d583ceb — task 8: Run focused change-flow regression verification
 - 494b65e00974951c6acf7d6f7798d20ede16045a — task 9: Gate approval scope to the gate's capability and reject stale initial slice validation
+- 36a45f0c62da1d9598d5bdc0f6a39f6df8185b20 — task 10: Block sliced routing when approval entries are malformed
 
 ## TDD Evidence
 
@@ -24,9 +25,9 @@
 | 7 | 9c5b3d9a3351ccd1ac03bf299402fe735b677482 | src/ai_harness/resources/change-agent/*.md, expected/*.md | tests/test_renderers.py | mixed | passed: 257/257 | written | passed | N/A: existing covered | clean |
 | 8 | eb0f082e3d9b5555acea8efa7b37d6c61d583ceb | .ai-harness/changes/improve-change-flow/design.md, .ai-harness/changes/improve-change-flow/exploration.md, .ai-harness/changes/improve-change-flow/implementation.md, .ai-harness/changes/improve-change-flow/prd.md, .ai-harness/changes/improve-change-flow/specs/ordered-slice-continuation.md, .ai-harness/changes/improve-change-flow/specs/risk-and-scope-governance.md, .ai-harness/changes/improve-change-flow/specs/safe-normal-risk-first-slice.md, .ai-harness/changes/improve-change-flow/tasks.json | tests/test_renderers.py, tests/test_change.py, tests/test_change_task_slice.py, tests/test_change_flow_internals.py, tests/test_change_approvals.py, tests/test_change_continuation.py, tests/test_change_slice_status.py, tests/test_change_sliced_archive.py | e2e | passed: 771/771 | written | passed | N/A: regression scope | clean |
 | 9 | 494b65e00974951c6acf7d6f7798d20ede16045a | src/ai_harness/modules/harness/change.py, .ai-harness/changes/improve-change-flow/tasks.json | tests/test_change_approvals.py, tests/test_change_continuation.py, tests/test_change_slice_status.py, tests/test_change_sliced_archive.py | unit | passed: 5/5 | written | passed | 5 cases | clean |
+| 10 | 36a45f0c62da1d9598d5bdc0f6a39f6df8185b20 | src/ai_harness/modules/harness/change_flow.py, .ai-harness/changes/improve-change-flow/tasks.json | tests/test_change_flow_internals.py | unit | passed: 5/5 | written | passed | 5 cases | clean |
 
 ## Remaining
-- task 10: Block sliced routing when approval entries are malformed
 - task 11: Surface a safe routing diagnostic for unsafe task spec references
 - task 12: Deduplicate change-flow test fixtures for the pylint gate
 - task 13: Restore TDD evidence grammar and full commit SHAs
