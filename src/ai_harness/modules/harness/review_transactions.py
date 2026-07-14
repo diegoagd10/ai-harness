@@ -1620,20 +1620,26 @@ class ReviewContractV1:
             transitions,
         )
 
-        # Stage 6: critical findings must not remain open. Wired in
-        # before correction validation so unresolved-critical is reported
-        # independently of whether a correction was supplied.
-        _enforce_no_unresolved_critical(findings, finding_index, derived_states)
+        # Stage 4: correction binding (optional).
+        correction_id = self._validate_correction_binding(
+            transaction,
+            finding_index,
+            resolved_by_finding,
+            correction_fact,
+        )
 
-        # Stage 4-5 (correction validation) ships in task 4. Until it
-        # lands we refuse a supplied correction up front so callers
-        # cannot bypass unimplemented validation.
-        if correction_fact is not None:
-            raise ReviewContractError(
-                "validate_transaction correction-fact checks ship in task 4 of this change",
-                code=CODE_VERSION_UNSUPPORTED,
-                context={"stage": "pending"},
-            )
+        # Stage 5: bijective attribution between correction resolved
+        # findings and supplied resolved transitions.
+        self._validate_correction_attribution(
+            finding_index,
+            resolved_by_finding,
+            correction_id,
+            correction_fact,
+        )
+
+        # Stage 6: critical findings must not remain open after the
+        # graph is fully resolved.
+        _enforce_no_unresolved_critical(findings, finding_index, derived_states)
 
     def _validate_lens_selection_binding(
         self,
@@ -1877,6 +1883,184 @@ class ReviewContractV1:
                 code=CODE_TRANSITION_INVALID,
                 context={"finding_id": transition.finding_id.value},
             )
+
+    def _validate_correction_binding(
+        self,
+        transaction: ReviewTransaction,
+        finding_index: dict[FindingId, Finding],
+        resolved_by_finding: dict[FindingId, FindingTransition],
+        correction_fact: CorrectionFact | None,
+    ) -> CorrectionFactId | None:
+        """Stage 4: validate the optional aggregate correction fact.
+
+        When *correction_fact* is ``None``, no correction is asserted
+        and any supplied resolved transition is rejected at stage 5 as
+        "resolution has no correction fact". When a correction is
+        supplied, the function recomputes its ID, binds it to the
+        transaction, enforces candidate-before equality, requires a
+        distinct candidate-after, validates changed-path scope, and
+        enforces the zero-paths-zero-LOC and LOC-budget rules.
+        """
+
+        if correction_fact is None:
+            return None
+
+        transaction_id = self.id_for(transaction)
+        if correction_fact.review_transaction_id != transaction_id:
+            raise ReviewContractError(
+                "correction fact references a different transaction",
+                code=CODE_ID_INVALID,
+                context={
+                    "expected": transaction_id.value,
+                    "actual": correction_fact.review_transaction_id.value,
+                },
+            )
+
+        if correction_fact.candidate_before != transaction.candidate_id:
+            raise ReviewContractError(
+                "correction.candidate_before must equal the transaction's candidate_id",
+                code=CODE_CORRECTION_INVALID,
+                context={
+                    "expected": transaction.candidate_id,
+                    "actual": correction_fact.candidate_before,
+                },
+            )
+
+        if correction_fact.candidate_after == correction_fact.candidate_before:
+            raise ReviewContractError(
+                "correction.candidate_after must differ from candidate_before",
+                code=CODE_CORRECTION_INVALID,
+                context={"candidate_after": correction_fact.candidate_after},
+            )
+
+        # Zero changed paths are valid only when actual LOC is zero.
+        if not correction_fact.changed_paths and correction_fact.loc_actual != 0:
+            raise ReviewContractError(
+                "zero changed paths require zero actual LOC",
+                code=CODE_CORRECTION_INVALID,
+                context={"loc_actual": str(correction_fact.loc_actual)},
+            )
+
+        # Every changed path must be in scope.
+        for path in correction_fact.changed_paths:
+            if not _Scope.contains(transaction.scope_paths, path):
+                raise ReviewContractError(
+                    "correction changed_path is outside the transaction scope",
+                    code=CODE_CORRECTION_INVALID,
+                    context={"path": path},
+                )
+
+        # LOC totals: arithmetic is enforced at decode time; here we
+        # check budget compliance.
+        if correction_fact.loc_actual > transaction.loc_budget:
+            raise ReviewContractError(
+                "correction.loc_actual exceeds the transaction LOC budget",
+                code=CODE_CORRECTION_INVALID,
+                context={
+                    "loc_actual": str(correction_fact.loc_actual),
+                    "loc_budget": str(transaction.loc_budget),
+                },
+            )
+
+        # A correction that resolves no supplied findings is rejected
+        # here so callers do not silently receive a correction that
+        # does not claim to fix anything.
+        if not correction_fact.resolved_finding_ids:
+            raise ReviewContractError(
+                "correction.resolved_finding_ids must list at least one finding",
+                code=CODE_CORRECTION_INVALID,
+                context={"field": "resolved_finding_ids"},
+            )
+
+        return self.id_for(correction_fact)
+
+    def _validate_correction_attribution(
+        self,
+        finding_index: dict[FindingId, Finding],
+        resolved_by_finding: dict[FindingId, FindingTransition],
+        correction_id: CorrectionFactId | None,
+        correction_fact: CorrectionFact | None,
+    ) -> None:
+        """Stage 5: bijection between correction ``resolved_finding_ids`` and resolved transitions.
+
+        When no correction is supplied but a resolved transition exists,
+        the validation fails ("resolution has no correction fact").
+        When a correction is supplied, every listed finding must have
+        exactly one resolved transition referencing the supplied
+        correction's ID, and every resolved transition must identify one
+        listed finding. An accepted finding must never appear in the
+        correction's resolved-finding list.
+        """
+
+        if correction_fact is None or correction_id is None:
+            if resolved_by_finding:
+                raise ReviewContractError(
+                    "resolved transition present without a supplied correction fact",
+                    code=CODE_CORRECTION_INVALID,
+                    context={"finding_id": next(iter(resolved_by_finding)).value},
+                )
+            return
+
+        # The correction's recomputed id must be the value cited by
+        # every supplied resolved transition.
+        for finding_id, transition in resolved_by_finding.items():
+            if transition.correction_fact_id != correction_id:
+                raise ReviewContractError(
+                    "resolved transition references a correction fact that is not the supplied correction",
+                    code=CODE_CORRECTION_INVALID,
+                    context={"finding_id": finding_id.value},
+                )
+
+        # Set up the listed finding ids and resolved transition ids.
+        listed_ids = list(correction_fact.resolved_finding_ids)
+        sorted_listed = sorted(listed_ids, key=lambda fid: fid.value)
+        if [fid.value for fid in sorted_listed] != [fid.value for fid in listed_ids]:
+            raise ReviewContractError(
+                "correction.resolved_finding_ids must be in ascending order",
+                code=CODE_CORRECTION_INVALID,
+                context={"field": "resolved_finding_ids"},
+            )
+        listed_set = set(listed_ids)
+
+        # Every listed id must identify a supplied finding bound to the transaction.
+        for fid in listed_ids:
+            finding = finding_index.get(fid)
+            if finding is None:
+                raise ReviewContractError(
+                    "correction.resolved_finding_ids references a finding that is not in the supplied graph",
+                    code=CODE_CORRECTION_INVALID,
+                    context={"finding_id": fid.value},
+                )
+            if finding.severity not in SEVERITIES:
+                # Already enforced at decode/validate time; the assertion
+                # is purely defensive against future severity additions.
+                raise ReviewContractError(
+                    "correction attributed to a finding with an unknown severity",
+                    code=CODE_CORRECTION_INVALID,
+                    context={"finding_id": fid.value},
+                )
+
+        # Bijection: every listed finding has exactly one resolved
+        # transition referencing this correction, and no other resolved
+        # transition exists.
+        for fid in listed_set:
+            transition = resolved_by_finding.get(fid)
+            if transition is None:
+                raise ReviewContractError(
+                    "correction lists a finding without a matching resolved transition",
+                    code=CODE_CORRECTION_INVALID,
+                    context={"finding_id": fid.value},
+                )
+
+        # Findings whose resolved transition claims this correction
+        # must all be in the listed set.
+        for fid in resolved_by_finding:
+            if fid not in listed_set:
+                raise ReviewContractError(
+                    "resolved transition's finding is not in the correction's resolved_finding_ids",
+                    code=CODE_CORRECTION_INVALID,
+                    context={"finding_id": fid.value},
+                )
 
     def _spec_for_record(self, record: ReviewRecord) -> _SchemaSpec:
         kind = type(record)

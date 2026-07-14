@@ -1008,6 +1008,33 @@ def _make_transition(
     )
 
 
+def _build_correction(
+    contract: ReviewContractV1,
+    transaction: ReviewTransaction,
+    resolved: tuple[FindingId, ...],
+    *,
+    changed_paths: tuple[str, ...] = ("src/a.py",),
+    loc_added: int = 1,
+    loc_deleted: int = 1,
+    candidate_after: str = "sha256:" + ("d" * 64),
+) -> CorrectionFact:
+    """Build a fully valid aggregate correction for a transaction."""
+
+    loc_actual = loc_added + loc_deleted
+    return CorrectionFact(
+        schema_name=REVIEW_CORRECTION_FACT_SCHEMA_NAME,  # type: ignore[arg-type]
+        schema_version=1,  # type: ignore[arg-type]
+        review_transaction_id=contract.id_for(transaction),
+        resolved_finding_ids=resolved,
+        candidate_before=transaction.candidate_id,
+        candidate_after=candidate_after,
+        changed_paths=changed_paths,
+        loc_added=loc_added,
+        loc_deleted=loc_deleted,
+        loc_actual=loc_actual,
+    )
+
+
 def test_finding_belongs_to_transaction() -> None:
     """A finding bound to the supplied transaction and selected lens passes."""
 
@@ -1034,6 +1061,627 @@ def test_finding_lens_must_be_selected_by_transaction() -> None:
             findings=(bad_lens_finding,),
         )
     assert exc.value.code == CODE_SCHEMA_INVALID
+
+
+# ---------------------------------------------------------------------------
+# Correction fact attribution and budget (task 4)
+# ---------------------------------------------------------------------------
+
+
+def test_correction_binds_transaction_candidate() -> None:
+    """A correction whose before-candidate matches the transaction is accepted."""
+
+    contract, selection, transaction, tx_id = _build_finding_fixture()
+    finding = _make_finding(contract, tx_id, severity="warning")
+    finding_id = contract.id_for(finding)
+    correction = _build_correction(contract, transaction, (finding_id,))
+    transition = _make_transition(
+        contract,
+        tx_id,
+        finding_id,
+        to_status="resolved",
+        correction_fact_id=contract.id_for(correction),
+    )
+    contract.validate_transaction(
+        transaction,
+        lens_selection=selection,
+        findings=(finding,),
+        transitions=(transition,),
+        correction_fact=correction,
+    )
+
+
+def test_correction_with_mismatched_before_candidate_fails() -> None:
+    """A correction whose before candidate differs from the transaction fails."""
+
+    contract, selection, transaction, tx_id = _build_finding_fixture()
+    finding = _make_finding(contract, tx_id, severity="warning")
+    finding_id = contract.id_for(finding)
+    mismatched = CorrectionFact(
+        schema_name=REVIEW_CORRECTION_FACT_SCHEMA_NAME,  # type: ignore[arg-type]
+        schema_version=1,  # type: ignore[arg-type]
+        review_transaction_id=tx_id,
+        resolved_finding_ids=(finding_id,),
+        candidate_before="sha256:" + ("0" * 64),  # different from CANDIDATE_ID
+        candidate_after="sha256:" + ("d" * 64),
+        changed_paths=("src/a.py",),
+        loc_added=1,
+        loc_deleted=1,
+        loc_actual=2,
+    )
+    with pytest.raises(ReviewContractError) as exc:
+        contract.validate_transaction(
+            transaction,
+            lens_selection=selection,
+            findings=(finding,),
+            correction_fact=mismatched,
+        )
+    assert exc.value.code == CODE_CORRECTION_INVALID
+
+
+def test_correction_with_equal_candidates_fails() -> None:
+    """Before and after candidates must differ."""
+
+    contract, selection, transaction, tx_id = _build_finding_fixture()
+    finding = _make_finding(contract, tx_id, severity="warning")
+    finding_id = contract.id_for(finding)
+    same_after = CorrectionFact(
+        schema_name=REVIEW_CORRECTION_FACT_SCHEMA_NAME,  # type: ignore[arg-type]
+        schema_version=1,  # type: ignore[arg-type]
+        review_transaction_id=tx_id,
+        resolved_finding_ids=(finding_id,),
+        candidate_before=transaction.candidate_id,
+        candidate_after=transaction.candidate_id,
+        changed_paths=("src/a.py",),
+        loc_added=1,
+        loc_deleted=1,
+        loc_actual=2,
+    )
+    with pytest.raises(ReviewContractError) as exc:
+        contract.validate_transaction(
+            transaction,
+            lens_selection=selection,
+            findings=(finding,),
+            correction_fact=same_after,
+        )
+    assert exc.value.code == CODE_CORRECTION_INVALID
+
+
+def test_correction_with_cross_transaction_reference_fails() -> None:
+    """A correction whose transaction reference differs is rejected."""
+
+    contract, selection, transaction, tx_id = _build_finding_fixture()
+    finding = _make_finding(contract, tx_id, severity="warning")
+    finding_id = contract.id_for(finding)
+    other_tx_id = ReviewTransactionId("sha256:" + ("e" * 64))
+    wrong = CorrectionFact(
+        schema_name=REVIEW_CORRECTION_FACT_SCHEMA_NAME,  # type: ignore[arg-type]
+        schema_version=1,  # type: ignore[arg-type]
+        review_transaction_id=other_tx_id,
+        resolved_finding_ids=(finding_id,),
+        candidate_before=transaction.candidate_id,
+        candidate_after="sha256:" + ("d" * 64),
+        changed_paths=("src/a.py",),
+        loc_added=1,
+        loc_deleted=1,
+        loc_actual=2,
+    )
+    with pytest.raises(ReviewContractError) as exc:
+        contract.validate_transaction(
+            transaction,
+            lens_selection=selection,
+            findings=(finding,),
+            correction_fact=wrong,
+        )
+    assert exc.value.code == CODE_ID_INVALID
+
+
+def test_correction_with_unknown_resolved_finding_fails() -> None:
+    """A correction listing a finding id that is not in the graph fails."""
+
+    contract, selection, transaction, tx_id = _build_finding_fixture()
+    finding = _make_finding(contract, tx_id, severity="warning")
+    fake_id = FindingId("sha256:" + ("d" * 64))
+    correction = CorrectionFact(
+        schema_name=REVIEW_CORRECTION_FACT_SCHEMA_NAME,  # type: ignore[arg-type]
+        schema_version=1,  # type: ignore[arg-type]
+        review_transaction_id=tx_id,
+        resolved_finding_ids=(fake_id,),
+        candidate_before=transaction.candidate_id,
+        candidate_after="sha256:" + ("d" * 64),
+        changed_paths=("src/a.py",),
+        loc_added=1,
+        loc_deleted=1,
+        loc_actual=2,
+    )
+    with pytest.raises(ReviewContractError) as exc:
+        contract.validate_transaction(
+            transaction,
+            lens_selection=selection,
+            findings=(finding,),
+            correction_fact=correction,
+        )
+    assert exc.value.code == CODE_CORRECTION_INVALID
+
+
+def test_correction_with_missing_resolved_finding_transition_fails() -> None:
+    """A listed finding with no resolved transition pointing at the correction fails."""
+
+    contract, selection, transaction, tx_id = _build_finding_fixture()
+    finding = _make_finding(contract, tx_id, severity="warning")
+    finding_id = contract.id_for(finding)
+    correction = _build_correction(contract, transaction, (finding_id,))
+    # No supplied transition even though the correction lists this finding.
+    with pytest.raises(ReviewContractError) as exc:
+        contract.validate_transaction(
+            transaction,
+            lens_selection=selection,
+            findings=(finding,),
+            correction_fact=correction,
+        )
+    assert exc.value.code == CODE_CORRECTION_INVALID
+
+
+def test_correction_with_omitted_resolution_fails() -> None:
+    """A resolved transition whose finding is omitted from the correction fails."""
+
+    contract, selection, transaction, tx_id = _build_finding_fixture()
+    finding = _make_finding(contract, tx_id, severity="warning")
+    finding_id = contract.id_for(finding)
+    correction = CorrectionFact(
+        schema_name=REVIEW_CORRECTION_FACT_SCHEMA_NAME,  # type: ignore[arg-type]
+        schema_version=1,  # type: ignore[arg-type]
+        review_transaction_id=tx_id,
+        resolved_finding_ids=(),  # omitted!
+        candidate_before=transaction.candidate_id,
+        candidate_after="sha256:" + ("d" * 64),
+        changed_paths=("src/a.py",),
+        loc_added=1,
+        loc_deleted=1,
+        loc_actual=2,
+    )
+    transition = _make_transition(
+        contract,
+        tx_id,
+        finding_id,
+        to_status="resolved",
+        correction_fact_id=CorrectionFactId("sha256:" + ("f" * 64)),
+    )
+    with pytest.raises(ReviewContractError) as exc:
+        contract.validate_transaction(
+            transaction,
+            lens_selection=selection,
+            findings=(finding,),
+            transitions=(transition,),
+            correction_fact=correction,
+        )
+    assert exc.value.code == CODE_CORRECTION_INVALID
+
+
+def test_correction_attributed_to_accepted_finding_fails() -> None:
+    """A correction cannot list a finding whose terminal state is ``accepted``."""
+
+    contract, selection, transaction, tx_id = _build_finding_fixture()
+    finding = _make_finding(contract, tx_id, severity="warning")
+    finding_id = contract.id_for(finding)
+    accept = _make_transition(
+        contract,
+        tx_id,
+        finding_id,
+        to_status="accepted",
+        correction_fact_id=None,
+    )
+    bad_correction = CorrectionFact(
+        schema_name=REVIEW_CORRECTION_FACT_SCHEMA_NAME,  # type: ignore[arg-type]
+        schema_version=1,  # type: ignore[arg-type]
+        review_transaction_id=tx_id,
+        resolved_finding_ids=(finding_id,),
+        candidate_before=transaction.candidate_id,
+        candidate_after="sha256:" + ("d" * 64),
+        changed_paths=("src/a.py",),
+        loc_added=1,
+        loc_deleted=1,
+        loc_actual=2,
+    )
+    with pytest.raises(ReviewContractError) as exc:
+        contract.validate_transaction(
+            transaction,
+            lens_selection=selection,
+            findings=(finding,),
+            transitions=(accept,),
+            correction_fact=bad_correction,
+        )
+    assert exc.value.code == CODE_CORRECTION_INVALID
+
+
+def test_resolved_transition_without_supplied_correction_fails() -> None:
+    """A resolved transition with no supplied correction fails."""
+
+    contract, selection, transaction, tx_id = _build_finding_fixture()
+    finding = _make_finding(contract, tx_id, severity="warning")
+    finding_id = contract.id_for(finding)
+    transition = _make_transition(
+        contract,
+        tx_id,
+        finding_id,
+        to_status="resolved",
+        correction_fact_id=CorrectionFactId("sha256:" + ("f" * 64)),
+    )
+    with pytest.raises(ReviewContractError) as exc:
+        contract.validate_transaction(
+            transaction,
+            lens_selection=selection,
+            findings=(finding,),
+            transitions=(transition,),
+        )
+    assert exc.value.code == CODE_CORRECTION_INVALID
+
+
+def test_correction_changed_paths_outside_scope_fail() -> None:
+    """A correction with out-of-scope changed paths is rejected."""
+
+    contract, selection, transaction, tx_id = _build_finding_fixture()
+    finding = _make_finding(contract, tx_id, severity="warning")
+    finding_id = contract.id_for(finding)
+    correction = _build_correction(
+        contract,
+        transaction,
+        (finding_id,),
+        changed_paths=("other/file.py",),
+    )
+    with pytest.raises(ReviewContractError) as exc:
+        contract.validate_transaction(
+            transaction,
+            lens_selection=selection,
+            findings=(finding,),
+            correction_fact=correction,
+        )
+    assert exc.value.code == CODE_CORRECTION_INVALID
+
+
+def test_correction_descendant_path_is_in_scope() -> None:
+    """A descendant changed_path is contained by the scope."""
+
+    contract, selection, transaction, tx_id = _build_finding_fixture()
+    finding = _make_finding(contract, tx_id, severity="warning")
+    finding_id = contract.id_for(finding)
+    correction = _build_correction(
+        contract,
+        transaction,
+        (finding_id,),
+        changed_paths=("src", "src/deep/nested/file.py"),
+    )
+    transition = _make_transition(
+        contract,
+        tx_id,
+        finding_id,
+        to_status="resolved",
+        correction_fact_id=contract.id_for(correction),
+    )
+    contract.validate_transaction(
+        transaction,
+        lens_selection=selection,
+        findings=(finding,),
+        transitions=(transition,),
+        correction_fact=correction,
+    )
+
+
+def test_correction_with_prefix_text_path_is_rejected() -> None:
+    """Prefix text is not segment containment."""
+
+    contract, selection, transaction, tx_id = _build_finding_fixture()
+    finding = _make_finding(contract, tx_id, severity="warning")
+    finding_id = contract.id_for(finding)
+    correction = _build_correction(
+        contract,
+        transaction,
+        (finding_id,),
+        changed_paths=("src-old/file.py",),
+    )
+    with pytest.raises(ReviewContractError) as exc:
+        contract.validate_transaction(
+            transaction,
+            lens_selection=selection,
+            findings=(finding,),
+            correction_fact=correction,
+        )
+    assert exc.value.code == CODE_CORRECTION_INVALID
+
+
+def test_zero_path_zero_loc_correction_with_zero_budget_is_valid() -> None:
+    """A zero-path zero-LOC correction within a zero budget is allowed."""
+
+    contract = ReviewContractV1()
+    selection = contract.select_lenses(policy=LENS_POLICY_NAME, risk_level="normal")
+    transaction = ReviewTransaction(
+        schema_name=REVIEW_TRANSACTION_SCHEMA_NAME,  # type: ignore[arg-type]
+        schema_version=1,  # type: ignore[arg-type]
+        change_name=CHANGE_NAME,
+        candidate_id=CANDIDATE_ID,
+        lens_selection_id=contract.id_for(selection),
+        scope_paths=("src",),
+        loc_budget=0,
+    )
+    tx_id = contract.id_for(transaction)
+    finding = _make_finding(contract, tx_id, severity="warning")
+    finding_id = contract.id_for(finding)
+    correction = _build_correction(
+        contract,
+        transaction,
+        (finding_id,),
+        changed_paths=(),
+        loc_added=0,
+        loc_deleted=0,
+    )
+    transition = _make_transition(
+        contract,
+        tx_id,
+        finding_id,
+        to_status="resolved",
+        correction_fact_id=contract.id_for(correction),
+    )
+    contract.validate_transaction(
+        transaction,
+        lens_selection=selection,
+        findings=(finding,),
+        transitions=(transition,),
+        correction_fact=correction,
+    )
+
+
+def test_zero_paths_with_positive_actual_loc_is_rejected() -> None:
+    """Zero changed paths combined with positive actual LOC is rejected."""
+
+    contract, selection, transaction, tx_id = _build_finding_fixture()
+    finding = _make_finding(contract, tx_id, severity="warning")
+    finding_id = contract.id_for(finding)
+    # Loc arithmetic matches at the decoder level (1 + 0 = 1), so we
+    # build with a positive ``loc_actual`` to confirm the budget gate.
+    correction = CorrectionFact(
+        schema_name=REVIEW_CORRECTION_FACT_SCHEMA_NAME,  # type: ignore[arg-type]
+        schema_version=1,  # type: ignore[arg-type]
+        review_transaction_id=tx_id,
+        resolved_finding_ids=(finding_id,),
+        candidate_before=transaction.candidate_id,
+        candidate_after="sha256:" + ("d" * 64),
+        changed_paths=(),
+        loc_added=1,
+        loc_deleted=0,
+        loc_actual=1,
+    )
+    with pytest.raises(ReviewContractError) as exc:
+        contract.validate_transaction(
+            transaction,
+            lens_selection=selection,
+            findings=(finding,),
+            correction_fact=correction,
+        )
+    assert exc.value.code == CODE_CORRECTION_INVALID
+
+
+def test_correction_loc_exceeds_budget_is_rejected() -> None:
+    """Actual LOC greater than the transaction budget is rejected."""
+
+    contract = ReviewContractV1()
+    selection = contract.select_lenses(policy=LENS_POLICY_NAME, risk_level="normal")
+    transaction = ReviewTransaction(
+        schema_name=REVIEW_TRANSACTION_SCHEMA_NAME,  # type: ignore[arg-type]
+        schema_version=1,  # type: ignore[arg-type]
+        change_name=CHANGE_NAME,
+        candidate_id=CANDIDATE_ID,
+        lens_selection_id=contract.id_for(selection),
+        scope_paths=("src",),
+        loc_budget=1,
+    )
+    tx_id = contract.id_for(transaction)
+    finding = _make_finding(contract, tx_id, severity="warning")
+    finding_id = contract.id_for(finding)
+    correction = CorrectionFact(
+        schema_name=REVIEW_CORRECTION_FACT_SCHEMA_NAME,  # type: ignore[arg-type]
+        schema_version=1,  # type: ignore[arg-type]
+        review_transaction_id=tx_id,
+        resolved_finding_ids=(finding_id,),
+        candidate_before=transaction.candidate_id,
+        candidate_after="sha256:" + ("d" * 64),
+        changed_paths=("src/a.py",),
+        loc_added=2,
+        loc_deleted=0,
+        loc_actual=2,
+    )
+    with pytest.raises(ReviewContractError) as exc:
+        contract.validate_transaction(
+            transaction,
+            lens_selection=selection,
+            findings=(finding,),
+            correction_fact=correction,
+        )
+    assert exc.value.code == CODE_CORRECTION_INVALID
+
+
+def test_empty_scope_rejects_nonempty_changed_paths() -> None:
+    """An empty scope admits no non-empty changed paths."""
+
+    contract = ReviewContractV1()
+    selection = contract.select_lenses(policy=LENS_POLICY_NAME, risk_level="normal")
+    transaction = ReviewTransaction(
+        schema_name=REVIEW_TRANSACTION_SCHEMA_NAME,  # type: ignore[arg-type]
+        schema_version=1,  # type: ignore[arg-type]
+        change_name=CHANGE_NAME,
+        candidate_id=CANDIDATE_ID,
+        lens_selection_id=contract.id_for(selection),
+        scope_paths=(),
+        loc_budget=10,
+    )
+    tx_id = contract.id_for(transaction)
+    correction = CorrectionFact(
+        schema_name=REVIEW_CORRECTION_FACT_SCHEMA_NAME,  # type: ignore[arg-type]
+        schema_version=1,  # type: ignore[arg-type]
+        review_transaction_id=tx_id,
+        resolved_finding_ids=(),
+        candidate_before=transaction.candidate_id,
+        candidate_after="sha256:" + ("d" * 64),
+        changed_paths=("src/a.py",),  # non-empty paths but empty scope
+        loc_added=1,
+        loc_deleted=0,
+        loc_actual=1,
+    )
+    with pytest.raises(ReviewContractError) as exc:
+        contract.validate_transaction(
+            transaction,
+            lens_selection=selection,
+            correction_fact=correction,
+        )
+    assert exc.value.code == CODE_CORRECTION_INVALID
+
+
+def test_whole_repository_scope_accepts_any_concrete_changed_path() -> None:
+    """Whole-repo scope ``(``.``,)`` accepts any concrete changed path."""
+
+    contract = ReviewContractV1()
+    selection = contract.select_lenses(policy=LENS_POLICY_NAME, risk_level="normal")
+    transaction = ReviewTransaction(
+        schema_name=REVIEW_TRANSACTION_SCHEMA_NAME,  # type: ignore[arg-type]
+        schema_version=1,  # type: ignore[arg-type]
+        change_name=CHANGE_NAME,
+        candidate_id=CANDIDATE_ID,
+        lens_selection_id=contract.id_for(selection),
+        scope_paths=(".",),
+        loc_budget=10,
+    )
+    tx_id = contract.id_for(transaction)
+    finding = _make_finding(contract, tx_id, severity="warning")
+    finding_id = contract.id_for(finding)
+    correction = _build_correction(
+        contract,
+        transaction,
+        (finding_id,),
+        changed_paths=("anywhere/deep/file.py",),
+    )
+    transition = _make_transition(
+        contract,
+        tx_id,
+        finding_id,
+        to_status="resolved",
+        correction_fact_id=contract.id_for(correction),
+    )
+    contract.validate_transaction(
+        transaction,
+        lens_selection=selection,
+        findings=(finding,),
+        transitions=(transition,),
+        correction_fact=correction,
+    )
+
+
+def test_no_resolution_needs_no_correction() -> None:
+    """No correction and no resolved transitions is a valid empty graph."""
+
+    contract, selection, transaction, _ = _build_finding_fixture()
+    contract.validate_transaction(transaction, lens_selection=selection)
+
+
+def test_correction_with_null_but_resolved_finding_fails() -> None:
+    """`resolved_finding_ids` empty fails (correction resolves nothing)."""
+
+    contract, selection, transaction, tx_id = _build_finding_fixture()
+    finding = _make_finding(contract, tx_id, severity="warning")
+    correction = CorrectionFact(
+        schema_name=REVIEW_CORRECTION_FACT_SCHEMA_NAME,  # type: ignore[arg-type]
+        schema_version=1,  # type: ignore[arg-type]
+        review_transaction_id=tx_id,
+        resolved_finding_ids=(),
+        candidate_before=transaction.candidate_id,
+        candidate_after="sha256:" + ("d" * 64),
+        changed_paths=("src/a.py",),
+        loc_added=1,
+        loc_deleted=0,
+        loc_actual=1,
+    )
+    with pytest.raises(ReviewContractError) as exc:
+        contract.validate_transaction(
+            transaction,
+            lens_selection=selection,
+            findings=(finding,),
+            correction_fact=correction,
+        )
+    assert exc.value.code == CODE_CORRECTION_INVALID
+
+
+def test_correction_rejects_duplicated_resolved_finding_id() -> None:
+    """Duplicated resolved_finding_ids fail at decode; we verify and reassert."""
+
+    contract = ReviewContractV1()
+    tx_id = ReviewTransactionId("sha256:" + ("a" * 64))
+    finding = _make_finding(contract, tx_id, severity="warning")
+    finding_id = contract.id_for(finding)
+    dup_payload = {
+        "schema_name": REVIEW_CORRECTION_FACT_SCHEMA_NAME,
+        "schema_version": 1,
+        "review_transaction_id": tx_id.value,
+        "resolved_finding_ids": [finding_id.value, finding_id.value],
+        "candidate_before": CANDIDATE_ID,
+        "candidate_after": "sha256:" + ("d" * 64),
+        "changed_paths": ["src/a.py"],
+        "loc_added": 1,
+        "loc_deleted": 1,
+        "loc_actual": 2,
+    }
+    with pytest.raises(ReviewContractError) as exc:
+        contract.decode(CorrectionFact, dup_payload)
+    assert exc.value.code == CODE_SCHEMA_INVALID
+
+
+def test_correction_with_sorted_resolved_ids_is_accepted() -> None:
+    """Sorted resolved_finding_ids are accepted without reordering."""
+
+    contract = ReviewContractV1()
+    selection = contract.select_lenses(policy=LENS_POLICY_NAME, risk_level="high")
+    transaction = ReviewTransaction(
+        schema_name=REVIEW_TRANSACTION_SCHEMA_NAME,  # type: ignore[arg-type]
+        schema_version=1,  # type: ignore[arg-type]
+        change_name=CHANGE_NAME,
+        candidate_id=CANDIDATE_ID,
+        lens_selection_id=contract.id_for(selection),
+        scope_paths=("src",),
+        loc_budget=10,
+    )
+    tx_id = contract.id_for(transaction)
+    finding_a = _make_finding(contract, tx_id, lens="correctness", severity="warning")
+    finding_b = _make_finding(
+        contract,
+        tx_id,
+        lens="tests",
+        severity="warning",
+        summary="other summary",
+        detail="other detail",
+    )
+    finding_a_id = contract.id_for(finding_a)
+    finding_b_id = contract.id_for(finding_b)
+    sorted_ids = tuple(sorted([finding_a_id, finding_b_id], key=lambda fid: fid.value))
+
+    correction = _build_correction(
+        contract,
+        transaction,
+        sorted_ids,
+    )
+    transitions = tuple(
+        _make_transition(
+            contract,
+            tx_id,
+            fid,
+            to_status="resolved",
+            correction_fact_id=contract.id_for(correction),
+        )
+        for fid in (finding_a_id, finding_b_id)
+    )
+    contract.validate_transaction(
+        transaction,
+        lens_selection=selection,
+        findings=(finding_a, finding_b),
+        transitions=transitions,
+        correction_fact=correction,
+    )
 
 
 def test_finding_with_unknown_severity_is_rejected() -> None:
@@ -1124,12 +1772,13 @@ def test_duplicate_supplied_findings_fail_validation() -> None:
 
 
 def test_warning_finding_can_resolve_with_correction() -> None:
-    """`warning -> resolved` with a correction reference is legal."""
+    """`warning -> resolved` with a correction attribution is legal."""
 
     contract, selection, transaction, tx_id = _build_finding_fixture()
     finding = _make_finding(contract, tx_id, severity="warning")
     finding_id = contract.id_for(finding)
-    correction_id = CorrectionFactId("sha256:" + ("f" * 64))
+    correction = _build_correction(contract, transaction, (finding_id,))
+    correction_id = contract.id_for(correction)
     transition = _make_transition(
         contract,
         tx_id,
@@ -1137,16 +1786,12 @@ def test_warning_finding_can_resolve_with_correction() -> None:
         to_status="resolved",
         correction_fact_id=correction_id,
     )
-    # Stage 4 (correction validation) is not yet wired; the transition
-    # itself is reduced correctly here, but correction belongs to task 4.
-    # Without a correction fact supplied the resolved transition's
-    # correction id is recomputed elsewhere; for now we just want to
-    # confirm the state-machine accepts the edge.
     contract.validate_transaction(
         transaction,
         lens_selection=selection,
         findings=(finding,),
         transitions=(transition,),
+        correction_fact=correction,
     )
 
 
@@ -1410,18 +2055,21 @@ def test_critical_finding_resolves_successfully() -> None:
     contract, selection, transaction, tx_id = _build_finding_fixture()
     finding = _make_finding(contract, tx_id, severity="critical")
     finding_id = contract.id_for(finding)
+    correction = _build_correction(contract, transaction, (finding_id,))
+    correction_id = contract.id_for(correction)
     transition = _make_transition(
         contract,
         tx_id,
         finding_id,
         to_status="resolved",
-        correction_fact_id=CorrectionFactId("sha256:" + ("f" * 64)),
+        correction_fact_id=correction_id,
     )
     contract.validate_transaction(
         transaction,
         lens_selection=selection,
         findings=(finding,),
         transitions=(transition,),
+        correction_fact=correction,
     )
 
 
