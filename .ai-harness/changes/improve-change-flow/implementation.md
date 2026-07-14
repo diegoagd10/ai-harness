@@ -16,6 +16,7 @@
 - 01bc2799580cf7105c992c2e49b00fea58687610 — task 14: Diagnose different-capability task references in routing diagnostic
 - a2d713c4ae5be8edd1b9f90d07d7c318f8297ec8 — task 15: Require change-wide root design for any effectively high-risk capability
 - 6d6e0213ebd9789941bec3b19f93a3caf5b31352 — task 16: Fingerprint the effective-risk design so root edits invalidate elevated approvals
+- a97a99c6f2729ff434c875ec884c540def91b234 — task 17: Reject malformed approval timestamps and scope digest syntax at read time
 
 ## TDD Evidence
 
@@ -36,6 +37,7 @@
 | 14 | 01bc2799580cf7105c992c2e49b00fea58687610 | src/ai_harness/modules/harness/tasks.py, .ai-harness/changes/improve-change-flow/tasks.json | tests/test_change_task_slice.py | unit | passed: 21/21 | written | passed | 2 cases | clean |
 | 15 | a2d713c4ae5be8edd1b9f90d07d7c318f8297ec8 | src/ai_harness/modules/harness/change.py, .ai-harness/changes/improve-change-flow/tasks.json | tests/test_change_approvals.py | unit | passed: 20/20 | written | passed | Single | clean |
 | 16 | 6d6e0213ebd9789941bec3b19f93a3caf5b31352 | src/ai_harness/modules/harness/change.py | tests/test_change_approvals.py | unit | passed: 22/22 | written | passed | 2 cases | clean |
+| 17 | a97a99c6f2729ff434c875ec884c540def91b234 | src/ai_harness/modules/harness/change_flow.py | tests/test_change_flow_internals.py | unit | passed: 35/35 | written | passed | 5 cases | clean |
 
 ## Remaining
 - none — all task records closed; final regression gate passes with 789/789 pytest, 29/29 e2e, ruff clean, pylint duplicate-code clean.
