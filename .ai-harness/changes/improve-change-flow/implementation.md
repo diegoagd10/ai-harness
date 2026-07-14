@@ -42,4 +42,4 @@
 | 17 | a97a99c6f2729ff434c875ec884c540def91b234 | src/ai_harness/modules/harness/change_flow.py | tests/test_change_flow_internals.py | unit | passed: 35/35 | written | passed | 5 cases | clean |
 
 ## Remaining
-- none — all task records closed; final regression gate passes with 789/789 pytest, 29/29 e2e, ruff clean, pylint duplicate-code clean.
+- none — all task records closed; final regression gate passes with 798/798 pytest, 29/29 e2e, ruff clean, pylint duplicate-code clean.
