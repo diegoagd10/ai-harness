@@ -113,9 +113,7 @@ def test_records_are_frozen_and_slotted_and_tuple_backed() -> None:
 
     selection = _make_selection()
     assert dataclasses.is_dataclass(selection)
-    assert type(selection).__slots__ == tuple(
-        field.name for field in dataclasses.fields(selection)
-    )
+    assert type(selection).__slots__ == tuple(field.name for field in dataclasses.fields(selection))
 
     with pytest.raises(dataclasses.FrozenInstanceError):
         selection.policy = "changed"  # type: ignore[misc]
@@ -289,14 +287,12 @@ def test_id_for_uses_record_specific_label() -> None:
     # Distinct labels per record kind — typing the same bytes under two
     # labels yields two distinct IDs.
     from ai_harness.modules.harness import receipts as receipts_codec
+
     bytes_payload = contract.encode(record)
     label_a = REVIEW_LENS_SELECTION_ID_LABEL
     label_b = REVIEW_TRANSACTION_ID_LABEL
     assert label_a != label_b
-    assert (
-        receipts_codec.typed_hash(label_a, bytes_payload)
-        != receipts_codec.typed_hash(label_b, bytes_payload)
-    )
+    assert receipts_codec.typed_hash(label_a, bytes_payload) != receipts_codec.typed_hash(label_b, bytes_payload)
 
 
 # ---------------------------------------------------------------------------
@@ -426,9 +422,9 @@ def test_module_does_not_import_persistence_or_lifecycle() -> None:
     joined = "\n".join(import_lines)
     for token in forbidden:
         # Match either a top-level import or any `from X import` reference.
-        assert (
-            f"import {token}" not in joined and f".{token} " not in joined and f".{token}\n" not in joined
-        ), f"forbidden import: {token}"
+        assert f"import {token}" not in joined and f".{token} " not in joined and f".{token}\n" not in joined, (
+            f"forbidden import: {token}"
+        )
 
 
 def test_module_constants_export_surface() -> None:
@@ -712,10 +708,7 @@ def test_select_lenses_is_repeatable_for_normal_risk() -> None:
     """Identical inputs always produce identical records, bytes, and IDs."""
 
     contract = ReviewContractV1()
-    records = [
-        contract.select_lenses(policy=LENS_POLICY_NAME, risk_level="normal")
-        for _ in range(3)
-    ]
+    records = [contract.select_lenses(policy=LENS_POLICY_NAME, risk_level="normal") for _ in range(3)]
     assert records[0] == records[1] == records[2]
 
     bytes_set = {contract.encode(record) for record in records}
@@ -728,10 +721,7 @@ def test_select_lenses_is_repeatable_for_high_risk() -> None:
     """Identical high-risk inputs always produce identical bytes and IDs."""
 
     contract = ReviewContractV1()
-    records = [
-        contract.select_lenses(policy=LENS_POLICY_NAME, risk_level="high")
-        for _ in range(3)
-    ]
+    records = [contract.select_lenses(policy=LENS_POLICY_NAME, risk_level="high") for _ in range(3)]
     assert records[0] == records[1] == records[2]
 
     bytes_set = {contract.encode(record) for record in records}
@@ -958,7 +948,12 @@ def _build_finding_fixture(
         loc_budget=20,
     )
     tx_id = contract.id_for(transaction)
-    return contract, selection, transaction, tx_id,  # type: ignore[return-value]
+    return (
+        contract,
+        selection,
+        transaction,
+        tx_id,
+    )  # type: ignore[return-value]
 
 
 def _make_finding(
@@ -1074,9 +1069,7 @@ _DESTINATIONS_FOR_MATRIX: tuple[str, ...] = ("open", "resolved", "accepted")
 
 @pytest.mark.parametrize("severity", _SEVERITIES_FOR_MATRIX)
 @pytest.mark.parametrize("destination", _DESTINATIONS_FOR_MATRIX)
-def test_state_machine_covers_all_severity_destination_pairs(
-    severity: str, destination: str
-) -> None:
+def test_state_machine_covers_all_severity_destination_pairs(severity: str, destination: str) -> None:
     """The closed state machine covers every severity/destination pair.
 
     Per severity the legal edges are: ``critical`` -> ``resolved`` only;
@@ -1107,18 +1100,14 @@ def test_state_machine_covers_all_severity_destination_pairs(
             )
         return
 
-    legal_destinations = (
-        {"resolved"} if severity == "critical" else {"resolved", "accepted"}
-    )
+    legal_destinations = {"resolved"} if severity == "critical" else {"resolved", "accepted"}
     correction: CorrectionFact | None = None
     transition = _make_transition(
         contract,
         tx_id,
         finding_id,
         to_status=destination,
-        correction_fact_id=(
-            CorrectionFactId("sha256:" + ("f" * 64)) if destination == "resolved" else None
-        ),
+        correction_fact_id=(CorrectionFactId("sha256:" + ("f" * 64)) if destination == "resolved" else None),
     )
     if destination in legal_destinations:
         if destination == "resolved":
@@ -1311,9 +1300,7 @@ def test_multiple_resolved_findings_bijection_succeeds() -> None:
         loc_budget=20,
     )
     tx_id = contract.id_for(transaction)
-    finding_a = _make_finding(
-        contract, tx_id, lens="correctness", severity="warning"
-    )
+    finding_a = _make_finding(contract, tx_id, lens="correctness", severity="warning")
     finding_b = _make_finding(
         contract,
         tx_id,
@@ -1361,9 +1348,7 @@ def test_partial_bijection_fails_when_listed_finding_unresolved() -> None:
         loc_budget=20,
     )
     tx_id = contract.id_for(transaction)
-    finding_a = _make_finding(
-        contract, tx_id, lens="correctness", severity="warning"
-    )
+    finding_a = _make_finding(contract, tx_id, lens="correctness", severity="warning")
     finding_b = _make_finding(
         contract,
         tx_id,
@@ -1413,9 +1398,7 @@ def test_partial_bijection_fails_when_extra_transition_unattributed() -> None:
         loc_budget=20,
     )
     tx_id = contract.id_for(transaction)
-    finding_a = _make_finding(
-        contract, tx_id, lens="correctness", severity="warning"
-    )
+    finding_a = _make_finding(contract, tx_id, lens="correctness", severity="warning")
     finding_b = _make_finding(
         contract,
         tx_id,
@@ -1499,9 +1482,7 @@ def test_exact_scope_path_correction_passes() -> None:
     contract, selection, transaction, tx_id = _build_finding_fixture()
     finding = _make_finding(contract, tx_id, severity="warning")
     finding_id = contract.id_for(finding)
-    correction = _correction_with_resolved(
-        contract, transaction, (finding_id,), changed_paths=("src",)
-    )
+    correction = _correction_with_resolved(contract, transaction, (finding_id,), changed_paths=("src",))
     transition = _make_transition(
         contract,
         tx_id,
@@ -2065,9 +2046,7 @@ def test_malformed_candidate_after_at_validation_fails() -> None:
         ("accepted", "resolved"),
     ],
 )
-def test_every_non_open_source_state_is_rejected(
-    from_status: str, to_status: str
-) -> None:
+def test_every_non_open_source_state_is_rejected(from_status: str, to_status: str) -> None:
     """`from_status` other than ``open`` is always rejected."""
 
     contract, selection, transaction, tx_id = _build_finding_fixture()
@@ -2079,9 +2058,7 @@ def test_every_non_open_source_state_is_rejected(
         finding_id,
         from_status=from_status,
         to_status=to_status,
-        correction_fact_id=(
-            CorrectionFactId("sha256:" + ("f" * 64)) if to_status == "resolved" else None
-        ),
+        correction_fact_id=(CorrectionFactId("sha256:" + ("f" * 64)) if to_status == "resolved" else None),
     )
     with pytest.raises(ReviewContractError) as exc:
         contract.validate_transaction(
@@ -2403,9 +2380,7 @@ def test_finding_paths_within_scope_pass() -> None:
     """Every path equal to or descending from the scope passes."""
 
     contract, selection, transaction, tx_id = _build_finding_fixture()
-    finding = _make_finding(
-        contract, tx_id, paths=("src", "src/sub", "src/sub/deep/file.py")
-    )
+    finding = _make_finding(contract, tx_id, paths=("src", "src/sub", "src/sub/deep/file.py"))
     contract.validate_transaction(
         transaction,
         lens_selection=selection,
@@ -2578,10 +2553,7 @@ def test_select_lenses_returns_stable_record_for_each_risk(risk_level: str) -> N
     """Repeated selection calls produce identical records for each risk."""
 
     contract = ReviewContractV1()
-    records = [
-        contract.select_lenses(policy=LENS_POLICY_NAME, risk_level=risk_level)
-        for _ in range(5)
-    ]
+    records = [contract.select_lenses(policy=LENS_POLICY_NAME, risk_level=risk_level) for _ in range(5)]
     assert len({r.required_lenses for r in records}) == 1
     assert len({contract.encode(r) for r in records}) == 1
     assert len({contract.id_for(r).value for r in records}) == 1
@@ -2592,12 +2564,8 @@ def test_select_lenses_bytes_are_byte_identical(risk_level: str) -> None:
     """Selection bytes are byte-identical across calls."""
 
     contract = ReviewContractV1()
-    canonical_a = contract.encode(
-        contract.select_lenses(policy=LENS_POLICY_NAME, risk_level=risk_level)
-    )
-    canonical_b = contract.encode(
-        contract.select_lenses(policy=LENS_POLICY_NAME, risk_level=risk_level)
-    )
+    canonical_a = contract.encode(contract.select_lenses(policy=LENS_POLICY_NAME, risk_level=risk_level))
+    canonical_b = contract.encode(contract.select_lenses(policy=LENS_POLICY_NAME, risk_level=risk_level))
     assert canonical_a == canonical_b
 
 
@@ -2960,9 +2928,7 @@ def test_codec_decodes_each_record_kind_exactly() -> None:
         (CorrectionFact, "rogue", "value"),
     ],
 )
-def test_codec_rejects_additional_field_any_kind(
-    record_type: type, extra_field: str, field_value: object
-) -> None:
+def test_codec_rejects_additional_field_any_kind(record_type: type, extra_field: str, field_value: object) -> None:
     """Each record type rejects payloads with an additional field."""
 
     contract = ReviewContractV1()
@@ -3021,9 +2987,7 @@ def test_lens_selection_rejects_missing_field(missing_field: str) -> None:
         ([1], CODE_SCHEMA_INVALID),
     ],
 )
-def test_schema_version_rejects_non_integer_one(
-    wrong_value: object, expected_code: str
-) -> None:
+def test_schema_version_rejects_non_integer_one(wrong_value: object, expected_code: str) -> None:
     """Any non-integer-1 schema_version is rejected with the documented code."""
 
     contract = ReviewContractV1()
