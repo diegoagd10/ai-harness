@@ -198,3 +198,96 @@ def test_bundled_evidence_round_trip(store: ReceiptObjectStore) -> None:
 
     empty = store.read_run_evidence(object_id, "0000.stderr")
     assert empty == b""
+
+
+# ---------------------------------------------------------------------------
+# Review-kind closure regression coverage
+#
+# The review storage Change introduces a separate package-internal bundle
+# helper for review kinds. The public ``ReceiptObjectStore`` dispatch must
+# stay closed to its existing run and receipt kinds so that review kinds
+# cannot be published through the public receipt API.
+# ---------------------------------------------------------------------------
+
+
+_REVIEW_KINDS: tuple[str, ...] = (
+    "review-lens-selections",
+    "review-transactions",
+    "review-findings",
+    "review-finding-transitions",
+    "review-correction-facts",
+    "review-transaction-roots",
+)
+
+
+@pytest.mark.parametrize("review_kind", _REVIEW_KINDS)
+def test_publish_object_rejects_review_kind(store: ReceiptObjectStore, review_kind: str) -> None:
+    """The public receipt API rejects every closed review kind."""
+
+    with pytest.raises(ReceiptStoreError):
+        store.publish_object(review_kind, {"value": 1})
+
+
+def test_read_object_rejects_review_kind(store: ReceiptObjectStore) -> None:
+    """The public receipt API rejects reading any review-kind object."""
+
+    with pytest.raises(ReceiptStoreError):
+        store.read_object("review-findings", "sha256:" + "0" * 64)
+
+
+def test_publish_run_bundle_is_closed_to_review_kinds(store: ReceiptObjectStore) -> None:
+    """The run-bundle operation produces runs-kind bundles only and never a review kind.
+
+    Combined with the parametrized rejection test above, this pins the
+    public dispatch surface as closed for review kinds.
+    """
+
+    run_id = store.publish_run_bundle(
+        run_payload={"schema_name": "ai-harness.gate-run", "schema_version": 1, "value": 1},
+        evidence={"0000.stdout": (b"hello\n", "sha256:placeholder")},
+    )
+    digest = run_id.removeprefix("sha256:")
+    runs_bundle = store.bundle_path("runs", run_id)
+    assert runs_bundle.is_dir()
+    assert not (store.receipts_dir / "review-findings" / "sha256" / digest).exists()
+
+
+def test_public_api_signature_has_no_label_parameter() -> None:
+    """The receipt public API cannot accept caller-selected hash labels."""
+
+    import inspect
+
+    publish_signature = inspect.signature(ReceiptObjectStore.publish_object)
+    assert "label" not in publish_signature.parameters
+    read_signature = inspect.signature(ReceiptObjectStore.read_object)
+    assert "label" not in read_signature.parameters
+
+
+def test_evidence_round_trip_under_real_filesystem(tmp_path: Path) -> None:
+    """Evidence bytes round-trip through stable reads on a real filesystem."""
+
+    store = ReceiptObjectStore(tmp_path / ".receipts")
+    evidence_bytes = b"evidence stdout content\n" * 100
+    object_id = store.publish_run_bundle(
+        run_payload={"schema_name": "ai-harness.gate-run", "schema_version": 1, "value": 7},
+        evidence={"0000.stdout": (evidence_bytes, "sha256:placeholder")},
+    )
+
+    raw = store.read_run_payload(object_id)
+    assert raw["value"] == 7
+
+    observed = store.read_run_evidence(object_id, "0000.stdout")
+    assert observed == evidence_bytes
+
+
+def test_run_bundle_idempotent_for_unchanged_evidence(tmp_path: Path) -> None:
+    """Publishing the same run payload and evidence twice returns the same ID."""
+
+    store = ReceiptObjectStore(tmp_path / ".receipts")
+    payload = {"schema_name": "ai-harness.gate-run", "schema_version": 1, "value": 1}
+    evidence = {"0000.stdout": (b"hello\n", "sha256:placeholder")}
+
+    first = store.publish_run_bundle(run_payload=payload, evidence=evidence)
+    second = store.publish_run_bundle(run_payload=payload, evidence=evidence)
+
+    assert first == second

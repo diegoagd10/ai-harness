@@ -47,8 +47,11 @@ import subprocess
 import time
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
+from dataclasses import field as _dataclass_field
+from enum import Enum
 from pathlib import Path
-from typing import Any, Final, Literal
+from types import MappingProxyType
+from typing import Any, ClassVar, Final, Literal
 
 __all__ = [
     "CANONICAL_KEYS",
@@ -1685,8 +1688,307 @@ def _path_exists(path: Path) -> bool:
 
 
 def _validate_kind(kind: str) -> None:
+    """Reject kinds outside the public receipt set; review kinds are never accepted here."""
     if kind not in {RECEIPT_OBJECT_KIND_RUNS, RECEIPT_OBJECT_KIND_RECEIPTS}:
         raise ReceiptStoreError(f"unknown object kind: {kind!r}", code="storage.failed")
+
+
+# ===========================================================================
+# Package-internal immutable bundle primitive
+#
+# The primitive is shared by the public ``ReceiptObjectStore`` and by the new
+# review bundle helper. It owns durable sibling-rename publication and
+# strict stable reads for one content-addressed bundle under
+# ``<root>/<kind>/sha256/<digest>/object.json``. It performs no role or label
+# authorization; callers must validate input.
+# ===========================================================================
+
+
+@dataclass(frozen=True, slots=True)
+class _ImmutableBundleStore:
+    """Atomic immutable bundle publication/strict-read primitive.
+
+    The primitive is package-internal; only the public
+    :class:`ReceiptObjectStore` and the new review bundle helper call into
+    it. It deliberately exposes nothing about which kinds or labels are
+    legal — kind and label authority are encoded at the call site that
+    owns the closed registry.
+    """
+
+    receipts_dir: Path
+
+    def bundle_path(self, kind: str, object_id: str) -> Path:
+        """Return the bundle directory for one object under *kind* and *object_id*."""
+
+        validate_typed_id(object_id)
+        return self._kind_dir(kind) / "sha256" / object_id.removeprefix("sha256:")
+
+    def publish(
+        self,
+        *,
+        kind: str,
+        label: str,
+        canonical_bytes: bytes,
+        extra_children: Mapping[str, bytes] | None = None,
+    ) -> str:
+        """Atomically publish *canonical_bytes* and return its typed identifier.
+
+        The primitive writes ``object.json`` through a sibling temporary
+        directory and finalizes with an atomic rename and parent-directory
+        fsync. *extra_children* allows bundled callers (for example the run
+        store with its ``evidence/`` files) to write additional files under
+        the temporary directory before the rename.
+        """
+
+        object_id = typed_hash(label, canonical_bytes)
+        bundle = self.bundle_path(kind, object_id)
+        anchor = _storage_anchor(self.receipts_dir)
+        _ensure_directory(bundle.parent, anchor=anchor)
+
+        if _path_exists(bundle):
+            existing = self.read_object_bytes(
+                kind=kind,
+                label=label,
+                object_id=object_id,
+                extra_children=extra_children,
+            )
+            if existing != canonical_bytes:
+                raise ReceiptStoreError(
+                    f"object {object_id} already exists with different bytes",
+                    code="receipt.invalid",
+                )
+            return object_id
+
+        with _temporary_directory(bundle.parent) as tmp_dir:
+            _write_durable(tmp_dir / RECEIPT_OBJECT_FILENAME, canonical_bytes)
+            if extra_children:
+                for relative, data in extra_children.items():
+                    target = tmp_dir / relative
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    _write_durable(target, data)
+            _fsync_directory(tmp_dir)
+            try:
+                os.rename(tmp_dir, bundle)
+            except FileExistsError as exc:
+                raise ReceiptStoreError(
+                    f"object {object_id} appeared during publication",
+                    code="receipt.invalid",
+                ) from exc
+            _fsync_directory(bundle.parent)
+        return object_id
+
+    def read_object_bytes(
+        self,
+        *,
+        kind: str,
+        label: str,
+        object_id: str,
+        extra_children: Iterable[str] | None = None,
+    ) -> bytes:
+        """Return the canonical bytes for *object_id* with strict topology checks."""
+
+        _, data = self.read_object_file(
+            kind=kind,
+            label=label,
+            object_id=object_id,
+            extra_children=extra_children,
+        )
+        return data
+
+    def read_object_file(
+        self,
+        *,
+        kind: str,
+        label: str,
+        object_id: str,
+        extra_children: Iterable[str] | None = None,
+    ) -> tuple[Path, bytes]:
+        """Return ``(bundle_path, bytes)`` after strict topology verification."""
+
+        validate_typed_id(object_id)
+        anchor = _storage_anchor(self.receipts_dir)
+        bundle = self.bundle_path(kind, object_id)
+        _assert_no_symlink_components(bundle, anchor=anchor)
+
+        try:
+            bundle_stat = os.lstat(bundle)
+        except FileNotFoundError as exc:
+            raise ReceiptStoreError(
+                f"object bundle not found: {bundle}",
+                code="receipt.missing",
+            ) from exc
+        except OSError as exc:
+            raise ReceiptStoreError(
+                f"could not stat object bundle: {exc}",
+                code="receipt.invalid",
+            ) from exc
+
+        if stat.S_ISLNK(bundle_stat.st_mode) or not stat.S_ISDIR(bundle_stat.st_mode):
+            raise ReceiptStoreError(
+                "object bundle must be a real directory",
+                code="receipt.invalid",
+            )
+
+        allowed = set(extra_children or ()) | {RECEIPT_OBJECT_FILENAME}
+        try:
+            entries = sorted(os.scandir(bundle), key=lambda entry: entry.name)
+        except OSError as exc:
+            raise ReceiptStoreError(
+                f"could not enumerate object bundle: {exc}",
+                code="receipt.invalid",
+            ) from exc
+        names = [entry.name for entry in entries]
+        if any(name not in allowed for name in names):
+            raise ReceiptStoreError(
+                f"object bundle has unexpected contents: {names}",
+                code="receipt.invalid",
+            )
+
+        object_path = bundle / RECEIPT_OBJECT_FILENAME
+        data = _stable_regular_read(
+            object_path,
+            anchor=anchor,
+            description="object file",
+            code="receipt.invalid",
+        )
+        expected = typed_hash(label, data)
+        if expected != object_id:
+            raise ReceiptStoreError(
+                f"object bytes do not match typed id: {object_id} != {expected}",
+                code="receipt.invalid",
+            )
+        return object_path, data
+
+    # ---- internal helpers ----
+
+    def _kind_dir(self, kind: str) -> Path:
+        return self.receipts_dir / kind
+
+
+# ===========================================================================
+# Package-internal review bundle store
+#
+# The review bundle store owns the closed six-role registry of
+# ``(kind, typed-hash label)`` pairs used by ``ReviewTransactionStore``.
+# It exposes only typed canonical bytes / typed wire IDs through its API;
+# it never accepts a raw kind, label, destination path, or replacement
+# flag. Publication and readback go through the shared immutable-bundle
+# primitive, so atomic rename, fsync, stable reads, symlink containment,
+# topology checks, and digest verification are identical to the public
+# ``ReceiptObjectStore`` algorithm.
+# ===========================================================================
+
+
+class _ReviewBundleRole(Enum):
+    """Closed storage-role identifiers for review persistence."""
+
+    LENS_SELECTION = "lens_selection"
+    REVIEW_TRANSACTION = "review_transaction"
+    FINDING = "finding"
+    FINDING_TRANSITION = "finding_transition"
+    CORRECTION_FACT = "correction_fact"
+    TRANSACTION_ROOT = "transaction_root"
+
+
+@dataclass(frozen=True, slots=True)
+class _ReviewBundleStore:
+    """Closed-registry immutable bundle helper for review kinds.
+
+    The class is package-internal; the public seam is
+    ``ReviewTransactionStore``. The closed registry is the only entry
+    point through which a review kind can be published or read, and the
+    registry's contents are fixed by the v1 contract — neither kind nor
+    label are caller-selectable.
+    """
+
+    receipts_dir: Path
+    bundles: _ImmutableBundleStore = _dataclass_field(init=False, repr=False, compare=False)
+    _REGISTRY: ClassVar[Mapping[_ReviewBundleRole, tuple[str, str]]] = MappingProxyType(
+        {
+            _ReviewBundleRole.LENS_SELECTION: (
+                "review-lens-selections",
+                "ai-harness/review-lens-selection/v1",
+            ),
+            _ReviewBundleRole.REVIEW_TRANSACTION: (
+                "review-transactions",
+                "ai-harness/review-transaction/v1",
+            ),
+            _ReviewBundleRole.FINDING: (
+                "review-findings",
+                "ai-harness/review-finding/v1",
+            ),
+            _ReviewBundleRole.FINDING_TRANSITION: (
+                "review-finding-transitions",
+                "ai-harness/review-finding-transition/v1",
+            ),
+            _ReviewBundleRole.CORRECTION_FACT: (
+                "review-correction-facts",
+                "ai-harness/review-correction-fact/v1",
+            ),
+            _ReviewBundleRole.TRANSACTION_ROOT: (
+                "review-transaction-roots",
+                "ai-harness/review-transaction-root/v1",
+            ),
+        }
+    )
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "bundles", _ImmutableBundleStore(self.receipts_dir))
+
+    def publish(self, role: _ReviewBundleRole, canonical_bytes: bytes) -> str:
+        """Atomically publish *canonical_bytes* under the closed *role* registry.
+
+        Returns the typed identifier. Raises :class:`ReceiptStoreError` if
+        *role* is unknown, *canonical_bytes* is not bytes, or a conflicting
+        bundle already exists at the computed path.
+        """
+
+        kind, label = self._resolve_role(role)
+        if not isinstance(canonical_bytes, (bytes, bytearray)):
+            raise ReceiptStoreError(
+                "review bundle publish payload must be bytes",
+                code="review-storage.invalid",
+            )
+        return self.bundles.publish(kind=kind, label=label, canonical_bytes=bytes(canonical_bytes))
+
+    def read(self, role: _ReviewBundleRole, object_id: str) -> bytes:
+        """Return the canonical bytes for the object at *role* under *object_id*."""
+
+        kind, label = self._resolve_role(role)
+        return self.bundles.read_object_bytes(
+            kind=kind,
+            label=label,
+            object_id=object_id,
+        )
+
+    def bundle_path(self, role: _ReviewBundleRole, object_id: str) -> Path:
+        """Return the bundle directory for the given closed *role* and *object_id*."""
+
+        kind, _ = self._resolve_role(role)
+        return self.bundles.bundle_path(kind, object_id)
+
+    @staticmethod
+    def _resolve_role(role: _ReviewBundleRole) -> tuple[str, str]:
+        """Return the ``(kind, label)`` pair for a closed *role*.
+
+        Raises :class:`ReceiptStoreError` for any role outside the
+        closed six-role registry. ``_ReviewBundleRole`` is an
+        :class:`Enum` whose membership is fixed, so this comparison is
+        authoritative; the explicit error path exists for robustness
+        against future subclassing or accidental value substitution.
+        """
+
+        if not isinstance(role, _ReviewBundleRole):
+            raise ReceiptStoreError(
+                f"unknown review bundle role: {role!r}",
+                code="review-storage.invalid",
+            )
+        if role not in _ReviewBundleStore._REGISTRY:
+            raise ReceiptStoreError(
+                f"review bundle role not registered: {role!r}",
+                code="review-storage.invalid",
+            )
+        return _ReviewBundleStore._REGISTRY[role]
 
 
 def _validate_evidence_relative(relative: str) -> None:
