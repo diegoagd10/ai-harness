@@ -7,6 +7,7 @@
 - a701d26db6ce70347998a39dcfeb68f94183493b — task 4: Verify required lens completion and graph bindings
 - ec2e00c0e3034c5f5cc8b3a46ae5564beb030d2c — task 5: Test explicit required-lens completion
 - 5c4f9d613cdaa6440b3acc141bfad3c0e13bac70 — task 6: Enforce verified graph and candidate bindings
+- <pending> — task 7: Test verified graph and candidate bindings
 
 ## TDD Evidence
 
@@ -18,6 +19,7 @@
 | 4 | a701d26 | src/ai_harness/modules/harness/review_transaction_checkpoints.py | tests/test_review_transaction_checkpoints_verifier.py | integration | passed: 509/509 | written | passed | 20 cases | clean |
 | 5 | ec2e00c | N/A: new files | tests/test_review_transaction_checkpoints_completion.py | integration | passed: 519/519 | N/A: new files | passed | 10 cases | clean |
 | 6 | 5c4f9d6 | N/A: new files | tests/test_review_transaction_checkpoints_binding.py | integration | passed: 528/528 | N/A: new files | passed | 9 cases | clean |
+| 7 | <pending> | N/A: new files | tests/test_review_transaction_checkpoints_substitution.py | integration | passed: 540/540 | N/A: new files | passed | 12 cases | clean |
 
 ## Remaining
-- 7, 8, 9, 10, 11, 12
+- 8, 9, 10, 11, 12
