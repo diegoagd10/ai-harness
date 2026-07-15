@@ -427,6 +427,63 @@ def test_module_does_not_import_persistence_or_lifecycle() -> None:
         )
 
 
+def test_module_receipts_imports_are_limited_to_three_codec_primitives() -> None:
+    """The contract seam imports only the three approved receipts primitives.
+
+    The PRD and design require :mod:`ai_harness.modules.harness.review_transactions`
+    to depend on :mod:`ai_harness.modules.harness.receipts` only through
+    :func:`encode_canonical`, :func:`typed_hash`, and
+    :func:`validate_typed_id`. Receipt classes (notably
+    :class:`receipts.CodecError`) must never be named in the source —
+    the contract catches the broader :class:`RuntimeError` class and
+    translates every receipt failure into :class:`ReviewContractError`.
+    This regression reads the module source, splits it into import and
+    body lines, and rejects any reference that escapes the approved
+    boundary. The check is intentionally narrow: it looks for ``_receipts``
+    references that name anything other than the three approved
+    primitives, including :class:`CodecError` and other internal helpers.
+    """
+
+    source_path = rt.__file__  # type: ignore[attr-defined]
+    assert source_path is not None
+    lines = open(source_path, encoding="utf-8").read().splitlines()
+    # Look at every line, not just `import` lines — the forbidden access
+    # pattern is a dotted attribute access like ``_receipts.CodecError``
+    # anywhere in the module body.
+    body = "\n".join(lines)
+    # The approved primitive names — they are the only ``_receipts.<x>``
+    # accesses this module is allowed to perform.
+    approved = {"encode_canonical", "typed_hash", "validate_typed_id"}
+    forbidden: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if "_receipts." not in line:
+            continue
+        # The import line itself binds the module alias; downstream code
+        # uses ``_receipts.<primitive>``. Anything else is a violation.
+        if stripped.startswith("from "):
+            continue
+        suffix = line.split("_receipts.", 1)[1]
+        # Take the first dotted identifier — drop trailing operators.
+        head = suffix.lstrip("(").split("(", 1)[0]
+        head = head.split(",", 1)[0]
+        head = head.split(":", 1)[0]
+        head = head.split("=", 1)[0]
+        head = head.split(".", 1)[0]
+        head = head.strip()
+        if head not in approved:
+            forbidden.append(f"{stripped!r} -> _receipts.{head}")
+    assert not forbidden, (
+        "review_transactions.py must only import the three approved receipts "
+        "codec primitives; forbidden references found: " + repr(forbidden)
+    )
+    # Defensive: the alias name itself must be present (we keep the local
+    # name ``_receipts``) but every attribute access must be approved.
+    assert "_receipts.encode_canonical" in body
+    assert "_receipts.typed_hash" in body
+    assert "_receipts.validate_typed_id" in body
+
+
 def test_module_constants_export_surface() -> None:
     """Public surface matches the design's stated exports."""
 

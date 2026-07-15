@@ -75,8 +75,11 @@ from typing import Any, Final, Literal, TypeVar, overload
 from ai_harness.modules.harness import receipts as _receipts
 
 # Re-exported for callers and tests; the contract uses only these three
-# public primitives and translates their :class:`CodecError` failures
-# into :class:`ReviewContractError`.
+# public primitives. The receipts primitive failures are caught as the
+# broader :class:`RuntimeError` class (which is the declared base of
+# the receipts codec's failure type) and translated into
+# :class:`ReviewContractError` so no receipt-specific class crosses
+# this seam.
 _encode_canonical = _receipts.encode_canonical
 _typed_hash = _receipts.typed_hash
 _validate_typed_id = _receipts.validate_typed_id
@@ -169,11 +172,13 @@ class ReviewContractError(RuntimeError):
 
 
 def _raise_codec_error(message: str, *, context: Mapping[str, str] | None = None) -> None:
-    """Translate a :class:`CodecError` (or other failure) into the seam error.
+    """Translate a receipt primitive failure into the seam error.
 
-    Imported only at the public boundary; receipt-specific code paths
-    raise :class:`CodecError` and we reframe them without re-exporting
-    the original exception class.
+    The contract catches the broader :class:`RuntimeError` class at each
+    receipt primitive call site (the receipts module declares its
+    failure type as a :class:`RuntimeError` subclass). Receipt-specific
+    exception classes never cross this seam; only
+    :class:`ReviewContractError` is re-exported to callers.
     """
 
     raise ReviewContractError(message, code=CODE_SCHEMA_INVALID, context=context)
@@ -1149,7 +1154,7 @@ def _decode_canonical_object(data: bytes, *, description: str) -> dict[str, Any]
     # Re-encode and require byte-for-byte equality.
     try:
         re_encoded = _encode_canonical(decoded)
-    except _receipts.CodecError as exc:
+    except RuntimeError as exc:
         raise ReviewContractError(
             f"{description} is not canonical JSON: {exc}",
             code=CODE_SCHEMA_INVALID,
@@ -1236,7 +1241,7 @@ def _require_candidate_id(value: Any, *, field: str) -> str:
         )
     try:
         _validate_typed_id(value)
-    except _receipts.CodecError as exc:
+    except RuntimeError as exc:
         raise ReviewContractError(
             f"{field} is not a canonical typed id",
             code=CODE_ID_INVALID,
@@ -1255,7 +1260,7 @@ def _decode_typed_id_from_payload(value: Any, *, field: str) -> str:
         )
     try:
         _validate_typed_id(value)
-    except _receipts.CodecError as exc:
+    except RuntimeError as exc:
         raise ReviewContractError(
             f"{field} is not a canonical typed id",
             code=CODE_ID_INVALID,
@@ -1521,7 +1526,7 @@ def _decode_finding_transition_payload(payload: Mapping[str, Any]) -> FindingTra
     elif isinstance(correction_value, str):
         try:
             _validate_typed_id(correction_value)
-        except _receipts.CodecError as exc:
+        except RuntimeError as exc:
             raise ReviewContractError(
                 "correction_fact_id is not a canonical typed id",
                 code=CODE_ID_INVALID,
@@ -1893,7 +1898,7 @@ class ReviewContractV1:
         payload = self.to_payload(record)
         try:
             return _encode_canonical(payload)
-        except _receipts.CodecError as exc:
+        except RuntimeError as exc:
             raise ReviewContractError(
                 f"failed to canonicalize record: {exc}",
                 code=CODE_SCHEMA_INVALID,
@@ -1921,7 +1926,7 @@ class ReviewContractV1:
         bytes_ = self.encode(record)
         try:
             wire = _typed_hash(spec.hash_label, bytes_)
-        except _receipts.CodecError as exc:
+        except RuntimeError as exc:
             raise ReviewContractError(
                 f"failed to hash record: {exc}",
                 code=CODE_SCHEMA_INVALID,
