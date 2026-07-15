@@ -47,15 +47,14 @@ are the responsibility of :class:`ReviewTransactionCheckpointStore`
 
 from __future__ import annotations
 
-import json
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from dataclasses import field as _dataclass_field
-from json import JSONDecodeError
 from pathlib import Path
 from typing import Any, Final, Literal, TypeVar, overload
 
+from ai_harness.modules.harness import _review_contract_codec_shared as _codec
 from ai_harness.modules.harness import receipts as _receipts
 from ai_harness.modules.harness.receipts import (
     ReceiptStoreError,
@@ -103,8 +102,9 @@ CHECKPOINT_SCHEMA_VERSION: Final[int] = 1
 CHECKPOINT_LABEL: Final[str] = "ai-harness/review-transaction-checkpoint/v1"
 EVIDENCE_LABEL: Final[str] = "ai-harness/review-correction-evidence/v1"
 
-# Exact wire-format regex used for typed id wrappers and payload decoding.
-WIRE_ID_RE: Final[re.Pattern[str]] = re.compile(r"^sha256:[0-9a-f]{64}$")
+# Exact wire-format regex shared with every other review contract; re-exported
+# under the seam name so external imports keep working unchanged.
+WIRE_ID_RE: Final[re.Pattern[str]] = _codec.WIRE_ID_RE
 
 
 # ---------------------------------------------------------------------------
@@ -158,12 +158,7 @@ class ReviewTransactionCheckpointStorageError(RuntimeError):
     ) -> None:
         if code not in ALL_STORAGE_CODES:
             raise ValueError(f"unknown checkpoint storage code: {code!r}")
-        super().__init__(message)
-        self.code = code
-        self.message = message
-        self.context = tuple(sorted((str(k), str(v)) for k, v in (context or {}).items()))
-        if cause is not None:
-            self.__cause__ = cause
+        _codec.init_review_storage_error(self, message, code=code, context=context, cause=cause)
 
 
 # ---------------------------------------------------------------------------
@@ -237,12 +232,12 @@ def _raise_codec_error(message: str, *, context: Mapping[str, str] | None = None
 def _check_wire_id(value: Any, *, description: str) -> None:
     """Validate ``value`` is the exact canonical wire shape."""
 
-    if not isinstance(value, str) or not WIRE_ID_RE.match(value):
-        raise ReviewCheckpointContractError(
-            f"{description} must use canonical typed id sha256:<64 lowercase hex>",
-            code=CODE_ID_INVALID,
-            context={"description": description},
-        )
+    _codec.check_wire_id(
+        value,
+        description=description,
+        error_factory=ReviewCheckpointContractError,
+        code_invalid=CODE_ID_INVALID,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -271,25 +266,25 @@ class ReviewCorrectionEvidenceId:
 
 
 def _require_checkpoint_id(value: Any, *, field: str) -> ReviewTransactionCheckpointId:
-    if not isinstance(value, ReviewTransactionCheckpointId) or type(value) is not ReviewTransactionCheckpointId:
-        raise ReviewCheckpointContractError(
-            f"{field} must be a ReviewTransactionCheckpointId",
-            code=CODE_ID_INVALID,
-            context={"field": field},
-        )
-    _check_wire_id(value.value, description=f"{field}.value")
-    return value
+    return _codec.require_typed_id(
+        value,
+        record_class=ReviewTransactionCheckpointId,
+        field=field,
+        error_factory=ReviewCheckpointContractError,
+        code_invalid=CODE_ID_INVALID,
+        check_wire_id_fn=_check_wire_id,
+    )
 
 
 def _require_evidence_id(value: Any, *, field: str) -> ReviewCorrectionEvidenceId:
-    if not isinstance(value, ReviewCorrectionEvidenceId) or type(value) is not ReviewCorrectionEvidenceId:
-        raise ReviewCheckpointContractError(
-            f"{field} must be a ReviewCorrectionEvidenceId",
-            code=CODE_ID_INVALID,
-            context={"field": field},
-        )
-    _check_wire_id(value.value, description=f"{field}.value")
-    return value
+    return _codec.require_typed_id(
+        value,
+        record_class=ReviewCorrectionEvidenceId,
+        field=field,
+        error_factory=ReviewCheckpointContractError,
+        code_invalid=CODE_ID_INVALID,
+        check_wire_id_fn=_check_wire_id,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -543,7 +538,7 @@ CheckpointRecord = ReviewTransactionCheckpoint | ReviewCorrectionEvidence
 
 
 def _is_bool(value: Any) -> bool:
-    return isinstance(value, bool)
+    return _codec.is_bool(value)
 
 
 def _require_strict_string(value: Any, *, field: str, allow_empty: bool = False) -> str:
@@ -567,21 +562,13 @@ def _require_strict_string(value: Any, *, field: str, allow_empty: bool = False)
 def _decode_typed_id_from_payload(value: Any, *, field: str) -> str:
     """Return the canonical wire id from a payload cell or raise."""
 
-    if not isinstance(value, str):
-        raise ReviewCheckpointContractError(
-            f"{field} must be a canonical typed id string",
-            code=CODE_ID_INVALID,
-            context={"field": field},
-        )
-    try:
-        _validate_typed_id(value)
-    except RuntimeError as exc:
-        raise ReviewCheckpointContractError(
-            f"{field} is not a canonical typed id",
-            code=CODE_ID_INVALID,
-            context={"field": field},
-        ) from exc
-    return value
+    return _codec.decode_typed_id_from_payload(
+        value,
+        field=field,
+        validate_typed_id=_validate_typed_id,
+        error_factory=ReviewCheckpointContractError,
+        code_invalid=CODE_ID_INVALID,
+    )
 
 
 def _decode_finding_id_payload(value: Any, *, field: str) -> FindingId:
@@ -596,80 +583,25 @@ def _decode_finding_id_payload(value: Any, *, field: str) -> FindingId:
 def _decode_canonical_object(data: bytes, *, description: str) -> dict[str, Any]:
     """Decode canonical JSON bytes into a JSON object with duplicate-key rejection."""
 
-    def _pairs(pairs: Sequence[tuple[str, Any]]) -> dict[str, Any]:
-        result: dict[str, Any] = {}
-        for key, value in pairs:
-            if key in result:
-                raise ReviewCheckpointContractError(
-                    f"{description} has duplicate JSON key: {key}",
-                    code=CODE_SCHEMA_INVALID,
-                    context={"description": description, "key": key},
-                )
-            result[key] = value
-        return result
-
-    # Reject BOM.
-    if data.startswith(b"\xef\xbb\xbf"):
-        raise ReviewCheckpointContractError(
-            f"{description} rejects UTF-8 BOM",
-            code=CODE_SCHEMA_INVALID,
-            context={"description": description},
-        )
-    try:
-        decoded = json.loads(data.decode("utf-8"), object_pairs_hook=_pairs)
-    except UnicodeDecodeError as exc:
-        raise ReviewCheckpointContractError(
-            f"{description} is not valid UTF-8",
-            code=CODE_SCHEMA_INVALID,
-            context={"description": description},
-        ) from exc
-    except JSONDecodeError as exc:
-        raise ReviewCheckpointContractError(
-            f"{description} is not valid JSON",
-            code=CODE_SCHEMA_INVALID,
-            context={"description": description},
-        ) from exc
-    if not isinstance(decoded, dict):
-        raise ReviewCheckpointContractError(
-            f"{description} must be a JSON object",
-            code=CODE_SCHEMA_INVALID,
-            context={"description": description},
-        )
-    # Re-encode and require byte-for-byte equality.
-    try:
-        re_encoded = _encode_canonical(decoded)
-    except RuntimeError as exc:
-        raise ReviewCheckpointContractError(
-            f"{description} is not canonical JSON: {exc}",
-            code=CODE_SCHEMA_INVALID,
-            context={"description": description},
-        ) from exc
-    if re_encoded != data:
-        raise ReviewCheckpointContractError(
-            f"{description} is not in canonical JSON form",
-            code=CODE_SCHEMA_INVALID,
-            context={"description": description},
-        )
-    return decoded
+    return _codec.decode_canonical_object(
+        data,
+        description=description,
+        encode_canonical=_encode_canonical,
+        error_factory=ReviewCheckpointContractError,
+        code_invalid=CODE_SCHEMA_INVALID,
+    )
 
 
 def _expect_keys(payload: Mapping[str, Any], *, expected_keys: frozenset[str], description: str) -> None:
     """Reject payloads with missing or unexpected keys."""
 
-    actual_keys = frozenset(payload.keys())
-    if actual_keys != expected_keys:
-        missing = sorted(expected_keys - actual_keys)
-        unexpected = sorted(actual_keys - expected_keys)
-        bits: list[str] = []
-        if missing:
-            bits.append(f"missing={missing}")
-        if unexpected:
-            bits.append(f"unexpected={unexpected}")
-        raise ReviewCheckpointContractError(
-            f"{description} has unexpected shape: {', '.join(bits)}",
-            code=CODE_SCHEMA_INVALID,
-            context={"description": description},
-        )
+    _codec.expect_keys(
+        payload,
+        expected_keys=expected_keys,
+        description=description,
+        error_factory=ReviewCheckpointContractError,
+        code_invalid=CODE_SCHEMA_INVALID,
+    )
 
 
 def _require_schema_identity(
@@ -680,39 +612,15 @@ def _require_schema_identity(
 ) -> int:
     """Validate schema name and integer version; returns the validated version."""
 
-    actual_name = payload.get("schema_name")
-    if actual_name is None:
-        raise ReviewCheckpointContractError(
-            f"{description} is missing schema_name",
-            code=CODE_VERSION_UNSUPPORTED,
-            context={"description": description},
-        )
-    if actual_name != expected_name:
-        if isinstance(actual_name, str):
-            raise ReviewCheckpointContractError(
-                f"{description} has unsupported schema name: {actual_name!r}",
-                code=CODE_VERSION_UNSUPPORTED,
-                context={"description": description, "schema_name": actual_name},
-            )
-        raise ReviewCheckpointContractError(
-            f"{description} schema_name must be a string",
-            code=CODE_SCHEMA_INVALID,
-            context={"description": description},
-        )
-    version = payload.get("schema_version")
-    if _is_bool(version) or not isinstance(version, int):
-        raise ReviewCheckpointContractError(
-            f"{description} schema_version must be integer 1",
-            code=CODE_SCHEMA_INVALID,
-            context={"description": description},
-        )
-    if version != CHECKPOINT_SCHEMA_VERSION:
-        raise ReviewCheckpointContractError(
-            f"{description} has unsupported schema version: {version!r}",
-            code=CODE_VERSION_UNSUPPORTED,
-            context={"description": description, "schema_version": str(version)},
-        )
-    return version
+    return _codec.require_schema_identity(
+        payload,
+        expected_name=expected_name,
+        description=description,
+        expected_version=CHECKPOINT_SCHEMA_VERSION,
+        error_factory=ReviewCheckpointContractError,
+        code_invalid=CODE_SCHEMA_INVALID,
+        code_version=CODE_VERSION_UNSUPPORTED,
+    )
 
 
 def _decode_sorted_unique_finding_ids(value: Any, *, field: str) -> tuple[FindingId, ...]:
@@ -742,21 +650,11 @@ def _decode_sorted_unique_finding_ids(value: Any, *, field: str) -> tuple[Findin
 def _decode_required_lens_completion(payload: Mapping[str, Any]) -> RequiredLensCompletion:
     """Decode one ``lens_completions`` entry into a :class:`RequiredLensCompletion`."""
 
-    expected_keys = frozenset({"complete", "finding_ids", "lens"})
-    actual_keys = frozenset(payload.keys())
-    if actual_keys != expected_keys:
-        missing = sorted(expected_keys - actual_keys)
-        unexpected = sorted(actual_keys - expected_keys)
-        bits: list[str] = []
-        if missing:
-            bits.append(f"missing={missing}")
-        if unexpected:
-            bits.append(f"unexpected={unexpected}")
-        raise ReviewCheckpointContractError(
-            f"lens_completion entry has unexpected shape: {', '.join(bits)}",
-            code=CODE_SCHEMA_INVALID,
-            context={"field": "lens_completions"},
-        )
+    _expect_keys(
+        payload,
+        expected_keys=frozenset({"complete", "finding_ids", "lens"}),
+        description="lens_completion entry",
+    )
 
     lens = _require_strict_string(payload["lens"], field="lens", allow_empty=False)
     if not lens:
@@ -952,15 +850,7 @@ def _project_evidence(record: ReviewCorrectionEvidence) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=True, slots=True)
-class _SchemaSpec:
-    """Internal record: exact key set, expected schema name, decoder, projector, hash label."""
-
-    expected_keys: frozenset[str]
-    schema_name: str
-    hash_label: str
-    decode_payload: Any
-    project: Any
+_SchemaSpec = _codec.SchemaSpec
 
 
 _CHECKPOINT_SPEC = _SchemaSpec(
@@ -1023,13 +913,34 @@ def _spec_for[R: (ReviewTransactionCheckpoint, ReviewCorrectionEvidence)](
 # ---------------------------------------------------------------------------
 
 
+def _id_factory_for_kind(record_kind: type) -> Callable[[str], Any]:
+    """Return the typed-id constructor that wraps *record_kind*'s wire id."""
+
+    if record_kind is ReviewTransactionCheckpoint:
+        return ReviewTransactionCheckpointId
+    if record_kind is ReviewCorrectionEvidence:
+        return ReviewCorrectionEvidenceId
+
+    def _unsupported(wire: str) -> Any:
+        raise ReviewCheckpointContractError(
+            f"unsupported checkpoint record type: {record_kind!r}",
+            code=CODE_VERSION_UNSUPPORTED,
+            context={"record_kind": record_kind.__name__},
+        )
+
+    return _unsupported
+
+
 class ReviewTransactionCheckpointContractV1:
     """Public seam for v1 review-transaction checkpoints and correction evidence.
 
     The class is stateless and deterministic: equal inputs always
     produce equal records, bytes, and IDs. Operations accept only the
     exact typed record classes and bytes — never mappings or subclasses
-    — so partial-validation bypasses are impossible.
+    — so partial-validation bypasses are impossible. The four
+    byte-level methods delegate to the shared review-contract codec
+    helpers so the byte-for-byte behaviour matches every other
+    review-contract facade.
     """
 
     def decode(self, record_type: type[RecordT], source: bytes) -> RecordT:
@@ -1048,35 +959,37 @@ class ReviewTransactionCheckpointContractV1:
         bytes-like input.
         """
 
-        if not isinstance(source, bytes):
-            raise ReviewCheckpointContractError(
-                "decode source must be canonical bytes",
-                code=CODE_SCHEMA_INVALID,
-                context={"record_type": str(record_type)},
-            )
-        spec = _spec_for(record_type)
-        payload = _decode_canonical_object(source, description=f"{spec.schema_name} bytes")
-        record = spec.decode_payload(payload)
-        return record  # type: ignore[return-value]
+        return _codec.decode_record_from_bytes(
+            record_type,
+            source,
+            specs_by_type=_SPECS_BY_TYPE,
+            decode_canonical_object_fn=_decode_canonical_object,
+            error_factory=ReviewCheckpointContractError,
+            code_invalid=CODE_SCHEMA_INVALID,
+            code_version=CODE_VERSION_UNSUPPORTED,
+        )
 
     def to_payload(self, record: CheckpointRecord) -> dict[str, object]:
         """Project *record* into a detached, JSON-safe payload."""
 
-        spec = self._spec_for_record(record)
-        return spec.project(record)
+        return _codec.to_payload_record(
+            record,
+            specs_by_type=_SPECS_BY_TYPE,
+            error_factory=ReviewCheckpointContractError,
+            code_version=CODE_VERSION_UNSUPPORTED,
+        )
 
     def encode(self, record: CheckpointRecord) -> bytes:
         """Return canonical bytes for *record*."""
 
-        payload = self.to_payload(record)
-        try:
-            return _encode_canonical(payload)
-        except RuntimeError as exc:
-            raise ReviewCheckpointContractError(
-                f"failed to canonicalize record: {exc}",
-                code=CODE_SCHEMA_INVALID,
-                context={"record_kind": type(record).__name__},
-            ) from exc
+        return _codec.encode_record(
+            record,
+            specs_by_type=_SPECS_BY_TYPE,
+            encode_canonical_fn=_encode_canonical,
+            error_factory=ReviewCheckpointContractError,
+            code_invalid=CODE_SCHEMA_INVALID,
+            code_version=CODE_VERSION_UNSUPPORTED,
+        )
 
     @overload
     def id_for(self, record: ReviewTransactionCheckpoint) -> ReviewTransactionCheckpointId: ...
@@ -1087,37 +1000,16 @@ class ReviewTransactionCheckpointContractV1:
     def id_for(self, record: CheckpointRecord) -> Any:
         """Derive the object-specific typed ID for *record*."""
 
-        spec = self._spec_for_record(record)
-        bytes_ = self.encode(record)
-        try:
-            wire = _typed_hash(spec.hash_label, bytes_)
-        except RuntimeError as exc:
-            raise ReviewCheckpointContractError(
-                f"failed to hash record: {exc}",
-                code=CODE_SCHEMA_INVALID,
-                context={"record_kind": type(record).__name__},
-            ) from exc
-        kind = type(record)
-        if kind is ReviewTransactionCheckpoint:
-            return ReviewTransactionCheckpointId(wire)
-        if kind is ReviewCorrectionEvidence:
-            return ReviewCorrectionEvidenceId(wire)
-        raise ReviewCheckpointContractError(
-            f"unsupported checkpoint record type: {kind!r}",
-            code=CODE_VERSION_UNSUPPORTED,
-            context={"record_kind": kind.__name__},
+        return _codec.derive_record_id(
+            record,
+            specs_by_type=_SPECS_BY_TYPE,
+            encode_canonical_fn=_encode_canonical,
+            typed_hash_fn=_typed_hash,
+            id_factory_by_kind=_id_factory_for_kind(type(record)),
+            error_factory=ReviewCheckpointContractError,
+            code_invalid=CODE_SCHEMA_INVALID,
+            code_version=CODE_VERSION_UNSUPPORTED,
         )
-
-    def _spec_for_record(self, record: CheckpointRecord) -> _SchemaSpec:
-        kind = type(record)
-        spec = _SPECS_BY_TYPE.get(kind)
-        if spec is None:
-            raise ReviewCheckpointContractError(
-                f"unsupported checkpoint record type: {kind!r}",
-                code=CODE_VERSION_UNSUPPORTED,
-                context={"record_kind": kind.__name__},
-            )
-        return spec
 
 
 # ---------------------------------------------------------------------------

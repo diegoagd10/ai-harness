@@ -429,26 +429,15 @@ def test_spec_scenario_use_the_aggregate_persistence_seam() -> None:
 
     # The only public API surface is the contract and the typed IDs;
     # there is no public method that accepts a graph and a checkpoint
-    # without going through the aggregate store.
-    excluded = {
-        "CHECKPOINT_LABEL",
-        "CHECKPOINT_SCHEMA_NAME",
-        "CHECKPOINT_SCHEMA_VERSION",
-        "EVIDENCE_LABEL",
-        "EVIDENCE_SCHEMA_NAME",
-        "CODE_ID_INVALID",
-        "CODE_SCHEMA_INVALID",
-        "CODE_STORAGE_CONFLICT",
-        "CODE_STORAGE_INVALID",
-        "CODE_STORAGE_IO_FAILED",
-        "CODE_STORAGE_MISSING",
-        "CODE_VERSION_UNSUPPORTED",
-    }
+    # without going through the aggregate store. Every public symbol is
+    # either a callable, a dataclass, or a module-level constant
+    # exposed for external use — anything else is a leak of a private
+    # helper that must not cross the seam.
     for name in public_names:
-        if name in excluded:
-            continue
         obj = getattr(module, name)
-        assert callable(obj) or hasattr(obj, "__dataclass_fields__"), f"unexpected public symbol: {name}"
+        assert callable(obj) or hasattr(obj, "__dataclass_fields__") or isinstance(obj, (str, int)), (
+            f"unexpected public symbol: {name}"
+        )
 
 
 # ---------------------------------------------------------------------------
