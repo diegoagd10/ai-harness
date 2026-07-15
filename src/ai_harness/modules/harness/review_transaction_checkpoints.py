@@ -51,13 +51,26 @@ import json
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from dataclasses import field as _dataclass_field
 from json import JSONDecodeError
+from pathlib import Path
 from typing import Any, Final, Literal, TypeVar, overload
 
 from ai_harness.modules.harness import receipts as _receipts
+from ai_harness.modules.harness.receipts import (
+    ReceiptStoreError,
+    _CheckpointBundleRole,
+    _CheckpointBundleStore,
+    typed_hash,
+)
+from ai_harness.modules.harness.review_transaction_storage import (
+    CODE_MISSING as REVIEW_STORAGE_CODE_MISSING,
+)
 from ai_harness.modules.harness.review_transaction_storage import (
     ReviewTransactionGraph,
     ReviewTransactionRootId,
+    ReviewTransactionStorageError,
+    ReviewTransactionStore,
     _ReviewRootCodec,
 )
 from ai_harness.modules.harness.review_transactions import (
@@ -92,6 +105,25 @@ EVIDENCE_LABEL: Final[str] = "ai-harness/review-correction-evidence/v1"
 
 # Exact wire-format regex used for typed id wrappers and payload decoding.
 WIRE_ID_RE: Final[re.Pattern[str]] = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
+# ---------------------------------------------------------------------------
+# Public verified-checkpoint aggregate
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class VerifiedReviewTransactionCheckpoint:
+    """Immutable aggregate returned by the checkpoint store's load operation.
+
+    ``checkpoint`` is the verified checkpoint record; ``correction_evidence``
+    is the verified evidence value when one was published alongside the
+    checkpoint and ``None`` otherwise. The aggregate is not hashable and
+    has no wire identity; it is only the return type of the load seam.
+    """
+
+    checkpoint: ReviewTransactionCheckpoint
+    correction_evidence: ReviewCorrectionEvidence | None
 
 
 # ---------------------------------------------------------------------------
@@ -1439,8 +1471,365 @@ class _CheckpointGraphVerifier:
             )
 
 
+# ---------------------------------------------------------------------------
+# Public persistence seam — ReviewTransactionCheckpointStore
+# ---------------------------------------------------------------------------
+
+
+def _translate_bundle_storage_error(
+    description: str,
+    exc: BaseException,
+    *,
+    during_publish: bool = False,
+) -> ReviewTransactionCheckpointStorageError:
+    """Translate a lower-level storage exception into the public error type."""
+
+    code = getattr(exc, "code", "receipt.invalid")
+    if during_publish:
+        if code == "receipt.missing":
+            public_code = CODE_STORAGE_MISSING
+        elif code in {"receipt.conflict", "receipt.invalid"}:
+            public_code = CODE_STORAGE_CONFLICT
+        elif code == "receipt.io-failed":
+            public_code = CODE_STORAGE_IO_FAILED
+        else:
+            public_code = CODE_STORAGE_INVALID
+    else:
+        if code == "receipt.missing":
+            public_code = CODE_STORAGE_MISSING
+        elif code == "receipt.io-failed":
+            public_code = CODE_STORAGE_IO_FAILED
+        elif code in {"receipt.invalid", "receipt.conflict"}:
+            public_code = CODE_STORAGE_INVALID
+        else:
+            public_code = CODE_STORAGE_INVALID
+    return ReviewTransactionCheckpointStorageError(
+        description,
+        code=public_code,
+        cause=exc,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewTransactionCheckpointStore:
+    """Public persistence seam for v1 review-transaction checkpoints.
+
+    Publication follows one fixed transaction boundary: verify the
+    archived graph before any checkpoint or evidence write, publish
+    optional evidence first, strictly reread and reverify it, and
+    atomically publish the checkpoint last. Loading starts from a
+    typed checkpoint id, decodes the checkpoint, recomputes its id,
+    loads and verifies the optional evidence reference, reloads the
+    archived graph by embedded root id, rechecks every binding, and
+    returns an immutable verified aggregate.
+    """
+
+    change_root: Path
+    _bundles: _CheckpointBundleStore = _dataclass_field(  # type: ignore[assignment]
+        init=False,
+        repr=False,
+        compare=False,
+    )
+    _review_store: ReviewTransactionStore = _dataclass_field(  # type: ignore[assignment]
+        init=False,
+        repr=False,
+        compare=False,
+    )
+    _contract: ReviewTransactionCheckpointContractV1 = _dataclass_field(  # type: ignore[assignment]
+        init=False,
+        repr=False,
+        compare=False,
+    )
+    _verifier: _CheckpointGraphVerifier = _dataclass_field(  # type: ignore[assignment]
+        init=False,
+        repr=False,
+        compare=False,
+    )
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.change_root, Path):
+            raise ReviewTransactionCheckpointStorageError(
+                "ReviewTransactionCheckpointStore.change_root must be a Path",
+                code=CODE_STORAGE_INVALID,
+                context={"change_root_type": type(self.change_root).__name__},
+            )
+        object.__setattr__(self, "_bundles", _CheckpointBundleStore(self.change_root / ".receipts"))
+        object.__setattr__(self, "_review_store", ReviewTransactionStore(change_root=self.change_root))
+        object.__setattr__(self, "_contract", ReviewTransactionCheckpointContractV1())
+        object.__setattr__(
+            self,
+            "_verifier",
+            _CheckpointGraphVerifier(contract=ReviewContractV1()),
+        )
+
+    def publish(
+        self,
+        checkpoint: ReviewTransactionCheckpoint,
+        *,
+        correction_evidence: ReviewCorrectionEvidence | None = None,
+    ) -> ReviewTransactionCheckpointId:
+        """Atomically publish *checkpoint* and optional *correction_evidence*.
+
+        Steps:
+
+        1. Validate exact typed inputs and derive their typed ids.
+        2. Require the checkpoint reference and supplied evidence to be
+           either both absent or mutually identifying.
+        3. Load and verify the archived graph via
+           :meth:`ReviewTransactionStore.load` before any checkpoint or
+           evidence write.
+        4. Publish the evidence bundle through the fixed evidence role
+           when present.
+        5. Strictly reread the evidence bundle; require byte equality,
+           canonical decode, expected-label identity recomputation, and
+           graph binding again.
+        6. Publish the checkpoint bundle last; only after a successful
+           rename and parent-directory fsync does this method return
+           the typed checkpoint id.
+
+        Failure before step 6 leaves no visible partial checkpoint.
+        """
+
+        if (
+            not isinstance(checkpoint, ReviewTransactionCheckpoint)
+            or type(checkpoint) is not ReviewTransactionCheckpoint
+        ):
+            raise ReviewTransactionCheckpointStorageError(
+                "publish input must be a ReviewTransactionCheckpoint",
+                code=CODE_STORAGE_INVALID,
+                context={"input_type": type(checkpoint).__name__},
+            )
+        if correction_evidence is not None and (
+            not isinstance(correction_evidence, ReviewCorrectionEvidence)
+            or type(correction_evidence) is not ReviewCorrectionEvidence
+        ):
+            raise ReviewTransactionCheckpointStorageError(
+                "correction_evidence input must be a ReviewCorrectionEvidence or None",
+                code=CODE_STORAGE_INVALID,
+                context={"input_type": type(correction_evidence).__name__},
+            )
+
+        # Derive the typed ids without writing.
+        try:
+            checkpoint_bytes = self._contract.encode(checkpoint)
+        except ReviewCheckpointContractError as exc:
+            raise ReviewTransactionCheckpointStorageError(
+                exc.message,
+                code=CODE_STORAGE_INVALID,
+                context=dict(exc.context),
+                cause=exc,
+            ) from exc
+        checkpoint_id = ReviewTransactionCheckpointId(typed_hash(CHECKPOINT_LABEL, checkpoint_bytes))
+
+        evidence_id: ReviewCorrectionEvidenceId | None = None
+        evidence_bytes: bytes | None = None
+        if correction_evidence is not None:
+            try:
+                evidence_bytes = self._contract.encode(correction_evidence)
+            except ReviewCheckpointContractError as exc:
+                raise ReviewTransactionCheckpointStorageError(
+                    exc.message,
+                    code=CODE_STORAGE_INVALID,
+                    context=dict(exc.context),
+                    cause=exc,
+                ) from exc
+            evidence_id = ReviewCorrectionEvidenceId(typed_hash(EVIDENCE_LABEL, evidence_bytes))
+            if (
+                checkpoint.correction_evidence_id is None
+                or checkpoint.correction_evidence_id.value != evidence_id.value
+            ):
+                raise ReviewTransactionCheckpointStorageError(
+                    "supplied correction evidence does not match the checkpoint reference",
+                    code=CODE_STORAGE_INVALID,
+                )
+
+        # Load and verify the archived graph before any write.
+        try:
+            graph = self._review_store.load(checkpoint.review_transaction_root_id)
+        except ReviewTransactionStorageError as exc:
+            if exc.code == REVIEW_STORAGE_CODE_MISSING:
+                raise ReviewTransactionCheckpointStorageError(
+                    exc.message,
+                    code=CODE_STORAGE_MISSING,
+                    context=dict(exc.context),
+                    cause=exc,
+                ) from exc
+            raise ReviewTransactionCheckpointStorageError(
+                exc.message,
+                code=CODE_STORAGE_INVALID,
+                context=dict(exc.context),
+                cause=exc,
+            ) from exc
+
+        # Run the full binding check.
+        self._verifier.verify(
+            checkpoint,
+            evidence=correction_evidence,
+            root_id=checkpoint.review_transaction_root_id,
+            graph=graph,
+        )
+
+        # Publish optional evidence first.
+        if evidence_bytes is not None and evidence_id is not None:
+            try:
+                self._bundles.publish(_CheckpointBundleRole.CORRECTION_EVIDENCE, evidence_bytes)
+            except ReceiptStoreError as exc:
+                raise _translate_bundle_storage_error("publish checkpoint evidence", exc, during_publish=True) from exc
+
+            # Strictly reread the evidence bundle.
+            try:
+                reread = self._bundles.read(_CheckpointBundleRole.CORRECTION_EVIDENCE, evidence_id.value)
+            except ReceiptStoreError as exc:
+                raise _translate_bundle_storage_error("reread checkpoint evidence", exc, during_publish=True) from exc
+            if reread != evidence_bytes:
+                raise ReviewTransactionCheckpointStorageError(
+                    "reread evidence bytes differ from the planned payload",
+                    code=CODE_STORAGE_CONFLICT,
+                    context={"expected_id": evidence_id.value},
+                )
+            try:
+                reread_decoded = self._contract.decode(ReviewCorrectionEvidence, reread)
+            except ReviewCheckpointContractError as exc:
+                raise ReviewTransactionCheckpointStorageError(
+                    exc.message,
+                    code=CODE_STORAGE_INVALID,
+                    context=dict(exc.context),
+                    cause=exc,
+                ) from exc
+            reread_id = self._contract.id_for(reread_decoded)
+            if reread_id.value != evidence_id.value:
+                raise ReviewTransactionCheckpointStorageError(
+                    "reread evidence identity does not match the planned digest",
+                    code=CODE_STORAGE_CONFLICT,
+                    context={
+                        "expected_id": evidence_id.value,
+                        "derived_id": reread_id.value,
+                    },
+                )
+
+        # Publish the checkpoint bundle last.
+        try:
+            self._bundles.publish(_CheckpointBundleRole.CHECKPOINT, checkpoint_bytes)
+        except ReceiptStoreError as exc:
+            raise _translate_bundle_storage_error("publish checkpoint bundle", exc, during_publish=True) from exc
+        return checkpoint_id
+
+    def load(
+        self,
+        checkpoint_id: ReviewTransactionCheckpointId,
+    ) -> VerifiedReviewTransactionCheckpoint:
+        """Reconstruct a verified checkpoint aggregate from its typed id.
+
+        Steps:
+
+        1. Strictly read and decode the checkpoint bundle; recompute its
+           typed id and require equality.
+        2. Strictly read and decode the optional evidence bundle; recompute
+           its typed id and require equality.
+        3. Reload the archived graph by the checkpoint's embedded root id
+           and re-run every binding check.
+        4. Return an immutable verified aggregate only after every check
+           passes.
+        """
+
+        if (
+            not isinstance(checkpoint_id, ReviewTransactionCheckpointId)
+            or type(checkpoint_id) is not ReviewTransactionCheckpointId
+        ):
+            raise ReviewTransactionCheckpointStorageError(
+                "load input must be a ReviewTransactionCheckpointId",
+                code=CODE_STORAGE_INVALID,
+                context={"input_type": type(checkpoint_id).__name__},
+            )
+
+        try:
+            checkpoint_bytes = self._bundles.read(_CheckpointBundleRole.CHECKPOINT, checkpoint_id.value)
+        except ReceiptStoreError as exc:
+            raise _translate_bundle_storage_error("read checkpoint bundle", exc) from exc
+
+        try:
+            checkpoint = self._contract.decode(ReviewTransactionCheckpoint, checkpoint_bytes)
+        except ReviewCheckpointContractError as exc:
+            raise ReviewTransactionCheckpointStorageError(
+                exc.message,
+                code=CODE_STORAGE_INVALID,
+                context=dict(exc.context),
+                cause=exc,
+            ) from exc
+
+        derived_id = self._contract.id_for(checkpoint)
+        if derived_id.value != checkpoint_id.value:
+            raise ReviewTransactionCheckpointStorageError(
+                "loaded checkpoint identity does not match the requested id",
+                code=CODE_STORAGE_INVALID,
+                context={
+                    "expected": checkpoint_id.value,
+                    "derived": derived_id.value,
+                },
+            )
+
+        evidence: ReviewCorrectionEvidence | None = None
+        if checkpoint.correction_evidence_id is not None:
+            try:
+                evidence_bytes = self._bundles.read(
+                    _CheckpointBundleRole.CORRECTION_EVIDENCE,
+                    checkpoint.correction_evidence_id.value,
+                )
+            except ReceiptStoreError as exc:
+                raise _translate_bundle_storage_error("read checkpoint evidence", exc) from exc
+            try:
+                evidence = self._contract.decode(ReviewCorrectionEvidence, evidence_bytes)
+            except ReviewCheckpointContractError as exc:
+                raise ReviewTransactionCheckpointStorageError(
+                    exc.message,
+                    code=CODE_STORAGE_INVALID,
+                    context=dict(exc.context),
+                    cause=exc,
+                ) from exc
+            derived_evidence_id = self._contract.id_for(evidence)
+            if derived_evidence_id.value != checkpoint.correction_evidence_id.value:
+                raise ReviewTransactionCheckpointStorageError(
+                    "loaded evidence identity does not match the checkpoint reference",
+                    code=CODE_STORAGE_INVALID,
+                    context={
+                        "expected": checkpoint.correction_evidence_id.value,
+                        "derived": derived_evidence_id.value,
+                    },
+                )
+
+        try:
+            graph = self._review_store.load(checkpoint.review_transaction_root_id)
+        except ReviewTransactionStorageError as exc:
+            if exc.code == REVIEW_STORAGE_CODE_MISSING:
+                raise ReviewTransactionCheckpointStorageError(
+                    exc.message,
+                    code=CODE_STORAGE_MISSING,
+                    context=dict(exc.context),
+                    cause=exc,
+                ) from exc
+            raise ReviewTransactionCheckpointStorageError(
+                exc.message,
+                code=CODE_STORAGE_INVALID,
+                context=dict(exc.context),
+                cause=exc,
+            ) from exc
+
+        self._verifier.verify(
+            checkpoint,
+            evidence=evidence,
+            root_id=checkpoint.review_transaction_root_id,
+            graph=graph,
+        )
+
+        return VerifiedReviewTransactionCheckpoint(
+            checkpoint=checkpoint,
+            correction_evidence=evidence,
+        )
+
+
 __all__ = [
     # Public API surface
+    "RequiredLensCompletion",
     "ReviewCheckpointContractError",
     "ReviewCorrectionEvidence",
     "ReviewCorrectionEvidenceId",
@@ -1448,7 +1837,8 @@ __all__ = [
     "ReviewTransactionCheckpointContractV1",
     "ReviewTransactionCheckpointId",
     "ReviewTransactionCheckpointStorageError",
-    "RequiredLensCompletion",
+    "ReviewTransactionCheckpointStore",
+    "VerifiedReviewTransactionCheckpoint",
     # Constants
     "CHECKPOINT_LABEL",
     "CHECKPOINT_SCHEMA_NAME",

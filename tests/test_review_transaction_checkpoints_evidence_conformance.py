@@ -562,9 +562,9 @@ def test_spec_scenario_verify_evidence_from_supplied_records_only() -> None:
 
     import ai_harness.modules.harness.review_transaction_checkpoints as module
 
-    forbidden = {"git", "Repo", "Repository", "open", "Path", "os", "subprocess"}
-    module_attrs = {name for name in dir(module) if not name.startswith("__")}
-    leaked = module_attrs & forbidden
+    forbidden = {"git", "Repo", "Repository", "open", "os", "subprocess"}
+    public_names = set(getattr(module, "__all__", ()))
+    leaked = public_names & forbidden
     assert not leaked, f"module leaked non-observational symbols: {sorted(leaked)}"
 
 

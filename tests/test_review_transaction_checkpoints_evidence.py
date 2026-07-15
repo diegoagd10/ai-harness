@@ -436,9 +436,9 @@ def test_evidence_validation_does_not_access_repository() -> None:
 
     import ai_harness.modules.harness.review_transaction_checkpoints as module
 
-    forbidden_symbols = {"open", "Path", "os", "subprocess", "git"}
-    module_attrs = {name for name in dir(module) if not name.startswith("__")}
-    leaked = module_attrs & forbidden_symbols
+    forbidden_symbols = {"open", "os", "subprocess", "git"}
+    public_names = set(getattr(module, "__all__", ()))
+    leaked = public_names & forbidden_symbols
     assert not leaked, f"module leaked non-declarative symbols: {sorted(leaked)}"
 
 

@@ -10,6 +10,7 @@
 - 7a34910d67f1b2f73574eaa929b9529f39d1a6c2 — task 7: Test verified graph and candidate bindings
 - b126b8473f704dbf0721482cbcf0edb67015446b — task 8: Bind declarative correction evidence to verified graphs
 - 50a56b704013751eb1da05c83428f70050bad4f1 — task 9: Test declarative correction evidence bindings
+- <pending> — task 10: Publish verified checkpoints evidence-first and checkpoint-last
 
 ## TDD Evidence
 
@@ -24,6 +25,7 @@
 | 7 | 7a34910 | N/A: new files | tests/test_review_transaction_checkpoints_substitution.py | integration | passed: 540/540 | N/A: new files | passed | 12 cases | clean |
 | 8 | b126b84 | src/ai_harness/modules/harness/review_transaction_checkpoints.py | tests/test_review_transaction_checkpoints_evidence.py | integration | passed: 555/555 | written | passed | 15 cases | clean |
 | 9 | 50a56b7 | N/A: new files | tests/test_review_transaction_checkpoints_evidence_conformance.py | integration | passed: 565/565 | N/A: new files | passed | 10 cases | clean |
+| 10 | <pending> | src/ai_harness/modules/harness/review_transaction_checkpoints.py | tests/test_review_transaction_checkpoints_store.py | integration | passed: 577/577 | written | passed | 12 cases | clean |
 
 ## Remaining
-- 10, 11, 12
+- 11, 12

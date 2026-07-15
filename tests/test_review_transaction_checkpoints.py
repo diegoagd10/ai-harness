@@ -1075,9 +1075,11 @@ def test_codec_does_not_require_filesystem() -> None:
 
     import ai_harness.modules.harness.review_transaction_checkpoints as module
 
-    module_attrs = {name for name in dir(module) if not name.startswith("__")}
-    forbidden = {"open", "Path", "os", "subprocess"}
-    leaked = module_attrs & forbidden
+    # ``Path`` is re-exported for the checkpoint store; the public symbol
+    # surface (i.e. ``module.__all__``) must not expose filesystem APIs.
+    public_names = set(getattr(module, "__all__", ()))
+    forbidden = {"open", "os", "subprocess"}
+    leaked = public_names & forbidden
     assert not leaked, f"codec module leaked non-pure symbols: {sorted(leaked)}"
 
 

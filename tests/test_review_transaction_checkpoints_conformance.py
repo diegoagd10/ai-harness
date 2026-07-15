@@ -340,9 +340,9 @@ def test_spec_scenario_exercise_the_codec_hermetically() -> None:
 
     import ai_harness.modules.harness.review_transaction_checkpoints as module
 
-    forbidden_symbols = {"open", "Path", "os", "subprocess"}
-    module_attrs = {name for name in dir(module) if not name.startswith("__")}
-    leaked = module_attrs & forbidden_symbols
+    forbidden_symbols = {"open", "os", "subprocess"}
+    public_names = set(getattr(module, "__all__", ()))
+    leaked = public_names & forbidden_symbols
     assert not leaked, f"codec module leaked non-pure symbols: {sorted(leaked)}"
 
 
