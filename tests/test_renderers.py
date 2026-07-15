@@ -715,59 +715,6 @@ def test_contract_orchestrator_auto_gatekeeper_requires_all_four_checks(tmp_path
     assert "routing" in body or "depend" in body
 
 
-def test_contract_orchestrator_launch_dedup_session_log_required(tmp_path: Path) -> None:
-    """Subtask 6.8 — launch dedup session log is asserted in the prompt.
-
-    Locks that the orchestrator body mentions the session
-    (phase, task-fingerprint) launch log and the duplicate guard.
-    """
-    body = _change_orchestrator_body(home=tmp_path).lower()
-
-    # Launch dedup section in the new body.
-    assert "launch dedup" in body
-    assert "session log" in body
-    # New keying: (phase, change) — not the old (phase, task_fingerprint).
-    assert "(phase, change)" in body
-    # Duplicate guard wording preserved.
-    assert "duplicate" in body or "twice" in body
-
-
-def test_contract_change_artifacts_carry_all_five_gentle_references() -> None:
-    """Subtask 6.9 — all five gentle-orchestrator line refs are present.
-
-    Locks carry-through: every required gentle-orchestrator line range
-    must be cited from at least one Change artifact (PRD, exploration,
-    design, specs, or implementation). Removing any one breaks the
-    enforcement contract.
-    """
-    project_root = Path(__file__).resolve().parent.parent
-    active_root = project_root / ".ai-harness/changes/fix-interactive-gates"
-    archived_root = project_root / ".ai-harness/archive/fix-interactive-gates"
-    change_root = active_root if (active_root / "prd.md").exists() else archived_root
-
-    prd = (change_root / "prd.md").read_text()
-    exploration = (change_root / "exploration.md").read_text()
-    design = (change_root / "design.md").read_text()
-    specs_dir = change_root / "specs"
-    specs_files = list(specs_dir.glob("*.md"))
-    specs_text = "\n".join(p.read_text() for p in specs_files)
-
-    # All five gentle-orchestrator line ranges from the PRD mapping.
-    expected_refs = [
-        "sdd-orchestrator.md:100-149",  # Session Preflight hard gate
-        "sdd-orchestrator.md:178-199",  # Execution Mode interactive pauses
-        "sdd-orchestrator.md:200",  # Proposal/grill round before proposal
-        "sdd-orchestrator.md:202-222",  # Automatic Mode Gatekeeper
-        "sdd-orchestrator.md:299-308",  # Sub-Agent Launch Deduplication
-    ]
-
-    combined = prd + exploration + design + specs_text
-    for ref in expected_refs:
-        assert ref in combined, (
-            f"gentle-orchestrator reference {ref!r} missing from PRD/exploration/design/specs under {change_root}"
-        )
-
-
 def test_change_orchestrator_body_frontmatter_parity_after_body_only_edits(tmp_path: Path) -> None:
     """Rendered change-orchestrator frontmatter stays aligned with its source.
 

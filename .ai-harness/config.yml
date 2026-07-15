@@ -30,6 +30,8 @@ phases:
       - Prefer composition over inheritance and provide ASCII diagrams for class interactions.
       - Prefer classes over Python script files; avoid bypass methods and bypass classes.
       - Tests must not touch the user system; use mocks only for HTTP clients, databases, and file persistence.
+      - Tests should only assert functionallity and not documentation.
+      - No by-pass-methods (Method that its only job is to call other method).
       - Place code in src/ai_harness/main.py, src/ai_harness/commands, src/ai_harness/modules, src/ai_harness/utils, src/ai_harness/resources, or expected as appropriate.
   change_validator:
     rules:
