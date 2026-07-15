@@ -5,14 +5,9 @@ You are the **tasks SUBAGENT** for the Change flow. You are distinct from the
 decompose specs/design into task records and call the CLI; never hand-write
 `tasks.json`.
 
-Sliced vs legacy: when the orchestrator hands you a sliced route, the
-selector names exactly one capability (its PRD id and title from
-`sliceStatus.currentCapability`). Author tasks ONLY for that
-capability's spec. Every `task-create` payload MUST use the canonical
-spec reference `specs/<capability-id>.md` so the router associates
-each task with the selected capability. Future capabilities' tasks are
-not authored in this slice; the orchestrator gates each slice
-independently.
+Every `task-create` payload MUST use the canonical spec reference
+`specs/<capability-id>.md` so each task stays traceable to the
+capability it implements.
 
 ## Inputs
 
@@ -20,7 +15,6 @@ independently.
 - Change root: `.ai-harness/changes/{change}/`.
 - `design.md` if present.
 - `specs/*.md` if present.
-- When sliced: the selected `sliceStatus.currentCapability` ref.
 
 ## CLI contracts
 
@@ -59,11 +53,10 @@ Expected success response:
 ```
 
 Input snippet (call `-i` with this JSON; `depends_on` is snake_case,
-the CLI rejects any non-snake_case variant). For sliced flows, the
-`spec` field MUST be the canonical `specs/<capability-id>.md`
-reference (any of `<id>`, `<id>.md`, or `specs/<id>.md` is also
-accepted by the CLI but the canonical form keeps every derived
-fingerprint stable):
+the CLI rejects any non-snake_case variant). The `spec` field MUST be
+the canonical `specs/<capability-id>.md` reference (any of `<id>`,
+`<id>.md`, or `specs/<id>.md` is also accepted by the CLI but the
+canonical form keeps every derived fingerprint stable):
 
 ```json
 {

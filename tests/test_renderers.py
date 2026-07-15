@@ -192,7 +192,7 @@ def test_change_orchestrator_meta_declares_primary_restricted_agent() -> None:
 
     assert meta.description
     assert meta.mode == "primary"
-    assert meta.model["opencode"] == "minimax/MiniMax-M3"
+    assert meta.model["opencode"] == "openai/gpt-5.6-terra"
     assert meta.model["claude"] == "sonnet"
     # Orchestrator now exposes a permissive permission block via meta["permission"]
     # (no caps layer). The contract tested here is "primary mode + native models".
@@ -220,8 +220,8 @@ def test_change_orchestrator_body_has_human_review_gate_heading(tmp_path: Path) 
         assert "Human review gate" in body, f"{cli}: gate heading missing from rendered body"
 
 
-def test_change_orchestrator_body_gate_names_every_artifact(tmp_path: Path) -> None:
-    """Gate wording names PRD, design, specs, and tasks explicitly for review."""
+def test_change_orchestrator_body_gate_names_implementor_inputs(tmp_path: Path) -> None:
+    """Gate wording names the implementor's permitted artifact inputs."""
     pair = _find_pair(
         ADMINISTRATORS[AgentCli.OPENCODE].render_artifacts(home=tmp_path, overrides={}),
         "change-orchestrator",
@@ -232,10 +232,11 @@ def test_change_orchestrator_body_gate_names_every_artifact(tmp_path: Path) -> N
     # Gate is a single paragraph (bold inline marker); ends at next blank line.
     para_end = body.find("\n\n", gate_idx)
     gate_section = body[gate_idx : para_end if para_end != -1 else None]
-    assert "prd.md" in gate_section
+    assert "exploration.md" in gate_section
     assert "design.md" in gate_section
-    assert "specs/" in gate_section
-    assert "tasks.json" in gate_section
+    assert "prd.md" not in gate_section
+    assert "specs/" not in gate_section
+    assert "tasks.json" not in gate_section
 
 
 def test_change_orchestrator_body_gate_requires_explicit_confirmation(tmp_path: Path) -> None:
@@ -995,7 +996,7 @@ def test_get_agent_meta_partial_merge_preserves_defaults() -> None:
     assert meta.mode == "subagent"
     # Different agent not in overrides keeps its defaults
     explorer_meta = ADMINISTRATORS[AgentCli.CLAUDE].get_agent_metadata("change-explorer", overrides=overrides)
-    assert explorer_meta.model["opencode"] == "minimax/MiniMax-M2.7"
+    assert explorer_meta.model["opencode"] == "openai/gpt-5.6-terra"
 
 
 def test_get_agent_metadata_returns_frozen_dataclass() -> None:
@@ -1364,8 +1365,8 @@ def test_get_agent_meta_auto_load_partial_override_preserves_others(tmp_path: Pa
     assert implementor.model["claude"] == "sonnet"  # not overridden → default
     assert implementor.mode == "subagent"  # not in override → default
     # Explorer untouched
-    assert explorer.model["opencode"] == "minimax/MiniMax-M2.7"
-    assert "opencode" not in dict(explorer.effort)
+    assert explorer.model["opencode"] == "openai/gpt-5.6-terra"
+    assert explorer.effort["opencode"] == "medium"
 
 
 def test_get_agent_meta_auto_load_unknown_override_agent_ignored(tmp_path: Path) -> None:
@@ -2320,51 +2321,23 @@ def test_renderer_parity_change_implementor_has_missing_directive_error(cli: Age
 
 
 @pytest.mark.parametrize("cli", _NATIVE_RENDERERS_PARITY)
-def test_change_orchestrator_body_documents_version_two_changestatus(cli: AgentCli, tmp_path: Path) -> None:
-    """Task 4.1 — the rendered orchestrator body documents the version-2 contract.
-
-    Locks the cross-renderer parity contract for the new additively
-    versioned ChangeStatus shape. The body must name
-    ``configContext``, ``schema version 2``, and the routed-phase
-    JSON shape (canonical ``change_*`` phase plus ordered rules).
-    """
+def test_change_orchestrator_body_documents_changestatus_routing(cli: AgentCli, tmp_path: Path) -> None:
+    """The rendered orchestrator documents the ChangeStatus routing contract."""
     body = _native_change_orchestrator_body(cli, home=tmp_path)
 
     assert "configContext" in body, f"{cli}: configContext missing from orchestrator body"
-    # Schema v3 is additive on v2 — the orchestrator advertises both
-    # versions so older and newer consumers can find their contract.
-    versioned = "schemaVersion: 2" in body or "schemaVersion: 3" in body
-    assert versioned, f"{cli}: schema version 2 or 3 not advertised in orchestrator body"
+    assert "ChangeStatus JSON object" in body, f"{cli}: ChangeStatus contract missing from orchestrator body"
+    assert "nextRecommended" in body, f"{cli}: routing field missing from orchestrator body"
 
 
 @pytest.mark.parametrize("cli", _NATIVE_RENDERERS_PARITY)
-def test_change_orchestrator_body_representative_prd_response_is_parseable(cli: AgentCli, tmp_path: Path) -> None:
-    """Task 4.1 — the representative prd response embedded in the orchestrator body parses."""
+def test_change_orchestrator_body_documents_configcontext_shape(cli: AgentCli, tmp_path: Path) -> None:
+    """The rendered orchestrator documents the routed phase context shape."""
 
     body = _native_change_orchestrator_body(cli, home=tmp_path)
 
-    # The body embeds at least one JSON fenced code block. Extract every
-    # fenced block whose info string is ``json`` (or absent) and try to
-    # parse the body until one matches the versioned contract.
-    payload = _extract_change_continue_response(body)
-    assert payload is not None, f"{cli}: orchestrator body missing a parseable ChangeStatus example"
-
-    # Schema v3 is additive on v2; the embedding may advertise either.
-    assert payload["schemaVersion"] in (2, 3)
-    # Legacy form: actionable ``prd`` token with a populated
-    # ``configContext``. Sliced form: a nullable ``configContext``
-    # with a populated ``sliceStatus``. Both forms are valid
-    # advertising for the schema version.
-    if payload["schemaVersion"] == 2:
-        assert payload["nextRecommended"] == "prd"
-        assert payload["configContext"] == {
-            "phase": "change_propose",
-            "phase_rules": ["First rule", "Second rule"],
-        }
-    else:
-        assert payload["configContext"] is None
-        assert payload["sliceStatus"]["mode"] == "sliced"
-        assert payload["sliceStatus"]["approval"]["gate"] == "implementation"
+    assert '"phase": "<canonical change_* key>"' in body
+    assert '"phase_rules"' in body
 
 
 @pytest.mark.parametrize("cli", _NATIVE_RENDERERS_PARITY)
@@ -2406,14 +2379,8 @@ def test_change_orchestrator_body_requires_configcontext_forwarding(cli: AgentCl
     ), f"{cli}: forwarding rule does not explicitly forbid forwarding for resolve-blockers"
 
 
-def test_change_orchestrator_expected_rendered_mirrors_source_version_two_contract(tmp_path: Path) -> None:
-    """Task 4.3 — the checked-in rendered expectation mirrors the source prompt version-2 shape.
-
-    Both files must name ``configContext`` and ``schemaVersion: 2`` or
-    ``schemaVersion: 3`` (additive on v2) for the same routing example.
-    A drift between source and rendered expectation breaks the publish
-    pipeline and silently regresses the forwarding contract.
-    """
+def test_change_orchestrator_expected_rendered_mirrors_source_prompt(tmp_path: Path) -> None:
+    """The checked-in rendered expectation has the packaged prompt body."""
     prompt_path = Path("src/ai_harness/resources/change-agent/change-orchestrator.md")
     expected_path = Path("expected/change-orchestrator.md")
 
@@ -2423,23 +2390,7 @@ def test_change_orchestrator_expected_rendered_mirrors_source_version_two_contra
     prompt_body = _strip_frontmatter(prompt_path.read_text(encoding="utf-8"))
     expected_body = _strip_frontmatter(expected_path.read_text(encoding="utf-8"))
 
-    assert "configContext" in prompt_body, "source prompt missing configContext"
-    assert "configContext" in expected_body, "rendered expectation missing configContext"
-
-    # Both must contain at least one parseable ChangeStatus example whose
-    # schemaVersion is 2 or 3. Legacy v2 examples route ``prd`` with
-    # populated ``configContext``; v3 examples may show the sliced
-    # approval gate (``configContext: null`` + ``sliceStatus.approval``)
-    # — both forms are valid advertising for the schema contract.
-    for label, body in (("source", prompt_body), ("expected", expected_body)):
-        payload = _extract_change_continue_response(body)
-        assert payload is not None, f"{label}: missing a parseable ChangeStatus example"
-        assert payload["schemaVersion"] in (2, 3)
-        if payload["schemaVersion"] == 2:
-            assert payload["configContext"]["phase"] == "change_propose"
-        else:
-            assert payload["configContext"] is None
-            assert payload["sliceStatus"]["mode"] == "sliced"
+    assert prompt_body == expected_body
 
 
 def _strip_frontmatter(raw: str) -> str:
@@ -2894,7 +2845,7 @@ def test_change_orchestrator_metadata_json_has_permissive_permission_block() -> 
 
     assert data["mode"] == "primary"
     assert data["model"]["claude"] == "sonnet"
-    assert data["model"]["opencode"] == "minimax/MiniMax-M3"
+    assert data["model"]["opencode"] == "openai/gpt-5.6-terra"
     assert data["permission"] == {
         "question": "allow",
         "task": {"*": "allow"},
@@ -2911,13 +2862,13 @@ def test_subagent_metadata_json_sets_native_models_per_agent() -> None:
 
     root = files("ai_harness.resources") / "agent-metadata"
     expected_models = {
-        "change-explorer": {"opencode": "minimax/MiniMax-M2.7", "claude": "sonnet"},
-        "change-propose": {"opencode": "minimax/MiniMax-M2.7", "claude": "sonnet"},
-        "change-design": {"opencode": "minimax/MiniMax-M2.7", "claude": "sonnet"},
-        "change-specs": {"opencode": "minimax/MiniMax-M2.7", "claude": "sonnet"},
-        "change-tasks": {"opencode": "minimax/MiniMax-M2.7", "claude": "sonnet"},
+        "change-explorer": {"opencode": "openai/gpt-5.6-terra", "claude": "sonnet"},
+        "change-propose": {"opencode": "openai/gpt-5.6-sol", "claude": "sonnet"},
+        "change-design": {"opencode": "openai/gpt-5.6-sol", "claude": "sonnet"},
+        "change-specs": {"opencode": "openai/gpt-5.6-sol", "claude": "sonnet"},
+        "change-tasks": {"opencode": "openai/gpt-5.6-terra", "claude": "sonnet"},
         "change-implementor": {"opencode": "minimax/MiniMax-M3", "claude": "sonnet"},
-        "change-validator": {"opencode": "minimax/MiniMax-M2.7", "claude": "sonnet"},
+        "change-validator": {"opencode": "openai/gpt-5.6-terra", "claude": "sonnet"},
         "change-archiver": {"opencode": "minimax/MiniMax-M2.7-highspeed", "claude": "sonnet"},
     }
     for name, expected in expected_models.items():
@@ -2939,9 +2890,8 @@ def test_load_agent_metadata_decodes_typed_agent_metadata() -> None:
 
     assert meta.description.startswith("Change explorer")
     assert meta.mode == "subagent"
-    assert dict(meta.model) == {"opencode": "minimax/MiniMax-M2.7", "claude": "sonnet"}
-    # Defaults when fields are absent.
-    assert dict(meta.effort) == {}
+    assert dict(meta.model) == {"opencode": "openai/gpt-5.6-terra", "claude": "sonnet"}
+    assert dict(meta.effort) == {"opencode": "medium"}
     assert meta.caps.write is True
     assert meta.caps.bash is True
     assert meta.caps.spawn is None
@@ -3387,7 +3337,7 @@ def test_opencode_administrator_frontmatter_has_description_mode_model(tmp_path:
     fm = yaml.safe_load(artifacts[0].content.split("---", 2)[1])
     assert fm["description"].startswith("Change explorer")
     assert fm["mode"] == "subagent"
-    assert fm["model"] == "minimax/MiniMax-M2.7"
+    assert fm["model"] == "openai/gpt-5.6-terra"
 
 
 def test_opencode_administrator_missing_model_raises(tmp_path: Path) -> None:
@@ -3715,11 +3665,11 @@ def test_wizard_current_opencode_model_applies_override(tmp_path: Path) -> None:
     assert _current_opencode_model("change-explorer", tmp_path) == "openai/gpt-5.5"
 
 
-def test_wizard_current_opencode_effort_returns_none_when_unset(tmp_path: Path) -> None:
-    """_current_opencode_effort returns None when no effort.opencode override exists."""
+def test_wizard_current_opencode_effort_returns_template_default_when_unset(tmp_path: Path) -> None:
+    """_current_opencode_effort returns the template default without an override."""
     from ai_harness.modules.wizard.tui import _current_opencode_effort
 
-    assert _current_opencode_effort("change-explorer", tmp_path) is None
+    assert _current_opencode_effort("change-explorer", tmp_path) == "medium"
 
 
 def test_wizard_current_opencode_effort_applies_override(tmp_path: Path) -> None:

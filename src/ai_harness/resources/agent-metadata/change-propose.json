@@ -2,7 +2,10 @@
   "description": "Change PRD author — writes prd.md in the sdd-propose structure without publishing anywhere.",
   "mode": "subagent",
   "model": {
-    "opencode": "minimax/MiniMax-M2.7",
+    "opencode": "openai/gpt-5.6-sol",
     "claude": "sonnet"
+  },
+  "effort": {
+    "opencode": "high"
   }
 }

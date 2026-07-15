@@ -18,6 +18,9 @@ block.
 - Change name: `{change}`.
 - Shared understanding or scope seed from the orchestrator.
 - Change root: `.ai-harness/changes/{change}/`.
+- Parent PRD path (`.ai-harness/changes/{parent}/prd.md`), only when
+  this Change is a confirmed child of a budget-decomposed parent —
+  read it for high-level scope context.
 - Exact `SKILL.md` paths resolved by the orchestrator in the
   `Skills to load before work` block, when applicable.
 

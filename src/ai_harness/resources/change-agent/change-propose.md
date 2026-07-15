@@ -19,6 +19,10 @@ understanding and proceed.
 - Change root: `.ai-harness/changes/{change}/`.
 - `exploration.md`.
 - Shared understanding or scope seed.
+- Parent PRD path (`.ai-harness/changes/{parent}/prd.md`), only when
+  this Change is a confirmed child of a budget-decomposed parent —
+  read it for high-level scope context before writing this Change's
+  own, narrower `prd.md`.
 
 ## Write
 
@@ -55,29 +59,23 @@ Write `.ai-harness/changes/{change}/prd.md` atomically using this
 `## Capabilities` is the prd→specs handoff. Each entry should be independently
 specifiable as a tracer-bullet vertical slice.
 
-When the user asks for a sliced change flow, append a YAML front
-matter block at the top of `prd.md`:
+When the delegation goal marks this as a PARENT overview prd for a
+budget-decomposed change (see `change-orchestrator.md`, "Semantic fork
+— budget"), add one more section after `## Capabilities`:
 
-```yaml
----
-changeFlow:
-  schemaVersion: 1
-  mode: sliced
-  capabilities:
-    - id: <capability-id>
-      title: <Capability Title>
-      risk:
-        level: normal | high
-        reasons: []
-      design: none | slice | change
----
+```markdown
+## Child Changes
+- <child-change-name>: <one-line scope>
 ```
 
-Capability IDs are unique, stable, lower-case kebab-case identifiers.
-Their list order is delivery order. `design` is `none` or `slice` for
-normal-risk slices; effective high risk overrides it to `change`. The
-prose `## Capabilities` section MUST describe the same entries for
-humans — routing reads only the versioned front matter.
+List exactly the confirmed children, one per line, in delivery order.
+Keep `## Intent` and `## Scope` at the overview level for this case —
+each child's own `prd.md` carries the detailed capabilities, approach,
+and risks for its slice.
+
+If a parent PRD path was provided as input (this Change is a confirmed
+child), name the parent Change under `## Dependencies` so a reader can
+trace back to the overview.
 
 ## Result
 

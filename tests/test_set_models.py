@@ -1287,8 +1287,8 @@ def test_run_opencode_wizard_change_agent_set_writes_eight_overrides(
     )
     for agent in change_agents:
         assert overrides[agent]["model"]["opencode"] == "openai/gpt-5.5"
-        # No effort override — the test never picked one.
-        assert "effort" not in overrides[agent]
+        # The model switch explicitly clears any template reasoning effort.
+        assert overrides[agent].get("effort", {}).get("opencode") is None
 
 
 def test_run_opencode_wizard_change_agent_set_re_renders_change_agent_files(

@@ -1205,9 +1205,9 @@ def test_install_with_partial_overrides_preserves_others(tmp_path: Path) -> None
     validator_fm = _read_frontmatter(tmp_path / ".config" / "opencode" / "agent" / "change-validator.md")
     orchestrator_fm = _read_frontmatter(tmp_path / ".config" / "opencode" / "agent" / "change-orchestrator.md")
     # Default opencode models per agent (per the agent-metadata JSON resources).
-    assert explorer_fm["model"] == "minimax/MiniMax-M2.7"
-    assert validator_fm["model"] == "minimax/MiniMax-M2.7"
-    assert orchestrator_fm["model"] == "minimax/MiniMax-M3"
+    assert explorer_fm["model"] == "openai/gpt-5.6-terra"
+    assert validator_fm["model"] == "openai/gpt-5.6-terra"
+    assert orchestrator_fm["model"] == "openai/gpt-5.6-terra"
 
 
 def test_install_with_overrides_does_not_remove_overrides_on_uninstall(tmp_path: Path) -> None:

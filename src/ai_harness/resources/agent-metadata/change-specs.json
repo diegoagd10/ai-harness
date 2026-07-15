@@ -2,7 +2,10 @@
   "description": "Change specs author — writes tracer-bullet specs from prd.md capabilities with RFC 2119 requirements and GIVEN/WHEN/THEN scenarios.",
   "mode": "subagent",
   "model": {
-    "opencode": "minimax/MiniMax-M2.7",
+    "opencode": "openai/gpt-5.6-sol",
     "claude": "sonnet"
+  },
+  "effort": {
+    "opencode": "medium"
   }
 }

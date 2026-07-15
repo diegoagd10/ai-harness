@@ -3,8 +3,11 @@
   "mode": "primary",
   "color": "error",
   "model": {
-    "opencode": "minimax/MiniMax-M3",
+    "opencode": "openai/gpt-5.6-terra",
     "claude": "sonnet"
+  },
+  "effort": {
+    "opencode": "high"
   },
   "permission": {
     "question": "allow",
