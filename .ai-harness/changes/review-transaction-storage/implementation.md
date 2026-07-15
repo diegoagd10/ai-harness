@@ -8,6 +8,7 @@
 - 20692d2 — task 5: harden-review-storage-against-filesystem-tampering
 - c6c3d12 — task 6: distinguish-unsupported-platform-fsync-from-operational-fsync-failure
 - 970afe5 — task 7: recheck-bundle-identity-and-topology-after-stable-object-file-read
+- f05dd7e — task 8: translate-immutable-publication-bundle-errors-to-review-storage-conflict
 
 ## TDD Evidence
 
@@ -20,6 +21,7 @@
 | 5 | 20692d2 | src/ai_harness/modules/harness/receipts.py | tests/test_review_transaction_storage_hardening.py | unit | passed: 1284/1284 | written | passed | Single | clean |
 | 6 | c6c3d12 | src/ai_harness/modules/harness/receipts.py | tests/test_receipts_store.py | unit | passed: 1288/1288 | written | passed | (4 cases) | clean |
 | 7 | 970afe5 | src/ai_harness/modules/harness/receipts.py | tests/test_review_bundle_store.py | unit | passed: 1300/1300 | written | passed | (2 cases) | clean |
+| 8 | f05dd7e | src/ai_harness/modules/harness/review_transaction_storage.py | tests/test_review_transaction_storage_publish.py | unit | passed: 1315/1315 | written | passed | (4 cases) | clean |
 
 ## Remaining
 - none
