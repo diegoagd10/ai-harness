@@ -6,6 +6,7 @@
 - 766f09d — task 3: publish-verified-review-graphs-root-last
 - 133cf8a — task 4: load-and-revalidate-complete-review-graphs
 - 20692d2 — task 5: harden-review-storage-against-filesystem-tampering
+- c6c3d12 — task 6: distinguish-unsupported-platform-fsync-from-operational-fsync-failure
 
 ## TDD Evidence
 
@@ -16,6 +17,7 @@
 | 3 | 766f09d | src/ai_harness/modules/harness/review_transaction_storage.py | tests/test_review_transaction_storage_publish.py | unit | passed: 1260/1260 | written | passed | Single | clean |
 | 4 | 133cf8a | src/ai_harness/modules/harness/review_transaction_storage.py | tests/test_review_transaction_storage_load.py | unit | passed: 1271/1271 | written | passed | Single | clean |
 | 5 | 20692d2 | src/ai_harness/modules/harness/receipts.py | tests/test_review_transaction_storage_hardening.py | unit | passed: 1284/1284 | written | passed | Single | clean |
+| 6 | c6c3d12 | src/ai_harness/modules/harness/receipts.py | tests/test_receipts_store.py | unit | passed: 1288/1288 | written | passed | (4 cases) | clean |
 
 ## Remaining
 - none
