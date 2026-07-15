@@ -18,10 +18,16 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from dataclasses import field as _dataclass_field
 from json import JSONDecodeError
+from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Final
 
 from ai_harness.modules.harness.receipts import (
+    ReceiptStoreError,
+    _ReviewBundleRole,
+    _ReviewBundleStore,
     encode_canonical,
     typed_hash,
     validate_typed_id,
@@ -609,3 +615,377 @@ class _ReviewRootCodec:
                 code=CODE_INVALID,
                 context={"description": description},
             )
+
+
+# ---------------------------------------------------------------------------
+# Public storage seam
+# ---------------------------------------------------------------------------
+
+
+_REVIEW_ROLE_BY_RECORD_TYPE: Final[Mapping[type, _ReviewBundleRole]] = MappingProxyType(
+    {
+        LensSelection: _ReviewBundleRole.LENS_SELECTION,
+        ReviewTransaction: _ReviewBundleRole.REVIEW_TRANSACTION,
+        Finding: _ReviewBundleRole.FINDING,
+        FindingTransition: _ReviewBundleRole.FINDING_TRANSITION,
+        CorrectionFact: _ReviewBundleRole.CORRECTION_FACT,
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _MemberEntry:
+    """One member bundle entry in a frozen publication plan."""
+
+    role: _ReviewBundleRole
+    canonical_bytes: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class _ReviewPublicationPlan:
+    """Deterministic immutable publication plan for a v1 review graph.
+
+    The plan binds each member record to its fixed role and the canonical
+    bytes the bundle store will install. The plan is built once and used
+    three times: (1) to publish the member bundles, (2) to verify their
+    state after a stable read, and (3) to publish the root manifest.
+    Publishing against the same plan is idempotent; mutating the graph
+    yields a different plan.
+    """
+
+    lens_selection_entry: _MemberEntry
+    transaction_entry: _MemberEntry
+    finding_entries: tuple[_MemberEntry, ...]
+    transition_entries: tuple[_MemberEntry, ...]
+    correction_entry: _MemberEntry | None
+    root_canonical_bytes: bytes
+    root_id: ReviewTransactionRootId
+
+    @classmethod
+    def build(
+        cls,
+        graph: ReviewTransactionGraph,
+        *,
+        contract: ReviewContractV1,
+    ) -> _ReviewPublicationPlan:
+        """Return the deterministic publication plan for *graph*."""
+
+        if not isinstance(graph, ReviewTransactionGraph):
+            raise ReviewTransactionStorageError(
+                "publication plan input must be a ReviewTransactionGraph",
+                code=CODE_INVALID,
+                context={"input_type": type(graph).__name__},
+            )
+
+        try:
+            contract.validate_transaction(
+                graph.transaction,
+                lens_selection=graph.lens_selection,
+                findings=graph.findings,
+                transitions=graph.transitions,
+                correction_fact=graph.correction_fact,
+            )
+        except ReviewContractError as exc:
+            raise ReviewTransactionStorageError(
+                exc.message,
+                code=CODE_INVALID,
+                context=_contract_context_to_mapping(exc),
+                cause=exc,
+            ) from exc
+
+        lens_entry = _member_entry_from_record(graph.lens_selection, contract=contract)
+        transaction_entry = _member_entry_from_record(graph.transaction, contract=contract)
+
+        finding_entries: list[_MemberEntry] = []
+        seen_finding_keys: set[tuple[str, bytes]] = set()
+        for finding in graph.findings:
+            entry = _member_entry_from_record(finding, contract=contract)
+            key = (entry.role.value, entry.canonical_bytes)
+            if key in seen_finding_keys:
+                raise ReviewTransactionStorageError(
+                    "review graph contains duplicate finding identities",
+                    code=CODE_INVALID,
+                    context={"role": entry.role.value},
+                )
+            seen_finding_keys.add(key)
+            finding_entries.append(entry)
+
+        transition_entries: list[_MemberEntry] = []
+        seen_transition_keys: set[tuple[str, bytes]] = set()
+        for transition in graph.transitions:
+            entry = _member_entry_from_record(transition, contract=contract)
+            key = (entry.role.value, entry.canonical_bytes)
+            if key in seen_transition_keys:
+                raise ReviewTransactionStorageError(
+                    "review graph contains duplicate transition identities",
+                    code=CODE_INVALID,
+                    context={"role": entry.role.value},
+                )
+            seen_transition_keys.add(key)
+            transition_entries.append(entry)
+
+        if graph.correction_fact is not None:
+            correction_entry = _member_entry_from_record(graph.correction_fact, contract=contract)
+        else:
+            correction_entry = None
+
+        root_bytes = _ReviewRootCodec.encode(graph, contract=contract)
+        root_id = _ReviewRootCodec.root_id(root_bytes)
+
+        return cls(
+            lens_selection_entry=lens_entry,
+            transaction_entry=transaction_entry,
+            finding_entries=tuple(finding_entries),
+            transition_entries=tuple(transition_entries),
+            correction_entry=correction_entry,
+            root_canonical_bytes=root_bytes,
+            root_id=root_id,
+        )
+
+
+def _member_entry_from_record(record: Any, *, contract: ReviewContractV1) -> _MemberEntry:
+    """Resolve a single record into a ``(role, canonical_bytes)`` plan entry.
+
+    Raises :class:`ReviewTransactionStorageError` with code
+    :data:`CODE_INVALID` if the record's class is not mapped to a closed
+    review role, or if encoding the record fails.
+    """
+
+    role = _REVIEW_ROLE_BY_RECORD_TYPE.get(type(record))
+    if role is None:
+        raise ReviewTransactionStorageError(
+            "review record class is not in the closed role registry",
+            code=CODE_INVALID,
+            context={"record_type": type(record).__name__},
+        )
+    try:
+        canonical_bytes = contract.encode(record)
+    except ReviewContractError as exc:
+        raise ReviewTransactionStorageError(
+            exc.message,
+            code=CODE_INVALID,
+            context=_contract_context_to_mapping(exc),
+            cause=exc,
+        ) from exc
+    return _MemberEntry(role=role, canonical_bytes=canonical_bytes)
+
+
+def _translate_bundle_error(action: str, exc: ReceiptStoreError) -> ReviewTransactionStorageError:
+    """Translate a low-level receipt-store failure into a storage code."""
+
+    code = exc.code
+    if code in {"receipt.io-failed", "storage.failed"}:
+        target_code = CODE_IO_FAILED
+    elif code in {"receipt.missing"}:
+        target_code = CODE_MISSING
+    elif code in {"receipt.invalid"}:
+        target_code = CODE_INVALID
+    else:
+        target_code = CODE_INVALID
+    return ReviewTransactionStorageError(
+        f"{action}: {exc}",
+        code=target_code,
+        cause=exc,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewTransactionStore:
+    """Public persistence seam for complete immutable v1 review graphs.
+
+    Publication accepts a single ``ReviewTransactionGraph`` value and
+    returns a deterministic typed root id. Members are installed first,
+    reread, and verified before the root is committed. Load (added in
+    task 4) returns the same immutable graph or refuses to return any
+    partial result.
+    """
+
+    change_root: Path
+    _bundles: _ReviewBundleStore = _dataclass_field(
+        default=None,
+        init=False,
+        repr=False,
+        compare=False,  # type: ignore[assignment]
+    )
+    _contract: ReviewContractV1 = _dataclass_field(
+        default=None,
+        init=False,
+        repr=False,
+        compare=False,  # type: ignore[assignment]
+    )
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.change_root, Path):
+            raise ReviewTransactionStorageError(
+                "ReviewTransactionStore.change_root must be a Path",
+                code=CODE_INVALID,
+                context={"change_root_type": type(self.change_root).__name__},
+            )
+        object.__setattr__(self, "_bundles", _ReviewBundleStore(self.change_root / ".receipts"))
+        object.__setattr__(self, "_contract", ReviewContractV1())
+
+    def publish(self, graph: ReviewTransactionGraph) -> ReviewTransactionRootId:
+        """Atomically publish *graph* and return the typed root identifier.
+
+        Steps:
+
+        1. Validate the input type and aggregate graph invariants.
+        2. Encode each member through ``ReviewContractV1`` and compute
+           each member's contract identifier.
+        3. Build the canonical root manifest and its typed identifier.
+        4. Install each member bundle (lens, transaction, sorted
+           findings, ordered transitions, optional correction) with
+           atomic sibling-rename publication; an existing or racing
+           bundle is treated as idempotent success only when its bytes
+           match the plan.
+        5. Reread every member, decode it back to its expected record
+           class, recompute the contract id, compare against the plan,
+           reconstruct the graph, and re-run ``validate_transaction``.
+        6. Install the root bundle last; only after a successful root
+           rename and parent-directory fsync does publication return
+           the typed root id.
+        """
+
+        if not isinstance(graph, ReviewTransactionGraph):
+            raise ReviewTransactionStorageError(
+                "publish input must be a ReviewTransactionGraph",
+                code=CODE_INVALID,
+                context={"input_type": type(graph).__name__},
+            )
+
+        plan = _ReviewPublicationPlan.build(graph, contract=self._contract)
+
+        # Member-first publication in deterministic order.
+        member_order: list[_MemberEntry] = [plan.lens_selection_entry, plan.transaction_entry]
+        member_order.extend(plan.finding_entries)
+        member_order.extend(plan.transition_entries)
+        if plan.correction_entry is not None:
+            member_order.append(plan.correction_entry)
+        for entry in member_order:
+            self._publish_member(role=entry.role, canonical_bytes=entry.canonical_bytes)
+
+        # Reread and verify every member before installing the root.
+        lens_record = self._reread_and_verify_member(plan.lens_selection_entry, expected_class=LensSelection)
+        tx_record = self._reread_and_verify_member(plan.transaction_entry, expected_class=ReviewTransaction)
+        finding_records = tuple(
+            self._reread_and_verify_member(entry, expected_class=Finding) for entry in plan.finding_entries
+        )
+        transition_records = tuple(
+            self._reread_and_verify_member(entry, expected_class=FindingTransition) for entry in plan.transition_entries
+        )
+        if plan.correction_entry is not None:
+            correction_record = self._reread_and_verify_member(plan.correction_entry, expected_class=CorrectionFact)
+        else:
+            correction_record = None
+
+        # Re-run aggregate validation against the reread graph.
+        reconstructed = ReviewTransactionGraph(
+            lens_selection=lens_record,
+            transaction=tx_record,
+            findings=finding_records,
+            transitions=transition_records,
+            correction_fact=correction_record,
+        )
+        try:
+            self._contract.validate_transaction(
+                reconstructed.transaction,
+                lens_selection=reconstructed.lens_selection,
+                findings=reconstructed.findings,
+                transitions=reconstructed.transitions,
+                correction_fact=reconstructed.correction_fact,
+            )
+        except ReviewContractError as exc:
+            raise ReviewTransactionStorageError(
+                "reread validation failed for the publication graph",
+                code=CODE_INVALID,
+                context=_contract_context_to_mapping(exc),
+                cause=exc,
+            ) from exc
+
+        # Root-last commit point.
+        try:
+            self._bundles.publish(
+                _ReviewBundleRole.TRANSACTION_ROOT,
+                plan.root_canonical_bytes,
+            )
+        except ReceiptStoreError as exc:
+            raise _translate_bundle_error("publish review root", exc) from exc
+        return plan.root_id
+
+    # ---- internal members ----
+
+    def _publish_member(self, *, role: _ReviewBundleRole, canonical_bytes: bytes) -> None:
+        try:
+            self._bundles.publish(role, canonical_bytes)
+        except ReceiptStoreError as exc:
+            raise _translate_bundle_error(f"publish review {role.value}", exc) from exc
+
+    def _reread_and_verify_member(
+        self,
+        entry: _MemberEntry,
+        *,
+        expected_class: type[LensSelection]
+        | type[ReviewTransaction]
+        | type[Finding]
+        | type[FindingTransition]
+        | type[CorrectionFact],
+    ) -> Any:
+        """Reread the bundle at *entry*, validate bytes and decoding.
+
+        Returns the decoded record; raises
+        :class:`ReviewTransactionStorageError` on any topology, byte, or
+        identity mismatch.
+        """
+
+        expected_id = typed_hash(_label_for_role(entry.role), entry.canonical_bytes)
+        try:
+            reread = self._bundles.read(entry.role, expected_id)
+        except ReceiptStoreError as exc:
+            raise _translate_bundle_error(f"reread review {entry.role.value}", exc) from exc
+
+        if reread != entry.canonical_bytes:
+            raise ReviewTransactionStorageError(
+                f"reread {entry.role.value} bytes do not match the planned payload",
+                code=CODE_CONFLICT,
+                context={"role": entry.role.value, "expected_id": expected_id},
+            )
+
+        try:
+            decoded = self._contract.decode(expected_class, reread)
+        except ReviewContractError as exc:
+            raise ReviewTransactionStorageError(
+                exc.message,
+                code=CODE_INVALID,
+                context=_contract_context_to_mapping(exc),
+                cause=exc,
+            ) from exc
+
+        try:
+            derived_id = self._contract.id_for(decoded)
+        except ReviewContractError as exc:
+            raise ReviewTransactionStorageError(
+                exc.message,
+                code=CODE_INVALID,
+                context=_contract_context_to_mapping(exc),
+                cause=exc,
+            ) from exc
+
+        if derived_id.value != expected_id:
+            raise ReviewTransactionStorageError(
+                f"reread {entry.role.value} identity does not match planned digest",
+                code=CODE_CONFLICT,
+                context={
+                    "role": entry.role.value,
+                    "expected_id": expected_id,
+                    "derived_id": derived_id.value,
+                },
+            )
+
+        return decoded
+
+
+def _label_for_role(role: _ReviewBundleRole) -> str:
+    """Return the typed-hash label paired with a closed review role."""
+
+    pair = _ReviewBundleStore._REGISTRY[role]
+    return pair[1]  # type: ignore[index]  # noqa: ERA001
