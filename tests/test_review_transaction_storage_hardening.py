@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """Tests for review storage filesystem-hardening guarantees.
 
 These tests exercise the adversarial matrix specified in
@@ -23,96 +24,23 @@ import pytest
 from ai_harness.modules.harness.review_transaction_storage import (
     CODE_INVALID,
     CODE_MISSING,
-    ReviewTransactionGraph,
     ReviewTransactionRootId,
     ReviewTransactionStorageError,
     ReviewTransactionStore,
 )
 from ai_harness.modules.harness.review_transactions import (
-    LENS_POLICY_NAME,
-    CorrectionFact,
-    Finding,
-    FindingTransition,
     ReviewContractV1,
-    ReviewTransaction,
+)
+from tests._review_transaction_storage_fixtures import (
+    change_root,
+    make_accepted_graph,
+    make_minimum_graph,
+    make_resolution_graph,
+    store,
 )
 
-CHANGE_NAME: str = "test-change"
-CANDIDATE_BEFORE: str = "sha256:" + ("c" * 64)
-CANDIDATE_AFTER: str = "sha256:" + ("d" * 64)
-
-
-def _make_resolution_graph(
-    contract: ReviewContractV1,
-) -> tuple[ReviewTransactionGraph, list]:
-    selection = contract.select_lenses(policy=LENS_POLICY_NAME, risk_level="high")
-    transaction = ReviewTransaction(
-        schema_name="ai-harness.review-transaction",  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        change_name=CHANGE_NAME,
-        candidate_id=CANDIDATE_BEFORE,
-        lens_selection_id=contract.id_for(selection),
-        scope_paths=("src",),
-        loc_budget=20,
-    )
-    tx_id = contract.id_for(transaction)
-    finding = Finding(
-        schema_name="ai-harness.review-finding",  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        review_transaction_id=tx_id,
-        lens="correctness",
-        severity="warning",
-        summary="summary",
-        detail="detail",
-        paths=(),
-        status="open",  # type: ignore[arg-type]
-    )
-    correction = CorrectionFact(
-        schema_name="ai-harness.review-correction-fact",  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        review_transaction_id=tx_id,
-        resolved_finding_ids=(contract.id_for(finding),),
-        candidate_before=transaction.candidate_id,
-        candidate_after=CANDIDATE_AFTER,
-        changed_paths=("src/a.py",),
-        loc_added=1,
-        loc_deleted=1,
-        loc_actual=2,
-    )
-    transition = FindingTransition(
-        schema_name="ai-harness.review-finding-transition",  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        review_transaction_id=tx_id,
-        finding_id=contract.id_for(finding),
-        from_status="open",
-        to_status="resolved",
-        correction_fact_id=contract.id_for(correction),
-    )
-    graph = ReviewTransactionGraph(
-        lens_selection=selection,
-        transaction=transaction,
-        findings=(finding,),
-        transitions=(transition,),
-        correction_fact=correction,
-    )
-    ids = [
-        contract.id_for(selection),
-        contract.id_for(transaction),
-        contract.id_for(finding),
-        contract.id_for(transition),
-        contract.id_for(correction),
-    ]
-    return graph, ids
-
-
-@pytest.fixture
-def change_root(tmp_path: Path) -> Path:
-    return tmp_path
-
-
-@pytest.fixture
-def store(change_root: Path) -> ReviewTransactionStore:
-    return ReviewTransactionStore(change_root=change_root)
+# Fixtures re-exported so pytest can resolve them.
+__all__ = ["change_root", "store"]
 
 
 # ---------------------------------------------------------------------------
@@ -126,7 +54,7 @@ def test_load_rejects_symlinked_object_file(store: ReviewTransactionStore, chang
     import shutil
 
     contract = ReviewContractV1()
-    graph, ids = _make_resolution_graph(contract)
+    graph, ids = make_resolution_graph(contract)
     root_id = store.publish(graph)
 
     finding_digest = ids[2].value.removeprefix("sha256:")
@@ -153,7 +81,7 @@ def test_load_rejects_symlinked_bundle_directory(store: ReviewTransactionStore, 
     import shutil
 
     contract = ReviewContractV1()
-    graph, _ = _make_resolution_graph(contract)
+    graph, _ = make_resolution_graph(contract)
     root_id = store.publish(graph)
 
     findings_dir = change_root / ".receipts" / "review-findings" / "sha256"
@@ -173,7 +101,7 @@ def test_load_rejects_fifo_object_file(store: ReviewTransactionStore, change_roo
     """A FIFO replacing ``object.json`` is detected and rejected."""
 
     contract = ReviewContractV1()
-    graph, ids = _make_resolution_graph(contract)
+    graph, ids = make_resolution_graph(contract)
     root_id = store.publish(graph)
 
     finding_digest = ids[2].value.removeprefix("sha256:")
@@ -190,7 +118,7 @@ def test_load_rejects_extra_child_in_bundle(store: ReviewTransactionStore, chang
     """Adding a stray file under a bundle directory is rejected at topology check."""
 
     contract = ReviewContractV1()
-    graph, ids = _make_resolution_graph(contract)
+    graph, ids = make_resolution_graph(contract)
     root_id = store.publish(graph)
 
     finding_digest = ids[2].value.removeprefix("sha256:")
@@ -225,7 +153,7 @@ def test_publish_rejects_symlinked_member_bundle(store: ReviewTransactionStore, 
     import shutil
 
     contract = ReviewContractV1()
-    graph, ids = _make_resolution_graph(contract)
+    graph, ids = make_resolution_graph(contract)
     root_id_initial = store.publish(graph)
 
     digest = ids[1].value.removeprefix("sha256:")
@@ -250,7 +178,7 @@ def test_load_rejects_bundle_removed_during_read(store: ReviewTransactionStore, 
     """Removing a bundle between read attempts surfaces as missing."""
 
     contract = ReviewContractV1()
-    graph, _ = _make_resolution_graph(contract)
+    graph, _ = make_resolution_graph(contract)
     root_id = store.publish(graph)
 
     # Wipe one of the member bundles to simulate removal.
@@ -268,7 +196,7 @@ def test_load_rejects_overwritten_object_file(store: ReviewTransactionStore, cha
     """A bundle whose object.json is replaced with tampered bytes is rejected."""
 
     contract = ReviewContractV1()
-    graph, ids = _make_resolution_graph(contract)
+    graph, ids = make_resolution_graph(contract)
     root_id = store.publish(graph)
 
     target = (
@@ -288,7 +216,7 @@ def test_load_rejects_overwritten_root(store: ReviewTransactionStore, change_roo
     """A tampered root bundle with valid bytes but wrong digest fails closed."""
 
     contract = ReviewContractV1()
-    graph, _ = _make_resolution_graph(contract)
+    graph, _ = make_resolution_graph(contract)
     root_id = store.publish(graph)
 
     digest = root_id.value.removeprefix("sha256:")
@@ -314,31 +242,7 @@ def test_round_trip_for_minimum_graph(
     """A graph with empty findings/transitions and no correction round-trips."""
 
     contract = ReviewContractV1()
-    selection = contract.select_lenses(policy=LENS_POLICY_NAME, risk_level="high")
-    transaction = ReviewTransaction(
-        schema_name="ai-harness.review-transaction",  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        change_name=CHANGE_NAME,
-        candidate_id=CANDIDATE_BEFORE,
-        lens_selection_id=contract.id_for(selection),
-        scope_paths=("src",),
-        loc_budget=20,
-    )
-    contract.validate_transaction(
-        transaction,
-        lens_selection=selection,
-        findings=(),
-        transitions=(),
-        correction_fact=None,
-    )
-
-    graph = ReviewTransactionGraph(
-        lens_selection=selection,
-        transaction=transaction,
-        findings=(),
-        transitions=(),
-        correction_fact=None,
-    )
+    graph = make_minimum_graph(contract)
     root_id = store.publish(graph)
     loaded = store.load(root_id)
     assert loaded == graph
@@ -353,51 +257,7 @@ def test_round_trip_for_accepted_only_graph(
     """An accepted-only graph round-trips and preserves transition order."""
 
     contract = ReviewContractV1()
-    selection = contract.select_lenses(policy=LENS_POLICY_NAME, risk_level="high")
-    transaction = ReviewTransaction(
-        schema_name="ai-harness.review-transaction",  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        change_name=CHANGE_NAME,
-        candidate_id=CANDIDATE_BEFORE,
-        lens_selection_id=contract.id_for(selection),
-        scope_paths=("src",),
-        loc_budget=20,
-    )
-    tx_id = contract.id_for(transaction)
-    finding = Finding(
-        schema_name="ai-harness.review-finding",  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        review_transaction_id=tx_id,
-        lens="correctness",
-        severity="warning",
-        summary="summary",
-        detail="detail",
-        paths=(),
-        status="open",  # type: ignore[arg-type]
-    )
-    transition = FindingTransition(
-        schema_name="ai-harness.review-finding-transition",  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        review_transaction_id=tx_id,
-        finding_id=contract.id_for(finding),
-        from_status="open",
-        to_status="accepted",
-        correction_fact_id=None,
-    )
-    contract.validate_transaction(
-        transaction,
-        lens_selection=selection,
-        findings=(finding,),
-        transitions=(transition,),
-        correction_fact=None,
-    )
-    graph = ReviewTransactionGraph(
-        lens_selection=selection,
-        transaction=transaction,
-        findings=(finding,),
-        transitions=(transition,),
-        correction_fact=None,
-    )
+    graph = make_accepted_graph(contract)
     root_id = store.publish(graph)
     loaded = store.load(root_id)
     assert loaded == graph
@@ -410,7 +270,7 @@ def test_round_trip_through_multiple_publications_preserves_root_id(
     """Re-publishing the same root id (idempotent) preserves the root bytes."""
 
     contract = ReviewContractV1()
-    graph, _ = _make_resolution_graph(contract)
+    graph, _ = make_resolution_graph(contract)
 
     first = store.publish(graph)
     second = store.publish(graph)

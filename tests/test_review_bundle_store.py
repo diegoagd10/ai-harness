@@ -420,7 +420,6 @@ def test_read_rejects_bundle_dir_replaced_during_read(
     """
 
     from ai_harness.modules.harness import receipts as receipts_module
-    from ai_harness.modules.harness.receipts import _stable_regular_read
 
     role = _ReviewBundleRole.LENS_SELECTION
     object_id = bundle_store.publish(role, CANONICAL_PAYLOAD)

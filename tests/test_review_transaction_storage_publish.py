@@ -35,170 +35,34 @@ from ai_harness.modules.harness.review_transaction_storage import (
     ReviewTransactionStore,
 )
 from ai_harness.modules.harness.review_transactions import (
-    LENS_POLICY_NAME,
-    CorrectionFact,
     Finding,
     FindingTransition,
-    LensSelection,
     ReviewContractError,
     ReviewContractV1,
-    ReviewTransaction,
+)
+from tests._review_transaction_storage_fixtures import (
+    change_root,
+    make_correction,
+    make_finding,
+    make_resolved_transition,
+    make_selection,
+    make_transaction,
+    store,
 )
 
-CHANGE_NAME: str = "test-change"
-CANDIDATE_BEFORE: str = "sha256:" + ("c" * 64)
-CANDIDATE_AFTER: str = "sha256:" + ("d" * 64)
-
-
-# ---------------------------------------------------------------------------
-# Helpers — build complete graphs under deterministic IDs
-# ---------------------------------------------------------------------------
-
-
-def _make_selection(contract: ReviewContractV1) -> LensSelection:
-    return contract.select_lenses(policy=LENS_POLICY_NAME, risk_level="high")
-
-
-def _make_transaction(contract: ReviewContractV1, selection: LensSelection) -> ReviewTransaction:
-    return ReviewTransaction(
-        schema_name="ai-harness.review-transaction",  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        change_name=CHANGE_NAME,
-        candidate_id=CANDIDATE_BEFORE,
-        lens_selection_id=contract.id_for(selection),
-        scope_paths=("src",),
-        loc_budget=20,
-    )
-
-
-def _make_finding(contract: ReviewContractV1, tx_id: ReviewTransactionId, *, lens: str) -> Finding:
-
-    return Finding(
-        schema_name="ai-harness.review-finding",  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        review_transaction_id=tx_id,
-        lens=lens,
-        severity="warning",
-        summary=f"summary for {lens}",
-        detail=f"detail for {lens}",
-        paths=(),
-        status="open",  # type: ignore[arg-type]
-    )
-
-
-def _make_transition_to_resolution(
-    contract: ReviewContractV1,
-    transaction: ReviewTransaction,
-    finding: Finding,
-    *,
-    correction: CorrectionFact,
-) -> tuple[FindingTransition, CorrectionFact]:
-    tx_id = contract.id_for(transaction)
-    finding_id = contract.id_for(finding)
-    correction_id = contract.id_for(correction)
-    transition = FindingTransition(
-        schema_name="ai-harness.review-finding-transition",  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        review_transaction_id=tx_id,
-        finding_id=finding_id,
-        from_status="open",
-        to_status="resolved",
-        correction_fact_id=correction_id,
-    )
-    return transition, correction
-
-
-def _make_correction(
-    contract: ReviewContractV1,
-    transaction: ReviewTransaction,
-    *,
-    resolved: tuple,
-    changed_paths: tuple[str, ...] = ("src/a.py",),
-    loc_added: int = 1,
-    loc_deleted: int = 1,
-) -> CorrectionFact:
-    return CorrectionFact(
-        schema_name="ai-harness.review-correction-fact",  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        review_transaction_id=contract.id_for(transaction),
-        resolved_finding_ids=resolved,
-        candidate_before=transaction.candidate_id,
-        candidate_after=CANDIDATE_AFTER,
-        changed_paths=changed_paths,
-        loc_added=loc_added,
-        loc_deleted=loc_deleted,
-        loc_actual=loc_added + loc_deleted,
-    )
-
-
-def _build_resolved_graph(
-    contract: ReviewContractV1,
-) -> tuple[
-    ReviewContractV1,
-    LensSelection,
-    ReviewTransaction,
-    tuple[Finding, ...],
-    tuple[FindingTransition, ...],
-    CorrectionFact,
-]:
-    selection = _make_selection(contract)
-    transaction = _make_transaction(contract, selection)
-    tx_id = contract.id_for(transaction)
-    finding = _make_finding(contract, tx_id, lens="correctness")
-    finding_id = contract.id_for(finding)
-    correction = _make_correction(contract, transaction, resolved=(finding_id,))
-    transition, _ = _make_transition_to_resolution(contract, transaction, finding, correction=correction)
-    contract.validate_transaction(
-        transaction,
-        lens_selection=selection,
-        findings=(finding,),
-        transitions=(transition,),
-        correction_fact=correction,
-    )
-    return contract, selection, transaction, (finding,), (transition,), correction
-
-
-def _build_accepted_graph(
-    contract: ReviewContractV1,
-) -> tuple[
-    ReviewContractV1,
-    LensSelection,
-    ReviewTransaction,
-    tuple[Finding, ...],
-    tuple[FindingTransition, ...],
-    None,
-]:
-    selection = _make_selection(contract)
-    transaction = _make_transaction(contract, selection)
-    tx_id = contract.id_for(transaction)
-    finding = _make_finding(contract, tx_id, lens="correctness")
-    finding_id = contract.id_for(finding)
-    transition = FindingTransition(
-        schema_name="ai-harness.review-finding-transition",  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        review_transaction_id=tx_id,
-        finding_id=finding_id,
-        from_status="open",
-        to_status="accepted",
-        correction_fact_id=None,
-    )
-    contract.validate_transaction(
-        transaction,
-        lens_selection=selection,
-        findings=(finding,),
-        transitions=(transition,),
-        correction_fact=None,
-    )
-    return contract, selection, transaction, (finding,), (transition,), None
+# Fixtures re-exported so pytest can resolve them.
+__all__ = ["change_root", "store"]
 
 
 def _to_graph(
-    selection: LensSelection,
-    transaction: ReviewTransaction,
-    findings: tuple[Finding, ...],
-    transitions: tuple[FindingTransition, ...],
-    correction: CorrectionFact | None,
+    selection,
+    transaction,
+    findings,
+    transitions,
+    correction,
 ) -> ReviewTransactionGraph:
+    """Bundle a constructed graph into a ``ReviewTransactionGraph``."""
+
     return ReviewTransactionGraph(
         lens_selection=selection,
         transaction=transaction,
@@ -208,19 +72,54 @@ def _to_graph(
     )
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
+def _build_resolved_graph(
+    contract: ReviewContractV1,
+) -> tuple:
+    """Return ``(selection, transaction, findings, transitions, correction)``.
+
+    The helper mirrors the historical `_build_resolved_graph` shape so
+    callers can keep their tuple-destructure pattern.
+    """
+
+    selection = make_selection(contract)
+    transaction = make_transaction(contract, selection)
+    finding = make_finding(contract, transaction, lens="correctness")
+    correction = make_correction(contract, transaction, resolved=(contract.id_for(finding),))
+    transition = make_resolved_transition(
+        contract,
+        transaction,
+        finding,
+        correction=correction,
+    )
+    contract.validate_transaction(
+        transaction,
+        lens_selection=selection,
+        findings=(finding,),
+        transitions=(transition,),
+        correction_fact=correction,
+    )
+    return selection, transaction, (finding,), (transition,), correction
 
 
-@pytest.fixture
-def change_root(tmp_path: Path) -> Path:
-    return tmp_path
+def _build_accepted_graph(contract: ReviewContractV1) -> tuple:
+    """Return ``(selection, transaction, findings, transitions, None)``."""
 
+    from tests._review_transaction_storage_fixtures import (
+        make_accepted_transition,
+    )
 
-@pytest.fixture
-def store(change_root: Path) -> ReviewTransactionStore:
-    return ReviewTransactionStore(change_root=change_root)
+    selection = make_selection(contract)
+    transaction = make_transaction(contract, selection)
+    finding = make_finding(contract, transaction, lens="correctness")
+    transition = make_accepted_transition(contract, transaction, finding)
+    contract.validate_transaction(
+        transaction,
+        lens_selection=selection,
+        findings=(finding,),
+        transitions=(transition,),
+        correction_fact=None,
+    )
+    return selection, transaction, (finding,), (transition,), None
 
 
 # ---------------------------------------------------------------------------
@@ -232,7 +131,7 @@ def test_publish_writes_root_id_with_canonical_prefix(store: ReviewTransactionSt
     """A complete graph publishes and returns a canonical typed root id."""
 
     contract = ReviewContractV1()
-    selection, transaction, findings, transitions, correction = _build_resolved_graph(contract)[1:]
+    selection, transaction, findings, transitions, correction = _build_resolved_graph(contract)
     graph = _to_graph(selection, transaction, findings, transitions, correction)
 
     root_id = store.publish(graph)
@@ -245,7 +144,7 @@ def test_publish_is_deterministic_for_equal_graph(store: ReviewTransactionStore)
     """Two publishes of equal graphs return the same root id."""
 
     contract = ReviewContractV1()
-    selection, transaction, findings, transitions, correction = _build_resolved_graph(contract)[1:]
+    selection, transaction, findings, transitions, correction = _build_resolved_graph(contract)
     graph = _to_graph(selection, transaction, findings, transitions, correction)
 
     first = store.publish(graph)
@@ -259,11 +158,11 @@ def test_publish_finding_input_order_does_not_change_root(store: ReviewTransacti
     """Finding identity drives the manifest; equal findings in different order share a root."""
 
     contract = ReviewContractV1()
-    selection = _make_selection(contract)
-    transaction = _make_transaction(contract, selection)
+    selection = make_selection(contract)
+    transaction = make_transaction(contract, selection)
     tx_id = contract.id_for(transaction)
 
-    finding_a = _make_finding(contract, tx_id, lens="correctness")
+    finding_a = make_finding(contract, transaction, lens="correctness")
     finding_b = Finding(
         schema_name="ai-harness.review-finding",  # type: ignore[arg-type]
         schema_version=1,  # type: ignore[arg-type]
@@ -276,22 +175,10 @@ def test_publish_finding_input_order_does_not_change_root(store: ReviewTransacti
         status="open",  # type: ignore[arg-type]
     )
 
-    # Resolve each finding to a transition accepted by an empty correction.
-    correction_a = _make_correction(contract, transaction, resolved=(contract.id_for(finding_a),))
-    correction_b = _make_correction(
-        contract,
-        transaction,
-        resolved=(contract.id_for(finding_b),),
-        changed_paths=("src/b.py",),
-    )
-
-    transition_a, _ = _make_transition_to_resolution(contract, transaction, finding_a, correction=correction_a)
-    transition_b, _ = _make_transition_to_resolution(contract, transaction, finding_b, correction=correction_b)
-
     # Required correction: correction must resolve all findings referenced by
     # resolved transitions. We construct two graphs that differ only in
     # finding order, with identical correction bindings.
-    correction_combined = _make_correction(
+    correction_combined = make_correction(
         contract,
         transaction,
         resolved=(contract.id_for(finding_a), contract.id_for(finding_b)),
@@ -353,10 +240,10 @@ def test_publish_transition_order_matters(store: ReviewTransactionStore) -> None
     """Changing transition order changes the root id deterministically."""
 
     contract = ReviewContractV1()
-    selection = _make_selection(contract)
-    transaction = _make_transaction(contract, selection)
+    selection = make_selection(contract)
+    transaction = make_transaction(contract, selection)
     tx_id = contract.id_for(transaction)
-    finding_x = _make_finding(contract, tx_id, lens="correctness")
+    finding_x = make_finding(contract, transaction, lens="correctness")
     finding_y = Finding(
         schema_name="ai-harness.review-finding",  # type: ignore[arg-type]
         schema_version=1,  # type: ignore[arg-type]
@@ -427,7 +314,7 @@ def test_publish_writes_six_bundles_for_full_graph(
     """A full graph (lens, transaction, finding, transition, correction, root) writes all six bundles."""
 
     contract = ReviewContractV1()
-    selection, transaction, findings, transitions, correction = _build_resolved_graph(contract)[1:]
+    selection, transaction, findings, transitions, correction = _build_resolved_graph(contract)
     graph = _to_graph(selection, transaction, findings, transitions, correction)
     root_id = store.publish(graph)
 
@@ -453,7 +340,7 @@ def test_publish_writes_five_bundles_when_correction_is_absent(
     """An accepted-only graph writes five bundles and omits the correction kind directory."""
 
     contract = ReviewContractV1()
-    selection, transaction, findings, transitions, _ = _build_accepted_graph(contract)[1:]
+    selection, transaction, findings, transitions, _ = _build_accepted_graph(contract)
     graph = _to_graph(selection, transaction, findings, transitions, None)
     root_id = store.publish(graph)
 
@@ -476,7 +363,7 @@ def test_publish_is_idempotent_with_no_new_writes(
     """A second publish of the same graph touches no new file system path."""
 
     contract = ReviewContractV1()
-    selection, transaction, findings, transitions, correction = _build_resolved_graph(contract)[1:]
+    selection, transaction, findings, transitions, correction = _build_resolved_graph(contract)
     graph = _to_graph(selection, transaction, findings, transitions, correction)
     first = store.publish(graph)
     snapshot = _snapshot_directory_tree(change_root / ".receipts")
@@ -498,7 +385,7 @@ def test_publish_recovers_when_member_bundle_already_matches(
     """
 
     contract = ReviewContractV1()
-    selection, transaction, findings, transitions, correction = _build_resolved_graph(contract)[1:]
+    selection, transaction, findings, transitions, correction = _build_resolved_graph(contract)
     graph = _to_graph(selection, transaction, findings, transitions, correction)
 
     first = store.publish(graph)
@@ -524,8 +411,8 @@ def test_publish_rejects_aggregate_validation_failure(store: ReviewTransactionSt
     """A graph that violates aggregate validation is rejected before any bundle is written."""
 
     contract = ReviewContractV1()
-    selection = _make_selection(contract)
-    transaction = _make_transaction(contract, selection)
+    selection = make_selection(contract)
+    transaction = make_transaction(contract, selection)
     tx_id = contract.id_for(transaction)
 
     # Construct a finding not bound to the transaction's required lens — this
@@ -553,10 +440,9 @@ def test_publish_rejects_duplicate_member_identities_before_write(store: ReviewT
     """A graph with duplicate finding identities fails closed before any write."""
 
     contract = ReviewContractV1()
-    selection = _make_selection(contract)
-    transaction = _make_transaction(contract, selection)
-    tx_id = contract.id_for(transaction)
-    finding = _make_finding(contract, tx_id, lens="correctness")
+    selection = make_selection(contract)
+    transaction = make_transaction(contract, selection)
+    finding = make_finding(contract, transaction, lens="correctness")
 
     graph = _to_graph(selection, transaction, (finding, finding), (), None)
     with pytest.raises(ReviewTransactionStorageError) as exc:
@@ -580,7 +466,7 @@ def test_publish_existing_member_with_conflicting_bytes_surfaces_as_conflict(
     """
 
     contract = ReviewContractV1()
-    selection, transaction, findings, transitions, correction = _build_resolved_graph(contract)[1:]
+    selection, transaction, findings, transitions, correction = _build_resolved_graph(contract)
     graph = _to_graph(selection, transaction, findings, transitions, correction)
 
     # Publish once to discover the lens-selection bundle path.
@@ -624,11 +510,11 @@ def test_publish_existing_member_with_invalid_topology_surfaces_as_conflict(
     """
 
     contract = ReviewContractV1()
-    selection, transaction, findings, transitions, correction = _build_resolved_graph(contract)[1:]
+    selection, transaction, findings, transitions, correction = _build_resolved_graph(contract)
     graph = _to_graph(selection, transaction, findings, transitions, correction)
 
     # Publish once to install the planned bundles.
-    first_root = store.publish(graph)
+    store.publish(graph)
     digest_lens = contract.id_for(selection).value.removeprefix("sha256:")
     bundle_dir = change_root / ".receipts" / "review-lens-selections" / "sha256" / digest_lens
     assert bundle_dir.is_dir()
@@ -660,7 +546,7 @@ def test_publish_racing_unreadable_member_surfaces_as_conflict(
     """
 
     contract = ReviewContractV1()
-    selection, transaction, findings, transitions, correction = _build_resolved_graph(contract)[1:]
+    selection, transaction, findings, transitions, correction = _build_resolved_graph(contract)
     graph = _to_graph(selection, transaction, findings, transitions, correction)
 
     # Publish once to install the planned bundles.
@@ -688,7 +574,7 @@ def test_load_still_uses_invalid_for_tampered_member(store: ReviewTransactionSto
     """
 
     contract = ReviewContractV1()
-    selection, transaction, findings, transitions, correction = _build_resolved_graph(contract)[1:]
+    selection, transaction, findings, transitions, correction = _build_resolved_graph(contract)
     graph = _to_graph(selection, transaction, findings, transitions, correction)
 
     root_id = store.publish(graph)

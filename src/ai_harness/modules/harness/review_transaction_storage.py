@@ -518,11 +518,11 @@ class _ReviewRootCodec:
         if actual_keys != _REVIEW_ROOT_REQUIRED_KEYS:
             missing = sorted(_REVIEW_ROOT_REQUIRED_KEYS - actual_keys)
             extra = sorted(actual_keys - _REVIEW_ROOT_REQUIRED_KEYS)
-            bits: list[str] = []
-            if missing:
-                bits.append(f"missing={missing}")
-            if extra:
-                bits.append(f"unexpected={extra}")
+            formatted_bits = [
+                f"missing={missing}" if missing else None,
+                f"unexpected={extra}" if extra else None,
+            ]
+            bits = [piece for piece in formatted_bits if piece is not None]
             raise ReviewTransactionStorageError(
                 f"{description} has unexpected root manifest shape: {', '.join(bits)}",
                 code=CODE_INVALID,
@@ -1083,9 +1083,7 @@ class ReviewTransactionStore:
         try:
             self._bundles.publish(role, canonical_bytes)
         except ReceiptStoreError as exc:
-            raise _translate_bundle_error(
-                f"publish review {role.value}", exc, during_publish=True
-            ) from exc
+            raise _translate_bundle_error(f"publish review {role.value}", exc, during_publish=True) from exc
 
     def _reread_and_verify_member(
         self,
@@ -1108,9 +1106,7 @@ class ReviewTransactionStore:
         try:
             reread = self._bundles.read(entry.role, expected_id)
         except ReceiptStoreError as exc:
-            raise _translate_bundle_error(
-                f"reread review {entry.role.value}", exc, during_publish=True
-            ) from exc
+            raise _translate_bundle_error(f"reread review {entry.role.value}", exc, during_publish=True) from exc
 
         if reread != entry.canonical_bytes:
             raise ReviewTransactionStorageError(

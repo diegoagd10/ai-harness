@@ -295,9 +295,7 @@ def test_run_bundle_idempotent_for_unchanged_evidence(tmp_path: Path) -> None:
     assert first == second
 
 
-def test_fsync_directory_surfaces_operational_failure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_fsync_directory_surfaces_operational_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """An operational directory fsync failure must surface as ``ReceiptStoreError``.
 
     The fix distinguishes the unsupported platform case (where
@@ -337,9 +335,7 @@ def test_fsync_directory_silent_for_missing_directory(
     _fsync_directory(missing)
 
 
-def test_fsync_directory_silent_when_odirectory_missing(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_fsync_directory_silent_when_odirectory_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The unsupported platform case (``O_DIRECTORY`` unavailable) is silent.
 
     When the platform does not expose ``O_DIRECTORY``, the helper does
@@ -360,9 +356,7 @@ def test_fsync_directory_silent_when_odirectory_missing(
     # Reaching this point is the assertion; no exception was raised.
 
 
-def test_publish_object_propagates_operational_fsync_failure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_publish_object_propagates_operational_fsync_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """An operational directory fsync failure during publication propagates.
 
     The atomic publication calls ``_fsync_directory`` as part of the

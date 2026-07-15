@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """Tests for the v1 review-transaction storage public values and root codec.
 
 These tests pin:
@@ -41,131 +42,32 @@ from ai_harness.modules.harness.review_transaction_storage import (
     _ReviewTransactionRootV1,
 )
 from ai_harness.modules.harness.review_transactions import (
-    LENS_POLICY_NAME,
-    REVIEW_TRANSACTION_SCHEMA_NAME,
-    CorrectionFact,
     CorrectionFactId,
     Finding,
     FindingId,
     FindingTransition,
     FindingTransitionId,
-    LensSelection,
     LensSelectionId,
     ReviewContractV1,
-    ReviewTransaction,
     ReviewTransactionId,
 )
-
-CHANGE_NAME: str = "test-change"
-CANDIDATE_BEFORE: str = "sha256:" + ("c" * 64)
-CANDIDATE_AFTER: str = "sha256:" + ("d" * 64)
-
-
-# ---------------------------------------------------------------------------
-# Helpers — build typed contract values
-# ---------------------------------------------------------------------------
-
-
-def _make_selection(contract: ReviewContractV1) -> LensSelection:
-    return contract.select_lenses(policy=LENS_POLICY_NAME, risk_level="high")
+from tests._review_transaction_storage_fixtures import (
+    make_finding,
+    make_minimal_v1_payload,
+    make_minimum_graph,
+    make_resolution_graph,
+    make_selection,
+    make_transaction,
+)
 
 
-def _make_transaction(contract: ReviewContractV1, selection: LensSelection) -> ReviewTransaction:
-    return ReviewTransaction(
-        schema_name=REVIEW_TRANSACTION_SCHEMA_NAME,  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        change_name=CHANGE_NAME,
-        candidate_id=CANDIDATE_BEFORE,
-        lens_selection_id=contract.id_for(selection),
-        scope_paths=("src",),
-        loc_budget=20,
-    )
-
-
-def _make_finding(contract: ReviewContractV1, tx_id: ReviewTransactionId) -> Finding:
-    return Finding(
-        schema_name="ai-harness.review-finding",  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        review_transaction_id=tx_id,
-        lens="correctness",
-        severity="warning",
-        summary="summary",
-        detail="detail",
-        paths=(),
-        status="open",  # type: ignore[arg-type]
-    )
-
-
-def _make_resolution(
-    contract: ReviewContractV1,
-    transaction: ReviewTransaction,
-    finding: Finding,
-    *,
-    correction: CorrectionFact | None,
-) -> tuple[FindingTransition, CorrectionFact]:
-    tx_id = contract.id_for(transaction)
-    finding_id = contract.id_for(finding)
-    corrected = correction or CorrectionFact(
-        schema_name="ai-harness.review-correction-fact",  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        review_transaction_id=tx_id,
-        resolved_finding_ids=(finding_id,),
-        candidate_before=CANDIDATE_BEFORE,
-        candidate_after=CANDIDATE_AFTER,
-        changed_paths=("src/a.py",),
-        loc_added=1,
-        loc_deleted=1,
-        loc_actual=2,
-    )
-    correction_id = contract.id_for(corrected)
-    transition = FindingTransition(
-        schema_name="ai-harness.review-finding-transition",  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        review_transaction_id=tx_id,
-        finding_id=finding_id,
-        from_status="open",
-        to_status="resolved",
-        correction_fact_id=correction_id,
-    )
-    return transition, corrected
-
-
-def _build_complete_graph(
-    contract: ReviewContractV1,
-) -> tuple[
-    ReviewContractV1,
-    LensSelection,
-    ReviewTransaction,
-    tuple[Finding, ...],
-    tuple[FindingTransition, ...],
-    CorrectionFact | None,
-]:
-    selection = _make_selection(contract)
-    transaction = _make_transaction(contract, selection)
-    tx_id = contract.id_for(transaction)
-    finding = _make_finding(contract, tx_id)
-    transition, correction = _make_resolution(contract, transaction, finding, correction=None)
-    contract.validate_transaction(
-        transaction,
-        lens_selection=selection,
-        findings=(finding,),
-        transitions=(transition,),
-        correction_fact=correction,
-    )
-    return contract, selection, transaction, (finding,), (transition,), correction
-
-
-def _build_graph_value(
+def build_codec_graph_value(
     contract: ReviewContractV1,
 ) -> ReviewTransactionGraph:
-    contract, selection, transaction, findings, transitions, correction = _build_complete_graph(contract)
-    return ReviewTransactionGraph(
-        lens_selection=selection,
-        transaction=transaction,
-        findings=findings,
-        transitions=transitions,
-        correction_fact=correction,
-    )
+    """Return the canonical ``ReviewTransactionGraph`` for codec round-trip tests."""
+
+    graph, _ids = make_resolution_graph(contract)
+    return graph
 
 
 # ---------------------------------------------------------------------------
@@ -235,7 +137,7 @@ def test_graph_value_is_frozen_and_tuple_backed() -> None:
     """``ReviewTransactionGraph`` is frozen, slots-only, and tuple backed."""
 
     contract = ReviewContractV1()
-    graph = _build_graph_value(contract)
+    graph = build_codec_graph_value(contract)
 
     import dataclasses
 
@@ -326,7 +228,7 @@ def test_root_codec_encode_and_decode_round_trip() -> None:
     """Encoding a graph and decoding the canonical bytes is identity."""
 
     contract = ReviewContractV1()
-    graph = _build_graph_value(contract)
+    graph = build_codec_graph_value(contract)
 
     canonical = _ReviewRootCodec.encode(graph, contract=contract)
     decoded = _ReviewRootCodec.decode(canonical, description="root")
@@ -352,7 +254,7 @@ def test_root_codec_encode_emits_canonical_bytes() -> None:
     """The encoded manifest must be byte-equal to ``encode_canonical`` of the same payload."""
 
     contract = ReviewContractV1()
-    graph = _build_graph_value(contract)
+    graph = build_codec_graph_value(contract)
     canonical = _ReviewRootCodec.encode(graph, contract=contract)
 
     payload = json.loads(canonical.decode("utf-8"))
@@ -362,15 +264,8 @@ def test_root_codec_encode_emits_canonical_bytes() -> None:
 def test_root_codec_rejects_missing_required_key() -> None:
     """Decoding bytes without a required key fails closed."""
 
-    payload = {
-        "correction_fact_id": None,
-        "finding_ids": [],
-        "finding_transition_ids": [],
-        "lens_selection_id": "sha256:" + "0" * 64,
-        "review_transaction_id": "sha256:" + "0" * 64,
-        "schema_name": REVIEW_TRANSACTION_ROOT_SCHEMA_NAME,
-        # schema_version omitted
-    }
+    payload = make_minimal_v1_payload()
+    payload.pop("schema_version")
     canonical = encode_canonical(payload)
     with pytest.raises(ReviewTransactionStorageError) as exc:
         _ReviewRootCodec.decode(canonical, description="root")
@@ -380,16 +275,7 @@ def test_root_codec_rejects_missing_required_key() -> None:
 def test_root_codec_rejects_extra_key() -> None:
     """Decoding bytes with an unknown key fails closed."""
 
-    payload = {
-        "correction_fact_id": None,
-        "finding_ids": [],
-        "finding_transition_ids": [],
-        "lens_selection_id": "sha256:" + "0" * 64,
-        "review_transaction_id": "sha256:" + "0" * 64,
-        "schema_name": REVIEW_TRANSACTION_ROOT_SCHEMA_NAME,
-        "schema_version": 1,
-        "extra_key": "no",
-    }
+    payload = make_minimal_v1_payload(extra_key="no")
     canonical = encode_canonical(payload)
     with pytest.raises(ReviewTransactionStorageError) as exc:
         _ReviewRootCodec.decode(canonical, description="root")
@@ -399,15 +285,7 @@ def test_root_codec_rejects_extra_key() -> None:
 def test_root_codec_rejects_wrong_schema_name() -> None:
     """A wrong schema name fails closed with the storage invalid code."""
 
-    payload = {
-        "correction_fact_id": None,
-        "finding_ids": [],
-        "finding_transition_ids": [],
-        "lens_selection_id": "sha256:" + "0" * 64,
-        "review_transaction_id": "sha256:" + "0" * 64,
-        "schema_name": "wrong.schema-name",
-        "schema_version": 1,
-    }
+    payload = make_minimal_v1_payload(schema_name="wrong.schema-name")
     canonical = encode_canonical(payload)
     with pytest.raises(ReviewTransactionStorageError) as exc:
         _ReviewRootCodec.decode(canonical, description="root")
@@ -417,15 +295,7 @@ def test_root_codec_rejects_wrong_schema_name() -> None:
 def test_root_codec_rejects_boolean_schema_version() -> None:
     """Boolean ``schema_version`` is rejected: ``true`` is not ``1``."""
 
-    payload = {
-        "correction_fact_id": None,
-        "finding_ids": [],
-        "finding_transition_ids": [],
-        "lens_selection_id": "sha256:" + "0" * 64,
-        "review_transaction_id": "sha256:" + "0" * 64,
-        "schema_name": REVIEW_TRANSACTION_ROOT_SCHEMA_NAME,
-        "schema_version": True,
-    }
+    payload = make_minimal_v1_payload(schema_version=True)
     canonical = encode_canonical(payload)
     with pytest.raises(ReviewTransactionStorageError) as exc:
         _ReviewRootCodec.decode(canonical, description="root")
@@ -435,15 +305,7 @@ def test_root_codec_rejects_boolean_schema_version() -> None:
 def test_root_codec_rejects_wrong_schema_version() -> None:
     """An integer other than ``1`` is rejected."""
 
-    payload = {
-        "correction_fact_id": None,
-        "finding_ids": [],
-        "finding_transition_ids": [],
-        "lens_selection_id": "sha256:" + "0" * 64,
-        "review_transaction_id": "sha256:" + "0" * 64,
-        "schema_name": REVIEW_TRANSACTION_ROOT_SCHEMA_NAME,
-        "schema_version": 2,
-    }
+    payload = make_minimal_v1_payload(schema_version=2)
     canonical = encode_canonical(payload)
     with pytest.raises(ReviewTransactionStorageError) as exc:
         _ReviewRootCodec.decode(canonical, description="root")
@@ -487,15 +349,7 @@ def test_root_codec_rejects_duplicate_json_key() -> None:
 def test_root_codec_rejects_malformed_typed_id_value() -> None:
     """A manifest with a malformed lens selection id fails closed."""
 
-    payload = {
-        "correction_fact_id": None,
-        "finding_ids": [],
-        "finding_transition_ids": [],
-        "lens_selection_id": "not-a-typed-id",
-        "review_transaction_id": "sha256:" + "0" * 64,
-        "schema_name": REVIEW_TRANSACTION_ROOT_SCHEMA_NAME,
-        "schema_version": 1,
-    }
+    payload = make_minimal_v1_payload(lens_selection_id="not-a-typed-id")
     canonical = encode_canonical(payload)
     with pytest.raises(ReviewTransactionStorageError) as exc:
         _ReviewRootCodec.decode(canonical, description="root")
@@ -505,18 +359,9 @@ def test_root_codec_rejects_malformed_typed_id_value() -> None:
 def test_root_codec_rejects_unsorted_finding_ids() -> None:
     """Unsorted finding IDs are rejected; the decoder never normalizes order."""
 
-    payload = {
-        "correction_fact_id": None,
-        "finding_ids": [
-            "sha256:" + "f" * 64,
-            "sha256:" + "0" * 64,  # out of order
-        ],
-        "finding_transition_ids": [],
-        "lens_selection_id": "sha256:" + "0" * 64,
-        "review_transaction_id": "sha256:" + "0" * 64,
-        "schema_name": REVIEW_TRANSACTION_ROOT_SCHEMA_NAME,
-        "schema_version": 1,
-    }
+    payload = make_minimal_v1_payload(
+        finding_ids=["sha256:" + "f" * 64, "sha256:" + "0" * 64],
+    )
     canonical = encode_canonical(payload)
     with pytest.raises(ReviewTransactionStorageError) as exc:
         _ReviewRootCodec.decode(canonical, description="root")
@@ -526,18 +371,9 @@ def test_root_codec_rejects_unsorted_finding_ids() -> None:
 def test_root_codec_rejects_duplicate_finding_ids() -> None:
     """Duplicate finding IDs in the manifest are rejected."""
 
-    payload = {
-        "correction_fact_id": None,
-        "finding_ids": [
-            "sha256:" + "0" * 64,
-            "sha256:" + "0" * 64,
-        ],
-        "finding_transition_ids": [],
-        "lens_selection_id": "sha256:" + "0" * 64,
-        "review_transaction_id": "sha256:" + "0" * 64,
-        "schema_name": REVIEW_TRANSACTION_ROOT_SCHEMA_NAME,
-        "schema_version": 1,
-    }
+    payload = make_minimal_v1_payload(
+        finding_ids=["sha256:" + "0" * 64, "sha256:" + "0" * 64],
+    )
     canonical = encode_canonical(payload)
     with pytest.raises(ReviewTransactionStorageError) as exc:
         _ReviewRootCodec.decode(canonical, description="root")
@@ -547,18 +383,9 @@ def test_root_codec_rejects_duplicate_finding_ids() -> None:
 def test_root_codec_rejects_duplicate_transition_ids() -> None:
     """Duplicate transition IDs in the manifest are rejected."""
 
-    payload = {
-        "correction_fact_id": None,
-        "finding_ids": [],
-        "finding_transition_ids": [
-            "sha256:" + "0" * 64,
-            "sha256:" + "0" * 64,
-        ],
-        "lens_selection_id": "sha256:" + "0" * 64,
-        "review_transaction_id": "sha256:" + "0" * 64,
-        "schema_name": REVIEW_TRANSACTION_ROOT_SCHEMA_NAME,
-        "schema_version": 1,
-    }
+    payload = make_minimal_v1_payload(
+        finding_transition_ids=["sha256:" + "0" * 64, "sha256:" + "0" * 64],
+    )
     canonical = encode_canonical(payload)
     with pytest.raises(ReviewTransactionStorageError) as exc:
         _ReviewRootCodec.decode(canonical, description="root")
@@ -569,15 +396,10 @@ def test_root_codec_rejects_cross_role_duplicate_id() -> None:
     """An ID appearing in two manifest roles (non-null) fails global distinctness."""
 
     shared = "sha256:" + "a" * 64
-    payload = {
-        "correction_fact_id": None,
-        "finding_ids": [],
-        "finding_transition_ids": [],
-        "lens_selection_id": shared,
-        "review_transaction_id": shared,
-        "schema_name": REVIEW_TRANSACTION_ROOT_SCHEMA_NAME,
-        "schema_version": 1,
-    }
+    payload = make_minimal_v1_payload(
+        lens_selection_id=shared,
+        review_transaction_id=shared,
+    )
     canonical = encode_canonical(payload)
     with pytest.raises(ReviewTransactionStorageError) as exc:
         _ReviewRootCodec.decode(canonical, description="root")
@@ -592,15 +414,7 @@ def test_root_codec_rejects_cross_role_duplicate_id() -> None:
 def test_root_id_for_canonical_bytes_is_deterministic() -> None:
     """The typed root ID is a deterministic ``typed_hash`` over the v1 root label."""
 
-    payload = {
-        "correction_fact_id": None,
-        "finding_ids": [],
-        "finding_transition_ids": [],
-        "lens_selection_id": "sha256:" + "0" * 64,
-        "review_transaction_id": "sha256:" + "0" * 64,
-        "schema_name": REVIEW_TRANSACTION_ROOT_SCHEMA_NAME,
-        "schema_version": 1,
-    }
+    payload = make_minimal_v1_payload()
     canonical = encode_canonical(payload)
     root_id = _ReviewRootCodec.root_id(canonical)
     assert root_id.value == typed_hash(REVIEW_TRANSACTION_ROOT_ID_LABEL, canonical)
@@ -610,7 +424,7 @@ def test_root_id_for_equal_graph_is_stable_across_calls() -> None:
     """Two encodes of equal graphs derive the same typed root ID."""
 
     contract = ReviewContractV1()
-    graph = _build_graph_value(contract)
+    graph = build_codec_graph_value(contract)
     first_canonical = _ReviewRootCodec.encode(graph, contract=contract)
     second_canonical = _ReviewRootCodec.encode(graph, contract=contract)
     assert first_canonical == second_canonical
@@ -626,22 +440,7 @@ def test_root_codec_handles_empty_findings_and_transitions() -> None:
     """An empty graph (findings and transitions absent) still encodes cleanly."""
 
     contract = ReviewContractV1()
-    selection = _make_selection(contract)
-    transaction = _make_transaction(contract, selection)
-    contract.validate_transaction(
-        transaction,
-        lens_selection=selection,
-        findings=(),
-        transitions=(),
-        correction_fact=None,
-    )
-    graph = ReviewTransactionGraph(
-        lens_selection=selection,
-        transaction=transaction,
-        findings=(),
-        transitions=(),
-        correction_fact=None,
-    )
+    graph = make_minimum_graph(contract)
     canonical = _ReviewRootCodec.encode(graph, contract=contract)
     decoded = _ReviewRootCodec.decode(canonical, description="root")
     assert decoded.finding_ids == ()
@@ -658,10 +457,9 @@ def test_root_codec_encode_rejects_duplicate_finding_records() -> None:
     """Two findings with the same identity fail closed before any write."""
 
     contract = ReviewContractV1()
-    selection = _make_selection(contract)
-    transaction = _make_transaction(contract, selection)
-    tx_id = contract.id_for(transaction)
-    finding = _make_finding(contract, tx_id)
+    selection = make_selection(contract)
+    transaction = make_transaction(contract, selection)
+    finding = make_finding(contract, transaction)
     graph = ReviewTransactionGraph(
         lens_selection=selection,
         transaction=transaction,
@@ -678,9 +476,9 @@ def test_root_codec_encode_rejects_duplicate_transition_records() -> None:
     """Two transitions with the same identity fail closed before any write."""
 
     contract = ReviewContractV1()
-    selection = _make_selection(contract)
-    transaction = _make_transaction(contract, selection)
-    finding = _make_finding(contract, contract.id_for(transaction))
+    selection = make_selection(contract)
+    transaction = make_transaction(contract, selection)
+    finding = make_finding(contract, transaction)
     transition = FindingTransition(
         schema_name="ai-harness.review-finding-transition",  # type: ignore[arg-type]
         schema_version=1,  # type: ignore[arg-type]
@@ -706,9 +504,9 @@ def test_root_codec_encode_rejects_duplicate_finding_id_via_caller_supplied_grap
     """Two findings with distinct records but equal IDs are caught at encode."""
 
     contract = ReviewContractV1()
-    selection = _make_selection(contract)
-    transaction = _make_transaction(contract, selection)
-    finding_a = _make_finding(contract, contract.id_for(transaction))
+    selection = make_selection(contract)
+    transaction = make_transaction(contract, selection)
+    finding_a = make_finding(contract, transaction)
     finding_b = Finding(
         schema_name="ai-harness.review-finding",  # type: ignore[arg-type]
         schema_version=1,  # type: ignore[arg-type]
@@ -741,7 +539,7 @@ def test_root_value_holds_typed_id_wrappers() -> None:
     """The decoded manifest wraps each role's IDs in the matching typed class."""
 
     contract = ReviewContractV1()
-    graph = _build_graph_value(contract)
+    graph = build_codec_graph_value(contract)
     canonical = _ReviewRootCodec.encode(graph, contract=contract)
     decoded = _ReviewRootCodec.decode(canonical, description="root")
     assert isinstance(decoded, _ReviewTransactionRootV1)

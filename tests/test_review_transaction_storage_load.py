@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """Tests for ``ReviewTransactionStore.load()`` reconstruction.
 
 These tests pin the strict verified graph reconstruction contract:
@@ -30,151 +31,22 @@ from ai_harness.modules.harness.review_transaction_storage import (
     CODE_INVALID,
     CODE_MISSING,
     REVIEW_TRANSACTION_ROOT_ID_LABEL,
-    REVIEW_TRANSACTION_ROOT_SCHEMA_NAME,
-    ReviewTransactionGraph,
     ReviewTransactionRootId,
     ReviewTransactionStorageError,
     ReviewTransactionStore,
 )
-from ai_harness.modules.harness.review_transactions import (
-    LENS_POLICY_NAME,
-    CorrectionFact,
-    Finding,
-    FindingTransition,
-    LensSelection,
-    ReviewContractV1,
-    ReviewTransaction,
+from ai_harness.modules.harness.review_transactions import ReviewContractV1
+from tests._review_transaction_storage_fixtures import (
+    change_root,
+    make_accepted_graph,
+    make_minimal_v1_payload,
+    make_minimum_graph,
+    make_resolution_graph,
+    store,
 )
 
-CHANGE_NAME: str = "test-change"
-CANDIDATE_BEFORE: str = "sha256:" + ("c" * 64)
-CANDIDATE_AFTER: str = "sha256:" + ("d" * 64)
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _make_selection(contract: ReviewContractV1) -> LensSelection:
-    return contract.select_lenses(policy=LENS_POLICY_NAME, risk_level="high")
-
-
-def _make_transaction(contract: ReviewContractV1, selection: LensSelection) -> ReviewTransaction:
-    return ReviewTransaction(
-        schema_name="ai-harness.review-transaction",  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        change_name=CHANGE_NAME,
-        candidate_id=CANDIDATE_BEFORE,
-        lens_selection_id=contract.id_for(selection),
-        scope_paths=("src",),
-        loc_budget=20,
-    )
-
-
-def _make_resolution_graph(
-    contract: ReviewContractV1,
-) -> tuple[ReviewTransactionGraph, list]:
-    """Build a fully-resolved graph and stash derived IDs for assertions."""
-
-    selection = _make_selection(contract)
-    transaction = _make_transaction(contract, selection)
-    tx_id = contract.id_for(transaction)
-    finding = Finding(
-        schema_name="ai-harness.review-finding",  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        review_transaction_id=tx_id,
-        lens="correctness",
-        severity="warning",
-        summary="summary",
-        detail="detail",
-        paths=(),
-        status="open",  # type: ignore[arg-type]
-    )
-    correction = CorrectionFact(
-        schema_name="ai-harness.review-correction-fact",  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        review_transaction_id=tx_id,
-        resolved_finding_ids=(contract.id_for(finding),),
-        candidate_before=transaction.candidate_id,
-        candidate_after=CANDIDATE_AFTER,
-        changed_paths=("src/a.py",),
-        loc_added=1,
-        loc_deleted=1,
-        loc_actual=2,
-    )
-    transition = FindingTransition(
-        schema_name="ai-harness.review-finding-transition",  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        review_transaction_id=tx_id,
-        finding_id=contract.id_for(finding),
-        from_status="open",
-        to_status="resolved",
-        correction_fact_id=contract.id_for(correction),
-    )
-    graph = ReviewTransactionGraph(
-        lens_selection=selection,
-        transaction=transaction,
-        findings=(finding,),
-        transitions=(transition,),
-        correction_fact=correction,
-    )
-    ids = [
-        contract.id_for(selection),
-        contract.id_for(transaction),
-        contract.id_for(finding),
-        contract.id_for(transition),
-        contract.id_for(correction),
-    ]
-    return graph, ids
-
-
-def _make_accepted_graph(contract: ReviewContractV1) -> ReviewTransactionGraph:
-    selection = _make_selection(contract)
-    transaction = _make_transaction(contract, selection)
-    tx_id = contract.id_for(transaction)
-    finding = Finding(
-        schema_name="ai-harness.review-finding",  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        review_transaction_id=tx_id,
-        lens="correctness",
-        severity="warning",
-        summary="summary",
-        detail="detail",
-        paths=(),
-        status="open",  # type: ignore[arg-type]
-    )
-    transition = FindingTransition(
-        schema_name="ai-harness.review-finding-transition",  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        review_transaction_id=tx_id,
-        finding_id=contract.id_for(finding),
-        from_status="open",
-        to_status="accepted",
-        correction_fact_id=None,
-    )
-    return ReviewTransactionGraph(
-        lens_selection=selection,
-        transaction=transaction,
-        findings=(finding,),
-        transitions=(transition,),
-        correction_fact=None,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def change_root(tmp_path: Path) -> Path:
-    return tmp_path
-
-
-@pytest.fixture
-def store(change_root: Path) -> ReviewTransactionStore:
-    return ReviewTransactionStore(change_root=change_root)
+# Fixtures re-exported so pytest can resolve them.
+__all__ = ["change_root", "store"]
 
 
 # ---------------------------------------------------------------------------
@@ -186,7 +58,7 @@ def test_load_returns_published_resolved_graph(store: ReviewTransactionStore) ->
     """A published resolved graph round-trips through load."""
 
     contract = ReviewContractV1()
-    graph, _ = _make_resolution_graph(contract)
+    graph, _ = make_resolution_graph(contract)
     root_id = store.publish(graph)
 
     loaded = store.load(root_id)
@@ -200,7 +72,7 @@ def test_load_returns_published_accepted_graph(store: ReviewTransactionStore) ->
     """A published accepted graph round-trips through load."""
 
     contract = ReviewContractV1()
-    graph = _make_accepted_graph(contract)
+    graph = make_accepted_graph(contract)
     root_id = store.publish(graph)
 
     loaded = store.load(root_id)
@@ -246,7 +118,7 @@ def test_load_rejects_noncanonical_root_bytes(
     """A root bundle with non-canonical JSON bytes fails closed."""
 
     contract = ReviewContractV1()
-    graph, _ = _make_resolution_graph(contract)
+    graph, _ = make_resolution_graph(contract)
     root_id = store.publish(graph)
 
     # Manually overwrite the root object.json with non-canonical bytes
@@ -254,15 +126,7 @@ def test_load_rejects_noncanonical_root_bytes(
     # canonical encoding the codec expects.
     digest = root_id.value.removeprefix("sha256:")
     target = change_root / ".receipts" / "review-transaction-roots" / "sha256" / digest / "object.json"
-    payload = {
-        "correction_fact_id": None,
-        "finding_ids": [],
-        "finding_transition_ids": [],
-        "lens_selection_id": "sha256:" + "0" * 64,
-        "review_transaction_id": "sha256:" + "0" * 64,
-        "schema_name": REVIEW_TRANSACTION_ROOT_SCHEMA_NAME,
-        "schema_version": 1,
-    }
+    payload = make_minimal_v1_payload()
     # Add explicit whitespace which the codec will reject because canonical
     # bytes use no spaces.
     target.write_text(json.dumps(payload) + "\n", encoding="utf-8")
@@ -276,7 +140,7 @@ def test_load_rejects_missing_required_member(store: ReviewTransactionStore, cha
     """A manifest naming a missing member bundle is reported as missing."""
 
     contract = ReviewContractV1()
-    graph, _ = _make_resolution_graph(contract)
+    graph, _ = make_resolution_graph(contract)
     root_id = store.publish(graph)
 
     # Remove the lens-selection bundle directory.
@@ -304,7 +168,7 @@ def test_load_rejects_member_with_wrong_role_substitution(store: ReviewTransacti
     """
 
     contract = ReviewContractV1()
-    graph, ids = _make_resolution_graph(contract)
+    graph, ids = make_resolution_graph(contract)
     root_id = store.publish(graph)
 
     # Capture the lens bytes; delete the lens bundle; plant them under the
@@ -333,7 +197,7 @@ def test_load_rejects_altered_member_payload(store: ReviewTransactionStore, chan
     """A mutated member's bytes do not match the planned digest; load rejects."""
 
     contract = ReviewContractV1()
-    graph, ids = _make_resolution_graph(contract)
+    graph, ids = make_resolution_graph(contract)
     root_id = store.publish(graph)
 
     finding_id = ids[2]
@@ -369,19 +233,16 @@ def test_load_rejects_internally_inconsistent_authentic_records(
     """
 
     contract = ReviewContractV1()
-    graph, ids = _make_resolution_graph(contract)
+    graph, ids = make_resolution_graph(contract)
 
     # Build a manifest that dangles the transition reference: the root
     # is authentic, but its transition-id has no on-disk bundle.
-    new_payload = {
-        "correction_fact_id": None,
-        "finding_ids": [ids[2].value],
-        "finding_transition_ids": ["sha256:" + "f" * 64],  # absent transition
-        "lens_selection_id": ids[0].value,
-        "review_transaction_id": ids[1].value,
-        "schema_name": REVIEW_TRANSACTION_ROOT_SCHEMA_NAME,
-        "schema_version": 1,
-    }
+    new_payload = make_minimal_v1_payload(
+        finding_ids=[ids[2].value],
+        finding_transition_ids=["sha256:" + "f" * 64],  # absent transition
+        lens_selection_id=ids[0].value,
+        review_transaction_id=ids[1].value,
+    )
     invalid_bytes = encode_canonical(new_payload)
     invalid_id = typed_hash(REVIEW_TRANSACTION_ROOT_ID_LABEL, invalid_bytes)
     invalid_digest = invalid_id.removeprefix("sha256:")
@@ -405,24 +266,8 @@ def test_load_round_trips_minimum_graph(store: ReviewTransactionStore) -> None:
     """A minimum graph with only the lens selection and transaction round-trips."""
 
     contract = ReviewContractV1()
-    selection = _make_selection(contract)
-    transaction = _make_transaction(contract, selection)
-    contract.validate_transaction(
-        transaction,
-        lens_selection=selection,
-        findings=(),
-        transitions=(),
-        correction_fact=None,
-    )
-    graph = ReviewTransactionGraph(
-        lens_selection=selection,
-        transaction=transaction,
-        findings=(),
-        transitions=(),
-        correction_fact=None,
-    )
+    graph = make_minimum_graph(contract)
     root_id = store.publish(graph)
-
     loaded = store.load(root_id)
     assert loaded == graph
     assert loaded.findings == ()
