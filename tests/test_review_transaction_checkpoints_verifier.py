@@ -31,23 +31,20 @@ from ai_harness.modules.harness.review_transaction_checkpoints import (
     CODE_STORAGE_INVALID,
     RequiredLensCompletion,
     ReviewCheckpointContractError,
-    ReviewCorrectionEvidence,
-    ReviewCorrectionEvidenceId,
-    ReviewTransactionCheckpoint,
-    ReviewTransactionCheckpointContractV1,
 )
 from ai_harness.modules.harness.review_transaction_storage import (
     ReviewTransactionGraph,
-    ReviewTransactionRootId,
 )
 from ai_harness.modules.harness.review_transactions import (
     LENS_POLICY_NAME,
-    CorrectionFactId,
     FindingId,
     LensSelection,
-    ReviewContractV1,
-    ReviewTransaction,
-    ReviewTransactionId,
+)
+from tests._review_transaction_checkpoints_fixtures import (
+    checkpoint_contract,
+    make_checkpoint,
+    make_unique_finding,
+    tmp_root,
 )
 from tests._review_transaction_storage_fixtures import (
     make_resolution_graph,
@@ -60,56 +57,10 @@ from tests._review_transaction_storage_fixtures import (
 # ---------------------------------------------------------------------------
 
 
-def _contract() -> ReviewContractV1:
-    return ReviewContractV1()
-
-
-def _checkpoint_contract() -> ReviewTransactionCheckpointContractV1:
-    return ReviewTransactionCheckpointContractV1()
-
-
-def _make_checkpoint(
-    *,
-    root_id: str,
-    transaction_id: str,
-    candidate_id: str,
-    lens_completions: tuple[RequiredLensCompletion, ...],
-    correction_evidence_id: ReviewCorrectionEvidenceId | None = None,
-) -> ReviewTransactionCheckpoint:
-    return ReviewTransactionCheckpoint(
-        schema_name="ai-harness.review-transaction-checkpoint",  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        review_transaction_root_id=ReviewTransactionRootId(root_id),
-        review_transaction_id=ReviewTransactionId(transaction_id),
-        candidate_id=candidate_id,
-        lens_completions=lens_completions,
-        correction_evidence_id=correction_evidence_id,
-    )
-
-
-def _make_evidence(
-    *,
-    root_id: str,
-    transaction_id: str,
-    correction_fact_id: str,
-    candidate_before: str,
-    candidate_after: str,
-) -> ReviewCorrectionEvidence:
-    return ReviewCorrectionEvidence(
-        schema_name="ai-harness.review-correction-evidence",  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        review_transaction_root_id=ReviewTransactionRootId(root_id),
-        review_transaction_id=ReviewTransactionId(transaction_id),
-        correction_fact_id=CorrectionFactId(correction_fact_id),
-        candidate_before=candidate_before,
-        candidate_after=candidate_after,
-    )
-
-
 def _build_published_graph(*, risk_level: str = "high") -> tuple[ReviewTransactionGraph, list[Any]]:
     """Publish a graph and return the loaded graph and its expected typed ids."""
 
-    contract = _contract()
+    contract = checkpoint_contract()
     selection = make_selection(contract)  # high-risk selection by default
     if risk_level == "normal":
         selection = LensSelection(
@@ -144,7 +95,7 @@ def test_verifier_accepts_normal_risk_required_lens_projection() -> None:
         _CheckpointGraphVerifier,
     )
 
-    contract = _contract()
+    contract = checkpoint_contract()
     selection = LensSelection(
         schema_name="ai-harness.review-lens-selection",  # type: ignore[arg-type]
         schema_version=1,  # type: ignore[arg-type]
@@ -164,10 +115,10 @@ def test_verifier_accepts_normal_risk_required_lens_projection() -> None:
     # checkpoint store.
     from ai_harness.modules.harness.review_transaction_storage import ReviewTransactionStore
 
-    store = ReviewTransactionStore(change_root=_tmp_root())
+    store = ReviewTransactionStore(change_root=tmp_root())
     root_id = store.publish(graph)
     loaded = store.load(root_id)
-    checkpoint = _make_checkpoint(
+    checkpoint = make_checkpoint(
         root_id=root_id.value,
         transaction_id=contract.id_for(transaction).value,
         candidate_id=transaction.candidate_id,
@@ -188,7 +139,7 @@ def test_verifier_accepts_high_risk_required_lens_projection() -> None:
     )
     from ai_harness.modules.harness.review_transaction_storage import ReviewTransactionStore
 
-    contract = _contract()
+    contract = checkpoint_contract()
     selection = make_selection(contract)  # high-risk
     transaction = make_transaction(contract, selection)
     graph = ReviewTransactionGraph(
@@ -198,10 +149,10 @@ def test_verifier_accepts_high_risk_required_lens_projection() -> None:
         transitions=(),
         correction_fact=None,
     )
-    store = ReviewTransactionStore(change_root=_tmp_root())
+    store = ReviewTransactionStore(change_root=tmp_root())
     root_id = store.publish(graph)
     loaded = store.load(root_id)
-    checkpoint = _make_checkpoint(
+    checkpoint = make_checkpoint(
         root_id=root_id.value,
         transaction_id=contract.id_for(transaction).value,
         candidate_id=transaction.candidate_id,
@@ -221,7 +172,7 @@ def test_verifier_rejects_unknown_lens() -> None:
     )
     from ai_harness.modules.harness.review_transaction_storage import ReviewTransactionStore
 
-    contract = _contract()
+    contract = checkpoint_contract()
     selection = make_selection(contract)
     transaction = make_transaction(contract, selection)
     graph = ReviewTransactionGraph(
@@ -231,10 +182,10 @@ def test_verifier_rejects_unknown_lens() -> None:
         transitions=(),
         correction_fact=None,
     )
-    store = ReviewTransactionStore(change_root=_tmp_root())
+    store = ReviewTransactionStore(change_root=tmp_root())
     root_id = store.publish(graph)
     loaded = store.load(root_id)
-    checkpoint = _make_checkpoint(
+    checkpoint = make_checkpoint(
         root_id=root_id.value,
         transaction_id=contract.id_for(transaction).value,
         candidate_id=transaction.candidate_id,
@@ -257,7 +208,7 @@ def test_verifier_rejects_omitted_lens() -> None:
     )
     from ai_harness.modules.harness.review_transaction_storage import ReviewTransactionStore
 
-    contract = _contract()
+    contract = checkpoint_contract()
     selection = make_selection(contract)
     transaction = make_transaction(contract, selection)
     graph = ReviewTransactionGraph(
@@ -267,11 +218,11 @@ def test_verifier_rejects_omitted_lens() -> None:
         transitions=(),
         correction_fact=None,
     )
-    store = ReviewTransactionStore(change_root=_tmp_root())
+    store = ReviewTransactionStore(change_root=tmp_root())
     root_id = store.publish(graph)
     loaded = store.load(root_id)
     # Drop one required lens from the projection.
-    checkpoint = _make_checkpoint(
+    checkpoint = make_checkpoint(
         root_id=root_id.value,
         transaction_id=contract.id_for(transaction).value,
         candidate_id=transaction.candidate_id,
@@ -293,7 +244,7 @@ def test_verifier_rejects_reordered_lenses() -> None:
     )
     from ai_harness.modules.harness.review_transaction_storage import ReviewTransactionStore
 
-    contract = _contract()
+    contract = checkpoint_contract()
     selection = make_selection(contract)
     transaction = make_transaction(contract, selection)
     graph = ReviewTransactionGraph(
@@ -303,11 +254,11 @@ def test_verifier_rejects_reordered_lenses() -> None:
         transitions=(),
         correction_fact=None,
     )
-    store = ReviewTransactionStore(change_root=_tmp_root())
+    store = ReviewTransactionStore(change_root=tmp_root())
     root_id = store.publish(graph)
     loaded = store.load(root_id)
     reversed_lenses = tuple(reversed(selection.required_lenses))
-    checkpoint = _make_checkpoint(
+    checkpoint = make_checkpoint(
         root_id=root_id.value,
         transaction_id=contract.id_for(transaction).value,
         candidate_id=transaction.candidate_id,
@@ -329,7 +280,7 @@ def test_verifier_rejects_duplicate_lens_entry() -> None:
     )
     from ai_harness.modules.harness.review_transaction_storage import ReviewTransactionStore
 
-    contract = _contract()
+    contract = checkpoint_contract()
     selection = make_selection(contract)
     transaction = make_transaction(contract, selection)
     graph = ReviewTransactionGraph(
@@ -339,7 +290,7 @@ def test_verifier_rejects_duplicate_lens_entry() -> None:
         transitions=(),
         correction_fact=None,
     )
-    store = ReviewTransactionStore(change_root=_tmp_root())
+    store = ReviewTransactionStore(change_root=tmp_root())
     root_id = store.publish(graph)
     loaded = store.load(root_id)
     duplicated = (RequiredLensCompletion(lens="correctness", complete=True, finding_ids=()),) * 2 + tuple(
@@ -347,7 +298,7 @@ def test_verifier_rejects_duplicate_lens_entry() -> None:
         for lens in selection.required_lenses
         if lens != "correctness"
     )
-    checkpoint = _make_checkpoint(
+    checkpoint = make_checkpoint(
         root_id=root_id.value,
         transaction_id=contract.id_for(transaction).value,
         candidate_id=transaction.candidate_id,
@@ -367,7 +318,7 @@ def test_verifier_rejects_non_selected_lens_entry() -> None:
     )
     from ai_harness.modules.harness.review_transaction_storage import ReviewTransactionStore
 
-    contract = _contract()
+    contract = checkpoint_contract()
     selection = make_selection(contract)  # high-risk
     transaction = make_transaction(contract, selection)
     graph = ReviewTransactionGraph(
@@ -377,7 +328,7 @@ def test_verifier_rejects_non_selected_lens_entry() -> None:
         transitions=(),
         correction_fact=None,
     )
-    store = ReviewTransactionStore(change_root=_tmp_root())
+    store = ReviewTransactionStore(change_root=tmp_root())
     root_id = store.publish(graph)
     loaded = store.load(root_id)
     # Swap a selected lens for an unselected one.
@@ -387,7 +338,7 @@ def test_verifier_rejects_non_selected_lens_entry() -> None:
         else RequiredLensCompletion(lens=lens, complete=True, finding_ids=())
         for lens in selection.required_lenses
     )
-    checkpoint = _make_checkpoint(
+    checkpoint = make_checkpoint(
         root_id=root_id.value,
         transaction_id=contract.id_for(transaction).value,
         candidate_id=transaction.candidate_id,
@@ -412,9 +363,9 @@ def test_verifier_accepts_completed_lens_with_zero_findings() -> None:
     )
     from ai_harness.modules.harness.review_transaction_storage import ReviewTransactionStore
 
-    contract = _contract()
+    contract = checkpoint_contract()
     graph, ids = make_resolution_graph(contract)  # has one finding on correctness
-    store = ReviewTransactionStore(change_root=_tmp_root())
+    store = ReviewTransactionStore(change_root=tmp_root())
     root_id = store.publish(graph)
     loaded = store.load(root_id)
     # Claim completion on every lens — but ``tests`` has no findings and
@@ -433,7 +384,7 @@ def test_verifier_accepts_completed_lens_with_zero_findings() -> None:
                 finding_ids=findings,
             )
         )
-    checkpoint = _make_checkpoint(
+    checkpoint = make_checkpoint(
         root_id=root_id.value,
         transaction_id=ids[1].value,
         candidate_id=loaded.transaction.candidate_id,
@@ -451,9 +402,9 @@ def test_verifier_rejects_incomplete_entry_for_lens_with_findings() -> None:
     )
     from ai_harness.modules.harness.review_transaction_storage import ReviewTransactionStore
 
-    contract = _contract()
+    contract = checkpoint_contract()
     graph, ids = make_resolution_graph(contract)
-    store = ReviewTransactionStore(change_root=_tmp_root())
+    store = ReviewTransactionStore(change_root=tmp_root())
     root_id = store.publish(graph)
     loaded = store.load(root_id)
     # Claim ``correctness`` complete:false but with no findings despite
@@ -467,7 +418,7 @@ def test_verifier_rejects_incomplete_entry_for_lens_with_findings() -> None:
             bad_completions.append(RequiredLensCompletion(lens=lens, complete=True, finding_ids=()))
         else:
             bad_completions.append(RequiredLensCompletion(lens=lens, complete=True, finding_ids=()))
-    checkpoint = _make_checkpoint(
+    checkpoint = make_checkpoint(
         root_id=root_id.value,
         transaction_id=ids[1].value,
         candidate_id=loaded.transaction.candidate_id,
@@ -487,9 +438,9 @@ def test_verifier_rejects_unknown_finding_in_completion() -> None:
     )
     from ai_harness.modules.harness.review_transaction_storage import ReviewTransactionStore
 
-    contract = _contract()
+    contract = checkpoint_contract()
     graph, ids = make_resolution_graph(contract)
-    store = ReviewTransactionStore(change_root=_tmp_root())
+    store = ReviewTransactionStore(change_root=tmp_root())
     root_id = store.publish(graph)
     loaded = store.load(root_id)
     bogus_finding = FindingId("sha256:" + "9" * 64)
@@ -505,7 +456,7 @@ def test_verifier_rejects_unknown_finding_in_completion() -> None:
             )
         else:
             bad_completions.append(RequiredLensCompletion(lens=lens, complete=True, finding_ids=()))
-    checkpoint = _make_checkpoint(
+    checkpoint = make_checkpoint(
         root_id=root_id.value,
         transaction_id=ids[1].value,
         candidate_id=loaded.transaction.candidate_id,
@@ -525,12 +476,12 @@ def test_verifier_rejects_duplicate_finding_across_entries() -> None:
     )
     from ai_harness.modules.harness.review_transaction_storage import ReviewTransactionStore
 
-    contract = _contract()
+    contract = checkpoint_contract()
     selection = make_selection(contract)
     transaction = make_transaction(contract, selection)
     tx_id = contract.id_for(transaction)
-    finding_correctness = _make_unique_finding(contract, transaction, lens="correctness", summary_suffix="dup-1")
-    finding_tests = _make_unique_finding(contract, transaction, lens="tests", summary_suffix="dup-2")
+    finding_correctness = make_unique_finding(contract, transaction, lens="correctness", summary_suffix="dup-1")
+    finding_tests = make_unique_finding(contract, transaction, lens="tests", summary_suffix="dup-2")
     finding_correctness_id = contract.id_for(finding_correctness)
     finding_tests_id = contract.id_for(finding_tests)
     graph = ReviewTransactionGraph(
@@ -540,7 +491,7 @@ def test_verifier_rejects_duplicate_finding_across_entries() -> None:
         transitions=(),
         correction_fact=None,
     )
-    store = ReviewTransactionStore(change_root=_tmp_root())
+    store = ReviewTransactionStore(change_root=tmp_root())
     root_id = store.publish(graph)
     loaded = store.load(root_id)
     # Place the correctness finding also in the tests entry.
@@ -558,7 +509,7 @@ def test_verifier_rejects_duplicate_finding_across_entries() -> None:
         RequiredLensCompletion(lens="architecture", complete=True, finding_ids=()),
         RequiredLensCompletion(lens="security", complete=True, finding_ids=()),
     )
-    checkpoint = _make_checkpoint(
+    checkpoint = make_checkpoint(
         root_id=root_id.value,
         transaction_id=tx_id.value,
         candidate_id=transaction.candidate_id,
@@ -578,11 +529,11 @@ def test_verifier_rejects_cross_lens_finding_assignment() -> None:
     )
     from ai_harness.modules.harness.review_transaction_storage import ReviewTransactionStore
 
-    contract = _contract()
+    contract = checkpoint_contract()
     selection = make_selection(contract)
     transaction = make_transaction(contract, selection)
     tx_id = contract.id_for(transaction)
-    correctness_finding = _make_unique_finding(contract, transaction, lens="correctness", summary_suffix="cross-lens")
+    correctness_finding = make_unique_finding(contract, transaction, lens="correctness", summary_suffix="cross-lens")
     graph = ReviewTransactionGraph(
         lens_selection=selection,
         transaction=transaction,
@@ -590,7 +541,7 @@ def test_verifier_rejects_cross_lens_finding_assignment() -> None:
         transitions=(),
         correction_fact=None,
     )
-    store = ReviewTransactionStore(change_root=_tmp_root())
+    store = ReviewTransactionStore(change_root=tmp_root())
     root_id = store.publish(graph)
     loaded = store.load(root_id)
     correctness_id = contract.id_for(correctness_finding)
@@ -604,7 +555,7 @@ def test_verifier_rejects_cross_lens_finding_assignment() -> None:
         RequiredLensCompletion(lens="architecture", complete=True, finding_ids=()),
         RequiredLensCompletion(lens="security", complete=True, finding_ids=()),
     )
-    checkpoint = _make_checkpoint(
+    checkpoint = make_checkpoint(
         root_id=root_id.value,
         transaction_id=tx_id.value,
         candidate_id=transaction.candidate_id,
@@ -629,14 +580,14 @@ def test_verifier_rejects_wrong_root_id() -> None:
     )
     from ai_harness.modules.harness.review_transaction_storage import ReviewTransactionStore
 
-    contract = _contract()
+    contract = checkpoint_contract()
     graph, ids = make_resolution_graph(contract)
-    store = ReviewTransactionStore(change_root=_tmp_root())
+    store = ReviewTransactionStore(change_root=tmp_root())
     root_id = store.publish(graph)
     loaded = store.load(root_id)
     # Build a syntactically valid but unrelated root id.
     wrong_root = "sha256:" + "f" * 64
-    checkpoint = _make_checkpoint(
+    checkpoint = make_checkpoint(
         root_id=wrong_root,
         transaction_id=ids[1].value,
         candidate_id=loaded.transaction.candidate_id,
@@ -659,13 +610,13 @@ def test_verifier_rejects_wrong_transaction_id() -> None:
     )
     from ai_harness.modules.harness.review_transaction_storage import ReviewTransactionStore
 
-    contract = _contract()
+    contract = checkpoint_contract()
     graph, ids = make_resolution_graph(contract)
-    store = ReviewTransactionStore(change_root=_tmp_root())
+    store = ReviewTransactionStore(change_root=tmp_root())
     root_id = store.publish(graph)
     loaded = store.load(root_id)
     wrong_tx_id = "sha256:" + "e" * 64
-    checkpoint = _make_checkpoint(
+    checkpoint = make_checkpoint(
         root_id=root_id.value,
         transaction_id=wrong_tx_id,
         candidate_id=loaded.transaction.candidate_id,
@@ -688,13 +639,13 @@ def test_verifier_rejects_wrong_candidate_id() -> None:
     )
     from ai_harness.modules.harness.review_transaction_storage import ReviewTransactionStore
 
-    contract = _contract()
+    contract = checkpoint_contract()
     graph, ids = make_resolution_graph(contract)
-    store = ReviewTransactionStore(change_root=_tmp_root())
+    store = ReviewTransactionStore(change_root=tmp_root())
     root_id = store.publish(graph)
     loaded = store.load(root_id)
     wrong_candidate = "sha256:" + "d" * 64
-    checkpoint = _make_checkpoint(
+    checkpoint = make_checkpoint(
         root_id=root_id.value,
         transaction_id=ids[1].value,
         candidate_id=wrong_candidate,
@@ -717,12 +668,12 @@ def test_verifier_accepts_incomplete_lens_with_verified_subset() -> None:
     )
     from ai_harness.modules.harness.review_transaction_storage import ReviewTransactionStore
 
-    contract = _contract()
+    contract = checkpoint_contract()
     selection = make_selection(contract)
     transaction = make_transaction(contract, selection)
     tx_id = contract.id_for(transaction)
-    correctness_a = _make_unique_finding(contract, transaction, lens="correctness", summary_suffix="incomplete-a")
-    correctness_b = _make_unique_finding(contract, transaction, lens="correctness", summary_suffix="incomplete-b")
+    correctness_a = make_unique_finding(contract, transaction, lens="correctness", summary_suffix="incomplete-a")
+    correctness_b = make_unique_finding(contract, transaction, lens="correctness", summary_suffix="incomplete-b")
     graph = ReviewTransactionGraph(
         lens_selection=selection,
         transaction=transaction,
@@ -730,7 +681,7 @@ def test_verifier_accepts_incomplete_lens_with_verified_subset() -> None:
         transitions=(),
         correction_fact=None,
     )
-    store = ReviewTransactionStore(change_root=_tmp_root())
+    store = ReviewTransactionStore(change_root=tmp_root())
     root_id = store.publish(graph)
     loaded = store.load(root_id)
     # Mark correctness as incomplete with only the first finding.
@@ -744,7 +695,7 @@ def test_verifier_accepts_incomplete_lens_with_verified_subset() -> None:
         RequiredLensCompletion(lens="architecture", complete=True, finding_ids=()),
         RequiredLensCompletion(lens="security", complete=True, finding_ids=()),
     )
-    checkpoint = _make_checkpoint(
+    checkpoint = make_checkpoint(
         root_id=root_id.value,
         transaction_id=tx_id.value,
         candidate_id=transaction.candidate_id,
@@ -767,16 +718,16 @@ def test_verifier_rejects_forged_completion_with_extra_lens() -> None:
     )
     from ai_harness.modules.harness.review_transaction_storage import ReviewTransactionStore
 
-    contract = _contract()
+    contract = checkpoint_contract()
     graph, ids = make_resolution_graph(contract)
-    store = ReviewTransactionStore(change_root=_tmp_root())
+    store = ReviewTransactionStore(change_root=tmp_root())
     root_id = store.publish(graph)
     loaded = store.load(root_id)
     forged = tuple(
         RequiredLensCompletion(lens=lens, complete=True, finding_ids=())
         for lens in loaded.lens_selection.required_lenses
     ) + (RequiredLensCompletion(lens="phantom", complete=True, finding_ids=()),)
-    checkpoint = _make_checkpoint(
+    checkpoint = make_checkpoint(
         root_id=root_id.value,
         transaction_id=ids[1].value,
         candidate_id=loaded.transaction.candidate_id,
@@ -796,9 +747,9 @@ def test_verifier_rejects_completed_entry_with_extra_finding() -> None:
     )
     from ai_harness.modules.harness.review_transaction_storage import ReviewTransactionStore
 
-    contract = _contract()
+    contract = checkpoint_contract()
     graph, ids = make_resolution_graph(contract)
-    store = ReviewTransactionStore(change_root=_tmp_root())
+    store = ReviewTransactionStore(change_root=tmp_root())
     root_id = store.publish(graph)
     loaded = store.load(root_id)
     real_correctness = contract.id_for(loaded.findings[0])
@@ -818,7 +769,7 @@ def test_verifier_rejects_completed_entry_with_extra_finding() -> None:
             )
         else:
             completions.append(RequiredLensCompletion(lens=lens, complete=True, finding_ids=()))
-    checkpoint = _make_checkpoint(
+    checkpoint = make_checkpoint(
         root_id=root_id.value,
         transaction_id=ids[1].value,
         candidate_id=loaded.transaction.candidate_id,
@@ -857,41 +808,6 @@ def test_completion_constructor_rejects_unsorted_finding_ids() -> None:
 # ---------------------------------------------------------------------------
 # Local helpers — temporary directory and unique-finding builder.
 # ---------------------------------------------------------------------------
-
-
-def _tmp_root():
-    """Return a per-test temporary directory as a ``Path``."""
-
-    import tempfile
-    from pathlib import Path
-
-    return Path(tempfile.mkdtemp(prefix="rt-checkpoint-verifier-"))
-
-
-def _make_unique_finding(
-    contract: ReviewContractV1,
-    transaction: ReviewTransaction,
-    *,
-    lens: str,
-    summary_suffix: str,
-    detail_suffix: str | None = None,
-):
-    """Build an open ``Finding`` whose content is unique within the test graph."""
-
-    from ai_harness.modules.harness.review_transactions import Finding
-
-    detail = detail_suffix if detail_suffix is not None else summary_suffix
-    return Finding(
-        schema_name="ai-harness.review-finding",  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        review_transaction_id=contract.id_for(transaction),
-        lens=lens,
-        severity="warning",
-        summary=f"summary-{lens}-{summary_suffix}",
-        detail=f"detail-{lens}-{detail}",
-        paths=(),
-        status="open",  # type: ignore[arg-type]
-    )
 
 
 # ---------------------------------------------------------------------------

@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -29,7 +28,6 @@ from ai_harness.modules.harness.review_transaction_checkpoints import (
     CODE_STORAGE_INVALID,
     RequiredLensCompletion,
     ReviewCheckpointContractError,
-    ReviewCorrectionEvidenceId,
     ReviewTransactionCheckpoint,
     ReviewTransactionCheckpointContractV1,
     ReviewTransactionCheckpointStorageError,
@@ -37,77 +35,28 @@ from ai_harness.modules.harness.review_transaction_checkpoints import (
 )
 from ai_harness.modules.harness.review_transaction_storage import (
     ReviewTransactionGraph,
-    ReviewTransactionRootId,
     ReviewTransactionStore,
 )
 from ai_harness.modules.harness.review_transactions import (
     HIGH_RISK_LENSES,
     LENS_POLICY_NAME,
     NORMAL_RISK_LENSES,
-    Finding,
     FindingId,
     LensSelection,
-    ReviewContractV1,
-    ReviewTransaction,
-    ReviewTransactionId,
 )
 
 # Reuse the same test fixtures from the storage tests.
+from tests._review_transaction_checkpoints_fixtures import (
+    checkpoint_contract,
+    make_checkpoint,
+    make_unique_finding,
+    tmp_root,
+)
 from tests._review_transaction_storage_fixtures import (
     CANDIDATE_BEFORE,
     make_selection,
     make_transaction,
 )
-
-
-def _contract() -> ReviewContractV1:
-    return ReviewContractV1()
-
-
-def _tmp_root() -> Path:
-    return Path(tempfile.mkdtemp(prefix="rt-checkpoint-completion-"))
-
-
-def _make_unique_finding(
-    contract: ReviewContractV1,
-    transaction: ReviewTransaction,
-    *,
-    lens: str,
-    summary_suffix: str,
-) -> Finding:
-    """Return an open Finding whose content is unique within the test graph."""
-
-    return Finding(
-        schema_name="ai-harness.review-finding",  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        review_transaction_id=contract.id_for(transaction),
-        lens=lens,
-        severity="warning",
-        summary=f"summary-{lens}-{summary_suffix}",
-        detail=f"detail-{lens}-{summary_suffix}",
-        paths=(),
-        status="open",  # type: ignore[arg-type]
-    )
-
-
-def _make_checkpoint(
-    *,
-    root_id: str,
-    transaction_id: str,
-    candidate_id: str,
-    lens_completions: tuple[RequiredLensCompletion, ...],
-    correction_evidence_id: ReviewCorrectionEvidenceId | None = None,
-) -> ReviewTransactionCheckpoint:
-    return ReviewTransactionCheckpoint(
-        schema_name=CHECKPOINT_SCHEMA_NAME,  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        review_transaction_root_id=ReviewTransactionRootId(root_id),
-        review_transaction_id=ReviewTransactionId(transaction_id),
-        candidate_id=candidate_id,
-        lens_completions=lens_completions,
-        correction_evidence_id=correction_evidence_id,
-    )
-
 
 # ---------------------------------------------------------------------------
 # Spec scenarios — complete ordered lens projection
@@ -122,7 +71,7 @@ def test_spec_scenario_normal_risk_required_lenses() -> None:
     each lens in contractual order.
     """
 
-    contract = _contract()
+    contract = checkpoint_contract()
     selection = LensSelection(
         schema_name="ai-harness.review-lens-selection",  # type: ignore[arg-type]
         schema_version=1,  # type: ignore[arg-type]
@@ -138,10 +87,10 @@ def test_spec_scenario_normal_risk_required_lenses() -> None:
         transitions=(),
         correction_fact=None,
     )
-    store = ReviewTransactionStore(change_root=_tmp_root())
+    store = ReviewTransactionStore(change_root=tmp_root())
     root_id = store.publish(graph)
     loaded = store.load(root_id)
-    checkpoint = _make_checkpoint(
+    checkpoint = make_checkpoint(
         root_id=root_id.value,
         transaction_id=contract.id_for(transaction).value,
         candidate_id=transaction.candidate_id,
@@ -161,7 +110,7 @@ def test_spec_scenario_high_risk_required_lenses() -> None:
     contains all four entries exactly once in contractual order.
     """
 
-    contract = _contract()
+    contract = checkpoint_contract()
     selection = LensSelection(
         schema_name="ai-harness.review-lens-selection",  # type: ignore[arg-type]
         schema_version=1,  # type: ignore[arg-type]
@@ -177,10 +126,10 @@ def test_spec_scenario_high_risk_required_lenses() -> None:
         transitions=(),
         correction_fact=None,
     )
-    store = ReviewTransactionStore(change_root=_tmp_root())
+    store = ReviewTransactionStore(change_root=tmp_root())
     root_id = store.publish(graph)
     loaded = store.load(root_id)
-    checkpoint = _make_checkpoint(
+    checkpoint = make_checkpoint(
         root_id=root_id.value,
         transaction_id=contract.id_for(transaction).value,
         candidate_id=transaction.candidate_id,
@@ -199,7 +148,7 @@ def test_spec_scenario_reject_forged_lens_projection() -> None:
     reordered lens is rejected as ``review-checkpoint-storage.invalid``.
     """
 
-    contract = _contract()
+    contract = checkpoint_contract()
     selection = make_selection(contract)  # high-risk
     transaction = make_transaction(contract, selection)
     graph = ReviewTransactionGraph(
@@ -209,14 +158,14 @@ def test_spec_scenario_reject_forged_lens_projection() -> None:
         transitions=(),
         correction_fact=None,
     )
-    store = ReviewTransactionStore(change_root=_tmp_root())
+    store = ReviewTransactionStore(change_root=tmp_root())
     root_id = store.publish(graph)
     loaded = store.load(root_id)
     base = list(selection.required_lenses)
 
     # Unknown lens.
     forged_unknown = base + ["unknown"]
-    checkpoint = _make_checkpoint(
+    checkpoint = make_checkpoint(
         root_id=root_id.value,
         transaction_id=contract.id_for(transaction).value,
         candidate_id=transaction.candidate_id,
@@ -232,7 +181,7 @@ def test_spec_scenario_reject_forged_lens_projection() -> None:
     # Non-selected lens (replace ``security`` with a non-selected lens).
     non_selected = list(base)
     non_selected[non_selected.index("security")] = "maintainability"
-    checkpoint = _make_checkpoint(
+    checkpoint = make_checkpoint(
         root_id=root_id.value,
         transaction_id=contract.id_for(transaction).value,
         candidate_id=transaction.candidate_id,
@@ -246,7 +195,7 @@ def test_spec_scenario_reject_forged_lens_projection() -> None:
 
     # Omitted lens.
     omitted = base[:-1]
-    checkpoint = _make_checkpoint(
+    checkpoint = make_checkpoint(
         root_id=root_id.value,
         transaction_id=contract.id_for(transaction).value,
         candidate_id=transaction.candidate_id,
@@ -258,7 +207,7 @@ def test_spec_scenario_reject_forged_lens_projection() -> None:
 
     # Duplicated lens.
     duplicated = ["correctness", "correctness"] + [lens for lens in base if lens != "correctness"]
-    checkpoint = _make_checkpoint(
+    checkpoint = make_checkpoint(
         root_id=root_id.value,
         transaction_id=contract.id_for(transaction).value,
         candidate_id=transaction.candidate_id,
@@ -270,7 +219,7 @@ def test_spec_scenario_reject_forged_lens_projection() -> None:
 
     # Reordered lenses.
     reordered = list(reversed(base))
-    checkpoint = _make_checkpoint(
+    checkpoint = make_checkpoint(
         root_id=root_id.value,
         transaction_id=contract.id_for(transaction).value,
         candidate_id=transaction.candidate_id,
@@ -362,12 +311,12 @@ def test_spec_scenario_preserve_incomplete_progress() -> None:
     equals the full set of graph findings for the lens.
     """
 
-    contract = _contract()
+    contract = checkpoint_contract()
     selection = make_selection(contract)
     transaction = make_transaction(contract, selection)
     tx_id = contract.id_for(transaction)
-    f_a = _make_unique_finding(contract, transaction, lens="correctness", summary_suffix="a")
-    f_b = _make_unique_finding(contract, transaction, lens="correctness", summary_suffix="b")
+    f_a = make_unique_finding(contract, transaction, lens="correctness", summary_suffix="a")
+    f_b = make_unique_finding(contract, transaction, lens="correctness", summary_suffix="b")
     graph = ReviewTransactionGraph(
         lens_selection=selection,
         transaction=transaction,
@@ -375,7 +324,7 @@ def test_spec_scenario_preserve_incomplete_progress() -> None:
         transitions=(),
         correction_fact=None,
     )
-    store = ReviewTransactionStore(change_root=_tmp_root())
+    store = ReviewTransactionStore(change_root=tmp_root())
     root_id = store.publish(graph)
     loaded = store.load(root_id)
     # Mark correctness as incomplete with both findings as a verified
@@ -395,7 +344,7 @@ def test_spec_scenario_preserve_incomplete_progress() -> None:
         RequiredLensCompletion(lens="architecture", complete=True, finding_ids=()),
         RequiredLensCompletion(lens="security", complete=True, finding_ids=()),
     )
-    checkpoint = _make_checkpoint(
+    checkpoint = make_checkpoint(
         root_id=root_id.value,
         transaction_id=tx_id.value,
         candidate_id=transaction.candidate_id,
@@ -418,12 +367,12 @@ def test_spec_scenario_verify_complete_lens_findings() -> None:
     wire order.
     """
 
-    contract = _contract()
+    contract = checkpoint_contract()
     selection = make_selection(contract)
     transaction = make_transaction(contract, selection)
     tx_id = contract.id_for(transaction)
-    f_a = _make_unique_finding(contract, transaction, lens="correctness", summary_suffix="v-1")
-    f_b = _make_unique_finding(contract, transaction, lens="correctness", summary_suffix="v-2")
+    f_a = make_unique_finding(contract, transaction, lens="correctness", summary_suffix="v-1")
+    f_b = make_unique_finding(contract, transaction, lens="correctness", summary_suffix="v-2")
     graph = ReviewTransactionGraph(
         lens_selection=selection,
         transaction=transaction,
@@ -431,7 +380,7 @@ def test_spec_scenario_verify_complete_lens_findings() -> None:
         transitions=(),
         correction_fact=None,
     )
-    store = ReviewTransactionStore(change_root=_tmp_root())
+    store = ReviewTransactionStore(change_root=tmp_root())
     root_id = store.publish(graph)
     loaded = store.load(root_id)
     sorted_pairs = sorted(
@@ -449,7 +398,7 @@ def test_spec_scenario_verify_complete_lens_findings() -> None:
         RequiredLensCompletion(lens="architecture", complete=True, finding_ids=()),
         RequiredLensCompletion(lens="security", complete=True, finding_ids=()),
     )
-    checkpoint = _make_checkpoint(
+    checkpoint = make_checkpoint(
         root_id=root_id.value,
         transaction_id=tx_id.value,
         candidate_id=transaction.candidate_id,
@@ -467,12 +416,12 @@ def test_spec_scenario_reject_false_completion() -> None:
     rejected as ``review-checkpoint-storage.invalid``.
     """
 
-    contract = _contract()
+    contract = checkpoint_contract()
     selection = make_selection(contract)
     transaction = make_transaction(contract, selection)
     tx_id = contract.id_for(transaction)
-    f_a = _make_unique_finding(contract, transaction, lens="correctness", summary_suffix="f-1")
-    f_b = _make_unique_finding(contract, transaction, lens="correctness", summary_suffix="f-2")
+    f_a = make_unique_finding(contract, transaction, lens="correctness", summary_suffix="f-1")
+    f_b = make_unique_finding(contract, transaction, lens="correctness", summary_suffix="f-2")
     f_id_a = contract.id_for(f_a)
     f_id_b = contract.id_for(f_b)
     # Sort the two finding ids so the immutable construction invariant
@@ -486,13 +435,13 @@ def test_spec_scenario_reject_false_completion() -> None:
         transitions=(),
         correction_fact=None,
     )
-    store = ReviewTransactionStore(change_root=_tmp_root())
+    store = ReviewTransactionStore(change_root=tmp_root())
     root_id = store.publish(graph)
     loaded = store.load(root_id)
     verifier = _CheckpointGraphVerifier(contract=contract)
 
     def _checkpoint_with(completions: tuple[RequiredLensCompletion, ...]) -> ReviewTransactionCheckpoint:
-        return _make_checkpoint(
+        return make_checkpoint(
             root_id=root_id.value,
             transaction_id=tx_id.value,
             candidate_id=transaction.candidate_id,

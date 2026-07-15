@@ -21,20 +21,17 @@ from __future__ import annotations
 
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 import pytest
 
 from ai_harness.modules.harness.review_transaction_checkpoints import (
-    CHECKPOINT_SCHEMA_NAME,
     CODE_STORAGE_INVALID,
     EVIDENCE_SCHEMA_NAME,
     RequiredLensCompletion,
     ReviewCheckpointContractError,
     ReviewCorrectionEvidence,
     ReviewCorrectionEvidenceId,
-    ReviewTransactionCheckpoint,
     ReviewTransactionCheckpointContractV1,
     ReviewTransactionCheckpointStorageError,
     _CheckpointGraphVerifier,
@@ -46,86 +43,20 @@ from ai_harness.modules.harness.review_transaction_storage import (
 )
 from ai_harness.modules.harness.review_transactions import (
     CorrectionFactId,
-    Finding,
-    ReviewContractV1,
-    ReviewTransaction,
     ReviewTransactionId,
 )
+from tests._review_transaction_checkpoints_fixtures import (
+    checkpoint_contract,
+    make_checkpoint,
+    make_evidence,
+    tmp_root,
+)
 from tests._review_transaction_storage_fixtures import (
-    CANDIDATE_AFTER,
     CANDIDATE_BEFORE,
     make_resolution_graph,
     make_selection,
     make_transaction,
 )
-
-
-def _contract() -> ReviewContractV1:
-    return ReviewContractV1()
-
-
-def _tmp_root() -> Path:
-    return Path(tempfile.mkdtemp(prefix="rt-checkpoint-evidence-conformance-"))
-
-
-def _make_unique_finding(
-    contract: ReviewContractV1,
-    transaction: ReviewTransaction,
-    *,
-    lens: str,
-    summary_suffix: str,
-) -> Finding:
-    return Finding(
-        schema_name="ai-harness.review-finding",  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        review_transaction_id=contract.id_for(transaction),
-        lens=lens,
-        severity="warning",
-        summary=f"summary-{lens}-{summary_suffix}",
-        detail=f"detail-{lens}-{summary_suffix}",
-        paths=(),
-        status="open",  # type: ignore[arg-type]
-    )
-
-
-def _make_evidence(
-    contract: ReviewContractV1,
-    *,
-    root_id: str,
-    transaction_id: str,
-    correction_fact_id: str,
-    candidate_before: str = CANDIDATE_BEFORE,
-    candidate_after: str = CANDIDATE_AFTER,
-) -> ReviewCorrectionEvidence:
-    return ReviewCorrectionEvidence(
-        schema_name=EVIDENCE_SCHEMA_NAME,  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        review_transaction_root_id=ReviewTransactionRootId(root_id),
-        review_transaction_id=ReviewTransactionId(transaction_id),
-        correction_fact_id=CorrectionFactId(correction_fact_id),
-        candidate_before=candidate_before,
-        candidate_after=candidate_after,
-    )
-
-
-def _make_checkpoint(
-    *,
-    root_id: str,
-    transaction_id: str,
-    candidate_id: str,
-    lens_completions: tuple[RequiredLensCompletion, ...],
-    correction_evidence_id: ReviewCorrectionEvidenceId | None = None,
-) -> ReviewTransactionCheckpoint:
-    return ReviewTransactionCheckpoint(
-        schema_name=CHECKPOINT_SCHEMA_NAME,  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        review_transaction_root_id=ReviewTransactionRootId(root_id),
-        review_transaction_id=ReviewTransactionId(transaction_id),
-        candidate_id=candidate_id,
-        lens_completions=lens_completions,
-        correction_evidence_id=correction_evidence_id,
-    )
-
 
 # ---------------------------------------------------------------------------
 # Spec scenarios — singular non-cyclic evidence reference
@@ -139,7 +70,7 @@ def test_spec_scenario_publish_without_correction_evidence() -> None:
     evidence verifies with no correction evidence member.
     """
 
-    contract = _contract()
+    contract = checkpoint_contract()
     selection = make_selection(contract)
     transaction = make_transaction(contract, selection)
     graph = ReviewTransactionGraph(
@@ -149,10 +80,10 @@ def test_spec_scenario_publish_without_correction_evidence() -> None:
         transitions=(),
         correction_fact=None,
     )
-    store = ReviewTransactionStore(change_root=_tmp_root())
+    store = ReviewTransactionStore(change_root=tmp_root())
     root_id = store.publish(graph)
     loaded = store.load(root_id)
-    checkpoint = _make_checkpoint(
+    checkpoint = make_checkpoint(
         root_id=root_id.value,
         transaction_id=contract.id_for(transaction).value,
         candidate_id=transaction.candidate_id,
@@ -173,13 +104,13 @@ def test_spec_scenario_publish_matching_correction_evidence() -> None:
     payload.
     """
 
-    contract = _contract()
+    contract = checkpoint_contract()
     graph, ids = make_resolution_graph(contract)
-    store = ReviewTransactionStore(change_root=_tmp_root())
+    store = ReviewTransactionStore(change_root=tmp_root())
     root_id = store.publish(graph)
     loaded = store.load(root_id)
     finding_id = ids[2]
-    evidence = _make_evidence(
+    evidence = make_evidence(
         contract,
         root_id=root_id.value,
         transaction_id=ids[1].value,
@@ -196,7 +127,7 @@ def test_spec_scenario_publish_matching_correction_evidence() -> None:
         RequiredLensCompletion(lens="architecture", complete=True, finding_ids=()),
         RequiredLensCompletion(lens="security", complete=True, finding_ids=()),
     )
-    checkpoint = _make_checkpoint(
+    checkpoint = make_checkpoint(
         root_id=root_id.value,
         transaction_id=ids[1].value,
         candidate_id=loaded.transaction.candidate_id,
@@ -219,13 +150,13 @@ def test_spec_scenario_reject_reference_cardinality_or_identity_mismatch() -> No
     ``review-checkpoint-storage.invalid`` before any checkpoint write.
     """
 
-    contract = _contract()
+    contract = checkpoint_contract()
     graph, ids = make_resolution_graph(contract)
-    store = ReviewTransactionStore(change_root=_tmp_root())
+    store = ReviewTransactionStore(change_root=tmp_root())
     root_id = store.publish(graph)
     loaded = store.load(root_id)
     finding_id = ids[2]
-    evidence = _make_evidence(
+    evidence = make_evidence(
         contract,
         root_id=root_id.value,
         transaction_id=ids[1].value,
@@ -245,7 +176,7 @@ def test_spec_scenario_reject_reference_cardinality_or_identity_mismatch() -> No
     verifier = _CheckpointGraphVerifier(contract=contract)
 
     # Evidence without a checkpoint reference.
-    no_ref = _make_checkpoint(
+    no_ref = make_checkpoint(
         root_id=root_id.value,
         transaction_id=ids[1].value,
         candidate_id=loaded.transaction.candidate_id,
@@ -257,7 +188,7 @@ def test_spec_scenario_reject_reference_cardinality_or_identity_mismatch() -> No
     assert exc.value.code == CODE_STORAGE_INVALID
 
     # Reference without evidence.
-    with_ref = _make_checkpoint(
+    with_ref = make_checkpoint(
         root_id=root_id.value,
         transaction_id=ids[1].value,
         candidate_id=loaded.transaction.candidate_id,
@@ -269,7 +200,7 @@ def test_spec_scenario_reject_reference_cardinality_or_identity_mismatch() -> No
     assert exc.value.code == CODE_STORAGE_INVALID
 
     # Reference to different evidence bytes.
-    other_evidence = _make_evidence(
+    other_evidence = make_evidence(
         contract,
         root_id=root_id.value,
         transaction_id=ids[1].value,
@@ -293,13 +224,13 @@ def test_spec_scenario_verify_matching_evidence_context() -> None:
     checkpoint and reconstructed graph passes binding checks.
     """
 
-    contract = _contract()
+    contract = checkpoint_contract()
     graph, ids = make_resolution_graph(contract)
-    store = ReviewTransactionStore(change_root=_tmp_root())
+    store = ReviewTransactionStore(change_root=tmp_root())
     root_id = store.publish(graph)
     loaded = store.load(root_id)
     finding_id = ids[2]
-    evidence = _make_evidence(
+    evidence = make_evidence(
         contract,
         root_id=root_id.value,
         transaction_id=ids[1].value,
@@ -316,7 +247,7 @@ def test_spec_scenario_verify_matching_evidence_context() -> None:
         RequiredLensCompletion(lens="architecture", complete=True, finding_ids=()),
         RequiredLensCompletion(lens="security", complete=True, finding_ids=()),
     )
-    checkpoint = _make_checkpoint(
+    checkpoint = make_checkpoint(
         root_id=root_id.value,
         transaction_id=ids[1].value,
         candidate_id=loaded.transaction.candidate_id,
@@ -335,13 +266,13 @@ def test_spec_scenario_reject_cross_context_evidence() -> None:
     ``review-checkpoint-storage.invalid``.
     """
 
-    contract = _contract()
+    contract = checkpoint_contract()
     graph, ids = make_resolution_graph(contract)
-    store = ReviewTransactionStore(change_root=_tmp_root())
+    store = ReviewTransactionStore(change_root=tmp_root())
     root_id = store.publish(graph)
     loaded = store.load(root_id)
     finding_id = ids[2]
-    base_evidence = _make_evidence(
+    base_evidence = make_evidence(
         contract,
         root_id=root_id.value,
         transaction_id=ids[1].value,
@@ -367,7 +298,7 @@ def test_spec_scenario_reject_cross_context_evidence() -> None:
         candidate_after: str = base_evidence.candidate_after,
         correction_fact_id: str = base_evidence.correction_fact_id.value,
     ) -> ReviewCorrectionEvidence:
-        return _make_evidence(
+        return make_evidence(
             contract,
             root_id=root_id,
             transaction_id=transaction_id,
@@ -379,7 +310,7 @@ def test_spec_scenario_reject_cross_context_evidence() -> None:
     bad_root_id = ReviewCorrectionEvidenceId(
         ReviewTransactionCheckpointContractV1().id_for(_bad_evidence(root_id="sha256:" + "f" * 64)).value
     )
-    bad_root_checkpoint = _make_checkpoint(
+    bad_root_checkpoint = make_checkpoint(
         root_id=root_id.value,
         transaction_id=ids[1].value,
         candidate_id=loaded.transaction.candidate_id,
@@ -398,7 +329,7 @@ def test_spec_scenario_reject_cross_context_evidence() -> None:
     bad_tx_id = ReviewCorrectionEvidenceId(
         ReviewTransactionCheckpointContractV1().id_for(_bad_evidence(transaction_id="sha256:" + "e" * 64)).value
     )
-    bad_tx_checkpoint = _make_checkpoint(
+    bad_tx_checkpoint = make_checkpoint(
         root_id=root_id.value,
         transaction_id=ids[1].value,
         candidate_id=loaded.transaction.candidate_id,
@@ -417,7 +348,7 @@ def test_spec_scenario_reject_cross_context_evidence() -> None:
     bad_candidate_id = ReviewCorrectionEvidenceId(
         ReviewTransactionCheckpointContractV1().id_for(_bad_evidence(candidate_before="sha256:" + "b" * 64)).value
     )
-    bad_candidate_checkpoint = _make_checkpoint(
+    bad_candidate_checkpoint = make_checkpoint(
         root_id=root_id.value,
         transaction_id=ids[1].value,
         candidate_id=loaded.transaction.candidate_id,
@@ -446,13 +377,13 @@ def test_spec_scenario_verify_correction_metadata() -> None:
     distinct candidate-after exactly match the evidence is accepted.
     """
 
-    contract = _contract()
+    contract = checkpoint_contract()
     graph, ids = make_resolution_graph(contract)
-    store = ReviewTransactionStore(change_root=_tmp_root())
+    store = ReviewTransactionStore(change_root=tmp_root())
     root_id = store.publish(graph)
     loaded = store.load(root_id)
     finding_id = ids[2]
-    evidence = _make_evidence(
+    evidence = make_evidence(
         contract,
         root_id=root_id.value,
         transaction_id=ids[1].value,
@@ -469,7 +400,7 @@ def test_spec_scenario_verify_correction_metadata() -> None:
         RequiredLensCompletion(lens="architecture", complete=True, finding_ids=()),
         RequiredLensCompletion(lens="security", complete=True, finding_ids=()),
     )
-    checkpoint = _make_checkpoint(
+    checkpoint = make_checkpoint(
         root_id=root_id.value,
         transaction_id=ids[1].value,
         candidate_id=loaded.transaction.candidate_id,
@@ -487,7 +418,7 @@ def test_spec_scenario_reject_absent_or_different_correction_fact() -> None:
     id or candidate pair, fails evidence verification as ``invalid``.
     """
 
-    contract = _contract()
+    contract = checkpoint_contract()
     selection = make_selection(contract)
     transaction = make_transaction(contract, selection)
     graph_no_correction = ReviewTransactionGraph(
@@ -497,17 +428,17 @@ def test_spec_scenario_reject_absent_or_different_correction_fact() -> None:
         transitions=(),
         correction_fact=None,
     )
-    store = ReviewTransactionStore(change_root=_tmp_root())
+    store = ReviewTransactionStore(change_root=tmp_root())
     root_id = store.publish(graph_no_correction)
     loaded = store.load(root_id)
-    bogus_evidence = _make_evidence(
+    bogus_evidence = make_evidence(
         contract,
         root_id=root_id.value,
         transaction_id=contract.id_for(transaction).value,
         correction_fact_id="sha256:" + "7" * 64,
     )
     bogus_id = ReviewCorrectionEvidenceId(ReviewTransactionCheckpointContractV1().id_for(bogus_evidence).value)
-    checkpoint = _make_checkpoint(
+    checkpoint = make_checkpoint(
         root_id=root_id.value,
         transaction_id=contract.id_for(transaction).value,
         candidate_id=transaction.candidate_id,

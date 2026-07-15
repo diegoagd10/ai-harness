@@ -18,7 +18,6 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -31,141 +30,20 @@ from ai_harness.modules.harness.review_transaction_checkpoints import (
     CODE_STORAGE_CONFLICT,
     CODE_STORAGE_INVALID,
     CODE_STORAGE_MISSING,
-    RequiredLensCompletion,
     ReviewCorrectionEvidence,
-    ReviewCorrectionEvidenceId,
     ReviewTransactionCheckpoint,
     ReviewTransactionCheckpointContractV1,
-    ReviewTransactionCheckpointId,
     ReviewTransactionCheckpointStorageError,
     ReviewTransactionCheckpointStore,
 )
-from ai_harness.modules.harness.review_transaction_storage import (
-    ReviewTransactionRootId,
-    ReviewTransactionStore,
-)
-from ai_harness.modules.harness.review_transactions import (
-    CorrectionFactId,
-    Finding,
-    ReviewContractV1,
-    ReviewTransaction,
-    ReviewTransactionId,
+from tests._review_transaction_checkpoints_fixtures import (
+    checkpoint_contract,
+    make_evidence,
+    publish_full_checkpoint,
 )
 from tests._review_transaction_storage_fixtures import (
-    CANDIDATE_AFTER,
     CANDIDATE_BEFORE,
-    make_resolution_graph,
 )
-
-
-def _contract() -> ReviewContractV1:
-    return ReviewContractV1()
-
-
-def _tmp_path_root() -> Path:
-    return Path(tempfile.mkdtemp(prefix="rt-checkpoint-hardening-"))
-
-
-def _make_unique_finding(
-    contract: ReviewContractV1,
-    transaction: ReviewTransaction,
-    *,
-    lens: str,
-    summary_suffix: str,
-) -> Finding:
-    return Finding(
-        schema_name="ai-harness.review-finding",  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        review_transaction_id=contract.id_for(transaction),
-        lens=lens,
-        severity="warning",
-        summary=f"summary-{lens}-{summary_suffix}",
-        detail=f"detail-{lens}-{summary_suffix}",
-        paths=(),
-        status="open",  # type: ignore[arg-type]
-    )
-
-
-def _make_evidence(
-    contract: ReviewContractV1,
-    *,
-    root_id: str,
-    transaction_id: str,
-    correction_fact_id: str,
-    candidate_before: str = CANDIDATE_BEFORE,
-    candidate_after: str = CANDIDATE_AFTER,
-) -> ReviewCorrectionEvidence:
-    return ReviewCorrectionEvidence(
-        schema_name="ai-harness.review-correction-evidence",  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        review_transaction_root_id=ReviewTransactionRootId(root_id),
-        review_transaction_id=ReviewTransactionId(transaction_id),
-        correction_fact_id=CorrectionFactId(correction_fact_id),
-        candidate_before=candidate_before,
-        candidate_after=candidate_after,
-    )
-
-
-def _make_checkpoint(
-    *,
-    root_id: str,
-    transaction_id: str,
-    candidate_id: str,
-    lens_completions: tuple[RequiredLensCompletion, ...],
-    correction_evidence_id: ReviewCorrectionEvidenceId | None = None,
-) -> ReviewTransactionCheckpoint:
-    return ReviewTransactionCheckpoint(
-        schema_name="ai-harness.review-transaction-checkpoint",  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        review_transaction_root_id=ReviewTransactionRootId(root_id),
-        review_transaction_id=ReviewTransactionId(transaction_id),
-        candidate_id=candidate_id,
-        lens_completions=lens_completions,
-        correction_evidence_id=correction_evidence_id,
-    )
-
-
-def _publish_full_checkpoint(
-    tmp_path: Path,
-) -> tuple[
-    ReviewTransactionCheckpoint,
-    ReviewCorrectionEvidence,
-    ReviewTransactionCheckpointId,
-]:
-    contract = _contract()
-    graph, ids = make_resolution_graph(contract)
-    store = ReviewTransactionStore(change_root=tmp_path)
-    root_id = store.publish(graph)
-    loaded = store.load(root_id)
-    finding_id = ids[2]
-    evidence = _make_evidence(
-        contract,
-        root_id=root_id.value,
-        transaction_id=ids[1].value,
-        correction_fact_id=ids[4].value,
-    )
-    evidence_id = ReviewCorrectionEvidenceId(ReviewTransactionCheckpointContractV1().id_for(evidence).value)
-    completions = (
-        RequiredLensCompletion(
-            lens="correctness",
-            complete=True,
-            finding_ids=(finding_id,),
-        ),
-        RequiredLensCompletion(lens="tests", complete=True, finding_ids=()),
-        RequiredLensCompletion(lens="architecture", complete=True, finding_ids=()),
-        RequiredLensCompletion(lens="security", complete=True, finding_ids=()),
-    )
-    checkpoint = _make_checkpoint(
-        root_id=root_id.value,
-        transaction_id=ids[1].value,
-        candidate_id=loaded.transaction.candidate_id,
-        lens_completions=completions,
-        correction_evidence_id=evidence_id,
-    )
-    checkpoint_store = ReviewTransactionCheckpointStore(change_root=tmp_path)
-    checkpoint_id = checkpoint_store.publish(checkpoint, correction_evidence=evidence)
-    return checkpoint, evidence, checkpoint_id
-
 
 # ---------------------------------------------------------------------------
 # 12.1 — Round-trip, idempotence, and pre-commit failures
@@ -175,7 +53,7 @@ def _publish_full_checkpoint(
 def test_publish_then_load_round_trips_full_checkpoint(tmp_path: Path) -> None:
     """A full checkpoint with evidence round-trips through publish and load."""
 
-    checkpoint, evidence, checkpoint_id = _publish_full_checkpoint(tmp_path)
+    checkpoint, evidence, checkpoint_id = publish_full_checkpoint(tmp_path)
     checkpoint_store = ReviewTransactionCheckpointStore(change_root=tmp_path)
     verified = checkpoint_store.load(checkpoint_id)
     assert verified.checkpoint == checkpoint
@@ -185,7 +63,7 @@ def test_publish_then_load_round_trips_full_checkpoint(tmp_path: Path) -> None:
 def test_publish_is_idempotent_for_same_inputs(tmp_path: Path) -> None:
     """Repeated publish of the same inputs returns the same id."""
 
-    checkpoint, evidence, first_id = _publish_full_checkpoint(tmp_path)
+    checkpoint, evidence, first_id = publish_full_checkpoint(tmp_path)
     checkpoint_store = ReviewTransactionCheckpointStore(change_root=tmp_path)
     second_id = checkpoint_store.publish(checkpoint, correction_evidence=evidence)
     assert first_id == second_id
@@ -196,13 +74,13 @@ def test_publish_failure_before_checkpoint_install_leaves_no_visible_checkpoint(
 ) -> None:
     """A pre-checkpoint failure leaves no visible checkpoint bundle."""
 
-    checkpoint, _evidence, _first_id = _publish_full_checkpoint(tmp_path)
+    checkpoint, _evidence, _first_id = publish_full_checkpoint(tmp_path)
     checkpoint_store = ReviewTransactionCheckpointStore(change_root=tmp_path)
 
     # Force a pre-checkpoint failure by passing an evidence value whose
     # ``correction_fact_id`` disagrees with the loaded correction fact.
-    bad_evidence = _make_evidence(
-        _contract(),
+    bad_evidence = make_evidence(
+        checkpoint_contract(),
         root_id=checkpoint.review_transaction_root_id.value,
         transaction_id=checkpoint.review_transaction_id.value,
         correction_fact_id="sha256:" + "9" * 64,
@@ -216,15 +94,15 @@ def test_publish_failure_before_checkpoint_install_leaves_no_visible_checkpoint(
 def test_publish_with_archived_graph_missing_reports_missing(tmp_path: Path) -> None:
     """A missing archived graph is translated to ``review-checkpoint-storage.missing``."""
 
-    checkpoint, _evidence, _first_id = _publish_full_checkpoint(tmp_path)
+    checkpoint, _evidence, _first_id = publish_full_checkpoint(tmp_path)
     # Remove the lens-selection bundle so the archived load fails.
     archived = tmp_path / ".receipts" / "review-lens-selections" / "sha256"
     for path in list(archived.iterdir()):
         if path.is_dir():
             shutil.rmtree(path, ignore_errors=True)
     checkpoint_store = ReviewTransactionCheckpointStore(change_root=tmp_path)
-    bogus_evidence = _make_evidence(
-        _contract(),
+    bogus_evidence = make_evidence(
+        checkpoint_contract(),
         root_id=checkpoint.review_transaction_root_id.value,
         transaction_id=checkpoint.review_transaction_id.value,
         correction_fact_id="sha256:" + "9" * 64,
@@ -242,7 +120,7 @@ def test_publish_with_archived_graph_missing_reports_missing(tmp_path: Path) -> 
 def test_load_rejects_missing_checkpoint_bundle(tmp_path: Path) -> None:
     """A removed checkpoint bundle is reported as ``missing``."""
 
-    _checkpoint, _evidence, checkpoint_id = _publish_full_checkpoint(tmp_path)
+    _checkpoint, _evidence, checkpoint_id = publish_full_checkpoint(tmp_path)
     digest = checkpoint_id.value.removeprefix("sha256:")
     bundle = tmp_path / ".receipts" / "review-transaction-checkpoints" / "sha256" / digest
     shutil.rmtree(bundle, ignore_errors=True)
@@ -255,7 +133,7 @@ def test_load_rejects_missing_checkpoint_bundle(tmp_path: Path) -> None:
 def test_load_rejects_tampered_checkpoint_bytes(tmp_path: Path) -> None:
     """A checkpoint bundle with noncanonical or tampered bytes is rejected."""
 
-    _checkpoint, _evidence, checkpoint_id = _publish_full_checkpoint(tmp_path)
+    _checkpoint, _evidence, checkpoint_id = publish_full_checkpoint(tmp_path)
     digest = checkpoint_id.value.removeprefix("sha256:")
     target = tmp_path / ".receipts" / "review-transaction-checkpoints" / "sha256" / digest / "object.json"
     target.write_bytes(b"not-canonical-bytes")
@@ -268,7 +146,7 @@ def test_load_rejects_tampered_checkpoint_bytes(tmp_path: Path) -> None:
 def test_load_rejects_wrong_role_bytes(tmp_path: Path) -> None:
     """A bundle whose bytes were produced under the wrong role is rejected."""
 
-    _checkpoint, evidence, checkpoint_id = _publish_full_checkpoint(tmp_path)
+    _checkpoint, evidence, checkpoint_id = publish_full_checkpoint(tmp_path)
     # Locate the evidence bundle and copy its bytes into the checkpoint
     # bundle directory under the same digest.
     evidence_id_value = typed_hash(
@@ -290,7 +168,7 @@ def test_load_rejects_wrong_role_bytes(tmp_path: Path) -> None:
 def test_publish_with_existing_object_at_other_role_does_not_overwrite(tmp_path: Path) -> None:
     """Publishing the same checkpoint does not overwrite conflicting bytes."""
 
-    _checkpoint, evidence, _first_id = _publish_full_checkpoint(tmp_path)
+    _checkpoint, evidence, _first_id = publish_full_checkpoint(tmp_path)
     checkpoint_store = ReviewTransactionCheckpointStore(change_root=tmp_path)
 
     # Publish the same checkpoint — second call is idempotent.
@@ -337,7 +215,7 @@ def _checkpoint_or_publish_payload(
 def test_load_rejects_symlinked_object_file(tmp_path: Path) -> None:
     """A symlink replacing ``object.json`` is rejected without following the link."""
 
-    _checkpoint, _evidence, checkpoint_id = _publish_full_checkpoint(tmp_path)
+    _checkpoint, _evidence, checkpoint_id = publish_full_checkpoint(tmp_path)
     digest = checkpoint_id.value.removeprefix("sha256:")
     bundle = tmp_path / ".receipts" / "review-transaction-checkpoints" / "sha256" / digest
     target = bundle / "object.json"
@@ -354,7 +232,7 @@ def test_load_rejects_symlinked_object_file(tmp_path: Path) -> None:
 def test_load_rejects_symlinked_bundle_directory(tmp_path: Path) -> None:
     """A bundle directory replaced with a symlink is rejected at lookup time."""
 
-    _checkpoint, _evidence, checkpoint_id = _publish_full_checkpoint(tmp_path)
+    _checkpoint, _evidence, checkpoint_id = publish_full_checkpoint(tmp_path)
     digest = checkpoint_id.value.removeprefix("sha256:")
     bundle = tmp_path / ".receipts" / "review-transaction-checkpoints" / "sha256" / digest
     real = bundle.parent / f"real-target-{digest}"
@@ -370,7 +248,7 @@ def test_load_rejects_symlinked_bundle_directory(tmp_path: Path) -> None:
 def test_load_rejects_fifo_object_file(tmp_path: Path) -> None:
     """A FIFO replacing ``object.json`` is rejected by the strict readback."""
 
-    _checkpoint, _evidence, checkpoint_id = _publish_full_checkpoint(tmp_path)
+    _checkpoint, _evidence, checkpoint_id = publish_full_checkpoint(tmp_path)
     digest = checkpoint_id.value.removeprefix("sha256:")
     target = tmp_path / ".receipts" / "review-transaction-checkpoints" / "sha256" / digest / "object.json"
     target.unlink()
@@ -383,7 +261,7 @@ def test_load_rejects_fifo_object_file(tmp_path: Path) -> None:
 def test_load_rejects_extra_child_in_bundle(tmp_path: Path) -> None:
     """A stray file inside the bundle is rejected by strict topology."""
 
-    _checkpoint, _evidence, checkpoint_id = _publish_full_checkpoint(tmp_path)
+    _checkpoint, _evidence, checkpoint_id = publish_full_checkpoint(tmp_path)
     digest = checkpoint_id.value.removeprefix("sha256:")
     bundle = tmp_path / ".receipts" / "review-transaction-checkpoints" / "sha256" / digest
     (bundle / "stray.txt").write_text("extra", encoding="utf-8")
@@ -396,7 +274,7 @@ def test_load_rejects_extra_child_in_bundle(tmp_path: Path) -> None:
 def test_load_rejects_overwritten_object_file_with_tampered_bytes(tmp_path: Path) -> None:
     """A bundle whose ``object.json`` is overwritten with tampered bytes is rejected."""
 
-    _checkpoint, _evidence, checkpoint_id = _publish_full_checkpoint(tmp_path)
+    _checkpoint, _evidence, checkpoint_id = publish_full_checkpoint(tmp_path)
     digest = checkpoint_id.value.removeprefix("sha256:")
     target = tmp_path / ".receipts" / "review-transaction-checkpoints" / "sha256" / digest / "object.json"
     target.write_text(
@@ -412,7 +290,7 @@ def test_load_rejects_overwritten_object_file_with_tampered_bytes(tmp_path: Path
 def test_load_rejects_replaced_object_file_with_different_digest_bytes(tmp_path: Path) -> None:
     """Replacing ``object.json`` with valid bytes for a different id is rejected."""
 
-    _checkpoint, _evidence, checkpoint_id = _publish_full_checkpoint(tmp_path)
+    _checkpoint, _evidence, checkpoint_id = publish_full_checkpoint(tmp_path)
     digest = checkpoint_id.value.removeprefix("sha256:")
     bundle = tmp_path / ".receipts" / "review-transaction-checkpoints" / "sha256" / digest
     target = bundle / "object.json"

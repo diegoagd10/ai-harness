@@ -17,7 +17,6 @@ import json
 import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -25,7 +24,6 @@ import pytest
 from ai_harness.modules.harness.review_transaction_checkpoints import (
     CODE_STORAGE_INVALID,
     RequiredLensCompletion,
-    ReviewTransactionCheckpoint,
     ReviewTransactionCheckpointStorageError,
     _CheckpointGraphVerifier,
 )
@@ -42,10 +40,12 @@ from ai_harness.modules.harness.review_transaction_storage import (
     ReviewTransactionStore,
 )
 from ai_harness.modules.harness.review_transactions import (
-    Finding,
-    ReviewContractV1,
     ReviewTransaction,
-    ReviewTransactionId,
+)
+from tests._review_transaction_checkpoints_fixtures import (
+    checkpoint_contract,
+    make_checkpoint,
+    make_unique_finding,
 )
 from tests._review_transaction_storage_fixtures import (
     CANDIDATE_AFTER,
@@ -55,53 +55,6 @@ from tests._review_transaction_storage_fixtures import (
     make_transaction,
 )
 
-
-def _contract() -> ReviewContractV1:
-    return ReviewContractV1()
-
-
-def _tmp_root() -> Path:
-    return Path(tempfile.mkdtemp(prefix="rt-checkpoint-bindings-"))
-
-
-def _make_unique_finding(
-    contract: ReviewContractV1,
-    transaction: ReviewTransaction,
-    *,
-    lens: str,
-    summary_suffix: str,
-) -> Finding:
-    return Finding(
-        schema_name="ai-harness.review-finding",  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        review_transaction_id=contract.id_for(transaction),
-        lens=lens,
-        severity="warning",
-        summary=f"summary-{lens}-{summary_suffix}",
-        detail=f"detail-{lens}-{summary_suffix}",
-        paths=(),
-        status="open",  # type: ignore[arg-type]
-    )
-
-
-def _make_checkpoint(
-    *,
-    root_id: str,
-    transaction_id: str,
-    candidate_id: str,
-    lens_completions: tuple[RequiredLensCompletion, ...],
-) -> ReviewTransactionCheckpoint:
-    return ReviewTransactionCheckpoint(
-        schema_name="ai-harness.review-transaction-checkpoint",  # type: ignore[arg-type]
-        schema_version=1,  # type: ignore[arg-type]
-        review_transaction_root_id=ReviewTransactionRootId(root_id),
-        review_transaction_id=ReviewTransactionId(transaction_id),
-        candidate_id=candidate_id,
-        lens_completions=lens_completions,
-        correction_evidence_id=None,
-    )
-
-
 # ---------------------------------------------------------------------------
 # 7.1 — Hermetic archived graph fixtures and authoritative root load
 # ---------------------------------------------------------------------------
@@ -110,7 +63,7 @@ def _make_checkpoint(
 def test_archived_graph_fixture_is_loaded_by_named_root(tmp_path: Path) -> None:
     """A checkpoint naming a published root is loaded by that exact root."""
 
-    contract = _contract()
+    contract = checkpoint_contract()
     selection = make_selection(contract)
     transaction = make_transaction(contract, selection)
     graph = ReviewTransactionGraph(
@@ -128,7 +81,7 @@ def test_archived_graph_fixture_is_loaded_by_named_root(tmp_path: Path) -> None:
     assert loaded.lens_selection.required_lenses == selection.required_lenses
 
     # The verifier confirms the embedded root id matches the loaded graph.
-    checkpoint = _make_checkpoint(
+    checkpoint = make_checkpoint(
         root_id=root_id.value,
         transaction_id=contract.id_for(transaction).value,
         candidate_id=transaction.candidate_id,
@@ -143,7 +96,7 @@ def test_archived_graph_fixture_is_loaded_by_named_root(tmp_path: Path) -> None:
 def test_archived_graph_fixture_supports_full_resolution_graph(tmp_path: Path) -> None:
     """A resolution graph (with correction fact) round-trips through publish/load."""
 
-    contract = _contract()
+    contract = checkpoint_contract()
     graph, _ids = make_resolution_graph(contract)
     store = ReviewTransactionStore(change_root=tmp_path)
     root_id = store.publish(graph)
@@ -167,7 +120,7 @@ def test_archived_graph_fixture_supports_full_resolution_graph(tmp_path: Path) -
 def test_two_distinct_archived_graphs_yield_distinct_roots(tmp_path: Path) -> None:
     """Two different archived graphs produce two different typed root ids."""
 
-    contract = _contract()
+    contract = checkpoint_contract()
     selection = make_selection(contract)
     transaction_a = make_transaction(contract, selection)
     # Make the second transaction distinguishable by adding a unique
@@ -212,7 +165,7 @@ def test_transaction_substitution_from_a_different_archived_graph_is_rejected(
 ) -> None:
     """A transaction id from a different archived graph is rejected."""
 
-    contract = _contract()
+    contract = checkpoint_contract()
     selection = make_selection(contract)
     transaction_a = make_transaction(contract, selection)
     transaction_b_unique = ReviewTransaction(
@@ -245,7 +198,7 @@ def test_transaction_substitution_from_a_different_archived_graph_is_rejected(
     loaded_b = store.load(root_b)
 
     # Substitute the ``b`` transaction id into a checkpoint for ``a``.
-    checkpoint = _make_checkpoint(
+    checkpoint = make_checkpoint(
         root_id=root_a.value,
         transaction_id=contract.id_for(loaded_b.transaction).value,
         candidate_id=loaded_a.transaction.candidate_id,
@@ -265,7 +218,7 @@ def test_candidate_substitution_from_a_different_archived_graph_is_rejected(
 ) -> None:
     """A candidate id from a different archived graph is rejected."""
 
-    contract = _contract()
+    contract = checkpoint_contract()
     selection = make_selection(contract)
     transaction_a = make_transaction(contract, selection)
     transaction_b_unique = ReviewTransaction(
@@ -298,7 +251,7 @@ def test_candidate_substitution_from_a_different_archived_graph_is_rejected(
     loaded_b = store.load(root_b)
 
     # Substitute ``b``'s candidate into ``a``'s checkpoint.
-    checkpoint = _make_checkpoint(
+    checkpoint = make_checkpoint(
         root_id=root_a.value,
         transaction_id=contract.id_for(transaction_a).value,
         candidate_id=loaded_b.transaction.candidate_id,
@@ -318,12 +271,12 @@ def test_finding_substitution_from_a_different_archived_graph_is_rejected(
 ) -> None:
     """A finding id from a different archived graph is rejected."""
 
-    contract = _contract()
+    contract = checkpoint_contract()
     selection = make_selection(contract)
     transaction = make_transaction(contract, selection)
     tx_id = contract.id_for(transaction)
-    finding_a = _make_unique_finding(contract, transaction, lens="correctness", summary_suffix="a")
-    finding_b = _make_unique_finding(contract, transaction, lens="correctness", summary_suffix="b")
+    finding_a = make_unique_finding(contract, transaction, lens="correctness", summary_suffix="a")
+    finding_b = make_unique_finding(contract, transaction, lens="correctness", summary_suffix="b")
     graph_a = ReviewTransactionGraph(
         lens_selection=selection,
         transaction=transaction,
@@ -346,7 +299,7 @@ def test_finding_substitution_from_a_different_archived_graph_is_rejected(
     finding_b_id = contract.id_for(loaded_b.findings[0])
     # A checkpoint claiming completion with the ``b`` finding on graph_a
     # is rejected because the finding id does not exist in ``a``.
-    checkpoint = _make_checkpoint(
+    checkpoint = make_checkpoint(
         root_id=root_a.value,
         transaction_id=tx_id.value,
         candidate_id=transaction.candidate_id,
@@ -372,12 +325,12 @@ def test_lens_substitution_via_cross_lens_attribution_is_rejected(
 ) -> None:
     """A finding attributed to a different lens within the same graph is rejected."""
 
-    contract = _contract()
+    contract = checkpoint_contract()
     selection = make_selection(contract)
     transaction = make_transaction(contract, selection)
     tx_id = contract.id_for(transaction)
-    f_correctness = _make_unique_finding(contract, transaction, lens="correctness", summary_suffix="lens-a")
-    f_tests = _make_unique_finding(contract, transaction, lens="tests", summary_suffix="lens-b")
+    f_correctness = make_unique_finding(contract, transaction, lens="correctness", summary_suffix="lens-a")
+    f_tests = make_unique_finding(contract, transaction, lens="tests", summary_suffix="lens-b")
     graph = ReviewTransactionGraph(
         lens_selection=selection,
         transaction=transaction,
@@ -392,7 +345,7 @@ def test_lens_substitution_via_cross_lens_attribution_is_rejected(
     finding_tests_id = contract.id_for(f_tests)
 
     # Attribute the correctness finding to the tests entry.
-    checkpoint = _make_checkpoint(
+    checkpoint = make_checkpoint(
         root_id=root_id.value,
         transaction_id=tx_id.value,
         candidate_id=transaction.candidate_id,
@@ -435,7 +388,7 @@ def test_load_missing_archived_root_translates_to_missing(tmp_path: Path) -> Non
 def test_load_tampered_archived_root_translates_to_invalid(tmp_path: Path) -> None:
     """A tampered root bundle is rejected with ``review-storage.invalid``."""
 
-    contract = _contract()
+    contract = checkpoint_contract()
     graph, _ids = make_resolution_graph(contract)
     store = ReviewTransactionStore(change_root=tmp_path)
     root_id = store.publish(graph)
@@ -456,7 +409,7 @@ def test_load_tampered_archived_root_translates_to_invalid(tmp_path: Path) -> No
 def test_load_returns_no_partial_value_on_archived_graph_failure(tmp_path: Path) -> None:
     """A failed ``ReviewTransactionStore.load`` returns no partial graph."""
 
-    contract = _contract()
+    contract = checkpoint_contract()
     graph, _ids = make_resolution_graph(contract)
     store = ReviewTransactionStore(change_root=tmp_path)
     root_id = store.publish(graph)
@@ -481,7 +434,7 @@ def test_verifier_rejects_checkpoint_against_tampered_archived_graph(
 ) -> None:
     """A tampered archived graph is rejected by the verifier as ``invalid``."""
 
-    contract = _contract()
+    contract = checkpoint_contract()
     graph, _ids = make_resolution_graph(contract)
     store = ReviewTransactionStore(change_root=tmp_path)
     root_id = store.publish(graph)
