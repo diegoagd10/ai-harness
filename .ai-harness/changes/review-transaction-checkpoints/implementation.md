@@ -15,6 +15,7 @@
 - eee4a52e73f28a9cc653f65e9d355ad734375abb — task 12: Test strict checkpoint persistence and storage hardening
 - 007dc04de528eb52f04c33f094d1504afeea6501 — task 13: Tighten ReviewTransactionCheckpointContractV1.decode to bytes-only
 - 39a694db7e75c18c763b2213c117b02b29a10ca7 — task 14: Extract shared checkpoint test fixtures to eliminate pylint duplicate-code
+- 605e780c1193b6202dc86c6cb6612e973a31878a — task 15: Correct implementation.md TDD evidence to use full commit SHAs and written RED cells
 
 ## TDD Evidence
 
