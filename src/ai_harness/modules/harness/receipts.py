@@ -2125,6 +2125,124 @@ class _ReviewBundleStore:
         return _ReviewBundleStore._REGISTRY[role]
 
 
+# ===========================================================================
+# Package-internal checkpoint bundle store
+#
+# The checkpoint bundle store owns the closed two-role registry of
+# ``(kind, typed-hash label)`` pairs used by the new
+# :class:`ai_harness.modules.harness.review_transaction_checkpoints.ReviewTransactionCheckpointStore`.
+# It is intentionally separate from the archived six-role
+# :class:`_ReviewBundleStore` registry: the two share only the hardened
+# immutable-bundle primitive, never registry entries, kind tokens, or
+# label values. Public receipt dispatch is never widened to include the
+# two checkpoint roles.
+# ===========================================================================
+
+
+class _CheckpointBundleRole(Enum):
+    """Closed storage-role identifiers for v1 checkpoint persistence.
+
+    Exactly two roles are admitted:
+
+    * ``CHECKPOINT`` — review-transaction checkpoint bundles at
+      ``review-transaction-checkpoints`` under the
+      ``ai-harness/review-transaction-checkpoint/v1`` label.
+    * ``CORRECTION_EVIDENCE`` — correction-evidence bundles at
+      ``review-correction-evidence`` under the
+      ``ai-harness/review-correction-evidence/v1`` label.
+    """
+
+    CHECKPOINT = "checkpoint"
+    CORRECTION_EVIDENCE = "correction_evidence"
+
+
+@dataclass(frozen=True, slots=True)
+class _CheckpointBundleStore:
+    """Closed-registry immutable bundle helper for the two checkpoint roles.
+
+    The class is package-internal; the public seam is
+    ``ReviewTransactionCheckpointStore``. The closed registry is the only
+    entry point through which a checkpoint or correction-evidence kind
+    can be published or read, and the registry's contents are fixed by
+    the v1 contract — neither kind nor label are caller-selectable. The
+    class composes :class:`_ImmutableBundleStore`; it neither inherits
+    from it nor exposes its primitive surface.
+    """
+
+    receipts_dir: Path
+    bundles: _ImmutableBundleStore = _dataclass_field(init=False, repr=False, compare=False)
+    _REGISTRY: ClassVar[Mapping[_CheckpointBundleRole, tuple[str, str]]] = MappingProxyType(
+        {
+            _CheckpointBundleRole.CHECKPOINT: (
+                "review-transaction-checkpoints",
+                "ai-harness/review-transaction-checkpoint/v1",
+            ),
+            _CheckpointBundleRole.CORRECTION_EVIDENCE: (
+                "review-correction-evidence",
+                "ai-harness/review-correction-evidence/v1",
+            ),
+        }
+    )
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "bundles", _ImmutableBundleStore(self.receipts_dir))
+
+    def publish(self, role: _CheckpointBundleRole, canonical_bytes: bytes) -> str:
+        """Atomically publish *canonical_bytes* under the closed *role* registry.
+
+        Returns the typed identifier. Raises :class:`ReceiptStoreError` if
+        *role* is unknown, *canonical_bytes* is not bytes, or a conflicting
+        bundle already exists at the computed path.
+        """
+
+        kind, label = self._resolve_role(role)
+        if not isinstance(canonical_bytes, (bytes, bytearray)):
+            raise ReceiptStoreError(
+                "checkpoint bundle publish payload must be bytes",
+                code="review-checkpoint-storage.invalid",
+            )
+        return self.bundles.publish(kind=kind, label=label, canonical_bytes=bytes(canonical_bytes))
+
+    def read(self, role: _CheckpointBundleRole, object_id: str) -> bytes:
+        """Return the canonical bytes for the object at *role* under *object_id*."""
+
+        kind, label = self._resolve_role(role)
+        return self.bundles.read_object_bytes(
+            kind=kind,
+            label=label,
+            object_id=object_id,
+        )
+
+    def bundle_path(self, role: _CheckpointBundleRole, object_id: str) -> Path:
+        """Return the bundle directory for the closed *role* and *object_id*."""
+
+        kind, _ = self._resolve_role(role)
+        return self.bundles.bundle_path(kind, object_id)
+
+    @staticmethod
+    def _resolve_role(role: _CheckpointBundleRole) -> tuple[str, str]:
+        """Return the ``(kind, label)`` pair for a closed *role*.
+
+        Raises :class:`ReceiptStoreError` for any role outside the
+        closed two-role registry. ``_CheckpointBundleRole`` is an
+        :class:`Enum` whose membership is fixed, so this comparison is
+        authoritative; the explicit error path exists for robustness
+        against future subclassing or accidental value substitution.
+        """
+
+        if not isinstance(role, _CheckpointBundleRole):
+            raise ReceiptStoreError(
+                f"unknown checkpoint bundle role: {role!r}",
+                code="review-checkpoint-storage.invalid",
+            )
+        if role not in _CheckpointBundleStore._REGISTRY:
+            raise ReceiptStoreError(
+                f"checkpoint bundle role not registered: {role!r}",
+                code="review-checkpoint-storage.invalid",
+            )
+        return _CheckpointBundleStore._REGISTRY[role]
+
+
 def _validate_evidence_relative(relative: str) -> None:
     if not isinstance(relative, str) or not relative or relative.startswith("/") or "\\" in relative:
         raise ReceiptStoreError(f"invalid evidence relative path: {relative!r}", code="evidence.invalid")
