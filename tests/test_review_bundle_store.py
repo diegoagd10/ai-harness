@@ -402,3 +402,84 @@ def test_publish_recovers_after_manual_idempotent_install(
     # as idempotent, returning the same ID.
     actual_id = bundle_store.publish(role, CANONICAL_PAYLOAD)
     assert actual_id == expected_id
+
+
+def test_read_rejects_bundle_dir_replaced_during_read(
+    bundle_store: _ReviewBundleStore,
+    change_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bundle directory replaced *after* the file read is rejected.
+
+    The stable read path protects against post-read replacement of
+    ``object.json``, but the bundle directory itself must also be
+    rechecked: an attacker who replaces the whole bundle directory
+    between the file read and the final verification must be detected
+    as ``receipt.invalid`` without returning bytes that no longer match
+    the originally enumerated bundle.
+    """
+
+    from ai_harness.modules.harness import receipts as receipts_module
+    from ai_harness.modules.harness.receipts import _stable_regular_read
+
+    role = _ReviewBundleRole.LENS_SELECTION
+    object_id = bundle_store.publish(role, CANONICAL_PAYLOAD)
+    digest = object_id.removeprefix("sha256:")
+    bundle = change_root / ".receipts" / "review-lens-selections" / "sha256" / digest
+
+    real_stable_read = receipts_module._stable_regular_read
+
+    def _swap_bundle_then_read(path: Path, **kwargs):
+        data = real_stable_read(path, **kwargs)
+        surrogate_parent = bundle.parent.parent / "surrogate"
+        surrogate_parent.mkdir(exist_ok=True)
+        surrogate = surrogate_parent / digest
+        if surrogate.exists():
+            import shutil as _shutil
+
+            _shutil.rmtree(surrogate)
+        import shutil as _shutil
+
+        _shutil.move(str(bundle), str(surrogate))
+        real = bundle
+        real.mkdir()
+        (real / "object.json").write_bytes(b'{"replacement": true}')
+        return data
+
+    monkeypatch.setattr(receipts_module, "_stable_regular_read", _swap_bundle_then_read)
+    with pytest.raises(ReceiptStoreError) as exc_info:
+        bundle_store.read(role, object_id)
+    assert exc_info.value.code == "receipt.invalid"
+
+
+def test_read_rejects_extra_child_inserted_mid_read(
+    bundle_store: _ReviewBundleStore,
+    change_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A child file inserted into the bundle after the read is rejected.
+
+    The strict reader re-checks the bundle's child set after the stable
+    read. Without this recheck, an attacker could add a stray file to a
+    bundle between the enumeration and the typed-digest verification and
+    no inspection step would notice.
+    """
+
+    from ai_harness.modules.harness import receipts as receipts_module
+
+    role = _ReviewBundleRole.LENS_SELECTION
+    object_id = bundle_store.publish(role, CANONICAL_PAYLOAD)
+    digest = object_id.removeprefix("sha256:")
+    bundle = change_root / ".receipts" / "review-lens-selections" / "sha256" / digest
+
+    real_stable_read = receipts_module._stable_regular_read
+
+    def _inject_child_then_read(path: Path, **kwargs):
+        data = real_stable_read(path, **kwargs)
+        (bundle / "stray_injected.txt").write_text("injected", encoding="utf-8")
+        return data
+
+    monkeypatch.setattr(receipts_module, "_stable_regular_read", _inject_child_then_read)
+    with pytest.raises(ReceiptStoreError) as exc_info:
+        bundle_store.read(role, object_id)
+    assert exc_info.value.code == "receipt.invalid"

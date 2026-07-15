@@ -1882,7 +1882,20 @@ class _ImmutableBundleStore:
         object_id: str,
         extra_children: Iterable[str] | None = None,
     ) -> tuple[Path, bytes]:
-        """Return ``(bundle_path, bytes)`` after strict topology verification."""
+        """Return ``(bundle_path, bytes)`` after strict topology verification.
+
+        The reader performs a **before → during → after** fingerprint
+        comparison:
+
+        * *Before* the file read the bundle directory is stat-ed, its
+          symlink status is checked, and its child set is enumerated.
+        * *During* the read, ``_stable_regular_read`` compares the
+          regular-file's pre-open, descriptor, post-read, and final-path
+          stat fingerprints.
+        * *After* the read the bundle directory is stat-ed and its
+          child set is re-enumerated so replacement, deletion, or
+          additional child insertion during the read is detected.
+        """
 
         validate_typed_id(object_id)
         anchor = _storage_anchor(self.receipts_dir)
@@ -1890,7 +1903,7 @@ class _ImmutableBundleStore:
         _assert_no_symlink_components(bundle, anchor=anchor)
 
         try:
-            bundle_stat = os.lstat(bundle)
+            bundle_stat_before = os.lstat(bundle)
         except FileNotFoundError as exc:
             raise ReceiptStoreError(
                 f"object bundle not found: {bundle}",
@@ -1902,7 +1915,7 @@ class _ImmutableBundleStore:
                 code="receipt.invalid",
             ) from exc
 
-        if stat.S_ISLNK(bundle_stat.st_mode) or not stat.S_ISDIR(bundle_stat.st_mode):
+        if stat.S_ISLNK(bundle_stat_before.st_mode) or not stat.S_ISDIR(bundle_stat_before.st_mode):
             raise ReceiptStoreError(
                 "object bundle must be a real directory",
                 code="receipt.invalid",
@@ -1910,16 +1923,17 @@ class _ImmutableBundleStore:
 
         allowed = set(extra_children or ()) | {RECEIPT_OBJECT_FILENAME}
         try:
-            entries = sorted(os.scandir(bundle), key=lambda entry: entry.name)
+            before_entries = sorted(
+                (entry.name for entry in os.scandir(bundle)),
+            )
         except OSError as exc:
             raise ReceiptStoreError(
                 f"could not enumerate object bundle: {exc}",
                 code="receipt.invalid",
             ) from exc
-        names = [entry.name for entry in entries]
-        if any(name not in allowed for name in names):
+        if any(name not in allowed for name in before_entries):
             raise ReceiptStoreError(
-                f"object bundle has unexpected contents: {names}",
+                f"object bundle has unexpected contents: {before_entries}",
                 code="receipt.invalid",
             )
 
@@ -1930,6 +1944,47 @@ class _ImmutableBundleStore:
             description="object file",
             code="receipt.invalid",
         )
+
+        # Post-read recheck: confirm the bundle directory itself has not
+        # been replaced and the child set has not been mutated during
+        # the read. ``_stable_regular_read`` protects ``object.json``;
+        # this recheck protects the bundle.
+        try:
+            bundle_stat_after = os.lstat(bundle)
+        except FileNotFoundError as exc:
+            raise ReceiptStoreError(
+                f"object bundle removed during read: {bundle}",
+                code="receipt.invalid",
+            ) from exc
+        except OSError as exc:
+            raise ReceiptStoreError(
+                f"could not re-stat object bundle: {exc}",
+                code="receipt.invalid",
+            ) from exc
+        if _stat_fingerprint(bundle_stat_after) != _stat_fingerprint(bundle_stat_before):
+            raise ReceiptStoreError(
+                "object bundle identity changed during read",
+                code="receipt.invalid",
+            )
+        if not stat.S_ISDIR(bundle_stat_after.st_mode):
+            raise ReceiptStoreError(
+                "object bundle is no longer a real directory",
+                code="receipt.invalid",
+            )
+
+        try:
+            after_entries = sorted(entry.name for entry in os.scandir(bundle))
+        except OSError as exc:
+            raise ReceiptStoreError(
+                f"could not re-enumerate object bundle: {exc}",
+                code="receipt.invalid",
+            ) from exc
+        if after_entries != before_entries:
+            raise ReceiptStoreError(
+                f"object bundle children changed during read: {before_entries} -> {after_entries}",
+                code="receipt.invalid",
+            )
+
         expected = typed_hash(label, data)
         if expected != object_id:
             raise ReceiptStoreError(
