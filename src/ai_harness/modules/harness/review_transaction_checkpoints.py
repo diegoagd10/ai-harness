@@ -1127,6 +1127,7 @@ class _CheckpointGraphVerifier:
         self._verify_required_lens_projection(checkpoint, graph)
         self._verify_finding_bindings(checkpoint, graph)
         self._verify_completion_findings(checkpoint, graph)
+        self._verify_evidence_reference_cardinality(checkpoint, evidence)
         if evidence is not None:
             self._verify_evidence_identity(evidence, root_id, graph)
             self._verify_evidence_candidates(evidence, graph)
@@ -1355,6 +1356,47 @@ class _CheckpointGraphVerifier:
                 context={
                     "expected": expected_correction_id.value,
                     "actual": evidence.correction_fact_id.value,
+                },
+            )
+
+    def _verify_evidence_reference_cardinality(
+        self,
+        checkpoint: ReviewTransactionCheckpoint,
+        evidence: ReviewCorrectionEvidence | None,
+    ) -> None:
+        """Require the checkpoint reference and supplied evidence to mutually identify.
+
+        The checkpoint reference and supplied evidence must be either
+        both absent or mutually identifying. A reference to different
+        evidence bytes is rejected before any other evidence check.
+        """
+
+        if checkpoint.correction_evidence_id is None and evidence is not None:
+            raise ReviewTransactionCheckpointStorageError(
+                "supplied correction evidence has no checkpoint reference",
+                code=CODE_STORAGE_INVALID,
+            )
+        if checkpoint.correction_evidence_id is not None and evidence is None:
+            raise ReviewTransactionCheckpointStorageError(
+                "checkpoint references correction evidence but none was supplied",
+                code=CODE_STORAGE_INVALID,
+                context={
+                    "expected": checkpoint.correction_evidence_id.value,
+                },
+            )
+        if checkpoint.correction_evidence_id is None:
+            return
+        assert evidence is not None
+        # Re-derive the evidence ID from the supplied evidence value.
+        contract = ReviewTransactionCheckpointContractV1()
+        derived_id = contract.id_for(evidence)
+        if derived_id.value != checkpoint.correction_evidence_id.value:
+            raise ReviewTransactionCheckpointStorageError(
+                "supplied correction evidence does not match the checkpoint reference",
+                code=CODE_STORAGE_INVALID,
+                context={
+                    "expected": checkpoint.correction_evidence_id.value,
+                    "actual": derived_id.value,
                 },
             )
 
