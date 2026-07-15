@@ -55,10 +55,15 @@ from json import JSONDecodeError
 from typing import Any, Final, Literal, TypeVar, overload
 
 from ai_harness.modules.harness import receipts as _receipts
-from ai_harness.modules.harness.review_transaction_storage import ReviewTransactionRootId
+from ai_harness.modules.harness.review_transaction_storage import (
+    ReviewTransactionGraph,
+    ReviewTransactionRootId,
+    _ReviewRootCodec,
+)
 from ai_harness.modules.harness.review_transactions import (
     CorrectionFactId,
     FindingId,
+    ReviewContractV1,
     ReviewTransactionId,
 )
 
@@ -87,6 +92,64 @@ EVIDENCE_LABEL: Final[str] = "ai-harness/review-correction-evidence/v1"
 
 # Exact wire-format regex used for typed id wrappers and payload decoding.
 WIRE_ID_RE: Final[re.Pattern[str]] = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
+# ---------------------------------------------------------------------------
+# Storage error boundary — public failure vocabulary for the store.
+# ---------------------------------------------------------------------------
+
+
+class ReviewTransactionCheckpointStorageError(RuntimeError):
+    """Public storage failure boundary for v1 checkpoint persistence.
+
+    ``code`` is one of the four stable literals:
+    ``review-checkpoint-storage.invalid``,
+    ``review-checkpoint-storage.missing``,
+    ``review-checkpoint-storage.conflict``, or
+    ``review-checkpoint-storage.io-failed``. Translated lower-level
+    failures are preserved as :attr:`__cause__`. ``context`` is a
+    sorted, immutable, string-only iterable used for diagnostic
+    display, never for control flow.
+    """
+
+    code: str
+    message: str
+    context: tuple[tuple[str, str], ...]
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str,
+        context: Mapping[str, str] | None = None,
+        cause: BaseException | None = None,
+    ) -> None:
+        if code not in ALL_STORAGE_CODES:
+            raise ValueError(f"unknown checkpoint storage code: {code!r}")
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.context = tuple(sorted((str(k), str(v)) for k, v in (context or {}).items()))
+        if cause is not None:
+            self.__cause__ = cause
+
+
+# ---------------------------------------------------------------------------
+# Public storage error codes — fixed by the v1 design.
+# ---------------------------------------------------------------------------
+
+
+CODE_STORAGE_INVALID: Final[str] = "review-checkpoint-storage.invalid"
+CODE_STORAGE_MISSING: Final[str] = "review-checkpoint-storage.missing"
+CODE_STORAGE_CONFLICT: Final[str] = "review-checkpoint-storage.conflict"
+CODE_STORAGE_IO_FAILED: Final[str] = "review-checkpoint-storage.io-failed"
+
+ALL_STORAGE_CODES: Final[tuple[str, ...]] = (
+    CODE_STORAGE_INVALID,
+    CODE_STORAGE_MISSING,
+    CODE_STORAGE_CONFLICT,
+    CODE_STORAGE_IO_FAILED,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -1019,6 +1082,321 @@ class ReviewTransactionCheckpointContractV1:
         return spec
 
 
+# ---------------------------------------------------------------------------
+# Internal collaborator — graph-first verification
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class _CheckpointGraphVerifier:
+    """Verify a checkpoint and optional evidence against a loaded archived graph.
+
+    The verifier composes a private :class:`ReviewContractV1` instance to
+    recompute transaction, finding, and correction-fact identities and
+    runs the complete binding rules in one ``verify(...) -> None``
+    operation. It exposes no public unchecked verifier, no caller-supplied
+    graph trust path, and no record CRUD. Failures surface as
+    :class:`ReviewTransactionCheckpointStorageError` with code
+    ``review-checkpoint-storage.invalid``.
+    """
+
+    contract: ReviewContractV1
+
+    def verify(
+        self,
+        checkpoint: ReviewTransactionCheckpoint,
+        *,
+        evidence: ReviewCorrectionEvidence | None,
+        root_id: ReviewTransactionRootId,
+        graph: ReviewTransactionGraph,
+    ) -> None:
+        """Run all binding checks for *checkpoint* and optional *evidence*.
+
+        *root_id* is the exact typed identifier that was used to load
+        *graph* via :meth:`ReviewTransactionStore.load`. The verifier
+        re-derives the root manifest from *graph* and confirms it
+        matches *root_id* before any other binding check.
+
+        Raises :class:`ReviewTransactionCheckpointStorageError` on any
+        mismatch; the cause is preserved when a lower-level contract
+        failure is the root.
+        """
+
+        self._verify_root_identity(checkpoint, root_id, graph)
+        self._verify_transaction_and_candidate_identity(checkpoint, graph)
+        self._verify_required_lens_projection(checkpoint, graph)
+        self._verify_finding_bindings(checkpoint, graph)
+        self._verify_completion_findings(checkpoint, graph)
+        if evidence is not None:
+            self._verify_evidence_identity(evidence, root_id, graph)
+            self._verify_evidence_candidates(evidence, graph)
+
+    # ---- internal helpers ----
+
+    def _verify_root_identity(
+        self,
+        checkpoint: ReviewTransactionCheckpoint,
+        root_id: ReviewTransactionRootId,
+        graph: ReviewTransactionGraph,
+    ) -> None:
+        """Confirm the loaded graph matches the embedded root id exactly.
+
+        The check has two parts: the *root_id* used for archived load
+        must equal the checkpoint's embedded root ID, and re-deriving
+        the root manifest from *graph* must reproduce *root_id*.
+        """
+
+        if root_id.value != checkpoint.review_transaction_root_id.value:
+            raise ReviewTransactionCheckpointStorageError(
+                "checkpoint review_transaction_root_id does not match the loaded graph",
+                code=CODE_STORAGE_INVALID,
+                context={
+                    "expected": root_id.value,
+                    "actual": checkpoint.review_transaction_root_id.value,
+                },
+            )
+
+        try:
+            manifest_bytes = _ReviewRootCodec.encode(graph, contract=self.contract)
+        except RuntimeError as exc:
+            raise ReviewTransactionCheckpointStorageError(
+                f"failed to encode root manifest: {exc}",
+                code=CODE_STORAGE_INVALID,
+                cause=exc,
+            ) from exc
+
+        try:
+            derived_root_id = _ReviewRootCodec.root_id(manifest_bytes)
+        except RuntimeError as exc:
+            raise ReviewTransactionCheckpointStorageError(
+                f"failed to derive root id from manifest: {exc}",
+                code=CODE_STORAGE_INVALID,
+                cause=exc,
+            ) from exc
+
+        if derived_root_id.value != root_id.value:
+            raise ReviewTransactionCheckpointStorageError(
+                "loaded graph does not match the supplied root id",
+                code=CODE_STORAGE_INVALID,
+                context={
+                    "expected": root_id.value,
+                    "actual": derived_root_id.value,
+                },
+            )
+
+    def _verify_transaction_and_candidate_identity(
+        self,
+        checkpoint: ReviewTransactionCheckpoint,
+        graph: ReviewTransactionGraph,
+    ) -> None:
+        """Bind the recomputed transaction id and candidate id."""
+
+        expected_tx_id = self.contract.id_for(graph.transaction)
+        if expected_tx_id.value != checkpoint.review_transaction_id.value:
+            raise ReviewTransactionCheckpointStorageError(
+                "checkpoint review_transaction_id does not match the loaded transaction",
+                code=CODE_STORAGE_INVALID,
+                context={
+                    "expected": expected_tx_id.value,
+                    "actual": checkpoint.review_transaction_id.value,
+                },
+            )
+        if graph.transaction.candidate_id != checkpoint.candidate_id:
+            raise ReviewTransactionCheckpointStorageError(
+                "checkpoint candidate_id does not match the loaded transaction candidate",
+                code=CODE_STORAGE_INVALID,
+                context={
+                    "expected": graph.transaction.candidate_id,
+                    "actual": checkpoint.candidate_id,
+                },
+            )
+
+    def _verify_required_lens_projection(
+        self,
+        checkpoint: ReviewTransactionCheckpoint,
+        graph: ReviewTransactionGraph,
+    ) -> None:
+        """Require an exact ordered match of the required lens sequence."""
+
+        required_lenses = graph.lens_selection.required_lenses
+        declared_lenses = tuple(entry.lens for entry in checkpoint.lens_completions)
+        if declared_lenses != required_lenses:
+            raise ReviewTransactionCheckpointStorageError(
+                "checkpoint lens_completions do not match the loaded graph's required lenses",
+                code=CODE_STORAGE_INVALID,
+                context={
+                    "expected": ",".join(required_lenses),
+                    "actual": ",".join(declared_lenses),
+                },
+            )
+
+    def _verify_finding_bindings(
+        self,
+        checkpoint: ReviewTransactionCheckpoint,
+        graph: ReviewTransactionGraph,
+    ) -> None:
+        """Bind every declared finding id to the loaded graph, transaction, and lens.
+
+        Each finding id must recompute from a finding in the loaded graph,
+        must belong to the bound transaction, and must have the lens of
+        the completion entry that names it. No finding id may occur in
+        more than one completion entry.
+        """
+
+        finding_by_id: dict[FindingId, Any] = {}
+        for finding in graph.findings:
+            finding_by_id[self.contract.id_for(finding)] = finding
+
+        seen_finding_ids: set[FindingId] = set()
+        for entry in checkpoint.lens_completions:
+            for finding_id in entry.finding_ids:
+                if finding_id in seen_finding_ids:
+                    raise ReviewTransactionCheckpointStorageError(
+                        "finding_id appears in more than one lens_completion entry",
+                        code=CODE_STORAGE_INVALID,
+                        context={"finding_id": finding_id.value},
+                    )
+                seen_finding_ids.add(finding_id)
+                finding = finding_by_id.get(finding_id)
+                if finding is None:
+                    raise ReviewTransactionCheckpointStorageError(
+                        "declared finding_id is not in the loaded graph",
+                        code=CODE_STORAGE_INVALID,
+                        context={
+                            "finding_id": finding_id.value,
+                            "lens": entry.lens,
+                        },
+                    )
+                if finding.review_transaction_id.value != checkpoint.review_transaction_id.value:
+                    raise ReviewTransactionCheckpointStorageError(
+                        "declared finding_id belongs to a different transaction",
+                        code=CODE_STORAGE_INVALID,
+                        context={
+                            "finding_id": finding_id.value,
+                            "expected": checkpoint.review_transaction_id.value,
+                            "actual": finding.review_transaction_id.value,
+                        },
+                    )
+                if finding.lens != entry.lens:
+                    raise ReviewTransactionCheckpointStorageError(
+                        "declared finding_id belongs to a different lens",
+                        code=CODE_STORAGE_INVALID,
+                        context={
+                            "finding_id": finding_id.value,
+                            "expected_lens": entry.lens,
+                            "actual_lens": finding.lens,
+                        },
+                    )
+
+    def _verify_completion_findings(
+        self,
+        checkpoint: ReviewTransactionCheckpoint,
+        graph: ReviewTransactionGraph,
+    ) -> None:
+        """For each completed entry, the finding-id tuple must equal the lens's graph findings."""
+
+        findings_by_lens: dict[str, list[FindingId]] = {}
+        for finding in graph.findings:
+            fid = self.contract.id_for(finding)
+            findings_by_lens.setdefault(finding.lens, []).append(fid)
+        for entry in checkpoint.lens_completions:
+            if not entry.complete:
+                continue
+            expected = tuple(sorted(findings_by_lens.get(entry.lens, ()), key=lambda fid: fid.value))
+            if entry.finding_ids != expected:
+                raise ReviewTransactionCheckpointStorageError(
+                    "completed lens entry does not enumerate every graph finding",
+                    code=CODE_STORAGE_INVALID,
+                    context={
+                        "lens": entry.lens,
+                        "expected": ",".join(fid.value for fid in expected),
+                        "actual": ",".join(fid.value for fid in entry.finding_ids),
+                    },
+                )
+
+    def _verify_evidence_identity(
+        self,
+        evidence: ReviewCorrectionEvidence,
+        root_id: ReviewTransactionRootId,
+        graph: ReviewTransactionGraph,
+    ) -> None:
+        """Confirm the evidence root, transaction, and correction-fact identities."""
+
+        if evidence.review_transaction_root_id.value != root_id.value:
+            raise ReviewTransactionCheckpointStorageError(
+                "evidence review_transaction_root_id does not match the loaded graph",
+                code=CODE_STORAGE_INVALID,
+                context={
+                    "expected": root_id.value,
+                    "actual": evidence.review_transaction_root_id.value,
+                },
+            )
+        expected_tx_id = self.contract.id_for(graph.transaction)
+        if evidence.review_transaction_id.value != expected_tx_id.value:
+            raise ReviewTransactionCheckpointStorageError(
+                "evidence review_transaction_id does not match the loaded transaction",
+                code=CODE_STORAGE_INVALID,
+                context={
+                    "expected": expected_tx_id.value,
+                    "actual": evidence.review_transaction_id.value,
+                },
+            )
+        if graph.correction_fact is None:
+            raise ReviewTransactionCheckpointStorageError(
+                "evidence is referenced but the loaded graph has no correction fact",
+                code=CODE_STORAGE_INVALID,
+                context={"correction_fact_id": evidence.correction_fact_id.value},
+            )
+        expected_correction_id = self.contract.id_for(graph.correction_fact)
+        if expected_correction_id.value != evidence.correction_fact_id.value:
+            raise ReviewTransactionCheckpointStorageError(
+                "evidence correction_fact_id does not match the loaded correction fact",
+                code=CODE_STORAGE_INVALID,
+                context={
+                    "expected": expected_correction_id.value,
+                    "actual": evidence.correction_fact_id.value,
+                },
+            )
+
+    def _verify_evidence_candidates(
+        self,
+        evidence: ReviewCorrectionEvidence,
+        graph: ReviewTransactionGraph,
+    ) -> None:
+        """Bind the evidence candidate pair to the loaded correction fact and transaction."""
+
+        if graph.correction_fact is None:
+            # Already covered by ``_verify_evidence_identity``; defensive.
+            return
+        if evidence.candidate_before != graph.correction_fact.candidate_before:
+            raise ReviewTransactionCheckpointStorageError(
+                "evidence candidate_before does not match the loaded correction fact",
+                code=CODE_STORAGE_INVALID,
+                context={
+                    "expected": graph.correction_fact.candidate_before,
+                    "actual": evidence.candidate_before,
+                },
+            )
+        if evidence.candidate_after != graph.correction_fact.candidate_after:
+            raise ReviewTransactionCheckpointStorageError(
+                "evidence candidate_after does not match the loaded correction fact",
+                code=CODE_STORAGE_INVALID,
+                context={
+                    "expected": graph.correction_fact.candidate_after,
+                    "actual": evidence.candidate_after,
+                },
+            )
+        if evidence.candidate_before != graph.transaction.candidate_id:
+            raise ReviewTransactionCheckpointStorageError(
+                "evidence candidate_before does not match the transaction candidate",
+                code=CODE_STORAGE_INVALID,
+                context={
+                    "expected": graph.transaction.candidate_id,
+                    "actual": evidence.candidate_before,
+                },
+            )
+
+
 __all__ = [
     # Public API surface
     "ReviewCheckpointContractError",
@@ -1027,6 +1405,7 @@ __all__ = [
     "ReviewTransactionCheckpoint",
     "ReviewTransactionCheckpointContractV1",
     "ReviewTransactionCheckpointId",
+    "ReviewTransactionCheckpointStorageError",
     "RequiredLensCompletion",
     # Constants
     "CHECKPOINT_LABEL",
@@ -1034,6 +1413,10 @@ __all__ = [
     "CHECKPOINT_SCHEMA_VERSION",
     "CODE_ID_INVALID",
     "CODE_SCHEMA_INVALID",
+    "CODE_STORAGE_CONFLICT",
+    "CODE_STORAGE_INVALID",
+    "CODE_STORAGE_IO_FAILED",
+    "CODE_STORAGE_MISSING",
     "CODE_VERSION_UNSUPPORTED",
     "EVIDENCE_LABEL",
     "EVIDENCE_SCHEMA_NAME",
