@@ -1,0 +1,264 @@
+{
+  "tasks": [
+    {
+      "id": "1",
+      "title": "Add closed review bundle-store support",
+      "spec": "specs/receipt-store-protection-preservation.md",
+      "phase": "foundation",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "1.1",
+          "title": "Factor package-internal immutable bundle operations for fixed review roles",
+          "scenario": "Review kind cannot bypass graph publication",
+          "status": "done"
+        },
+        {
+          "id": "1.2",
+          "title": "Keep ReceiptObjectStore dispatch and pointer behavior limited to existing kinds",
+          "scenario": "Existing run and receipt kinds remain accepted",
+          "status": "done"
+        },
+        {
+          "id": "1.3",
+          "title": "Add real-filesystem receipt and evidence regression coverage",
+          "scenario": "Run storage regression tests safely",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "2",
+      "title": "Define review storage values and root codec",
+      "spec": "specs/fixed-typed-review-record-storage.md",
+      "phase": "foundation",
+      "depends_on": [
+        "1"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "2.1",
+          "title": "Add immutable public graph, root ID, and storage error types",
+          "scenario": "Accept exact immutable contract values",
+          "status": "done"
+        },
+        {
+          "id": "2.2",
+          "title": "Implement the closed six-role registry and canonical root manifest codec",
+          "scenario": "Derive deterministic root identity",
+          "status": "done"
+        },
+        {
+          "id": "2.3",
+          "title": "Test input rejection, root identity validation, and manifest canonicality",
+          "scenario": "Reject malformed root identity",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "3",
+      "title": "Publish verified review graphs root-last",
+      "spec": "specs/atomic-complete-graph-publication.md",
+      "phase": "core",
+      "depends_on": [
+        "1",
+        "2"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "3.1",
+          "title": "Build deterministic validated graph publication plans",
+          "scenario": "Finding input order does not change the root",
+          "status": "done"
+        },
+        {
+          "id": "3.2",
+          "title": "Publish member bundles, reread them, and install the root last",
+          "scenario": "Commit a fully verified graph",
+          "status": "done"
+        },
+        {
+          "id": "3.3",
+          "title": "Test invalid pre-write rejection, idempotence, races, and publication conflicts",
+          "scenario": "Encounter an unprovable final bundle",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "4",
+      "title": "Load and revalidate complete review graphs",
+      "spec": "specs/strict-verified-graph-reconstruction.md",
+      "phase": "core",
+      "depends_on": [
+        "1",
+        "2",
+        "3"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "4.1",
+          "title": "Load typed roots with strict canonical manifest validation",
+          "scenario": "Decode an exact v1 manifest",
+          "status": "done"
+        },
+        {
+          "id": "4.2",
+          "title": "Read each member by fixed role and reconstruct the immutable graph",
+          "scenario": "Reconstruct valid members",
+          "status": "done"
+        },
+        {
+          "id": "4.3",
+          "title": "Revalidate aggregate relationships and translate load failures",
+          "scenario": "Reject an internally inconsistent set of authentic records",
+          "status": "done"
+        },
+        {
+          "id": "4.4",
+          "title": "Test missing, cross-kind, reordered, and correction relationship failures",
+          "scenario": "Reject correction omission or addition",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "5",
+      "title": "Harden review storage against filesystem tampering",
+      "spec": "specs/strict-verified-graph-reconstruction.md",
+      "phase": "testing",
+      "depends_on": [
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "5.1",
+          "title": "Exercise symlink, special-file, traversal, and extra-child bundle rejection",
+          "scenario": "Reject a symlink or special file",
+          "status": "done"
+        },
+        {
+          "id": "5.2",
+          "title": "Exercise stable-read replacement and mutation detection",
+          "scenario": "Detect concurrent replacement",
+          "status": "done"
+        },
+        {
+          "id": "5.3",
+          "title": "Verify hermetic complete-graph round trips including empty graphs",
+          "scenario": "Permit a contract-valid empty graph",
+          "status": "done"
+        },
+        {
+          "id": "5.4",
+          "title": "Run focused receipt, contract, storage, formatting, and lint regression suites",
+          "scenario": "Run storage regression tests safely",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "6",
+      "title": "Distinguish unsupported platform fsync from operational fsync failure",
+      "spec": "specs/receipt-store-protection-preservation.md",
+      "phase": "fix",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "6.1",
+          "title": "RED: assert operational fsync failure surfaces as io-failed",
+          "scenario": "Operational directory fsync failure surfaces as io-failed",
+          "status": "done"
+        },
+        {
+          "id": "6.2",
+          "title": "GREEN: fix _fsync_directory to distinguish unsupported from operational",
+          "scenario": "Operational directory fsync failure surfaces as io-failed",
+          "status": "done"
+        },
+        {
+          "id": "6.3",
+          "title": "REFACTOR: harden related fsync call sites",
+          "scenario": "Operational directory fsync failure surfaces as io-failed",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "7",
+      "title": "Recheck bundle identity and topology after stable object-file read",
+      "spec": "specs/strict-verified-graph-reconstruction.md",
+      "phase": "fix",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "7.1",
+          "title": "RED: assert bundle-topology change after read is detected",
+          "scenario": "Concurrent extra-child insertion during stable read is detected",
+          "status": "done"
+        },
+        {
+          "id": "7.2",
+          "title": "GREEN: fix read_object_file to recheck after stable read",
+          "scenario": "Concurrent extra-child insertion during stable read is detected",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "8",
+      "title": "Translate immutable-publication bundle errors to review-storage conflict",
+      "spec": "specs/atomic-complete-graph-publication.md",
+      "phase": "fix",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "8.1",
+          "title": "RED: assert race-conflict surfaces as conflict",
+          "scenario": "Existing/racing malformed bundle during publication surfaces as conflict",
+          "status": "done"
+        },
+        {
+          "id": "8.2",
+          "title": "GREEN: pass publish context to translation helper",
+          "scenario": "Existing/racing malformed bundle during publication surfaces as conflict",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "9",
+      "title": "Extract shared review storage test fixtures to remove duplication",
+      "spec": "specs/receipt-store-protection-preservation.md",
+      "phase": "fix",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "9.1",
+          "title": "RED: assert pylint-duplicate-code gate on test files",
+          "scenario": "Pylint duplicate-code gate passes on review storage test files",
+          "status": "done"
+        },
+        {
+          "id": "9.2",
+          "title": "GREEN: extract shared helpers to fixture module",
+          "scenario": "Pylint duplicate-code gate passes on review storage test files",
+          "status": "done"
+        }
+      ]
+    }
+  ]
+}
