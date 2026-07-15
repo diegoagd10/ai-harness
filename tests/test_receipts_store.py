@@ -9,7 +9,9 @@ the failure modes the design requires to fail closed.
 
 from __future__ import annotations
 
+import errno
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -291,3 +293,100 @@ def test_run_bundle_idempotent_for_unchanged_evidence(tmp_path: Path) -> None:
     second = store.publish_run_bundle(run_payload=payload, evidence=evidence)
 
     assert first == second
+
+
+def test_fsync_directory_surfaces_operational_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An operational directory fsync failure must surface as ``ReceiptStoreError``.
+
+    The fix distinguishes the unsupported platform case (where
+    ``O_DIRECTORY`` is missing) and the absent-directory case (best
+    effort) from a real operational failure (e.g. transient I/O error)
+    that must propagate to the caller as a storage failure.
+    """
+
+    from ai_harness.modules.harness.receipts import _fsync_directory
+
+    target = tmp_path / "fsync-target"
+    target.mkdir()
+
+    def _raise_operational_failure(fd: int) -> None:
+        raise OSError(errno.EIO, "simulated operational fsync failure")
+
+    monkeypatch.setattr(os, "fsync", _raise_operational_failure)
+    with pytest.raises(ReceiptStoreError) as exc_info:
+        _fsync_directory(target)
+    assert exc_info.value.code in {"receipt.io-failed", "storage.failed"}
+
+
+def test_fsync_directory_silent_for_missing_directory(
+    tmp_path: Path,
+) -> None:
+    """A missing target directory is treated as a no-op by ``_fsync_directory``.
+
+    Best-effort directory fsync must not raise when the directory has
+    already been replaced or removed by an unrelated operation.
+    """
+
+    from ai_harness.modules.harness.receipts import _fsync_directory
+
+    missing = tmp_path / "does-not-exist"
+    # No exception even though ``os.scandir`` would surface
+    # FileNotFoundError; the helper turns that into a silent no-op.
+    _fsync_directory(missing)
+
+
+def test_fsync_directory_silent_when_odirectory_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The unsupported platform case (``O_DIRECTORY`` unavailable) is silent.
+
+    When the platform does not expose ``O_DIRECTORY``, the helper does
+    not attempt to open a directory fd at all and does not raise an
+    error. The operational case is preserved through a separate path.
+    """
+
+    from ai_harness.modules.harness import receipts as receipts_module
+    from ai_harness.modules.harness.receipts import _fsync_directory
+
+    target = tmp_path / "odirectory-target"
+    target.mkdir()
+    monkeypatch.setattr(receipts_module.os, "O_DIRECTORY", 0)
+    # If the helper introspects the module attribute, return None so the
+    # ``getattr(os, "O_DIRECTORY", 0)`` fallback path is taken.
+    monkeypatch.delattr(receipts_module.os, "O_DIRECTORY", raising=False)
+    _fsync_directory(target)
+    # Reaching this point is the assertion; no exception was raised.
+
+
+def test_publish_object_propagates_operational_fsync_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An operational directory fsync failure during publication propagates.
+
+    The atomic publication calls ``_fsync_directory`` as part of the
+    durable metadata flush. When that fsync raises ``ReceiptStoreError``
+    with ``code="receipt.io-failed"`` the call site must propagate the
+    failure so the caller does not silently report success.
+    """
+
+    from ai_harness.modules.harness import receipts as receipts_module
+    from ai_harness.modules.harness.receipts import ReceiptStoreError
+
+    # Force every directory fsync inside the published flow to raise.
+    def _raise(fs_holder: list[object]) -> None:
+        fs_holder.append(True)
+        raise OSError(errno.EIO, "simulated operational fsync failure")
+
+    def _fsync_stub(fd: int) -> None:
+        _raise([])
+
+    monkeypatch.setattr(receipts_module.os, "fsync", _fsync_stub)
+    store = ReceiptObjectStore(tmp_path / ".receipts")
+    with pytest.raises(ReceiptStoreError) as exc_info:
+        store.publish_object(
+            "runs",
+            {"schema_name": "ai-harness.example", "schema_version": 1, "value": 1},
+        )
+    assert exc_info.value.code in {"receipt.io-failed", "storage.failed"}

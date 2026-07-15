@@ -1318,13 +1318,45 @@ def _ensure_directory(path: Path, *, anchor: Path) -> None:
 
 
 def _fsync_directory(path: Path) -> None:
-    """Durably flush one directory when the platform supports directory fds."""
-    try:
-        fd = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
-    except OSError:
+    """Durably flush one directory when the platform supports directory fds.
+
+    Three cases are deliberately distinguished:
+
+    * **Unsupported platform** — ``os.O_DIRECTORY`` is not exposed by
+      the runtime. ``getattr(os, "O_DIRECTORY", 0)`` evaluates to ``0``
+      and ``os.open`` is never called, so the helper returns silently.
+    * **Absent directory** — the path was removed between the
+      publication write and this fsync. Best-effort fsync treats this
+      as a no-op so unrelated concurrent operations cannot turn a
+      durable layout into an ``io-failed`` error.
+    * **Operational failure** — any other ``OSError`` (permission
+      denied, transient I/O error, ENOSPC, etc.) propagates as a
+      ``ReceiptStoreError`` so callers do not silently report success
+      when durable metadata flush did not happen.
+    """
+
+    o_directory = getattr(os, "O_DIRECTORY", 0)
+    if not o_directory:
         return
     try:
-        os.fsync(fd)
+        fd = os.open(path, os.O_RDONLY | o_directory)
+    except FileNotFoundError:
+        return
+    except NotADirectoryError:
+        return
+    except OSError as exc:
+        raise ReceiptStoreError(
+            f"could not open directory for fsync: {exc}",
+            code="receipt.io-failed",
+        ) from exc
+    try:
+        try:
+            os.fsync(fd)
+        except OSError as exc:
+            raise ReceiptStoreError(
+                f"could not fsync directory: {exc}",
+                code="receipt.io-failed",
+            ) from exc
     finally:
         os.close(fd)
 
