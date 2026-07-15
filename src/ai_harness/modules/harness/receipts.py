@@ -1261,10 +1261,13 @@ class ReceiptStoreError(RuntimeError):
         message: str,
         *,
         code: str = "storage.failed",
+        cause: BaseException | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
+        if cause is not None:
+            self.__cause__ = cause
 
 
 def _storage_anchor(path: Path) -> Path:
@@ -1280,7 +1283,7 @@ def _assert_no_symlink_components(path: Path, *, anchor: Path) -> None:
     try:
         relative = path.absolute().relative_to(anchor.absolute())
     except ValueError as exc:
-        raise ReceiptStoreError("receipt path escapes its storage root", code="storage.failed") from exc
+        raise ReceiptStoreError("receipt path escapes its storage root", code="receipt.invalid") from exc
     current = anchor.absolute()
     for component in relative.parts:
         current /= component
@@ -1291,7 +1294,7 @@ def _assert_no_symlink_components(path: Path, *, anchor: Path) -> None:
         except OSError as exc:
             raise ReceiptStoreError(f"could not stat receipt path component: {exc}", code="storage.failed") from exc
         if stat.S_ISLNK(component_stat.st_mode):
-            raise ReceiptStoreError("receipt path contains a symlink component", code="storage.failed")
+            raise ReceiptStoreError("receipt path contains a symlink component", code="receipt.invalid")
 
 
 def _ensure_directory(path: Path, *, anchor: Path) -> None:
@@ -1308,7 +1311,10 @@ def _ensure_directory(path: Path, *, anchor: Path) -> None:
             _fsync_directory(current.parent)
             continue
         if stat.S_ISLNK(component_stat.st_mode) or not stat.S_ISDIR(component_stat.st_mode):
-            raise ReceiptStoreError("receipt storage component is not a real directory", code="storage.failed")
+            raise ReceiptStoreError(
+                "receipt storage component is not a real directory",
+                code="receipt.invalid",
+            )
 
 
 def _fsync_directory(path: Path) -> None:
@@ -1769,12 +1775,53 @@ class _ImmutableBundleStore:
             _fsync_directory(tmp_dir)
             try:
                 os.rename(tmp_dir, bundle)
-            except FileExistsError as exc:
-                raise ReceiptStoreError(
-                    f"object {object_id} appeared during publication",
-                    code="receipt.invalid",
-                ) from exc
+            except FileExistsError:
+                # The bundle appeared during the rename. The strict stable
+                # read proves whether the racing publisher's bytes match;
+                # only an exact-byte, expected-digest match is treated as
+                # idempotent success. Different bytes, missing, unreadable,
+                # unstable, or topology-violating content is reported as a
+                # conflict and never overwrites or deletes the existing
+                # bundle.
+                return self._verify_existing_after_race(
+                    kind=kind,
+                    label=label,
+                    object_id=object_id,
+                    canonical_bytes=canonical_bytes,
+                    extra_children=extra_children,
+                )
             _fsync_directory(bundle.parent)
+        return object_id
+
+    def _verify_existing_after_race(
+        self,
+        *,
+        kind: str,
+        label: str,
+        object_id: str,
+        canonical_bytes: bytes,
+        extra_children: Iterable[str] | None,
+    ) -> str:
+        """Verify a racing publisher's bundle is byte-identical."""
+
+        try:
+            existing = self.read_object_bytes(
+                kind=kind,
+                label=label,
+                object_id=object_id,
+                extra_children=extra_children,
+            )
+        except ReceiptStoreError as exc:
+            raise ReceiptStoreError(
+                f"object {object_id} appeared during publication but is unreadable",
+                code="receipt.invalid",
+                cause=exc,
+            ) from exc
+        if existing != canonical_bytes:
+            raise ReceiptStoreError(
+                f"object {object_id} appeared during publication with different bytes",
+                code="receipt.invalid",
+            )
         return object_id
 
     def read_object_bytes(
