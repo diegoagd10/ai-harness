@@ -6,6 +6,7 @@
 - 0965cf6b3382d6b54be10581bd4b1e7125ba1263 — task 3: Test checkpoint and evidence contract conformance
 - a701d26db6ce70347998a39dcfeb68f94183493b — task 4: Verify required lens completion and graph bindings
 - ec2e00c0e3034c5f5cc8b3a46ae5564beb030d2c — task 5: Test explicit required-lens completion
+- <pending> — task 6: Enforce verified graph and candidate bindings
 
 ## TDD Evidence
 
@@ -16,6 +17,7 @@
 | 3 | 0965cf6 | N/A: new files | tests/test_review_transaction_checkpoints_conformance.py | unit | passed: 489/489 | N/A: new files | passed | 13 cases | clean |
 | 4 | a701d26 | src/ai_harness/modules/harness/review_transaction_checkpoints.py | tests/test_review_transaction_checkpoints_verifier.py | integration | passed: 509/509 | written | passed | 20 cases | clean |
 | 5 | ec2e00c | N/A: new files | tests/test_review_transaction_checkpoints_completion.py | integration | passed: 519/519 | N/A: new files | passed | 10 cases | clean |
+| 6 | <pending> | N/A: new files | tests/test_review_transaction_checkpoints_binding.py | integration | passed: 528/528 | N/A: new files | passed | 9 cases | clean |
 
 ## Remaining
-- 6, 7, 8, 9, 10, 11, 12
+- 7, 8, 9, 10, 11, 12
