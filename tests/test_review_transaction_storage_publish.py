@@ -599,7 +599,7 @@ def test_publish_existing_member_with_conflicting_bytes_surfaces_as_conflict(
 
     with pytest.raises(ReviewTransactionStorageError) as exc:
         store.publish(graph)
-    assert exc.value.code in {CODE_CONFLICT, CODE_INVALID}
+    assert exc.value.code == CODE_CONFLICT
     # The conflicting file was not replaced.
     assert target.read_bytes() == conflicting
 
@@ -608,6 +608,99 @@ def test_publish_existing_member_with_conflicting_bytes_surfaces_as_conflict(
     digest_root = first_root.value.removeprefix("sha256:")
     root_bundle = change_root / ".receipts" / "review-transaction-roots" / "sha256" / digest_root
     assert root_bundle.is_dir()
+
+
+def test_publish_existing_member_with_invalid_topology_surfaces_as_conflict(
+    store: ReviewTransactionStore,
+    change_root: Path,
+) -> None:
+    """A pre-existing bundle whose topology is invalid surfaces as a conflict.
+
+    The bundle helper fails closed with ``receipt.invalid`` because the
+    final bundle directory has an extra child. The publication must
+    translate that into ``review-storage.conflict`` because it is
+    encountered while verifying a pre-existing or racing bundle, not
+    while reading a fully trusted stored graph.
+    """
+
+    contract = ReviewContractV1()
+    selection, transaction, findings, transitions, correction = _build_resolved_graph(contract)[1:]
+    graph = _to_graph(selection, transaction, findings, transitions, correction)
+
+    # Publish once to install the planned bundles.
+    first_root = store.publish(graph)
+    digest_lens = contract.id_for(selection).value.removeprefix("sha256:")
+    bundle_dir = change_root / ".receipts" / "review-lens-selections" / "sha256" / digest_lens
+    assert bundle_dir.is_dir()
+
+    # Add an unexpected child to the existing lens bundle so its
+    # topology is now invalid.
+    (bundle_dir / "stray.txt").write_text("noise", encoding="utf-8")
+
+    with pytest.raises(ReviewTransactionStorageError) as exc:
+        store.publish(graph)
+    assert exc.value.code == CODE_CONFLICT
+    # The stray child was not removed by the publication attempt.
+    assert (bundle_dir / "stray.txt").is_file()
+
+
+def test_publish_racing_unreadable_member_surfaces_as_conflict(
+    store: ReviewTransactionStore,
+    change_root: Path,
+) -> None:
+    """A racing bundle that becomes unreadable between write and rename surfaces as a conflict.
+
+    Publication installs the final bundle from a sibling temporary
+    directory; on a rename race it falls back to a strict read of the
+    racing publisher's content. When that read produces an unreadable
+    ``receipt.invalid`` (e.g. the bundle directory was removed by an
+    outside party between the rename attempt and the read), the
+    publication translates the failure as ``review-storage.conflict``
+    instead of ``review-storage.invalid``.
+    """
+
+    contract = ReviewContractV1()
+    selection, transaction, findings, transitions, correction = _build_resolved_graph(contract)[1:]
+    graph = _to_graph(selection, transaction, findings, transitions, correction)
+
+    # Publish once to install the planned bundles.
+    store.publish(graph)
+    digest_tx = contract.id_for(transaction).value.removeprefix("sha256:")
+    tx_bundle = change_root / ".receipts" / "review-transactions" / "sha256" / digest_tx
+    assert tx_bundle.is_dir()
+
+    # Replace the review-transaction bundle with a non-readable state by
+    # removing the ``object.json`` so the strict reader rejects it.
+    (tx_bundle / "object.json").unlink()
+
+    with pytest.raises(ReviewTransactionStorageError) as exc:
+        store.publish(graph)
+    assert exc.value.code == CODE_CONFLICT
+
+
+def test_load_still_uses_invalid_for_tampered_member(store: ReviewTransactionStore, change_root: Path) -> None:
+    """Load-time tampering continues to surface as ``review-storage.invalid``.
+
+    Translation must distinguish the publication context (where an
+    existing/racing bundle appears during publish and may be either an
+    idempotent match or a conflict) from the load context (where the
+    bytes are simply authoritative and any mismatch is invalid).
+    """
+
+    contract = ReviewContractV1()
+    selection, transaction, findings, transitions, correction = _build_resolved_graph(contract)[1:]
+    graph = _to_graph(selection, transaction, findings, transitions, correction)
+
+    root_id = store.publish(graph)
+
+    # Tamper with a stored member after publish; load must reject.
+    digest_tx = contract.id_for(transaction).value.removeprefix("sha256:")
+    target = change_root / ".receipts" / "review-transactions" / "sha256" / digest_tx / "object.json"
+    target.write_bytes(b'{"tampered":true}')
+
+    with pytest.raises(ReviewTransactionStorageError) as exc:
+        store.load(root_id)
+    assert exc.value.code == CODE_INVALID
 
 
 # ---------------------------------------------------------------------------

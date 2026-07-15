@@ -769,8 +769,31 @@ def _member_entry_from_record(record: Any, *, contract: ReviewContractV1) -> _Me
     return _MemberEntry(role=role, canonical_bytes=canonical_bytes)
 
 
-def _translate_bundle_error(action: str, exc: ReceiptStoreError) -> ReviewTransactionStorageError:
-    """Translate a low-level receipt-store failure into a storage code."""
+def _translate_bundle_error(
+    action: str,
+    exc: ReceiptStoreError,
+    *,
+    during_publish: bool = False,
+) -> ReviewTransactionStorageError:
+    """Translate a low-level receipt-store failure into a storage code.
+
+    Translation distinguishes the publication context from the load
+    context:
+
+    * **Publication** (``during_publish=True``) encounters an existing
+      or racing bundle that is malformed, unreadable, unstable, or
+      topologically invalid. The store cannot prove that bundle is a
+      stable, closed-topology, byte-identical object with the expected
+      typed digest, so the failure surfaces as ``review-storage.conflict``
+      and the existing bundle is left untouched.
+    * **Load** (``during_publish=False``) reads stored bytes that
+      should be authoritative; any malformation is reported as
+      ``review-storage.invalid`` because tampering cannot masquerade as
+      a benign conflict.
+
+    ``receipt.missing`` and operational ``receipt.io-failed`` codes are
+    mapped identically in both contexts.
+    """
 
     code = exc.code
     if code in {"receipt.io-failed", "storage.failed"}:
@@ -778,9 +801,9 @@ def _translate_bundle_error(action: str, exc: ReceiptStoreError) -> ReviewTransa
     elif code in {"receipt.missing"}:
         target_code = CODE_MISSING
     elif code in {"receipt.invalid"}:
-        target_code = CODE_INVALID
+        target_code = CODE_CONFLICT if during_publish else CODE_INVALID
     else:
-        target_code = CODE_INVALID
+        target_code = CODE_CONFLICT if during_publish else CODE_INVALID
     return ReviewTransactionStorageError(
         f"{action}: {exc}",
         code=target_code,
@@ -908,7 +931,7 @@ class ReviewTransactionStore:
                 plan.root_canonical_bytes,
             )
         except ReceiptStoreError as exc:
-            raise _translate_bundle_error("publish review root", exc) from exc
+            raise _translate_bundle_error("publish review root", exc, during_publish=True) from exc
         return plan.root_id
 
     def load(self, root_id: ReviewTransactionRootId) -> ReviewTransactionGraph:
@@ -1060,7 +1083,9 @@ class ReviewTransactionStore:
         try:
             self._bundles.publish(role, canonical_bytes)
         except ReceiptStoreError as exc:
-            raise _translate_bundle_error(f"publish review {role.value}", exc) from exc
+            raise _translate_bundle_error(
+                f"publish review {role.value}", exc, during_publish=True
+            ) from exc
 
     def _reread_and_verify_member(
         self,
@@ -1083,7 +1108,9 @@ class ReviewTransactionStore:
         try:
             reread = self._bundles.read(entry.role, expected_id)
         except ReceiptStoreError as exc:
-            raise _translate_bundle_error(f"reread review {entry.role.value}", exc) from exc
+            raise _translate_bundle_error(
+                f"reread review {entry.role.value}", exc, during_publish=True
+            ) from exc
 
         if reread != entry.canonical_bytes:
             raise ReviewTransactionStorageError(
