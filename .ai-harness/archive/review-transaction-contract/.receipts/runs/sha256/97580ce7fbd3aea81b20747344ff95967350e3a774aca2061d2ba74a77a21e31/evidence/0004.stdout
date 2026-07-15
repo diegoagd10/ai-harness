@@ -1,0 +1,154 @@
+[0;34m[BUILD][0m Building image from e2e/Dockerfile
+[0;34m[BUILD][0m Image tag: ai-harness-e2e:local
+[0;34m[BUILD][0m Project root: /home/diegoagd10/Projects/ai-harness
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 1.57kB done
+#1 DONE 0.0s
+
+#2 resolve image config for docker-image://docker.io/docker/dockerfile:1.7
+#2 DONE 0.7s
+
+#3 docker-image://docker.io/docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
+#3 resolve docker.io/docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e done
+#3 CACHED
+
+#4 [internal] load metadata for docker.io/library/ubuntu:24.04
+#4 DONE 0.3s
+
+#5 [internal] load .dockerignore
+#5 transferring context: 122B done
+#5 DONE 0.0s
+
+#6 [1/7] FROM docker.io/library/ubuntu:24.04@sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90
+#6 resolve docker.io/library/ubuntu:24.04@sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90 done
+#6 DONE 0.0s
+
+#7 [internal] load build context
+#7 transferring context: 725.29kB 0.1s done
+#7 DONE 0.1s
+
+#8 [2/7] RUN apt-get update && apt-get install -y --no-install-recommends     bash     curl     jq     python3     python3-venv     ca-certificates     && rm -rf /var/lib/apt/lists/*
+#8 CACHED
+
+#9 [3/7] RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+#9 CACHED
+
+#10 [4/7] COPY . /build
+#10 DONE 0.2s
+
+#11 [5/7] RUN chmod +x /build/e2e/e2e_test.sh /build/e2e/lib.sh
+#11 DONE 0.1s
+
+#12 [6/7] WORKDIR /build
+#12 DONE 0.0s
+
+#13 [7/7] RUN uv tool install . --python python3
+#13 1.996 Resolved 12 packages in 1.64s
+#13 2.001    Building ai-harness @ file:///build
+#13 2.013       Built ai-harness @ file:///build
+#13 2.181 Downloading pygments (1.2MiB)
+#13 2.541  Downloaded pygments
+#13 2.541 Prepared 12 packages in 542ms
+#13 2.546 Installed 12 packages in 5ms
+#13 2.547  + ai-harness==0.2.0 (from file:///build)
+#13 2.547  + annotated-doc==0.0.4
+#13 2.547  + markdown-it-py==4.2.0
+#13 2.547  + mdurl==0.1.2
+#13 2.547  + prompt-toolkit==3.0.52
+#13 2.547  + pygments==2.20.0
+#13 2.547  + pyyaml==6.0.3
+#13 2.547  + questionary==2.1.1
+#13 2.547  + rich==15.0.0
+#13 2.547  + shellingham==1.5.4
+#13 2.547  + typer==0.26.8
+#13 2.547  + wcwidth==0.8.2
+#13 2.550 Installed 1 executable: ai-harness
+#13 DONE 2.6s
+
+#14 exporting to image
+#14 exporting layers
+#14 exporting layers 0.4s done
+#14 exporting manifest sha256:29c3da2a554c94300f696322500c2a2b361d4edcac89308571acd925c90a967a done
+#14 exporting config sha256:818b7fc8d68d139be9e4b6908b0add23033010cd797dc1b6bee1f5cd4eef1a86 done
+#14 exporting attestation manifest sha256:711473fa4f974e45468e0f69e494e9fd1ee30c76b015b08257f891705eac3c1a done
+#14 exporting manifest list sha256:76de67b0bd018d1258a3ea0fa9291dd1b349eb64d80753e6f6967c99c21127da done
+#14 naming to docker.io/library/ai-harness-e2e:local done
+#14 unpacking to docker.io/library/ai-harness-e2e:local
+#14 unpacking to docker.io/library/ai-harness-e2e:local 0.3s done
+#14 DONE 0.7s
+[0;32m[BUILD][0m Image built successfully
+[1;33m[RUN][0m   Running e2e tests inside container
+
+[0;34m[INFO][0m  Using binary: ai-harness
+[0;34m[INFO][0m  Tier 1 — Binary basics
+[1;33m[TEST][0m  Binary is on PATH
+[0;32m[PASS][0m  ok
+[1;33m[TEST][0m  Binary runs without panic
+[0;32m[PASS][0m  ok
+[1;33m[TEST][0m  --help lists all subcommands and subcommand helps work
+[0;32m[PASS][0m  help lists install
+[0;32m[PASS][0m  help lists uninstall
+[0;32m[PASS][0m  help lists set-models
+[0;32m[PASS][0m  install --help works
+[0;32m[PASS][0m  uninstall --help works
+[0;32m[PASS][0m  set-models --help works
+[1;33m[TEST][0m  install with no args exits 0
+[0;32m[PASS][0m  ok
+[1;33m[TEST][0m  uninstall with nothing installed is a no-op
+[0;32m[PASS][0m  ok
+[1;33m[TEST][0m  install produces recognisable output patterns
+[0;32m[PASS][0m  ok
+[1;33m[TEST][0m  install -a/-p/-c flags accepted
+[0;34m[SKIP][0m  install -a not supported
+[1;33m[TEST][0m  install twice produces consistent manifest
+Installed 1 agent CLI(s): generic.
+Wrote 6 file(s).
+Installed 1 agent CLI(s): generic.
+Wrote 6 file(s).
+[0;32m[PASS][0m  Manifest unchanged after 2nd install
+[1;33m[TEST][0m  install renders commit-format directive in change-orchestrator prompts
+Installed 1 agent CLI(s): generic.
+Wrote 6 file(s).
+[0;34m[SKIP][0m  OpenCode orchestrator render absent — install did not produce /root/.config/opencode/agent/change-orchestrator.md
+[0;34m[SKIP][0m  Claude orchestrator render absent — install did not produce /root/.claude/skills/change-orchestrator/SKILL.md
+[1;33m[TEST][0m  init creates .ai-harness/config.yml and leaves root documents absent
+[0;32m[PASS][0m  File exists: .ai-harness/config.yml
+[0;32m[PASS][0m  File absent: CLAUDE.md absent after init
+[0;32m[PASS][0m  File absent: AGENTS.md absent after init
+[0;32m[PASS][0m  File absent: CODING_STANDARDS.md absent after init
+[0;32m[PASS][0m  output mentions .ai-harness/config.yml
+[1;33m[TEST][0m  init preserves pre-populated .ai-harness/config.yml bytes and mtime
+[0;32m[PASS][0m  pre-populated config bytes preserved
+[0;32m[PASS][0m  pre-populated config mtime unchanged (1784118869)
+[1;33m[TEST][0m  init repeated after fresh creation preserves config bytes and mtime
+[0;32m[PASS][0m  generated config bytes preserved on re-run (md5 4bd68ac17333e50639f929860672474c)
+[0;32m[PASS][0m  generated config mtime unchanged on re-run (1784118871)
+[1;33m[TEST][0m  init preserves pre-populated config including trailing newline bytes
+[0;32m[PASS][0m  pre-populated config (with trailing newlines) bytes preserved (md5 418e122b561b038e732820b3fa3a25c5)
+[0;32m[PASS][0m  pre-populated config (with trailing newlines) mtime unchanged (1784118873)
+[1;33m[TEST][0m  init does not touch pre-existing root documents
+[0;32m[PASS][0m  CLAUDE.md byte-identical
+[0;32m[PASS][0m  AGENTS.md byte-identical
+[0;32m[PASS][0m  CODING_STANDARDS.md byte-identical
+[0;32m[PASS][0m  File exists: .ai-harness/config.yml created
+[1;33m[TEST][0m  init exits 0 on a fresh run and on an idempotent re-run
+[0;32m[PASS][0m  fresh init exits 0
+[0;32m[PASS][0m  saturated re-run exits 0
+[0;34m[SKIP][0m  Tier 2 skipped (RUN_FULL_E2E != 1)
+[0;34m[SKIP][0m  Tier 3 skipped (RUN_BACKUP_TESTS != 1)
+
+========================================
+  E2E Test Summary
+========================================
+  Tier 1  [0;32mPASSED[0m: 29  [0;31mFAILED[0m: 0  [0;34mSKIPPED[0m: 5
+  Tier 2  [0;32mPASSED[0m: 0  [0;31mFAILED[0m: 0  [0;34mSKIPPED[0m: 0
+  Tier 3  [0;32mPASSED[0m: 0  [0;31mFAILED[0m: 0  [0;34mSKIPPED[0m: 0
+  ========================================
+  OVERALL [0;32mPASSED[0m: 29  [0;31mFAILED[0m: 0  [0;34mSKIPPED[0m: 5
+  TOTAL  : 34
+========================================
+
+[0;32mAll tests passed.[0m
+[0;32m[RUN][0m   All tests PASSED

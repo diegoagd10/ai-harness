@@ -1,0 +1,321 @@
+{
+  "tasks": [
+    {
+      "id": "1",
+      "title": "Implement immutable review record codec and typed identities",
+      "spec": "specs/versioned-review-object-contract.md",
+      "phase": "foundation",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "1.1",
+          "title": "Create frozen slotted review records and distinct typed ID value objects",
+          "scenario": "Records cannot expose mutable state",
+          "status": "done"
+        },
+        {
+          "id": "1.2",
+          "title": "Implement exact v1 schema decoding, detached payload projection, canonical encoding, and typed hashing",
+          "scenario": "Canonical round trip is stable",
+          "status": "done"
+        },
+        {
+          "id": "1.3",
+          "title": "Enforce primitive, collection, path, and stable contract-error grammars",
+          "scenario": "Invalid primitives are rejected",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "2",
+      "title": "Implement deterministic v1 lens policy and transaction binding",
+      "spec": "specs/deterministic-lens-policy.md",
+      "phase": "core",
+      "depends_on": [
+        "1"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "2.1",
+          "title": "Define the closed policy, risk, lens vocabulary, and ordered selection matrix",
+          "scenario": "High risk selection",
+          "status": "done"
+        },
+        {
+          "id": "2.2",
+          "title": "Verify decoded lens selections against the recomputed policy result",
+          "scenario": "Forged selection is rejected",
+          "status": "done"
+        },
+        {
+          "id": "2.3",
+          "title": "Bind transactions to recomputed lens-selection IDs during graph validation",
+          "scenario": "Shape-only lens ID is insufficient",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "3",
+      "title": "Validate finding histories against the closed state machine",
+      "spec": "specs/structured-finding-lifecycle.md",
+      "phase": "core",
+      "depends_on": [
+        "1",
+        "2"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "3.1",
+          "title": "Validate finding transaction, lens, prose, and scope bindings",
+          "scenario": "Valid finding belongs to its transaction",
+          "status": "done"
+        },
+        {
+          "id": "3.2",
+          "title": "Reduce ordered transitions from open using severity-specific legal edges",
+          "scenario": "Legal edge is accepted",
+          "status": "done"
+        },
+        {
+          "id": "3.3",
+          "title": "Reject terminal replays, invalid correction nullability, and unresolved critical histories",
+          "scenario": "Critical remains open",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "4",
+      "title": "Validate aggregate correction facts and attribution",
+      "spec": "specs/verifiable-correction-facts.md",
+      "phase": "integration",
+      "depends_on": [
+        "1",
+        "2",
+        "3"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "4.1",
+          "title": "Verify correction transaction and before-after candidate bindings",
+          "scenario": "Candidate binding is valid",
+          "status": "done"
+        },
+        {
+          "id": "4.2",
+          "title": "Enforce bijective resolved-finding and transition attribution",
+          "scenario": "Complete bijection succeeds",
+          "status": "done"
+        },
+        {
+          "id": "4.3",
+          "title": "Enforce in-scope changed paths and correction LOC arithmetic and budgets",
+          "scenario": "Zero-path zero-LOC correction",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "5",
+      "title": "Test review record codecs and typed ID conformance",
+      "spec": "specs/versioned-review-object-contract.md",
+      "phase": "testing",
+      "depends_on": [
+        "1"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "5.1",
+          "title": "Add table-driven exact-schema, primitive, path, and immutable-value tests",
+          "scenario": "Shape is not extensible within v1",
+          "status": "done"
+        },
+        {
+          "id": "5.2",
+          "title": "Add canonical-byte, detached-payload, deterministic-ID, and error-translation regression tests",
+          "scenario": "Noncanonical bytes are rejected",
+          "status": "done"
+        },
+        {
+          "id": "5.3",
+          "title": "Run focused contract and receipt codec tests without system access or mocks",
+          "scenario": "Contract tests are isolated",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "6",
+      "title": "Test deterministic lens policy matrices",
+      "spec": "specs/deterministic-lens-policy.md",
+      "phase": "testing",
+      "depends_on": [
+        "2"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "6.1",
+          "title": "Test both supported risk selections for stable records, bytes, and IDs",
+          "scenario": "Selection is repeatable",
+          "status": "done"
+        },
+        {
+          "id": "6.2",
+          "title": "Test rejection of unknown policy inputs and every forged lens tuple variant",
+          "scenario": "Forged selection is rejected",
+          "status": "done"
+        },
+        {
+          "id": "6.3",
+          "title": "Test transaction lens bindings using only in-memory values",
+          "scenario": "Selection uses only explicit inputs",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "7",
+      "title": "Test finding lifecycle state-machine matrices",
+      "spec": "specs/structured-finding-lifecycle.md",
+      "phase": "testing",
+      "depends_on": [
+        "3"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "7.1",
+          "title": "Test all legal and illegal severity-specific transition edges",
+          "scenario": "Every other edge is closed",
+          "status": "done"
+        },
+        {
+          "id": "7.2",
+          "title": "Test reference recomputation, terminal replay rejection, and correction nullability",
+          "scenario": "Replayed transition is rejected",
+          "status": "done"
+        },
+        {
+          "id": "7.3",
+          "title": "Test unresolved-critical rejection and open noncritical acceptance in memory",
+          "scenario": "Noncritical remains open",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "8",
+      "title": "Test correction fact attribution and budget matrices",
+      "spec": "specs/verifiable-correction-facts.md",
+      "phase": "testing",
+      "depends_on": [
+        "4"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "8.1",
+          "title": "Test matching, missing, duplicated, and accepted finding correction attribution",
+          "scenario": "Resolution is omitted from correction",
+          "status": "done"
+        },
+        {
+          "id": "8.2",
+          "title": "Test exact, descendant, whole-repository, and empty scope correction paths",
+          "scenario": "Prefix text is not segment containment",
+          "status": "done"
+        },
+        {
+          "id": "8.3",
+          "title": "Test LOC boundaries, arithmetic, and budget failures with in-memory facts only",
+          "scenario": "Pure correction validation",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "9",
+      "title": "Format review transaction contract tests with ruff",
+      "spec": "specs/versioned-review-object-contract.md",
+      "phase": "validation-fixup",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "9.1",
+          "title": "Run ruff format on tests/test_review_transaction_contract.py",
+          "scenario": "Ruff format gate passes for the test file",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "10",
+      "title": "Format review transactions source with ruff",
+      "spec": "specs/versioned-review-object-contract.md",
+      "phase": "validation-fixup",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "10.1",
+          "title": "Run ruff format on src/ai_harness/modules/harness/review_transactions.py",
+          "scenario": "Ruff format gate passes for the source file",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "11",
+      "title": "Enforce constructor-local invariants on public review records",
+      "spec": "specs/versioned-review-object-contract.md",
+      "phase": "validation-fixup",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "11.1",
+          "title": "Add __post_init__ validation to LensSelection, ReviewTransaction, Finding, FindingTransition, and CorrectionFact",
+          "scenario": "Invalid schema literals, primitives, collection order, paths, and typed references cannot be constructed",
+          "status": "done"
+        },
+        {
+          "id": "11.2",
+          "title": "Add focused regression tests for constructor-local invariants",
+          "scenario": "Constructor rejects every invalid primitive and reference",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "12",
+      "title": "Restore approved import boundary in review transactions",
+      "spec": "specs/versioned-review-object-contract.md",
+      "phase": "validation-fixup",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "12.1",
+          "title": "Add a regression test asserting the source only references encode_canonical, typed_hash, and validate_typed_id from receipts",
+          "scenario": "Source module restricts receipts imports to the three approved primitives",
+          "status": "done"
+        },
+        {
+          "id": "12.2",
+          "title": "Replace direct _receipts.CodecError catches with the broader RuntimeError class to satisfy the import boundary",
+          "scenario": "Direct CodecError reference is removed while ReviewContractError behavior is preserved",
+          "status": "done"
+        }
+      ]
+    }
+  ]
+}
