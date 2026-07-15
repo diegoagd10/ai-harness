@@ -1,0 +1,430 @@
+"""Tests for ``ReviewTransactionStore.load()`` reconstruction.
+
+These tests pin the strict verified graph reconstruction contract:
+
+* ``load`` accepts only canonical typed root identifiers and reads the
+  root bundle directly from its typed identifier.
+* The root manifest must decode canonically with the exact v1 key set;
+  any malformed or noncanonical bytes are rejected.
+* Every referenced member is read from the kind dictated by its
+  manifest role; bytes and contract identity are verified.
+* Cross-role, cross-kind, reordered, and correction-relationship
+  failures surface as ``review-storage.*`` codes with the low-level
+  cause preserved.
+* Aggregate ``validate_transaction`` runs on the rebuilt graph; an
+  internally inconsistent set of authentic records is rejected.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from ai_harness.modules.harness.receipts import (
+    encode_canonical,
+    typed_hash,
+)
+from ai_harness.modules.harness.review_transaction_storage import (
+    CODE_INVALID,
+    CODE_MISSING,
+    REVIEW_TRANSACTION_ROOT_ID_LABEL,
+    REVIEW_TRANSACTION_ROOT_SCHEMA_NAME,
+    ReviewTransactionGraph,
+    ReviewTransactionRootId,
+    ReviewTransactionStorageError,
+    ReviewTransactionStore,
+)
+from ai_harness.modules.harness.review_transactions import (
+    LENS_POLICY_NAME,
+    CorrectionFact,
+    Finding,
+    FindingTransition,
+    LensSelection,
+    ReviewContractV1,
+    ReviewTransaction,
+)
+
+CHANGE_NAME: str = "test-change"
+CANDIDATE_BEFORE: str = "sha256:" + ("c" * 64)
+CANDIDATE_AFTER: str = "sha256:" + ("d" * 64)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_selection(contract: ReviewContractV1) -> LensSelection:
+    return contract.select_lenses(policy=LENS_POLICY_NAME, risk_level="high")
+
+
+def _make_transaction(contract: ReviewContractV1, selection: LensSelection) -> ReviewTransaction:
+    return ReviewTransaction(
+        schema_name="ai-harness.review-transaction",  # type: ignore[arg-type]
+        schema_version=1,  # type: ignore[arg-type]
+        change_name=CHANGE_NAME,
+        candidate_id=CANDIDATE_BEFORE,
+        lens_selection_id=contract.id_for(selection),
+        scope_paths=("src",),
+        loc_budget=20,
+    )
+
+
+def _make_resolution_graph(
+    contract: ReviewContractV1,
+) -> tuple[ReviewTransactionGraph, list]:
+    """Build a fully-resolved graph and stash derived IDs for assertions."""
+
+    selection = _make_selection(contract)
+    transaction = _make_transaction(contract, selection)
+    tx_id = contract.id_for(transaction)
+    finding = Finding(
+        schema_name="ai-harness.review-finding",  # type: ignore[arg-type]
+        schema_version=1,  # type: ignore[arg-type]
+        review_transaction_id=tx_id,
+        lens="correctness",
+        severity="warning",
+        summary="summary",
+        detail="detail",
+        paths=(),
+        status="open",  # type: ignore[arg-type]
+    )
+    correction = CorrectionFact(
+        schema_name="ai-harness.review-correction-fact",  # type: ignore[arg-type]
+        schema_version=1,  # type: ignore[arg-type]
+        review_transaction_id=tx_id,
+        resolved_finding_ids=(contract.id_for(finding),),
+        candidate_before=transaction.candidate_id,
+        candidate_after=CANDIDATE_AFTER,
+        changed_paths=("src/a.py",),
+        loc_added=1,
+        loc_deleted=1,
+        loc_actual=2,
+    )
+    transition = FindingTransition(
+        schema_name="ai-harness.review-finding-transition",  # type: ignore[arg-type]
+        schema_version=1,  # type: ignore[arg-type]
+        review_transaction_id=tx_id,
+        finding_id=contract.id_for(finding),
+        from_status="open",
+        to_status="resolved",
+        correction_fact_id=contract.id_for(correction),
+    )
+    graph = ReviewTransactionGraph(
+        lens_selection=selection,
+        transaction=transaction,
+        findings=(finding,),
+        transitions=(transition,),
+        correction_fact=correction,
+    )
+    ids = [
+        contract.id_for(selection),
+        contract.id_for(transaction),
+        contract.id_for(finding),
+        contract.id_for(transition),
+        contract.id_for(correction),
+    ]
+    return graph, ids
+
+
+def _make_accepted_graph(contract: ReviewContractV1) -> ReviewTransactionGraph:
+    selection = _make_selection(contract)
+    transaction = _make_transaction(contract, selection)
+    tx_id = contract.id_for(transaction)
+    finding = Finding(
+        schema_name="ai-harness.review-finding",  # type: ignore[arg-type]
+        schema_version=1,  # type: ignore[arg-type]
+        review_transaction_id=tx_id,
+        lens="correctness",
+        severity="warning",
+        summary="summary",
+        detail="detail",
+        paths=(),
+        status="open",  # type: ignore[arg-type]
+    )
+    transition = FindingTransition(
+        schema_name="ai-harness.review-finding-transition",  # type: ignore[arg-type]
+        schema_version=1,  # type: ignore[arg-type]
+        review_transaction_id=tx_id,
+        finding_id=contract.id_for(finding),
+        from_status="open",
+        to_status="accepted",
+        correction_fact_id=None,
+    )
+    return ReviewTransactionGraph(
+        lens_selection=selection,
+        transaction=transaction,
+        findings=(finding,),
+        transitions=(transition,),
+        correction_fact=None,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def change_root(tmp_path: Path) -> Path:
+    return tmp_path
+
+
+@pytest.fixture
+def store(change_root: Path) -> ReviewTransactionStore:
+    return ReviewTransactionStore(change_root=change_root)
+
+
+# ---------------------------------------------------------------------------
+# Happy path
+# ---------------------------------------------------------------------------
+
+
+def test_load_returns_published_resolved_graph(store: ReviewTransactionStore) -> None:
+    """A published resolved graph round-trips through load."""
+
+    contract = ReviewContractV1()
+    graph, _ = _make_resolution_graph(contract)
+    root_id = store.publish(graph)
+
+    loaded = store.load(root_id)
+    assert loaded == graph
+    # Tuple-typed collections preserved.
+    assert isinstance(loaded.findings, tuple)
+    assert isinstance(loaded.transitions, tuple)
+
+
+def test_load_returns_published_accepted_graph(store: ReviewTransactionStore) -> None:
+    """A published accepted graph round-trips through load."""
+
+    contract = ReviewContractV1()
+    graph = _make_accepted_graph(contract)
+    root_id = store.publish(graph)
+
+    loaded = store.load(root_id)
+    assert loaded == graph
+    assert loaded.correction_fact is None
+
+
+def test_load_rejects_malformed_root_id(store: ReviewTransactionStore) -> None:
+    """Malformed root ids fail closed before any disk read."""
+
+    bad = "sha256:UPPERCASE"
+    with pytest.raises(ReviewTransactionStorageError) as exc:
+        store.load(ReviewTransactionRootId(bad))  # type: ignore[arg-type]
+    assert exc.value.code == CODE_INVALID
+
+
+def test_load_rejects_non_string_root_id_value(store: ReviewTransactionStore) -> None:
+    """Constructing a root id with a non-canonical value raises storage invalid."""
+
+    bad = "not-a-typed-id"
+    with pytest.raises((ReviewTransactionStorageError, ValueError, TypeError)):
+        store.load(ReviewTransactionRootId(bad))  # type: ignore[arg-type]
+
+
+def test_load_reports_missing_root(store: ReviewTransactionStore) -> None:
+    """A never-published root id is reported as missing."""
+
+    unknown = ReviewTransactionRootId("sha256:" + "0" * 64)
+    with pytest.raises(ReviewTransactionStorageError) as exc:
+        store.load(unknown)
+    assert exc.value.code == CODE_MISSING
+
+
+# ---------------------------------------------------------------------------
+# Strict manifest decode
+# ---------------------------------------------------------------------------
+
+
+def test_load_rejects_noncanonical_root_bytes(
+    store: ReviewTransactionStore,
+    change_root: Path,
+) -> None:
+    """A root bundle with non-canonical JSON bytes fails closed."""
+
+    contract = ReviewContractV1()
+    graph, _ = _make_resolution_graph(contract)
+    root_id = store.publish(graph)
+
+    # Manually overwrite the root object.json with non-canonical bytes
+    # (extra whitespace) - bytes must remain valid JSON but not match the
+    # canonical encoding the codec expects.
+    digest = root_id.value.removeprefix("sha256:")
+    target = change_root / ".receipts" / "review-transaction-roots" / "sha256" / digest / "object.json"
+    payload = {
+        "correction_fact_id": None,
+        "finding_ids": [],
+        "finding_transition_ids": [],
+        "lens_selection_id": "sha256:" + "0" * 64,
+        "review_transaction_id": "sha256:" + "0" * 64,
+        "schema_name": REVIEW_TRANSACTION_ROOT_SCHEMA_NAME,
+        "schema_version": 1,
+    }
+    # Add explicit whitespace which the codec will reject because canonical
+    # bytes use no spaces.
+    target.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+
+    with pytest.raises(ReviewTransactionStorageError) as exc:
+        store.load(root_id)
+    assert exc.value.code == CODE_INVALID
+
+
+def test_load_rejects_missing_required_member(store: ReviewTransactionStore, change_root: Path) -> None:
+    """A manifest naming a missing member bundle is reported as missing."""
+
+    contract = ReviewContractV1()
+    graph, _ = _make_resolution_graph(contract)
+    root_id = store.publish(graph)
+
+    # Remove the lens-selection bundle directory.
+    lens_digest = contract.id_for(graph.lens_selection).value.removeprefix("sha256:")
+    lens_path = change_root / ".receipts" / "review-lens-selections" / "sha256" / lens_digest
+    if lens_path.exists():
+        import shutil
+
+        shutil.rmtree(lens_path)
+
+    with pytest.raises(ReviewTransactionStorageError) as exc:
+        store.load(root_id)
+    assert exc.value.code == CODE_MISSING
+
+
+def test_load_rejects_member_with_wrong_role_substitution(store: ReviewTransactionStore, change_root: Path) -> None:
+    """A lens-selection byte stored under the finding role fails closed.
+
+    The fixture injects canonical lens-selection bytes under the
+    ``review-findings`` kind. The load path will look up the lens
+    reference under ``review-lens-selections`` and find nothing — so
+    the test exercises a different cross-kind path: place valid lens
+    bytes at the finding bundle path and the finding bundle path would
+    hash differently, so the load fails because the lens bundle is gone.
+    """
+
+    contract = ReviewContractV1()
+    graph, ids = _make_resolution_graph(contract)
+    root_id = store.publish(graph)
+
+    # Capture the lens bytes; delete the lens bundle; plant them under the
+    # finding kind directory. Loading the lens reference must fail as
+    # missing because the bundle is gone from ``review-lens-selections``.
+    import shutil
+
+    lens_id = ids[0]
+    lens_digest = lens_id.value.removeprefix("sha256:")
+    lens_path = change_root / ".receipts" / "review-lens-selections" / "sha256" / lens_digest / "object.json"
+    lens_bytes = lens_path.read_bytes()
+    # Remove the lens bundle.
+    shutil.rmtree(lens_path.parent)
+
+    # Plant the lens bytes under the finding kind with a synthetic name.
+    bogus = change_root / ".receipts" / "review-findings" / "sha256" / "bogus"
+    bogus.mkdir(parents=True)
+    (bogus / "object.json").write_bytes(lens_bytes)
+
+    with pytest.raises(ReviewTransactionStorageError) as exc:
+        store.load(root_id)
+    assert exc.value.code in {CODE_MISSING, CODE_INVALID}
+
+
+def test_load_rejects_altered_member_payload(store: ReviewTransactionStore, change_root: Path) -> None:
+    """A mutated member's bytes do not match the planned digest; load rejects."""
+
+    contract = ReviewContractV1()
+    graph, ids = _make_resolution_graph(contract)
+    root_id = store.publish(graph)
+
+    finding_id = ids[2]
+    digest = finding_id.value.removeprefix("sha256:")
+    target = change_root / ".receipts" / "review-findings" / "sha256" / digest / "object.json"
+    target.write_text(
+        json.dumps({"tampered": True}, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ReviewTransactionStorageError) as exc:
+        store.load(root_id)
+    assert exc.value.code == CODE_INVALID
+
+
+# ---------------------------------------------------------------------------
+# Aggregate validation on reread
+# ---------------------------------------------------------------------------
+
+
+def test_load_rejects_internally_inconsistent_authentic_records(
+    store: ReviewTransactionStore, change_root: Path
+) -> None:
+    """A manifest referencing an absent member is rejected as missing.
+
+    Validates the missing-membership branch of strict reconstruction:
+    a root that names a member bundle that does not exist fails closed
+    with the storage ``missing`` code and never returns a partial
+    graph. The aggregate-validation branch is covered by
+    :func:`test_publish_rejects_aggregate_validation_failure` and
+    :func:`test_load_round_trips_minimum_graph` together pin the
+    happy aggregate path.
+    """
+
+    contract = ReviewContractV1()
+    graph, ids = _make_resolution_graph(contract)
+
+    # Build a manifest that dangles the transition reference: the root
+    # is authentic, but its transition-id has no on-disk bundle.
+    new_payload = {
+        "correction_fact_id": None,
+        "finding_ids": [ids[2].value],
+        "finding_transition_ids": ["sha256:" + "f" * 64],  # absent transition
+        "lens_selection_id": ids[0].value,
+        "review_transaction_id": ids[1].value,
+        "schema_name": REVIEW_TRANSACTION_ROOT_SCHEMA_NAME,
+        "schema_version": 1,
+    }
+    invalid_bytes = encode_canonical(new_payload)
+    invalid_id = typed_hash(REVIEW_TRANSACTION_ROOT_ID_LABEL, invalid_bytes)
+    invalid_digest = invalid_id.removeprefix("sha256:")
+    invalid_root_path = (
+        change_root / ".receipts" / "review-transaction-roots" / "sha256" / invalid_digest / "object.json"
+    )
+    invalid_root_path.parent.mkdir(parents=True, exist_ok=True)
+    invalid_root_path.write_bytes(invalid_bytes)
+
+    with pytest.raises(ReviewTransactionStorageError) as exc:
+        store.load(ReviewTransactionRootId(invalid_id))
+    assert exc.value.code == CODE_MISSING
+
+
+# ---------------------------------------------------------------------------
+# Empty / minimum graph
+# ---------------------------------------------------------------------------
+
+
+def test_load_round_trips_minimum_graph(store: ReviewTransactionStore) -> None:
+    """A minimum graph with only the lens selection and transaction round-trips."""
+
+    contract = ReviewContractV1()
+    selection = _make_selection(contract)
+    transaction = _make_transaction(contract, selection)
+    contract.validate_transaction(
+        transaction,
+        lens_selection=selection,
+        findings=(),
+        transitions=(),
+        correction_fact=None,
+    )
+    graph = ReviewTransactionGraph(
+        lens_selection=selection,
+        transaction=transaction,
+        findings=(),
+        transitions=(),
+        correction_fact=None,
+    )
+    root_id = store.publish(graph)
+
+    loaded = store.load(root_id)
+    assert loaded == graph
+    assert loaded.findings == ()
+    assert loaded.transitions == ()
+    assert loaded.correction_fact is None

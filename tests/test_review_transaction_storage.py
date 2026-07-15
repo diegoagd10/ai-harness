@@ -41,7 +41,6 @@ from ai_harness.modules.harness.review_transaction_storage import (
     _ReviewTransactionRootV1,
 )
 from ai_harness.modules.harness.review_transactions import (
-    CODE_ID_INVALID,
     LENS_POLICY_NAME,
     REVIEW_TRANSACTION_SCHEMA_NAME,
     CorrectionFact,
@@ -52,7 +51,6 @@ from ai_harness.modules.harness.review_transactions import (
     FindingTransitionId,
     LensSelection,
     LensSelectionId,
-    ReviewContractError,
     ReviewContractV1,
     ReviewTransaction,
     ReviewTransactionId,
@@ -186,31 +184,50 @@ def test_root_id_accepts_canonical_wire_value() -> None:
 def test_root_id_rejects_uppercase_hex() -> None:
     """``ReviewTransactionRootId`` rejects uppercase hex characters."""
 
-    with pytest.raises(ReviewContractError) as exc:
+    from ai_harness.modules.harness.review_transaction_storage import (
+        CODE_INVALID,
+        ReviewTransactionStorageError,
+    )
+
+    with pytest.raises(ReviewTransactionStorageError) as exc:
         ReviewTransactionRootId("sha256:" + "F" * 64)
-    assert exc.value.code == CODE_ID_INVALID
+    assert exc.value.code == CODE_INVALID
 
 
 def test_root_id_rejects_wrong_prefix() -> None:
     """``ReviewTransactionRootId`` rejects identifiers without the typed prefix."""
 
-    with pytest.raises(ReviewContractError) as exc:
+    from ai_harness.modules.harness.review_transaction_storage import (
+        CODE_INVALID,
+        ReviewTransactionStorageError,
+    )
+
+    with pytest.raises(ReviewTransactionStorageError) as exc:
         ReviewTransactionRootId("md5:" + "f" * 64)
-    assert exc.value.code == CODE_ID_INVALID
+    assert exc.value.code == CODE_INVALID
 
 
 def test_root_id_rejects_truncated_value() -> None:
     """``ReviewTransactionRootId`` rejects wire values that are too short."""
 
-    with pytest.raises(ReviewContractError) as exc:
+    from ai_harness.modules.harness.review_transaction_storage import (
+        CODE_INVALID,
+        ReviewTransactionStorageError,
+    )
+
+    with pytest.raises(ReviewTransactionStorageError) as exc:
         ReviewTransactionRootId("sha256:" + "0" * 63)
-    assert exc.value.code == CODE_ID_INVALID
+    assert exc.value.code == CODE_INVALID
 
 
 def test_root_id_rejects_non_string() -> None:
     """``ReviewTransactionRootId`` rejects non-string values via the typed id check."""
 
-    with pytest.raises((ReviewContractError, TypeError)):
+    from ai_harness.modules.harness.review_transaction_storage import (
+        ReviewTransactionStorageError,
+    )
+
+    with pytest.raises((ReviewTransactionStorageError, TypeError)):
         ReviewTransactionRootId(None)  # type: ignore[arg-type]
 
 

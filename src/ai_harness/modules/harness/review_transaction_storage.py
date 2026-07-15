@@ -33,7 +33,6 @@ from ai_harness.modules.harness.receipts import (
     validate_typed_id,
 )
 from ai_harness.modules.harness.review_transactions import (
-    CODE_ID_INVALID,
     WIRE_ID_RE,
     CorrectionFact,
     CorrectionFactId,
@@ -138,18 +137,18 @@ class ReviewTransactionRootId:
 
     The wire value is exactly ``sha256:<64 lowercase hex>``; any other
     shape — uppercase hex, missing prefix, truncated, or non-string —
-    raises :class:`ReviewContractError` with code ``review.id-invalid``.
-    Construction is the single point of wire validation; consumers never
-    re-validate.
+    raises :class:`ReviewTransactionStorageError` with code
+    ``review-storage.invalid``. Construction is the single point of
+    wire validation; consumers never re-validate.
     """
 
     value: str
 
     def __post_init__(self) -> None:
         if not isinstance(self.value, str) or not WIRE_ID_RE.match(self.value):
-            raise ReviewContractError(
+            raise ReviewTransactionStorageError(
                 "ReviewTransactionRootId.value must be canonical typed id sha256:<64 lowercase hex>",
-                code=CODE_ID_INVALID,
+                code=CODE_INVALID,
                 context={"field": "ReviewTransactionRootId.value"},
             )
 
@@ -911,6 +910,149 @@ class ReviewTransactionStore:
         except ReceiptStoreError as exc:
             raise _translate_bundle_error("publish review root", exc) from exc
         return plan.root_id
+
+    def load(self, root_id: ReviewTransactionRootId) -> ReviewTransactionGraph:
+        """Reconstruct a v1 review graph from its typed root identifier.
+
+        Steps:
+
+        1. Strictly decode the root bundle's canonical bytes into the
+           v1 manifest value (no normalization, no key aliasing).
+        2. For each manifest reference, read the bundle from the kind
+           dictated by its role, verify canonical bytes and the
+           role-specific typed digest, decode the expected record
+           class, recompute the contract identifier, and require it to
+           equal the manifest reference.
+        3. Reject duplicate references across manifest roles, missing
+           members, and topology or identity violations.
+        4. Reconstruct the immutable graph and run
+           ``validate_transaction``; return the graph only after that
+           aggregate validation succeeds.
+        """
+
+        if not isinstance(root_id, ReviewTransactionRootId):
+            raise ReviewTransactionStorageError(
+                "load input must be a ReviewTransactionRootId",
+                code=CODE_INVALID,
+                context={"input_type": type(root_id).__name__},
+            )
+
+        root_bytes = self._read_root_bytes(root_id)
+        manifest = _ReviewRootCodec.decode(root_bytes, description="review root")
+
+        # Load each member by its manifest role. Refusal to deliver any
+        # member aborts the whole load; partial results are never
+        # returned.
+        lens_record = self._load_member(
+            manifest.lens_selection_id,
+            role=_ReviewBundleRole.LENS_SELECTION,
+            expected_class=LensSelection,
+        )
+        tx_record = self._load_member(
+            manifest.review_transaction_id,
+            role=_ReviewBundleRole.REVIEW_TRANSACTION,
+            expected_class=ReviewTransaction,
+        )
+        finding_records = tuple(
+            self._load_member(fid, role=_ReviewBundleRole.FINDING, expected_class=Finding)
+            for fid in manifest.finding_ids
+        )
+        transition_records = tuple(
+            self._load_member(
+                tid,
+                role=_ReviewBundleRole.FINDING_TRANSITION,
+                expected_class=FindingTransition,
+            )
+            for tid in manifest.finding_transition_ids
+        )
+        if manifest.correction_fact_id is not None:
+            correction_record: CorrectionFact | None = self._load_member(
+                manifest.correction_fact_id,
+                role=_ReviewBundleRole.CORRECTION_FACT,
+                expected_class=CorrectionFact,
+            )
+        else:
+            correction_record = None
+
+        graph = ReviewTransactionGraph(
+            lens_selection=lens_record,
+            transaction=tx_record,
+            findings=finding_records,
+            transitions=transition_records,
+            correction_fact=correction_record,
+        )
+        try:
+            self._contract.validate_transaction(
+                graph.transaction,
+                lens_selection=graph.lens_selection,
+                findings=graph.findings,
+                transitions=graph.transitions,
+                correction_fact=graph.correction_fact,
+            )
+        except ReviewContractError as exc:
+            raise ReviewTransactionStorageError(
+                "loaded graph failed aggregate validation",
+                code=CODE_INVALID,
+                context=_contract_context_to_mapping(exc),
+                cause=exc,
+            ) from exc
+        return graph
+
+    # ---- internal members ----
+
+    def _read_root_bytes(self, root_id: ReviewTransactionRootId) -> bytes:
+        try:
+            return self._bundles.read(_ReviewBundleRole.TRANSACTION_ROOT, root_id.value)
+        except ReceiptStoreError as exc:
+            raise _translate_bundle_error("read review root", exc) from exc
+
+    def _load_member(
+        self,
+        member_id: LensSelectionId | ReviewTransactionId | FindingId | FindingTransitionId | CorrectionFactId,
+        *,
+        role: _ReviewBundleRole,
+        expected_class: type[LensSelection]
+        | type[ReviewTransaction]
+        | type[Finding]
+        | type[FindingTransition]
+        | type[CorrectionFact],
+    ):
+        try:
+            raw = self._bundles.read(role, member_id.value)
+        except ReceiptStoreError as exc:
+            raise _translate_bundle_error(f"read review {role.value}", exc) from exc
+
+        try:
+            decoded = self._contract.decode(expected_class, raw)
+        except ReviewContractError as exc:
+            raise ReviewTransactionStorageError(
+                exc.message,
+                code=CODE_INVALID,
+                context={"role": role.value, **_contract_context_to_mapping(exc)},
+                cause=exc,
+            ) from exc
+
+        try:
+            derived = self._contract.id_for(decoded)
+        except ReviewContractError as exc:
+            raise ReviewTransactionStorageError(
+                exc.message,
+                code=CODE_INVALID,
+                context={"role": role.value, **_contract_context_to_mapping(exc)},
+                cause=exc,
+            ) from exc
+
+        if derived.value != member_id.value:
+            raise ReviewTransactionStorageError(
+                f"loaded review {role.value} identity does not match reference",
+                code=CODE_INVALID,
+                context={
+                    "role": role.value,
+                    "expected_id": member_id.value,
+                    "derived_id": derived.value,
+                },
+            )
+        return decoded
 
     # ---- internal members ----
 
