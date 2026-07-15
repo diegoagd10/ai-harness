@@ -12,7 +12,7 @@
 - 50a56b704013751eb1da05c83428f70050bad4f1 — task 9: Test declarative correction evidence bindings
 - a4106e0c4072cc363987fc4ca5a1a1a5825e2660 — task 10: Publish verified checkpoints evidence-first and checkpoint-last
 - a722d7ae6f5c8de436f703c3d267ee5446aa4d82 — task 11: Load checkpoints by typed ID with complete readback verification
-- <pending> — task 12: Test strict checkpoint persistence and storage hardening
+- eee4a52e73f28a9cc653f65e9d355ad734375abb — task 12: Test strict checkpoint persistence and storage hardening
 
 ## TDD Evidence
 
@@ -29,7 +29,7 @@
 | 9 | 50a56b7 | N/A: new files | tests/test_review_transaction_checkpoints_evidence_conformance.py | integration | passed: 565/565 | N/A: new files | passed | 10 cases | clean |
 | 10 | a4106e0 | src/ai_harness/modules/harness/review_transaction_checkpoints.py | tests/test_review_transaction_checkpoints_store.py | integration | passed: 577/577 | written | passed | 12 cases | clean |
 | 11 | a722d7a | N/A: new files | tests/test_review_transaction_checkpoints_store_load.py | integration | passed: 594/594 | N/A: new files | passed | 17 cases | clean |
-| 12 | <pending> | N/A: new files | tests/test_review_transaction_checkpoints_store_hardening.py | integration | passed: 610/610 | N/A: new files | passed | 16 cases | clean |
+| 12 | eee4a52 | N/A: new files | tests/test_review_transaction_checkpoints_store_hardening.py | integration | passed: 610/610 | N/A: new files | passed | 16 cases | clean |
 
 ## Remaining
 - (none)
