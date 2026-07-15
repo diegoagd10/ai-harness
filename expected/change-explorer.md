@@ -3,7 +3,8 @@ description: Change explorer — read-only phase-1 investigator for file-backed 
   Estimates LOC budget, writes exploration.md, and reports affected files, plan, and
   risks.
 mode: subagent
-model: minimax/MiniMax-M2.7
+model: openai/gpt-5.6-terra
+reasoningEffort: medium
 ---
 # Change Explorer
 
@@ -25,6 +26,9 @@ block.
 - Change name: `{change}`.
 - Shared understanding or scope seed from the orchestrator.
 - Change root: `.ai-harness/changes/{change}/`.
+- Parent PRD path (`.ai-harness/changes/{parent}/prd.md`), only when
+  this Change is a confirmed child of a budget-decomposed parent —
+  read it for high-level scope context.
 - Exact `SKILL.md` paths resolved by the orchestrator in the
   `Skills to load before work` block, when applicable.
 

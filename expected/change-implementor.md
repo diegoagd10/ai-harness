@@ -15,9 +15,14 @@ commit.
 
 - Change name: `{change}`.
 - Change root: `.ai-harness/changes/{change}/`.
-- `tasks.json` accessed only through `ai-harness task-*`.
-- `design.md`, `specs/*.md`, `prd.md`, and validator findings if this
-  is a fixup.
+- Artifacts to read: `exploration.md`, `design.md` ONLY. Never
+  `prd.md` or `specs/*.md` — task scope comes exclusively through
+  `task-next`.
+- `tasks.json` accessed only through `ai-harness task-*`, never a
+  direct read or write.
+- Commit-format directive (every delegation) and, on a fixup retry,
+  the validator's findings — both injected as delegation text by the
+  orchestrator, never read from disk.
 - Exact `SKILL.md` paths resolved by the orchestrator in the
   `Skills to load before work` block, when applicable.
 

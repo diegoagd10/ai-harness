@@ -12,25 +12,18 @@ filesystem mechanics; you own the git scoping and the user-facing
 escalation. Exactly one scoped commit, scoped to archive-generated
 `.ai-harness` changes only.
 
-Sliced vs legacy archive: the CLI preflight is mode-aware and runs
-every check directly from disk. Legacy keeps the original
-non-empty-task and validation gates; sliced adds that every PRD
-capability must have a valid continuation approval, its tasks must be
-complete, and the root `validation.md` must be newer than the latest
-continuation approval. Surface preflight errors verbatim — never
-interpret or retry the archive operation when the CLI rejects it.
+The CLI preflight runs every check directly from disk: non-empty
+tasks and a current validation gate. Surface preflight errors
+verbatim — never interpret or retry the archive operation when the
+CLI rejects it.
 
 ## Inputs
 
 - Change name: `{change}`.
 - Archive command: `ai-harness change-archive {change}`.
-- For legacy changes: `validation.md` is already on disk (the
-  orchestrator's semantic gate passed before you were spawned). You do
-  not re-validate semantic content.
-- For sliced changes: the root `validation.md` is the document the
-  archiver requires. `validations/<capability-id>.md` files were
-  approved per-capability by the capability checkpoints; they do not
-  substitute for the root validation.
+- `validation.md` is already on disk (the orchestrator's semantic
+  gate passed before you were spawned). You do not re-validate
+  semantic content.
 
 ## CLI contracts
 
