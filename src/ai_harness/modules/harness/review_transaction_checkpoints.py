@@ -1035,21 +1035,27 @@ class ReviewTransactionCheckpointContractV1:
     def decode(self, record_type: type[RecordT], source: bytes) -> RecordT:
         """Strictly decode *source* into the requested *record_type*.
 
-        ``source`` must be canonical JSON bytes. The decoder rejects
+        ``source`` must be canonical ``bytes``. The decoder rejects
         duplicate keys, noncanonical encoding, malformed wire IDs,
         unsupported schema literals and versions, malformed completion
         entries, and cross-kind substitutions. It re-encodes the parsed
         value and requires byte-for-byte equality with the input.
+
+        Only the exact ``bytes`` type is accepted; ``bytearray``,
+        ``memoryview``, ``str``, and any other byte-like or text-like
+        container are rejected at the public boundary so the canonical
+        encoder guarantee cannot be bypassed by an alternative
+        bytes-like input.
         """
 
-        if not isinstance(source, (bytes, bytearray)):
+        if not isinstance(source, bytes):
             raise ReviewCheckpointContractError(
                 "decode source must be canonical bytes",
                 code=CODE_SCHEMA_INVALID,
                 context={"record_type": str(record_type)},
             )
         spec = _spec_for(record_type)
-        payload = _decode_canonical_object(bytes(source), description=f"{spec.schema_name} bytes")
+        payload = _decode_canonical_object(source, description=f"{spec.schema_name} bytes")
         record = spec.decode_payload(payload)
         return record  # type: ignore[return-value]
 

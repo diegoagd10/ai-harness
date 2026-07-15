@@ -26,6 +26,7 @@ from ai_harness.modules.harness.receipts import encode_canonical, typed_hash
 from ai_harness.modules.harness.review_transaction_checkpoints import (
     CHECKPOINT_LABEL,
     CHECKPOINT_SCHEMA_NAME,
+    CODE_SCHEMA_INVALID,
     EVIDENCE_LABEL,
     EVIDENCE_SCHEMA_NAME,
     ReviewCheckpointContractError,
@@ -213,6 +214,23 @@ def test_spec_scenario_reject_permissive_domain_inputs() -> None:
     # Mapping passed to decode — must fail.
     with pytest.raises(ReviewCheckpointContractError):
         contract.decode(ReviewTransactionCheckpoint, {"not": "bytes"})  # type: ignore[arg-type]
+
+
+def test_decode_rejects_bytearray_source() -> None:
+    """``decode`` accepts ``bytes`` only — ``bytearray`` is rejected.
+
+    The contract boundary is byte-only because the canonical encoder
+    requires exact ``bytes`` and any other bytes-like container would
+    bypass that guarantee. ``bytearray`` is therefore rejected at the
+    public seam rather than silently normalised.
+    """
+
+    contract = ReviewTransactionCheckpointContractV1()
+    encoded = encode_canonical(_checkpoint_payload())
+    assert isinstance(encoded, bytes)
+    with pytest.raises(ReviewCheckpointContractError) as exc:
+        contract.decode(ReviewTransactionCheckpoint, bytearray(encoded))
+    assert exc.value.code == CODE_SCHEMA_INVALID
 
 
 def test_spec_scenario_reject_cross_kind_data() -> None:
