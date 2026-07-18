@@ -346,6 +346,9 @@ def _apply_validation_route_override(
     slice_status: SliceStatus,
 ) -> tuple[str, str | None]:
     """Route an unapproved terminal validation back to validation."""
+    if fallback_route == "validate" and slice_status.mode == "legacy":
+        _approved, diagnostic = _validation_approved(change_dir)
+        return fallback_route, diagnostic
     if fallback_route != "archive":
         return fallback_route, None
     approved, diagnostic = _validation_approved(change_dir)
