@@ -1,0 +1,217 @@
+{
+  "tasks": [
+    {
+      "id": "1",
+      "title": "Trim validation envelope and receipt module APIs",
+      "spec": "specs/receipt-module-trim.md",
+      "phase": "foundation",
+      "depends_on": [],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "1.1",
+          "title": "Reduce the Verdict envelope to strict verdict and critical fields",
+          "scenario": "Two-field envelope",
+          "status": "done"
+        },
+        {
+          "id": "1.2",
+          "title": "Delete sealing, verification, receipt-kind, schema, and pointer-only code",
+          "scenario": "Sealing and archive verification APIs are removed",
+          "status": "done"
+        },
+        {
+          "id": "1.3",
+          "title": "Preserve and verify runs-only executor, codec, and candidate seams",
+          "scenario": "Existing executor suite runs",
+          "status": "done"
+        },
+        {
+          "id": "1.4",
+          "title": "Rehome parser coverage and update runs-kind assertions using temporary persistence",
+          "scenario": "Test doubles remain boundary-limited",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "2",
+      "title": "Route legacy archive eligibility through validation envelopes",
+      "spec": "specs/envelope-driven-archive-routing-legacy.md",
+      "phase": "core",
+      "depends_on": [
+        "1"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "2.1",
+          "title": "Add a validation approval helper that translates parser and file-read failures to diagnostics",
+          "scenario": "Pass archives without receipt state",
+          "status": "done"
+        },
+        {
+          "id": "2.2",
+          "title": "Replace legacy receipt route overrides with envelope approval while preserving task prerequisites",
+          "scenario": "Approved validation with incomplete tasks",
+          "status": "done"
+        },
+        {
+          "id": "2.3",
+          "title": "Gate direct archive preflight on the same envelope authority",
+          "scenario": "Direct archive without receipt",
+          "status": "done"
+        },
+        {
+          "id": "2.4",
+          "title": "Cover legacy pass and pass-with-warnings routing with temporary change roots",
+          "scenario": "Test execution under pytest",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "3",
+      "title": "Preserve blocked validation routing diagnostics",
+      "spec": "specs/validation-blocked-routing-preserved.md",
+      "phase": "core",
+      "depends_on": [
+        "1",
+        "2"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "3.1",
+          "title": "Return validate or final-validate with diagnostics for missing, unreadable, failing, and critical validation",
+          "scenario": "Legacy validation file absent",
+          "status": "done"
+        },
+        {
+          "id": "3.2",
+          "title": "Convert malformed and contradictory envelope errors into blocked reasons",
+          "scenario": "Malformed Verdict section",
+          "status": "done"
+        },
+        {
+          "id": "3.3",
+          "title": "Exercise direct archive rejection through the validation envelope gate",
+          "scenario": "Nonzero critical count",
+          "status": "done"
+        },
+        {
+          "id": "3.4",
+          "title": "Add isolated negative routing tests, limiting any mock to file-read failure",
+          "scenario": "Isolated negative suite",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "4",
+      "title": "Route sliced final validation through approved envelopes",
+      "spec": "specs/envelope-driven-archive-routing-sliced.md",
+      "phase": "integration",
+      "depends_on": [
+        "1",
+        "3"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "4.1",
+          "title": "Replace sliced receipt authorization with the shared validation approval check",
+          "scenario": "Sliced pass archives without receipt",
+          "status": "done"
+        },
+        {
+          "id": "4.2",
+          "title": "Keep per-capability validation and root freshness prerequisites intact",
+          "scenario": "Missing capability validation",
+          "status": "done"
+        },
+        {
+          "id": "4.3",
+          "title": "Verify stale root validation still returns final-validate with its existing diagnostic",
+          "scenario": "Stale root validation",
+          "status": "done"
+        },
+        {
+          "id": "4.4",
+          "title": "Add sliced pass and warning regressions with pytest-managed file-backed roots",
+          "scenario": "Sliced regression execution",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "5",
+      "title": "Remove receipt-only CLI commands and coverage",
+      "spec": "specs/receipt-cli-removal.md",
+      "phase": "integration",
+      "depends_on": [
+        "1"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "5.1",
+          "title": "Delete gate-run and receipt-seal command adapters and exclusive helpers",
+          "scenario": "Receipt command adapters have no dangling registration",
+          "status": "done"
+        },
+        {
+          "id": "5.2",
+          "title": "Remove obsolete command imports and Typer registrations",
+          "scenario": "Help omits removed commands",
+          "status": "done"
+        },
+        {
+          "id": "5.3",
+          "title": "Add in-process CLI tests for unknown removed commands and preserved commands",
+          "scenario": "Unknown-command test isolation",
+          "status": "done"
+        },
+        {
+          "id": "5.4",
+          "title": "Delete receipt CLI-only tests and confirm static quality has no dangling references",
+          "scenario": "Static quality gates inspect command modules",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "6",
+      "title": "Run validation-receipt removal quality gates",
+      "spec": "specs/receipt-module-trim.md",
+      "phase": "testing",
+      "depends_on": [
+        "2",
+        "3",
+        "4",
+        "5"
+      ],
+      "status": "done",
+      "subtasks": [
+        {
+          "id": "6.1",
+          "title": "Run Ruff formatting and lint checks after the API and CLI removals",
+          "scenario": "Static checks run after trimming",
+          "status": "done"
+        },
+        {
+          "id": "6.2",
+          "title": "Run the full Python test suite with uv using isolated file-backed tests",
+          "scenario": "Python quality and test gates",
+          "status": "done"
+        },
+        {
+          "id": "6.3",
+          "title": "Run the Docker end-to-end suite without the removed receipt commands",
+          "scenario": "End-to-end compatibility",
+          "status": "done"
+        }
+      ]
+    }
+  ]
+}
