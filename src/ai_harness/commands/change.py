@@ -18,14 +18,6 @@ from ai_harness.modules.harness.change import (
     change_continue,
     change_new,
 )
-from ai_harness.modules.harness.receipts import (
-    CodecError,
-    FinalValidationReceipts,
-    GateRunRequest,
-    ReceiptError,
-    SealResult,
-    decode_gate_declaration,
-)
 from ai_harness.modules.harness.tasks import (
     SubtaskInput,
     Task,
@@ -66,94 +58,6 @@ def change_approve_cmd(change: str = typer.Argument(..., help="Change name.")) -
         _print_json(change_approve(Path.cwd(), change))
     except ChangeStoreError as exc:
         _exit_error(str(exc))
-
-
-def change_gates_run_cmd(
-    change: str = typer.Option(..., "-c", "--change", help="Change name."),
-    input_json: str = typer.Option(..., "-i", "--input", help="GateRunRequest JSON."),
-) -> None:
-    """Run native gate declarations and emit a GateRunResult JSON summary.
-
-    The command accepts a request that *only* declares gates (gate
-    id, argv, cwd, timeout). Caller-supplied exit codes, candidate
-    IDs, evidence digests, verdict values, and receipt IDs are not
-    honored — the strict decoder rejects unknown JSON keys.
-
-    On a recorded-gate failure (any gate exited non-zero, timed out,
-    or overflowed) the command exits zero with
-    ``all_gates_passed=false`` and a full per-gate summary. On
-    declaration, capture, persistence, schema, or policy failure the
-    command exits non-zero with a single safe diagnostic on stderr.
-    """
-    try:
-        payload = _parse_json_object(input_json)
-        request = _parse_gate_run_request(payload)
-    except (CodecError, ValueError) as exc:
-        _exit_error(f"declaration.invalid: {exc}")
-
-    try:
-        result = FinalValidationReceipts(Path.cwd()).run_gates(change=change, request=request)
-    except ReceiptError as exc:
-        _exit_error(f"{exc.code}: {exc.message}")
-
-    typer.echo(
-        json.dumps(
-            {
-                "run_id": result.run_id,
-                "candidate_before": result.candidate_before,
-                "candidate_after": result.candidate_after,
-                "all_gates_passed": result.all_gates_passed,
-                "gates": [
-                    {
-                        "gate_id": outcome.gate_id,
-                        "launch": outcome.launch,
-                        "termination": outcome.termination,
-                        "return_code": outcome.return_code,
-                        "passed": outcome.passed,
-                    }
-                    for outcome in result.gates
-                ],
-            }
-        )
-    )
-
-
-def change_receipt_seal_cmd(change: str = typer.Argument(..., help="Change name.")) -> None:
-    """Bind the current root validation.md and current run into a receipt.
-
-    The command accepts no input options besides the Change name.
-    On success it emits the derived :class:`SealResult` as JSON and
-    exits zero; on a recorded denial (semantic or native) it also
-    exits zero with ``archive_eligible=false``. On infrastructure or
-    binding failure (validation missing, malformed, or stale; missing
-    run; tampered evidence; candidate mismatch; storage failure) it
-    exits non-zero with a safe diagnostic.
-
-    No interactive prompts — receipt operations are non-interactive.
-    """
-    try:
-        result = FinalValidationReceipts(Path.cwd()).seal(change=change)
-    except ReceiptError as exc:
-        _exit_error(f"{exc.code}: {exc.message}")
-
-    typer.echo(json.dumps(_seal_summary(result)))
-
-
-def _seal_summary(result: SealResult) -> dict[str, Any]:
-    """Return the public JSON shape of a SealResult."""
-    return {
-        "receipt_id": result.receipt_id,
-        "gate_run": result.gate_run,
-        "semantic_approval": result.semantic_approval,
-        "native_all_gates_passed": result.native_all_gates_passed,
-        "archive_eligible": result.archive_eligible,
-    }
-
-
-def _parse_gate_run_request(payload: dict[str, Any]) -> GateRunRequest:
-    """Decode and type-check the CLI request into a :class:`GateRunRequest`."""
-    request = decode_gate_declaration(payload)
-    return request
 
 
 def change_archive_cmd(change: str = typer.Argument(..., help="Change name.")) -> None:
