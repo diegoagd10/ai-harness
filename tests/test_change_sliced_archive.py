@@ -11,8 +11,6 @@ status payloads.
 from __future__ import annotations
 
 import os
-import subprocess
-import sys
 import time
 from pathlib import Path
 
@@ -22,6 +20,7 @@ from ai_harness.modules.harness.change import (
     ChangeStoreError,
     change_approve,
     change_archive,
+    change_continue,
     change_new,
 )
 from ai_harness.modules.harness.tasks import (
@@ -72,11 +71,15 @@ def _archiveable_legacy_change(tmp_path: Path, change: str) -> Path:
     )
     task_done(tmp_path, change, task.id)
     _stage(change_dir, "implementation.md", content="# impl\n")
-    _stage(change_dir, "validation.md", content="verdict: pass\n")
+    _stage(
+        change_dir,
+        "validation.md",
+        content="## Verdict\nverdict: pass\ncritical: 0\n",
+    )
     return change_dir
 
 
-def _archiveable_sliced_change(tmp_path: Path, change: str) -> Path:
+def _archiveable_sliced_change(tmp_path: Path, change: str, *, verdict: str = "pass") -> Path:
     """Construct a sliced change that passes every sliced archive preflight."""
     change_new(tmp_path, change)
     change_dir = tmp_path / ".ai-harness" / "changes" / change
@@ -88,53 +91,33 @@ def _archiveable_sliced_change(tmp_path: Path, change: str) -> Path:
     )
     _complete_capability(tmp_path, change, "single")
     change_approve(tmp_path, change)
-    _stage(change_dir, "validation.md", content="verdict: pass\n")
+    _stage(
+        change_dir,
+        "validation.md",
+        content=f"## Verdict\nverdict: {verdict}\ncritical: 0\n",
+    )
     future = time.time() + 60
     validation_path = change_dir / "validation.md"
     os.utime(validation_path, (future, future))
     return change_dir
 
 
-def _seal_archiveable_receipt(tmp_path: Path, change: str) -> None:
-    """Run native gates and seal an archive-eligible receipt for *change*."""
-    from ai_harness.modules.harness.receipts import (  # noqa: WPS433 - test helper
-        FinalValidationReceipts,
-        decode_gate_declaration,
-    )
-
-    if not (tmp_path / ".git").exists():
-        subprocess.run(["git", "init", "-q"], cwd=str(tmp_path), check=True)
-        subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=str(tmp_path), check=True)
-        subprocess.run(["git", "config", "user.name", "Tester"], cwd=str(tmp_path), check=True)
-
-    receipts = FinalValidationReceipts(tmp_path)
-    request = decode_gate_declaration(
-        {
-            "schema_name": "ai-harness.gate-declaration",
-            "schema_version": 1,
-            "gates": [
-                {
-                    "gate_id": "pass",
-                    "argv": [sys.executable, "-c", "print('ok')"],
-                    "cwd": ".",
-                    "timeout_seconds": 30,
-                }
-            ],
-        }
-    )
-    run_result = receipts.run_gates(change=change, request=request)
-    change_dir = tmp_path / ".ai-harness" / "changes" / change
-    (change_dir / "validation.md").write_text(
-        f"## Verdict\nverdict: pass\ncritical: 0\ngate-run: {run_result.run_id}\n",
-        encoding="utf-8",
-    )
-    seal = receipts.seal(change=change)
-    assert seal.archive_eligible is True
-
-
 @pytest.fixture(autouse=True)
 def _autouse_config(tmp_path: Path):
     _initialize_config(tmp_path, *_PHASES)
+
+
+@pytest.mark.parametrize("verdict", ["pass", "pass-with-warnings"])
+def test_sliced_final_validation_routes_approved_envelope_to_archive(tmp_path: Path, verdict: str) -> None:
+    change_dir = _archiveable_sliced_change(tmp_path, f"sliced-{verdict}", verdict=verdict)
+
+    status = change_continue(tmp_path, f"sliced-{verdict}")
+
+    assert status.nextRecommended == "archive"
+    assert status.sliceStatus is not None
+    assert status.sliceStatus.route == "archive"
+    assert status.blockedReasons == []
+    assert not (change_dir / ".receipts").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -199,6 +182,18 @@ def test_sliced_archive_rejects_when_continuation_approval_invalid(tmp_path: Pat
     assert not (tmp_path / ".ai-harness" / "specs" / "stale-approve").exists()
 
 
+def test_sliced_archive_rejects_missing_capability_validation(tmp_path: Path) -> None:
+    """Every capability retains its own validation prerequisite."""
+    change_dir = _archiveable_sliced_change(tmp_path, "missing-slice-validation")
+    (change_dir / "validations" / "single.md").unlink()
+
+    with pytest.raises(ChangeStoreError) as exc_info:
+        change_archive(tmp_path, "missing-slice-validation")
+
+    assert any("missing its slice validation" in error for error in exc_info.value.errors)
+    assert change_dir.is_dir()
+
+
 def test_sliced_archive_requires_root_final_validation(tmp_path: Path) -> None:
     """Slice validations do not substitute for the root final validation."""
     change_dir = _make_change(tmp_path, "missing-validation")
@@ -231,11 +226,21 @@ def test_sliced_archive_rejects_when_root_validation_is_stale(tmp_path: Path) ->
     _complete_capability(tmp_path, "stale-validation", "stale-validation")
     # Write the root validation BEFORE the approval so it becomes
     # stale the moment the approval is recorded.
-    _stage(change_dir, "validation.md", content="verdict: pass\n")
+    _stage(
+        change_dir,
+        "validation.md",
+        content="## Verdict\nverdict: pass\ncritical: 0\n",
+    )
 
     time.sleep(1.1)  # Force a clear mtime gap.
 
     change_approve(tmp_path, "stale-validation")
+
+    status = change_continue(tmp_path, "stale-validation")
+    assert status.nextRecommended == "validate"
+    assert status.sliceStatus is not None
+    assert status.sliceStatus.route == "final-validate"
+    assert any("older than the latest continuation approval" in reason for reason in status.blockedReasons)
 
     with pytest.raises(ChangeStoreError) as excinfo:
         change_archive(tmp_path, "stale-validation")
@@ -268,7 +273,6 @@ def test_sliced_archive_rejects_when_destination_collides(tmp_path: Path) -> Non
 def test_sliced_archive_moves_change_and_promotes_specs(tmp_path: Path) -> None:
     """A complete sliced change archives successfully."""
     _archiveable_sliced_change(tmp_path, "sliced-success")
-    _seal_archiveable_receipt(tmp_path, "sliced-success")
 
     change_archive(tmp_path, "sliced-success")
 
@@ -288,7 +292,6 @@ def test_sliced_archive_partial_move_is_rolled_back(tmp_path: Path, monkeypatch:
     import shutil
 
     change_dir = _archiveable_sliced_change(tmp_path, "rollback-test")
-    _seal_archiveable_receipt(tmp_path, "rollback-test")
 
     original_move = shutil.move
     calls: list[str] = []
