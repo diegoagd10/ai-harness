@@ -299,7 +299,10 @@ def _stage_change_for_route(tmp_path: Path, change: str, *, next_recommended: st
         if next_recommended in {"validate", "archive"}:
             (change_dir / "implementation.md").write_text("x\n", encoding="utf-8")
         if next_recommended == "archive":
-            (change_dir / "validation.md").write_text("x\n", encoding="utf-8")
+            (change_dir / "validation.md").write_text(
+                "## Verdict\nverdict: pass\ncritical: 0\n",
+                encoding="utf-8",
+            )
 
 
 def test_change_continue_attaches_canonical_explorer_context_for_explore_route(tmp_path: Path) -> None:
@@ -420,53 +423,11 @@ def test_change_continue_attaches_canonical_validator_context_for_validate_route
 
 def test_change_continue_attaches_canonical_archiver_context_for_archive_route(tmp_path: Path) -> None:
     """``archive`` resolves through the alias map to ``change_archiver``."""
-    import subprocess
-    import sys
-
-    from ai_harness.modules.harness.receipts import FinalValidationReceipts, decode_gate_declaration
-
-    # Receipt runner needs a Git top level; scaffold one for the test.
-    subprocess.run(["git", "init", "-q"], cwd=str(tmp_path), check=True)
-    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=str(tmp_path), check=True)
-    subprocess.run(["git", "config", "user.name", "Tester"], cwd=str(tmp_path), check=True)
-
     _initialize_config_with_rules(
         tmp_path,
         {"change_archiver": ["Move specs/ to .ai-harness/specs/", "Roll back partial moves"]},
     )
     _stage_change_for_route(tmp_path, "demo", next_recommended="archive")
-
-    # Without a current receipt the orchestrator must surface the
-    # final-validation gate instead of dispatching the archiver.
-    blocked_status = change_continue(tmp_path, "demo")
-    assert blocked_status.nextRecommended == "validate"
-
-    # Produce a valid receipt so the archiver context attaches.
-    receipts = FinalValidationReceipts(tmp_path)
-    run_result = receipts.run_gates(
-        change="demo",
-        request=decode_gate_declaration(
-            {
-                "schema_name": "ai-harness.gate-declaration",
-                "schema_version": 1,
-                "gates": [
-                    {
-                        "gate_id": "pass",
-                        "argv": [sys.executable, "-c", "print('ok')"],
-                        "cwd": ".",
-                        "timeout_seconds": 30,
-                    }
-                ],
-            }
-        ),
-    )
-    change_dir = tmp_path / ".ai-harness" / "changes" / "demo"
-    (change_dir / "validation.md").write_text(
-        f"## Verdict\nverdict: pass\ncritical: 0\ngate-run: {run_result.run_id}\n",
-        encoding="utf-8",
-    )
-    seal = receipts.seal(change="demo")
-    assert seal.archive_eligible is True
 
     status = change_continue(tmp_path, "demo")
 
@@ -598,17 +559,7 @@ def test_tasks_dependency_is_ready_when_design_or_specs_exists(tmp_path: Path) -
 
 
 def test_archive_requires_validation_and_non_empty_complete_tasks(tmp_path: Path) -> None:
-    """Archive stays blocked for zero or pending tasks even when validation exists."""
-    import subprocess
-    import sys
-
-    from ai_harness.modules.harness.receipts import FinalValidationReceipts, decode_gate_declaration
-
-    # Receipt runner needs a Git top level; scaffold one for the test.
-    subprocess.run(["git", "init", "-q"], cwd=str(tmp_path), check=True)
-    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=str(tmp_path), check=True)
-    subprocess.run(["git", "config", "user.name", "Tester"], cwd=str(tmp_path), check=True)
-
+    """Archive stays blocked for zero or pending tasks even when validation passes."""
     ChangeConfigAdministrator(repo_root=tmp_path).initialize_config()
     change_new(tmp_path, "demo")
     change_dir = tmp_path / ".ai-harness" / "changes" / "demo"
@@ -619,7 +570,10 @@ def test_archive_requires_validation_and_non_empty_complete_tasks(tmp_path: Path
     (change_dir / "specs" / "capability.md").write_text("spec\n", encoding="utf-8")
     (change_dir / "tasks.json").write_text('{"tasks": []}\n', encoding="utf-8")
     (change_dir / "implementation.md").write_text("implemented\n", encoding="utf-8")
-    (change_dir / "validation.md").write_text("pass\n", encoding="utf-8")
+    (change_dir / "validation.md").write_text(
+        "## Verdict\nverdict: pass\ncritical: 0\n",
+        encoding="utf-8",
+    )
 
     assert change_continue(tmp_path, "demo").dependencies["archive"] == "blocked"
 
@@ -640,40 +594,9 @@ def test_archive_requires_validation_and_non_empty_complete_tasks(tmp_path: Path
     task_done(tmp_path, "demo", task.id)
     ready_status = change_continue(tmp_path, "demo")
 
-    # Without an archive-eligible receipt the legacy terminal must
-    # route back to validate per the receipt gate.
     assert ready_status.taskProgress.total == 1
     assert ready_status.dependencies["archive"] == "ready"
-    assert ready_status.nextRecommended == "validate"
-
-    # Produce a valid receipt and confirm the archive route opens.
-    receipts = FinalValidationReceipts(tmp_path)
-    run_result = receipts.run_gates(
-        change="demo",
-        request=decode_gate_declaration(
-            {
-                "schema_name": "ai-harness.gate-declaration",
-                "schema_version": 1,
-                "gates": [
-                    {
-                        "gate_id": "pass",
-                        "argv": [sys.executable, "-c", "print('ok')"],
-                        "cwd": ".",
-                        "timeout_seconds": 30,
-                    }
-                ],
-            }
-        ),
-    )
-    (change_dir / "validation.md").write_text(
-        f"## Verdict\nverdict: pass\ncritical: 0\ngate-run: {run_result.run_id}\n",
-        encoding="utf-8",
-    )
-    seal = receipts.seal(change="demo")
-    assert seal.archive_eligible is True
-
-    authorized_status = change_continue(tmp_path, "demo")
-    assert authorized_status.nextRecommended == "archive"
+    assert ready_status.nextRecommended == "archive"
 
 
 def test_change_errors_on_collision_and_absent_change(tmp_path: Path) -> None:
@@ -865,48 +788,11 @@ def _build_archiveable_change(tmp_path: Path, name: str) -> Path:
     )
     task_done(tmp_path, name, task.id)
     (change_dir / "implementation.md").write_text("implemented\n", encoding="utf-8")
-    (change_dir / "validation.md").write_text("verdict: pass\n", encoding="utf-8")
-    return change_dir
-
-
-def _seal_receipt_for_archive(tmp_path: Path, name: str) -> None:
-    """Run gates and seal an archive-eligible receipt for *name*."""
-    import subprocess as _subprocess
-    import sys as _sys
-
-    from ai_harness.modules.harness.receipts import (  # noqa: WPS433 - test helper
-        FinalValidationReceipts,
-        decode_gate_declaration,
-    )
-
-    if not (tmp_path / ".git").exists():
-        _subprocess.run(["git", "init", "-q"], cwd=str(tmp_path), check=True)
-        _subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=str(tmp_path), check=True)
-        _subprocess.run(["git", "config", "user.name", "Tester"], cwd=str(tmp_path), check=True)
-
-    receipts = FinalValidationReceipts(tmp_path)
-    request = decode_gate_declaration(
-        {
-            "schema_name": "ai-harness.gate-declaration",
-            "schema_version": 1,
-            "gates": [
-                {
-                    "gate_id": "pass",
-                    "argv": [_sys.executable, "-c", "print('ok')"],
-                    "cwd": ".",
-                    "timeout_seconds": 30,
-                }
-            ],
-        }
-    )
-    run_result = receipts.run_gates(change=name, request=request)
-    change_dir = tmp_path / ".ai-harness" / "changes" / name
     (change_dir / "validation.md").write_text(
-        f"## Verdict\nverdict: pass\ncritical: 0\ngate-run: {run_result.run_id}\n",
+        "## Verdict\nverdict: pass\ncritical: 0\n",
         encoding="utf-8",
     )
-    seal = receipts.seal(change=name)
-    assert seal.archive_eligible is True
+    return change_dir
 
 
 # ---------------------------------------------------------------------------
@@ -1058,7 +944,6 @@ def test_change_archive_preflight_does_not_mutate_on_failure(tmp_path: Path) -> 
 def test_change_archive_promotes_specs_and_moves_change_folder(tmp_path: Path) -> None:
     """Successful archive promotes specs and relocates the remaining change folder."""
     _build_archiveable_change(tmp_path, "demo")
-    _seal_receipt_for_archive(tmp_path, "demo")
     change_dir = tmp_path / ".ai-harness" / "changes" / "demo"
 
     change_archive(tmp_path, "demo")
@@ -1079,7 +964,6 @@ def test_change_archive_promotes_specs_and_moves_change_folder(tmp_path: Path) -
 def test_change_archive_excludes_specs_subtree_from_archived_change(tmp_path: Path) -> None:
     """Archived change folder MUST NOT carry a duplicate specs/ subtree."""
     _build_archiveable_change(tmp_path, "demo")
-    _seal_receipt_for_archive(tmp_path, "demo")
     change_archive(tmp_path, "demo")
 
     archive_dest = tmp_path / ".ai-harness" / "archive" / "demo"
@@ -1091,7 +975,6 @@ def test_change_archive_excludes_specs_subtree_from_archived_change(tmp_path: Pa
 def test_change_archive_uses_canonical_top_level_layout(tmp_path: Path) -> None:
     """Archive lands at .ai-harness/archive/{change}, never .ai-harness/changes/archive/{change}."""
     _build_archiveable_change(tmp_path, "demo")
-    _seal_receipt_for_archive(tmp_path, "demo")
     change_archive(tmp_path, "demo")
 
     assert (tmp_path / ".ai-harness" / "archive" / "demo").is_dir()
@@ -1105,7 +988,6 @@ def test_change_archive_rolls_back_when_change_folder_move_fails(
 ) -> None:
     """A failure during the change-folder move restores the source tree intact."""
     _build_archiveable_change(tmp_path, "demo")
-    _seal_receipt_for_archive(tmp_path, "demo")
     change_dir = tmp_path / ".ai-harness" / "changes" / "demo"
     specs_src = change_dir / "specs"
 
@@ -1141,7 +1023,6 @@ def test_change_archive_leaves_source_intact_when_specs_move_fails(
 ) -> None:
     """A failure during the specs move leaves the change folder and archive untouched."""
     _build_archiveable_change(tmp_path, "demo")
-    _seal_receipt_for_archive(tmp_path, "demo")
     change_dir = tmp_path / ".ai-harness" / "changes" / "demo"
     specs_src = change_dir / "specs"
 
@@ -1172,7 +1053,6 @@ def test_change_archive_leaves_source_intact_when_specs_move_fails(
 def test_cli_change_archive_success_prints_done_and_exits_zero(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Successful archive prints exactly 'done' on stdout and exits zero."""
     _build_archiveable_change(tmp_path, "demo")
-    _seal_receipt_for_archive(tmp_path, "demo")
     monkeypatch.chdir(tmp_path)
 
     result = runner.invoke(app, ["change-archive", "demo"])
@@ -1218,7 +1098,6 @@ def test_cli_change_archive_success_does_not_emit_change_status_json(
 ) -> None:
     """Successful archive output is 'done', not a ChangeStatus JSON object."""
     _build_archiveable_change(tmp_path, "demo")
-    _seal_receipt_for_archive(tmp_path, "demo")
     monkeypatch.chdir(tmp_path)
 
     result = runner.invoke(app, ["change-archive", "demo"])
@@ -1229,20 +1108,18 @@ def test_cli_change_archive_success_does_not_emit_change_status_json(
     assert "{" not in result.stdout
 
 
-def test_cli_change_archive_does_not_parse_validation_content(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Archive proceeds with a receipt bound to the validation bytes regardless of prose."""
-
+def test_cli_change_archive_allows_prose_outside_verdict_envelope(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Archive approval reads only the strict Verdict section."""
     _build_archiveable_change(tmp_path, "demo")
-    _seal_receipt_for_archive(tmp_path, "demo")
-    # Validation content is the validator's judgment; the receipt already
-    # binds to the seal-time bytes. Archive proceeds.
     validation_path = tmp_path / ".ai-harness" / "changes" / "demo" / "validation.md"
     body = validation_path.read_text(encoding="utf-8")
-    (tmp_path / ".ai-harness" / "changes" / "demo" / "validation.md").write_text(body + "## Ad-hoc\n", encoding="utf-8")
+    validation_path.write_text(body + "## Ad-hoc\nReview prose.\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
     result = runner.invoke(app, ["change-archive", "demo"])
 
-    assert result.exit_code != 0, result.stderr
-    payload = json.loads(result.stdout)
-    assert "errors" in payload
+    assert result.exit_code == 0, result.stderr
+    assert result.stdout == "done\n"

@@ -77,7 +77,7 @@ from ai_harness.modules.harness.change_flow import (
     hash_scope_digest,
     read_prd_delivery,
 )
-from ai_harness.modules.harness.receipts import FinalValidationReceipts, ReceiptError
+from ai_harness.modules.harness.receipts import ReceiptError, parse_validation_envelope
 from ai_harness.modules.harness.tasks import (
     TaskProgress,
     TaskStoreError,
@@ -86,20 +86,23 @@ from ai_harness.modules.harness.tasks import (
 )
 
 
-def _receipt_archive_eligible(repository_root: Path, change: str) -> bool:
-    """Return ``True`` when an archive-eligible current receipt exists.
-
-    Routes through :class:`FinalValidationReceipts.verify_for_archive`
-    so the same strict recheck governs both archive and routing. The
-    helper swallows every receipt failure (missing, stale, tampered,
-    missing pointer) and returns ``False`` — the caller only needs the
-    boolean to drive the route and surface actionable diagnostics.
-    """
+def _validation_approved(change_dir: Path) -> tuple[bool, str | None]:
+    """Return archive approval and a safe diagnostic from ``validation.md``."""
+    validation_path = change_dir / "validation.md"
+    if not validation_path.is_file():
+        return False, f"Validation approval unavailable: validation.md is missing ({validation_path})"
     try:
-        FinalValidationReceipts(repository_root).verify_for_archive(change=change)
-    except Exception:
-        return False
-    return True
+        envelope = parse_validation_envelope(validation_path.read_bytes())
+    except ReceiptError as exc:
+        return False, f"Validation approval malformed ({exc.code}): {exc.message}"
+    except OSError as exc:
+        return False, f"Validation approval unreadable: {exc}"
+    if not envelope.approved:
+        return (
+            False,
+            f"Validation verdict is not approved for archive: verdict={envelope.verdict}, critical={envelope.critical}",
+        )
+    return True, None
 
 
 _PHASES = ("explore", "prd", "design", "specs", "tasks", "implement", "validate", "archive")
@@ -307,7 +310,13 @@ def _derive_status(root: Path, change: str) -> ChangeStatus:
     # existing phase tokens so older consumers see no change.
     slice_status, blocked_reasons = _derive_slice_status(root, change, change_dir, progress)
     fallback_route = _next_recommended(artifacts, dependencies)
-    fallback_route = _apply_receipt_route_override(root, change, fallback_route, artifacts, slice_status)
+    fallback_route, validation_diagnostic = _apply_validation_route_override(
+        change_dir,
+        fallback_route,
+        slice_status,
+    )
+    if validation_diagnostic is not None:
+        blocked_reasons.append(validation_diagnostic)
     next_recommended = _project_slice_route_to_next_recommended(
         slice_status.route,
         fallback=fallback_route,
@@ -331,31 +340,19 @@ def _derive_status(root: Path, change: str) -> ChangeStatus:
     )
 
 
-def _apply_receipt_route_override(
-    root: Path,
-    change: str,
+def _apply_validation_route_override(
+    change_dir: Path,
     fallback_route: str,
-    artifacts: dict[str, str],
     slice_status: SliceStatus,
-) -> str:
-    """Decide whether the receipt gate sends the change back to validate.
-
-    Both legacy and sliced terminal ``archive`` routes require an
-    archive-eligible current receipt. The receipt gate is additive:
-    existing structural rules remain authoritative, so we only act
-    when the legacy FSM would otherwise have produced ``archive``.
-
-    Legacy mode maps the absence of an archive-eligible receipt onto
-    ``validate``; sliced mode keeps the rich ``final-validate`` route
-    that the projector then surfaces as ``validate``.
-    """
+) -> tuple[str, str | None]:
+    """Route an unapproved terminal validation back to validation."""
     if fallback_route != "archive":
-        return fallback_route
-    if artifacts.get("validate") != "done":
-        return fallback_route
-    if _receipt_archive_eligible(root, change):
-        return fallback_route
-    return "validate" if slice_status.mode == "legacy" else "final-validate"
+        return fallback_route, None
+    approved, diagnostic = _validation_approved(change_dir)
+    if approved:
+        return fallback_route, None
+    route = "validate" if slice_status.mode == "legacy" else "final-validate"
+    return route, diagnostic
 
 
 def _change_dir(root: Path, change: str) -> Path:
@@ -499,7 +496,7 @@ def _derive_slice_status(
     if selected_ordinal is None:
         # Every capability has a valid continuation approval — terminal
         # route (final-validate or archive).
-        return _archive_route_after_all_complete(delivery, completed, change_dir, progress, root)
+        return _archive_route_after_all_complete(delivery, completed, change_dir, progress)
 
     selected_capability = next(cap for cap in delivery.capabilities if cap.ordinal == selected_ordinal)
     next_capability = delivery.capabilities[selected_ordinal] if selected_ordinal < len(delivery.capabilities) else None
@@ -727,7 +724,6 @@ def _derive_slice_status(
             completed,
             change_dir,
             progress,
-            root,
         )
 
     # Continuation approval is valid but another capability is still
@@ -791,12 +787,11 @@ def _archive_route_after_all_complete(
     completed: list[str],
     change_dir: Path,
     progress: TaskProgress,
-    repository_root: Path | None = None,
 ) -> tuple[SliceStatus, list[str]]:
     """Return the archive-or-final-validate SliceStatus for a fully completed PRD."""
     completion_approvals = _latest_continuation_approval_time(change_dir)
     root_validation = change_dir / "validation.md"
-    route, reason = _finalize_route(root_validation, completion_approvals, change_dir.name, repository_root)
+    route, reason = _finalize_route(root_validation, completion_approvals)
 
     status = _build_slice_status(
         mode="sliced",
@@ -817,22 +812,11 @@ def _archive_route_after_all_complete(
 def _finalize_route(
     root_validation: Path,
     completion_approval_time: str | None,
-    change: str,
-    repository_root: Path | None = None,
 ) -> tuple[str, str]:
     """Return ``(archive | final-validate, diagnostic)``.
 
-    Archive routing requires:
-
-    * a non-empty root ``validation.md``;
-    * a validation mtime newer than the most recent continuation
-      approval (when one exists);
-    * a current archive-eligible receipt bound to the same change.
-
-    Sliced and legacy deliveries share this requirement: slice
-    validations, legacy root validations without receipts, and
-    stale/tampered receipts route the Change back to
-    ``final-validate``.
+    Archive routing requires a non-empty, approved root ``validation.md``
+    whose mtime is newer than the most recent continuation approval.
     """
     if not _non_empty_file(root_validation):
         return "final-validate", "Root validation.md is missing — write it before archive."
@@ -854,15 +838,9 @@ def _finalize_route(
         if validation_mtime <= approval_epoch:
             return "final-validate", "Root validation.md is older than the latest continuation approval."
 
-    # Receipt authorization is an additive terminal gate. Existing
-    # structural rules remain authoritative; absence of a current
-    # archive-eligible receipt pushes the Change back to its
-    # final-validation phase rather than to archive.
-    if repository_root is not None and not _receipt_archive_eligible(repository_root, change):
-        return "final-validate", (
-            "Final-validation receipt is missing, stale, or not archive-eligible — "
-            "re-run gates, write validation.md, and run change-receipt-seal."
-        )
+    approved, diagnostic = _validation_approved(root_validation.parent)
+    if not approved:
+        return "final-validate", diagnostic or "Root validation.md is not approved for archive."
 
     return "archive", ""
 
@@ -1587,46 +1565,12 @@ def _archive_preflight(root: Path, change: str) -> list[str]:
     if archive_dest.exists():
         errors.append(f"Archive destination already exists: {archive_dest}")
 
-    # Terminal receipt authorization. We accumulate the failure as a
-    # single error so the CLI's { errors: [...] } shape stays stable and
-    # the existing two-stage move never sees a partial move.
     if validation.is_file():
-        receipt_error = _receipt_archive_error(root, change)
-        if receipt_error is not None:
-            errors.append(receipt_error)
+        approved, diagnostic = _validation_approved(change_dir)
+        if not approved and diagnostic is not None:
+            errors.append(diagnostic)
 
     return errors
-
-
-def _receipt_archive_error(repository_root: Path, change: str) -> str | None:
-    """Return a safe CLI-friendly error when current receipt is not eligible."""
-    try:
-        FinalValidationReceipts(repository_root).verify_for_archive(change=change)
-    except ReceiptError as exc:
-        # Translate code-prefixed errors into single, safe, user-facing
-        # strings. Never expose argv, evidence contents, env values, or
-        # secret material — ReceiptError messages are already vetted.
-        safe_message = exc.message
-        if exc.code == "receipt.missing":
-            safe_message = "no current archive-eligible receipt — run change-gates-run and change-receipt-seal first"
-        elif exc.code == "validation.stale":
-            safe_message = "root validation.md has been edited since sealing — re-seal the receipt"
-        elif exc.code == "validation.missing":
-            safe_message = "root validation.md is missing"
-        elif exc.code == "candidate.stale":
-            safe_message = "candidate has changed since the run — re-run gates"
-        elif exc.code == "run.missing":
-            safe_message = "the referenced native run is missing"
-        elif exc.code == "run.gates-failed":
-            safe_message = "the referenced native run recorded a failed gate"
-        elif exc.code == "receipt.not-eligible":
-            safe_message = "current receipt is not archive-eligible"
-        elif exc.code == "schema.unsupported":
-            safe_message = "current receipt uses an unsupported schema"
-        return f"Receipt authorization failed ({exc.code}): {safe_message}"
-    except Exception:  # pragma: no cover - defensive
-        return "Receipt authorization failed: verification raised an unexpected error"
-    return None
 
 
 def _evaluate_sliced_preflight(
