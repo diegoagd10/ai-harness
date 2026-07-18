@@ -397,17 +397,13 @@ def test_review_bundle_store_registry_pairs_unchanged() -> None:
 def test_public_receipt_object_store_remains_closed_to_checkpoint_kinds() -> None:
     """The public ``ReceiptObjectStore`` has no checkpoint or evidence kind option.
 
-    The public receipt dispatch exposes exactly ``runs`` and
-    ``receipts`` as kind tokens. No checkpoint or evidence kind is
-    added there.
+    The public receipt dispatch exposes exactly ``runs`` as its kind
+    token. No checkpoint or evidence kind is added there.
     """
 
-    from ai_harness.modules.harness.receipts import (
-        RECEIPT_OBJECT_KIND_RECEIPTS,
-        RECEIPT_OBJECT_KIND_RUNS,
-    )
+    from ai_harness.modules.harness.receipts import RECEIPT_OBJECT_KIND_RUNS
 
-    public_kinds = {RECEIPT_OBJECT_KIND_RUNS, RECEIPT_OBJECT_KIND_RECEIPTS}
+    public_kinds = {RECEIPT_OBJECT_KIND_RUNS}
     checkpoint_kinds = {kind for _, kind, _ in _CHECKPOINT_ROLES}
     assert public_kinds.isdisjoint(checkpoint_kinds)
 

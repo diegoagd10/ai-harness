@@ -1,12 +1,11 @@
 """Canonical codec, typed hashes, strict schemas, and request types.
 
-This module is the public seam for everything content-addressed in the
-final-validation receipt workflow. All persisted objects (candidate
-manifests, gate-run records, evidence metadata, sealed receipts, and
-the ``current`` pointer) are encoded through :func:`encode_canonical`
-and identified by :func:`typed_hash`. Both functions are deterministic,
-fail closed on ambiguous or unsupported inputs, and never invent
-fields or timestamps.
+This module is the public seam for canonical codecs, candidate identity,
+validation-envelope parsing, and native gate-run persistence. Persisted
+candidate manifests, gate-run records, and evidence metadata are encoded
+through :func:`encode_canonical` and identified by :func:`typed_hash`.
+Both functions are deterministic, fail closed on ambiguous or unsupported
+inputs, and never invent fields or timestamps.
 
 Public surface
 --------------
@@ -85,19 +84,10 @@ __all__ = [
     "POLICY_INHERIT_REDACT_SECRETS",
     "POLICY_REDACTION_EXACT",
     "RECEIPT_OBJECT_FILENAME",
-    "RECEIPT_OBJECT_KIND_RECEIPTS",
     "RECEIPT_OBJECT_KIND_RUNS",
-    "RECEIPT_POINTER_FILENAME",
-    "RECEIPT_POINTER_LABEL",
-    "RECEIPT_POINTER_SCHEMA_NAME",
-    "RECEIPT_POINTER_SCHEMA_VERSION",
-    "RECEIPT_SCHEMA_NAME",
-    "RECEIPT_SCHEMA_VERSION",
     "RUN_ID_LABEL",
-    "RECEIPT_ID_LABEL",
     "CANDIDATE_ID_LABEL",
     "EVIDENCE_ID_LABEL",
-    "VALIDATION_ID_LABEL",
     "ReceiptObjectStore",
     "ReceiptStoreError",
     "ValidationEnvelope",
@@ -127,12 +117,6 @@ GATE_RUN_SCHEMA_VERSION: Final[int] = 1
 EVIDENCE_SCHEMA_NAME: Final[str] = "ai-harness.evidence"
 EVIDENCE_SCHEMA_VERSION: Final[int] = 1
 
-RECEIPT_SCHEMA_NAME: Final[str] = "ai-harness.final-validation-receipt"
-RECEIPT_SCHEMA_VERSION: Final[int] = 1
-
-RECEIPT_POINTER_SCHEMA_NAME: Final[str] = "ai-harness.receipt-pointer"
-RECEIPT_POINTER_SCHEMA_VERSION: Final[int] = 1
-
 GATE_DECLARATION_SCHEMA_NAME: Final[str] = "ai-harness.gate-declaration"
 GATE_DECLARATION_SCHEMA_VERSION: Final[int] = 1
 
@@ -143,11 +127,8 @@ POLICY_REDACTION_EXACT: Final[str] = "exact-secret-values-v1"
 
 # Typed ID labels — versioned per object so IDs cannot cross-substitute.
 RUN_ID_LABEL: Final[str] = "ai-harness/gate-run/v1"
-RECEIPT_ID_LABEL: Final[str] = "ai-harness/receipt/v1"
 CANDIDATE_ID_LABEL: Final[str] = "ai-harness/candidate/v1"
 EVIDENCE_ID_LABEL: Final[str] = "ai-harness/evidence/v1"
-VALIDATION_ID_LABEL: Final[str] = "ai-harness/validation/v1"
-RECEIPT_POINTER_LABEL: Final[str] = "ai-harness/receipt-pointer/v1"
 
 # Canonical key sets per schema. Strict decoders reject unknown keys and
 # refuse missing keys; nothing here may be added without bumping the
@@ -214,26 +195,6 @@ CANONICAL_KEYS: Final[Mapping[str, frozenset[str]]] = {
             "complete",
             "redaction_policy",
             "replacement_count",
-        }
-    ),
-    "receipt": frozenset(
-        {
-            "schema_name",
-            "schema_version",
-            "candidate_policy",
-            "candidate_id",
-            "gate_run",
-            "validation",
-            "semantic",
-            "native",
-            "archive_eligible",
-        }
-    ),
-    "receipt-pointer": frozenset(
-        {
-            "receipt_id",
-            "schema_name",
-            "schema_version",
         }
     ),
 }
@@ -1246,8 +1207,6 @@ def _git_bytes(repo: Path, *args: str) -> bytes:
 
 RECEIPT_OBJECT_FILENAME: Final[str] = "object.json"
 RECEIPT_OBJECT_KIND_RUNS: Final[str] = "runs"
-RECEIPT_OBJECT_KIND_RECEIPTS: Final[str] = "receipts"
-RECEIPT_POINTER_FILENAME: Final[str] = "current"
 
 
 class ReceiptStoreError(RuntimeError):
@@ -1633,74 +1592,6 @@ class ReceiptObjectStore:
             code="evidence.invalid",
         )
 
-    def replace_current_pointer(self, receipt_id: str) -> None:
-        """Durably replace the canonical ``current`` pointer."""
-        validate_typed_id(receipt_id)
-        anchor = _storage_anchor(self.receipts_dir)
-        _ensure_directory(self.receipts_dir, anchor=anchor)
-        pointer_payload = {
-            "receipt_id": receipt_id,
-            "schema_name": RECEIPT_POINTER_SCHEMA_NAME,
-            "schema_version": RECEIPT_POINTER_SCHEMA_VERSION,
-        }
-        canonical = encode_canonical(pointer_payload)
-        suffix = secrets.token_hex(8)
-        tmp_file = self.receipts_dir / f".current-ptr-{suffix}"
-        try:
-            _write_durable(tmp_file, canonical)
-            os.replace(tmp_file, self.receipts_dir / RECEIPT_POINTER_FILENAME)
-            _fsync_directory(self.receipts_dir)
-        except ReceiptStoreError:
-            tmp_file.unlink(missing_ok=True)
-            raise
-        except OSError as exc:
-            tmp_file.unlink(missing_ok=True)
-            raise ReceiptStoreError(f"could not replace current pointer: {exc}", code="storage.failed") from exc
-
-    def read_current_pointer(self) -> str:
-        """Read and strictly validate the canonical current pointer."""
-        pointer_path = self.receipts_dir / RECEIPT_POINTER_FILENAME
-        try:
-            data = _stable_regular_read(
-                pointer_path,
-                anchor=_storage_anchor(self.receipts_dir),
-                description="current pointer",
-                code="receipt.invalid",
-            )
-        except ReceiptStoreError as exc:
-            if not _path_exists(pointer_path):
-                raise ReceiptStoreError("no current pointer present", code="receipt.missing") from exc
-            raise
-        try:
-            payload = _decode_canonical_json(data, description="current pointer")
-        except ReceiptStoreError as exc:
-            try:
-                fallback = json.loads(data.decode("utf-8"))
-            except (UnicodeDecodeError, json.JSONDecodeError) as fallback_exc:
-                raise exc from fallback_exc
-            if isinstance(fallback, dict) and (
-                fallback.get("schema_name") != RECEIPT_POINTER_SCHEMA_NAME
-                or fallback.get("schema_version") != RECEIPT_POINTER_SCHEMA_VERSION
-            ):
-                raise ReceiptStoreError("current pointer has an unsupported schema", code="schema.unsupported") from exc
-            raise
-        expected = {"receipt_id", "schema_name", "schema_version"}
-        if set(payload) != expected:
-            raise ReceiptStoreError("current pointer has unexpected shape", code="receipt.invalid")
-        if payload["schema_name"] != RECEIPT_POINTER_SCHEMA_NAME:
-            raise ReceiptStoreError("current pointer has an unsupported schema", code="schema.unsupported")
-        if (
-            isinstance(payload["schema_version"], bool)
-            or not isinstance(payload["schema_version"], int)
-            or payload["schema_version"] != RECEIPT_POINTER_SCHEMA_VERSION
-        ):
-            raise ReceiptStoreError("current pointer has an unsupported schema", code="schema.unsupported")
-        try:
-            validate_typed_id(payload["receipt_id"])
-        except (CodecError, TypeError) as exc:
-            raise ReceiptStoreError("current pointer has an invalid receipt id", code="receipt.invalid") from exc
-        return payload["receipt_id"]
-
     # ---- internal helpers ----
 
     def _kind_dir(self, kind: str) -> Path:
@@ -1710,8 +1601,6 @@ class ReceiptObjectStore:
     def _id_label_for_kind(kind: str) -> str:
         if kind == RECEIPT_OBJECT_KIND_RUNS:
             return RUN_ID_LABEL
-        if kind == RECEIPT_OBJECT_KIND_RECEIPTS:
-            return RECEIPT_ID_LABEL
         raise ReceiptStoreError(f"unknown object kind: {kind!r}", code="storage.failed")
 
 
@@ -1726,8 +1615,8 @@ def _path_exists(path: Path) -> bool:
 
 
 def _validate_kind(kind: str) -> None:
-    """Reject kinds outside the public receipt set; review kinds are never accepted here."""
-    if kind not in {RECEIPT_OBJECT_KIND_RUNS, RECEIPT_OBJECT_KIND_RECEIPTS}:
+    """Reject kinds outside the public runs-only receipt set."""
+    if kind != RECEIPT_OBJECT_KIND_RUNS:
         raise ReceiptStoreError(f"unknown object kind: {kind!r}", code="storage.failed")
 
 
@@ -2528,27 +2417,6 @@ class GateRunResult:
     gates: tuple[GateOutcomeSummary, ...]
 
 
-@dataclass(frozen=True, slots=True)
-class SealResult:
-    """Public result of :meth:`FinalValidationReceipts.seal`."""
-
-    receipt_id: str
-    gate_run: str
-    semantic_approval: bool
-    native_all_gates_passed: bool
-    archive_eligible: bool
-
-
-@dataclass(frozen=True, slots=True)
-class ArchiveAuthorization:
-    """Authorization identity returned by :meth:`FinalValidationReceipts.verify_for_archive`."""
-
-    receipt_id: str
-    run_id: str
-    candidate_id: str
-    validation_id: str
-
-
 # Public, machine-readable error class used by the deep receipts module
 # for every failure that surfaces through public operations.
 class ReceiptError(RuntimeError):
@@ -2581,17 +2449,10 @@ class ReceiptError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class FinalValidationReceipts:
-    """Public deep seam for receipts.
+    """Public deep seam for native gate execution.
 
-    Composes the candidate identity, gate execution, redaction, evidence
-    publication, validation parsing, sealing, and verification helpers
-    behind three operations:
-
-    * :meth:`run_gates` — execute the declared gates and persist facts.
-    * :meth:`seal` — bind the current root ``validation.md`` and
-      current run into a single archive-eligible receipt.
-    * :meth:`verify_for_archive` — strict read-only recheck before
-      archive.
+    Composes candidate identity, gate execution, redaction, and immutable
+    evidence publication behind :meth:`run_gates`.
     """
 
     repository_root: Path
@@ -2612,9 +2473,6 @@ class FinalValidationReceipts:
         if change_stat is not None and (stat.S_ISLNK(change_stat.st_mode) or not stat.S_ISDIR(change_stat.st_mode)):
             raise ReceiptError("Change directory must be a real directory", code="change.invalid")
         return ReceiptObjectStore(change_dir / ".receipts")
-
-    def _receipts_dir_for(self, change: str) -> Path:
-        return self.repository_root / ".ai-harness" / "changes" / change / ".receipts"
 
     # ------------------------------------------------------------------
     # Public seam operations
@@ -2716,265 +2574,6 @@ class FinalValidationReceipts:
             gates=tuple(outcome_summaries),
         )
 
-    def seal(self, *, change: str) -> SealResult:
-        """Bind the current root ``validation.md`` and current native run
-        into an immutable receipt.
-
-        Validation envelope is parsed, the referenced run is loaded and
-        its evidence verified, the candidate is recaptured, the
-        validation body is hash-bound, and the receipt is published.
-        A receipt with semantic denial or failed native gates is still
-        published for diagnosis, but only the conjunction of all three
-        facts (``semantic.approved``, ``native.all_gates_passed``, and
-        ``candidate_stable``) flips ``archive_eligible`` to true.
-        """
-        try:
-            _validate_change_name(change)
-        except CandidateBuilderError as exc:
-            raise ReceiptError(exc.message, code=exc.code) from exc
-
-        store = self.store_for(change)
-        validation_path = self.repository_root / ".ai-harness" / "changes" / change / "validation.md"
-        try:
-            validation_bytes = _stable_regular_read(
-                validation_path,
-                anchor=self.repository_root,
-                description="validation.md",
-                code="validation.missing",
-            )
-        except ReceiptStoreError as exc:
-            raise ReceiptError(exc.message, code="validation.missing") from exc
-        try:
-            envelope = parse_validation_envelope(validation_bytes)
-        except ReceiptError:
-            raise
-        except Exception as exc:  # pragma: no cover - defensive guard
-            raise ReceiptError(
-                f"could not parse validation envelope: {exc}",
-                code="validation.malformed",
-            ) from exc
-
-        # Resolve the Git root and load the referenced run + evidence.
-        repo_root = _resolve_git_top_level(self.repository_root)
-        run_payload = _load_run(store, envelope.gate_run, repo_root=repo_root)
-
-        # Re-capture the candidate now and require it to match the
-        # run's after-candidate. A run that mutated the candidate may be
-        # sealed diagnostically, but can never become eligible.
-        candidate = _capture_candidate(repo_root, change)
-        after_candidate_id = run_payload["candidate_after"]["id"]
-        if candidate.candidate_id != after_candidate_id:
-            raise ReceiptError(
-                "current candidate does not match the run's after-candidate",
-                code="candidate.stale",
-                context={"change": change},
-            )
-        candidate_stable = run_payload["candidate_before"]["id"] == after_candidate_id
-
-        # Build the receipt payload (semantic and native fields derived).
-        validation_id = hash_validation_bytes(change, validation_bytes)
-        semantic_payload = {
-            "verdict": envelope.verdict,
-            "critical": envelope.critical,
-            "gate_run": envelope.gate_run,
-            "approved": envelope.approved,
-        }
-        native_payload = {
-            "all_gates_passed": bool(run_payload["all_gates_passed"]),
-            "candidate_stable": candidate_stable,
-        }
-        receipt_payload: dict[str, Any] = {
-            "schema_name": RECEIPT_SCHEMA_NAME,
-            "schema_version": RECEIPT_SCHEMA_VERSION,
-            "candidate_policy": POLICY_GIT_WORKTREE,
-            "candidate_id": after_candidate_id,
-            "gate_run": envelope.gate_run,
-            "validation": {
-                "path": "validation.md",
-                "digest": validation_id,
-            },
-            "semantic": semantic_payload,
-            "native": native_payload,
-            "archive_eligible": envelope.approved and native_payload["all_gates_passed"] and candidate_stable,
-        }
-
-        # Publish the receipt bundle and update the current pointer.
-        receipt_id = store.publish_object(RECEIPT_OBJECT_KIND_RECEIPTS, receipt_payload)
-        store.replace_current_pointer(receipt_id)
-
-        return SealResult(
-            receipt_id=receipt_id,
-            gate_run=envelope.gate_run,
-            semantic_approval=envelope.approved,
-            native_all_gates_passed=native_payload["all_gates_passed"],
-            archive_eligible=receipt_payload["archive_eligible"],
-        )
-
-    def verify_for_archive(self, *, change: str) -> ArchiveAuthorization:
-        """Perform the final read-only transitive receipt authorization check."""
-        try:
-            _validate_change_name(change)
-        except CandidateBuilderError as exc:
-            raise ReceiptError(exc.message, code=exc.code) from exc
-        store = self.store_for(change)
-        try:
-            receipt_id = store.read_current_pointer()
-            receipt_payload = store.read_object(RECEIPT_OBJECT_KIND_RECEIPTS, receipt_id)
-        except ReceiptStoreError as exc:
-            code = "receipt.missing" if exc.code == "receipt.missing" else exc.code
-            raise ReceiptError(f"could not read current receipt: {exc.message}", code=code) from exc
-
-        _validate_receipt_schema(receipt_payload)
-        # Resolve the Git top level before loading the run so stored
-        # gate cwd values can be transitively re-confirmed against the
-        # repository during strict verification.
-        repo_root = _resolve_git_top_level(self.repository_root)
-        run_id = receipt_payload["gate_run"]
-        semantic = receipt_payload["semantic"]
-        native = receipt_payload["native"]
-        run_payload = _load_run(store, run_id, repo_root=repo_root)
-        if semantic["gate_run"] != run_id:
-            raise ReceiptError("receipt semantic gate run does not match its run", code="receipt.invalid")
-        if receipt_payload["candidate_id"] != run_payload["candidate_after"]["id"]:
-            raise ReceiptError("receipt candidate is not bound to the run after-candidate", code="receipt.invalid")
-        expected_stable = run_payload["candidate_before"]["id"] == run_payload["candidate_after"]["id"]
-        if (
-            native["all_gates_passed"] is not run_payload["all_gates_passed"]
-            or native["candidate_stable"] is not expected_stable
-        ):
-            raise ReceiptError("receipt native facts do not match the run", code="receipt.invalid")
-
-        validation_path = self.repository_root / ".ai-harness" / "changes" / change / "validation.md"
-        try:
-            validation_bytes = _stable_regular_read(
-                validation_path,
-                anchor=self.repository_root,
-                description="validation.md",
-                code="validation.missing",
-            )
-        except ReceiptStoreError as exc:
-            raise ReceiptError(exc.message, code="validation.missing") from exc
-        try:
-            envelope = parse_validation_envelope(validation_bytes)
-        except ReceiptError:
-            raise
-        stored_validation = receipt_payload["validation"]
-        validation_id = hash_validation_bytes(change, validation_bytes)
-        if stored_validation["digest"] != validation_id:
-            raise ReceiptError(
-                "validation.md has been edited since sealing",
-                code="validation.stale",
-                context={"change": change},
-            )
-        if (
-            envelope.gate_run != run_id
-            or envelope.verdict != semantic["verdict"]
-            or envelope.critical != semantic["critical"]
-            or envelope.approved is not semantic["approved"]
-        ):
-            raise ReceiptError("receipt semantic facts do not match validation.md", code="receipt.invalid")
-        if receipt_payload["archive_eligible"] is not (
-            envelope.approved and run_payload["all_gates_passed"] and expected_stable
-        ):
-            raise ReceiptError("receipt archive eligibility is inconsistent", code="receipt.invalid")
-
-        current_candidate = _capture_candidate(repo_root, change)
-        if current_candidate.candidate_id != receipt_payload["candidate_id"]:
-            raise ReceiptError(
-                "current candidate does not match the stored candidate_id",
-                code="candidate.stale",
-                context={"change": change},
-            )
-
-        try:
-            late_receipt_id = store.read_current_pointer()
-        except ReceiptStoreError as exc:
-            raise ReceiptError(
-                f"current pointer changed during verification: {exc.message}", code="receipt.invalid"
-            ) from exc
-        if late_receipt_id != receipt_id:
-            raise ReceiptError("current pointer changed during verification", code="receipt.invalid")
-        try:
-            late_validation_bytes = _stable_regular_read(
-                validation_path,
-                anchor=self.repository_root,
-                description="validation.md",
-                code="validation.stale",
-            )
-        except ReceiptStoreError as exc:
-            raise ReceiptError(exc.message, code="validation.stale") from exc
-        if late_validation_bytes != validation_bytes:
-            raise ReceiptError("validation.md changed during verification", code="validation.stale")
-        return ArchiveAuthorization(
-            receipt_id=receipt_id,
-            run_id=run_id,
-            candidate_id=receipt_payload["candidate_id"],
-            validation_id=validation_id,
-        )
-
-
-def _validate_receipt_schema(payload: Mapping[str, Any], *, require_eligible: bool = True) -> None:
-    """Validate exact receipt fields and recompute all redundant booleans."""
-    if set(payload) != CANONICAL_KEYS["receipt"]:
-        raise ReceiptError("stored receipt has unexpected keys", code="receipt.invalid")
-    if (
-        payload["schema_name"] != RECEIPT_SCHEMA_NAME
-        or isinstance(payload["schema_version"], bool)
-        or not isinstance(payload["schema_version"], int)
-        or payload["schema_version"] != RECEIPT_SCHEMA_VERSION
-    ):
-        raise ReceiptError("stored receipt uses an unsupported schema", code="schema.unsupported")
-    if payload["candidate_policy"] != POLICY_GIT_WORKTREE:
-        raise ReceiptError("stored receipt uses an unsupported candidate policy", code="policy.unsupported")
-    for field in ("candidate_id", "gate_run"):
-        try:
-            validate_typed_id(payload[field])
-        except (CodecError, TypeError) as exc:
-            raise ReceiptError(f"receipt {field} is invalid", code="receipt.invalid") from exc
-    validation = payload["validation"]
-    if (
-        not isinstance(validation, dict)
-        or set(validation) != {"path", "digest"}
-        or validation["path"] != "validation.md"
-    ):
-        raise ReceiptError("receipt validation binding is invalid", code="receipt.invalid")
-    try:
-        validate_typed_id(validation["digest"])
-    except (CodecError, TypeError) as exc:
-        raise ReceiptError("receipt validation digest is invalid", code="receipt.invalid") from exc
-    semantic = payload["semantic"]
-    if not isinstance(semantic, dict) or set(semantic) != {"verdict", "critical", "gate_run", "approved"}:
-        raise ReceiptError("receipt semantic envelope has unexpected keys", code="receipt.invalid")
-    if (
-        semantic["verdict"] not in _KNOWN_VERDICTS
-        or isinstance(semantic["critical"], bool)
-        or not isinstance(semantic["critical"], int)
-        or semantic["critical"] < 0
-    ):
-        raise ReceiptError("receipt semantic facts are invalid", code="receipt.invalid")
-    try:
-        validate_typed_id(semantic["gate_run"])
-    except (CodecError, TypeError) as exc:
-        raise ReceiptError("receipt semantic gate run is invalid", code="receipt.invalid") from exc
-    semantic_approved = semantic["verdict"] in {"pass", "pass-with-warnings"} and semantic["critical"] == 0
-    if semantic["approved"] is not semantic_approved:
-        raise ReceiptError("receipt semantic approval is inconsistent", code="receipt.invalid")
-    native = payload["native"]
-    if (
-        not isinstance(native, dict)
-        or set(native) != {"all_gates_passed", "candidate_stable"}
-        or not all(isinstance(native[field], bool) for field in native)
-    ):
-        raise ReceiptError("receipt native envelope has unexpected facts", code="receipt.invalid")
-    if not isinstance(payload["archive_eligible"], bool):
-        raise ReceiptError("receipt archive eligibility is not boolean", code="receipt.invalid")
-    if require_eligible and payload["archive_eligible"] is not True:
-        raise ReceiptError("current receipt is not archive-eligible", code="receipt.not-eligible")
-
-    # ------------------------------------------------------------------
-    # Internals
-    # ------------------------------------------------------------------
-
 
 def _capture_candidate(repo_root: Path, change: str) -> CandidateIdentity:
     """Capture and return the complete candidate identity."""
@@ -2986,330 +2585,6 @@ def _capture_candidate(repo_root: Path, change: str) -> CandidateIdentity:
             code=exc.code,
             context={key: value for key, value in (("category", exc.category), ("path", exc.path)) if value},
         ) from exc
-
-
-def _capture_candidate_id(repo_root: Path, change: str) -> str:
-    return _capture_candidate(repo_root, change).candidate_id
-
-
-def _load_run(store: ReceiptObjectStore, run_id: str, *, repo_root: Path) -> dict[str, Any]:
-    """Load one run and verify every schema, redundant fact, and evidence byte."""
-    try:
-        validate_typed_id(run_id)
-        run_payload = store.read_run_payload(run_id)
-    except CodecError as exc:
-        raise ReceiptError(f"invalid run id: {exc}", code="run.invalid") from exc
-    except ReceiptStoreError as exc:
-        code = "run.missing" if "not found" in exc.message else "run.invalid"
-        raise ReceiptError(f"run payload is unreadable: {exc.message}", code=code) from exc
-
-    _validate_run_schema(run_payload, repo_root=repo_root)
-    bundle = store.bundle_path(RECEIPT_OBJECT_KIND_RUNS, run_id)
-    evidence_dir = bundle / "evidence"
-    try:
-        evidence_entries = list(os.scandir(evidence_dir))
-    except OSError as exc:
-        raise ReceiptError(f"run evidence directory is unreadable: {exc}", code="run.invalid") from exc
-    expected_paths: set[str] = set()
-    for index, gate in enumerate(run_payload["gates"]):
-        for stream_name in ("stdout", "stderr"):
-            metadata = gate[stream_name]
-            relative = metadata["path"]
-            expected_paths.add(relative.removeprefix("evidence/"))
-            try:
-                stored_bytes = store.read_run_evidence(run_id, relative)
-            except ReceiptStoreError as exc:
-                raise ReceiptError(
-                    f"evidence for gate {index} {stream_name} is unreadable: {exc.message}",
-                    code="run.invalid",
-                ) from exc
-            if len(stored_bytes) != metadata["bytes"]:
-                raise ReceiptError(
-                    f"evidence length mismatch for gate {index} {stream_name}",
-                    code="run.invalid",
-                )
-            if typed_hash(EVIDENCE_ID_LABEL, stored_bytes) != metadata["digest"]:
-                raise ReceiptError(
-                    f"evidence digest mismatch for gate {index} {stream_name}",
-                    code="run.invalid",
-                )
-    actual_paths = set()
-    for entry in evidence_entries:
-        try:
-            entry_stat = entry.stat(follow_symlinks=False)
-        except OSError as exc:
-            raise ReceiptError("run evidence contains an unreadable entry", code="run.invalid") from exc
-        if stat.S_ISLNK(entry_stat.st_mode) or not stat.S_ISREG(entry_stat.st_mode):
-            raise ReceiptError("run evidence contains a non-regular entry", code="run.invalid")
-        actual_paths.add(entry.name)
-    if actual_paths != expected_paths:
-        raise ReceiptError("run evidence contains undeclared files", code="run.invalid")
-    return run_payload
-
-
-def _validate_run_schema(payload: Mapping[str, Any], *, repo_root: Path) -> None:
-    """Validate the exact run schema and recompute all derived gate facts."""
-    if set(payload) != CANONICAL_KEYS["gate-run"]:
-        raise ReceiptError("stored run has unexpected top-level keys", code="run.invalid")
-    if (
-        payload["schema_name"] != GATE_RUN_SCHEMA_NAME
-        or isinstance(payload["schema_version"], bool)
-        or not isinstance(payload["schema_version"], int)
-        or payload["schema_version"] != GATE_RUN_SCHEMA_VERSION
-    ):
-        raise ReceiptError("stored run uses an unsupported schema", code="schema.unsupported")
-    if payload["candidate_policy"] != POLICY_GIT_WORKTREE:
-        raise ReceiptError("stored run uses an unsupported candidate policy", code="policy.unsupported")
-    _validate_candidate_reference(payload["candidate_before"])
-    _validate_candidate_reference(payload["candidate_after"])
-    gates = payload["gates"]
-    if not isinstance(gates, list) or not gates or len(gates) > MAX_GATE_COUNT:
-        raise ReceiptError("stored run must contain one through 64 gates", code="run.invalid")
-    seen: set[str] = set()
-    for index, gate in enumerate(gates):
-        _validate_gate_record(gate, index=index, repo_root=repo_root)
-        gate_id = gate["gate_id"]
-        if gate_id in seen:
-            raise ReceiptError("stored run contains duplicate gate ids", code="run.invalid")
-        seen.add(gate_id)
-    derived = (
-        all(gate["passed"] for gate in gates) and payload["candidate_before"]["id"] == payload["candidate_after"]["id"]
-    )
-    if payload["all_gates_passed"] is not derived:
-        raise ReceiptError("stored run aggregate pass fact is inconsistent", code="run.invalid")
-
-
-def _validate_candidate_reference(reference: Any) -> None:
-    if not isinstance(reference, dict) or set(reference) != {"id", "manifest"}:
-        raise ReceiptError("run candidate reference has unexpected shape", code="run.invalid")
-    try:
-        validate_typed_id(reference["id"])
-    except (CodecError, TypeError) as exc:
-        raise ReceiptError("run candidate reference has an invalid id", code="run.invalid") from exc
-    manifest = reference["manifest"]
-    _validate_candidate_manifest(manifest)
-    try:
-        expected = typed_hash(CANDIDATE_ID_LABEL, encode_canonical(manifest))
-    except CodecError as exc:
-        raise ReceiptError("run candidate manifest is not canonical", code="run.invalid") from exc
-    if expected != reference["id"]:
-        raise ReceiptError("run candidate manifest does not match its id", code="run.invalid")
-
-
-def _validate_candidate_manifest(manifest: Any) -> None:
-    if not isinstance(manifest, dict) or set(manifest) != CANONICAL_KEYS["candidate"]:
-        raise ReceiptError("candidate manifest has unexpected keys", code="run.invalid")
-    if (
-        manifest["schema_name"] != CANDIDATE_SCHEMA_NAME
-        or isinstance(manifest["schema_version"], bool)
-        or not isinstance(manifest["schema_version"], int)
-        or manifest["schema_version"] != CANDIDATE_SCHEMA_VERSION
-    ):
-        raise ReceiptError("candidate manifest uses an unsupported schema", code="schema.unsupported")
-    if manifest["policy"] != POLICY_GIT_WORKTREE:
-        raise ReceiptError("candidate manifest uses an unsupported policy", code="policy.unsupported")
-    head = manifest["head"]
-    if not isinstance(head, dict) or head.get("state") not in {"commit", "unborn"}:
-        raise ReceiptError("candidate head is invalid", code="run.invalid")
-    if head["state"] == "commit":
-        if set(head) != {"state", "oid"} or not isinstance(head["oid"], str) or not GIT_OID_RE.fullmatch(head["oid"]):
-            raise ReceiptError("candidate head commit is invalid", code="run.invalid")
-    elif set(head) != {"state"}:
-        raise ReceiptError("candidate unborn head is invalid", code="run.invalid")
-    exclusions = manifest["exclusions"]
-    if not isinstance(exclusions, dict) or set(exclusions) != {"exact", "prefix"}:
-        raise ReceiptError("candidate exclusions are invalid", code="run.invalid")
-    for field in ("exact", "prefix"):
-        values = exclusions[field]
-        if not isinstance(values, list) or not all(isinstance(value, str) for value in values):
-            raise ReceiptError("candidate exclusions are invalid", code="run.invalid")
-    for field in ("index", "worktree", "untracked"):
-        records = manifest[field]
-        if not isinstance(records, list):
-            raise ReceiptError("candidate records are invalid", code="run.invalid")
-        for record in records:
-            if field == "index":
-                _validate_index_record(record)
-            else:
-                _validate_candidate_record(record, field)
-        paths = [record["path"].encode("utf-8") for record in records]
-        if paths != sorted(paths) or len(paths) != len(set(paths)) and field != "index":
-            raise ReceiptError("candidate records are not canonically sorted", code="run.invalid")
-        if field == "index" and [(record["path"].encode("utf-8"), record["stage"]) for record in records] != sorted(
-            (record["path"].encode("utf-8"), record["stage"]) for record in records
-        ):
-            raise ReceiptError("candidate index records are not canonically sorted", code="run.invalid")
-
-
-def _valid_manifest_path(path: str) -> bool:
-    return (
-        bool(path)
-        and "\x00" not in path
-        and not path.startswith("/")
-        and "\\" not in path
-        and path != "."
-        and ".." not in path.split("/")
-    )
-
-
-def _validate_index_record(record: Any) -> None:
-    if not isinstance(record, dict) or set(record) != {"path", "mode", "oid", "stage"}:
-        raise ReceiptError("candidate index record is invalid", code="run.invalid")
-    if not isinstance(record["path"], str) or not _valid_manifest_path(record["path"]):
-        raise ReceiptError("candidate index record is invalid", code="run.invalid")
-    if not isinstance(record["mode"], str) or not GIT_PLUMBING_MODE_RE.fullmatch(record["mode"]):
-        raise ReceiptError("candidate index mode is invalid", code="run.invalid")
-    if not isinstance(record["oid"], str) or not GIT_OID_RE.fullmatch(record["oid"]):
-        raise ReceiptError("candidate index object id is invalid", code="run.invalid")
-    if isinstance(record["stage"], bool) or not isinstance(record["stage"], int) or record["stage"] not in {0, 1, 2, 3}:
-        raise ReceiptError("candidate index stage is invalid", code="run.invalid")
-
-
-def _validate_candidate_record(record: Any, field: str) -> None:
-    if (
-        not isinstance(record, dict)
-        or not isinstance(record.get("path"), str)
-        or not _valid_manifest_path(record["path"])
-    ):
-        raise ReceiptError(f"candidate {field} record is invalid", code="run.invalid")
-    kind = record.get("kind")
-    expected: dict[str, set[str]] = {
-        "missing": {"path", "kind"},
-        "regular": {"path", "kind", "mode", "content"},
-        "symlink": {"path", "kind", "mode", "content"},
-        "submodule": {"path", "kind", "mode", "head", "candidate_id"},
-    }
-    if kind not in expected or set(record) != expected[kind]:
-        raise ReceiptError(f"candidate {field} record is invalid", code="run.invalid")
-    if kind == "regular" and record["mode"] not in {"100644", "100755"}:
-        raise ReceiptError(f"candidate {field} regular mode is invalid", code="run.invalid")
-    if kind == "symlink" and record["mode"] != "120000":
-        raise ReceiptError(f"candidate {field} symlink mode is invalid", code="run.invalid")
-    if kind == "submodule":
-        if (
-            record["mode"] != "160000"
-            or not isinstance(record["head"], dict)
-            or record["head"].get("state") not in {"commit", "unborn"}
-        ):
-            raise ReceiptError(f"candidate {field} submodule record is invalid", code="run.invalid")
-        if record["head"]["state"] == "commit" and (
-            set(record["head"]) != {"state", "oid"}
-            or not isinstance(record["head"].get("oid"), str)
-            or not GIT_OID_RE.fullmatch(record["head"]["oid"])
-        ):
-            raise ReceiptError(f"candidate {field} submodule head is invalid", code="run.invalid")
-        if record["head"]["state"] == "unborn" and set(record["head"]) != {"state"}:
-            raise ReceiptError(f"candidate {field} submodule head is invalid", code="run.invalid")
-        try:
-            validate_typed_id(record["candidate_id"])
-        except (CodecError, TypeError) as exc:
-            raise ReceiptError(f"candidate {field} submodule id is invalid", code="run.invalid") from exc
-    elif kind in {"regular", "symlink"}:
-        try:
-            validate_typed_id(record["content"])
-        except (CodecError, TypeError) as exc:
-            raise ReceiptError(f"candidate {field} content id is invalid", code="run.invalid") from exc
-
-
-def _validate_gate_record(gate: Any, *, index: int, repo_root: Path) -> None:
-    if not isinstance(gate, dict) or set(gate) != CANONICAL_KEYS["gate-record"]:
-        raise ReceiptError(f"gate record {index} has unexpected keys", code="run.invalid")
-    if not isinstance(gate["gate_id"], str) or not GATE_ID_PATTERN.fullmatch(gate["gate_id"]):
-        raise ReceiptError(f"gate record {index} has an invalid id", code="run.invalid")
-    argv = gate["argv"]
-    if (
-        not isinstance(argv, list)
-        or not argv
-        or len(argv) > MAX_GATE_ARGV_COUNT
-        or not all(isinstance(item, str) and item and "\x00" not in item for item in argv)
-    ):
-        raise ReceiptError(f"gate record {index} argv is invalid", code="run.invalid")
-    total_argv_bytes = 0
-    for entry in argv:
-        encoded = entry.encode("utf-8")
-        if len(encoded) > MAX_GATE_ARGV_BYTES:
-            raise ReceiptError(f"gate record {index} argv is invalid", code="run.invalid")
-        total_argv_bytes += len(encoded)
-    if total_argv_bytes > MAX_GATE_ARGV_TOTAL_BYTES:
-        raise ReceiptError(f"gate record {index} argv is invalid", code="run.invalid")
-    cwd = gate["cwd"]
-    if (
-        not isinstance(cwd, str)
-        or not cwd
-        or "\x00" in cwd
-        or "\\" in cwd
-        or cwd.startswith("/")
-        or cwd == ".."
-        or cwd.startswith("../")
-        or "/.." in cwd
-        or cwd.endswith("/..")
-    ):
-        raise ReceiptError(f"gate record {index} cwd is invalid", code="run.invalid")
-    _check_resolved_stored_cwd(repo_root, cwd, index=index)
-    if gate["environment_policy"] != POLICY_INHERIT_REDACT_SECRETS:
-        raise ReceiptError(f"gate record {index} environment policy is invalid", code="policy.unsupported")
-    if (
-        isinstance(gate["timeout_seconds"], bool)
-        or not isinstance(gate["timeout_seconds"], int)
-        or not MIN_GATE_TIMEOUT_SECONDS <= gate["timeout_seconds"] <= MAX_GATE_TIMEOUT_SECONDS
-    ):
-        raise ReceiptError(f"gate record {index} timeout is invalid", code="run.invalid")
-    if gate["launch"] not in {"ok", "not-found", "permission-denied", "os-error"}:
-        raise ReceiptError(f"gate record {index} launch is invalid", code="run.invalid")
-    if gate["termination"] not in {"exited", "launch-error", "timeout", "output-overflow"}:
-        raise ReceiptError(f"gate record {index} termination is invalid", code="run.invalid")
-    if gate["termination"] == "exited":
-        if gate["launch"] != "ok" or isinstance(gate["return_code"], bool) or not isinstance(gate["return_code"], int):
-            raise ReceiptError(f"gate record {index} exit facts are invalid", code="run.invalid")
-    elif (
-        gate["return_code"] is not None
-        or gate["termination"] == "launch-error"
-        and gate["launch"] == "ok"
-        or gate["launch"] != "ok"
-        and gate["termination"] != "launch-error"
-    ):
-        raise ReceiptError(f"gate record {index} termination facts are invalid", code="run.invalid")
-    for stream in ("stdout", "stderr"):
-        metadata = gate[stream]
-        if not isinstance(metadata, dict) or set(metadata) != CANONICAL_KEYS["evidence"]:
-            raise ReceiptError(f"gate record {index} {stream} metadata is invalid", code="run.invalid")
-        expected_path = f"evidence/{index:04d}.{stream}"
-        if metadata["path"] != expected_path:
-            raise ReceiptError(f"gate record {index} {stream} path is invalid", code="run.invalid")
-        if (
-            isinstance(metadata["bytes"], bool)
-            or not isinstance(metadata["bytes"], int)
-            or metadata["bytes"] < 0
-            or metadata["bytes"] > 1024 * 1024
-        ):
-            raise ReceiptError(f"gate record {index} {stream} length is invalid", code="run.invalid")
-        try:
-            validate_typed_id(metadata["digest"])
-        except (CodecError, TypeError) as exc:
-            raise ReceiptError(f"gate record {index} {stream} digest is invalid", code="run.invalid") from exc
-        if not isinstance(metadata["complete"], bool) or metadata["redaction_policy"] != POLICY_REDACTION_EXACT:
-            raise ReceiptError(f"gate record {index} {stream} redaction metadata is invalid", code="run.invalid")
-        if (
-            isinstance(metadata["replacement_count"], bool)
-            or not isinstance(metadata["replacement_count"], int)
-            or metadata["replacement_count"] < 0
-        ):
-            raise ReceiptError(f"gate record {index} {stream} replacement count is invalid", code="run.invalid")
-    derived = (
-        gate["launch"] == "ok"
-        and gate["termination"] == "exited"
-        and gate["return_code"] == 0
-        and gate["stdout"]["complete"]
-        and gate["stderr"]["complete"]
-    )
-    if (
-        gate["termination"] in {"timeout", "output-overflow"}
-        and gate["stdout"]["complete"]
-        and gate["stderr"]["complete"]
-    ):
-        raise ReceiptError(f"gate record {index} incomplete termination is inconsistent", code="run.invalid")
-    if gate["passed"] is not derived:
-        raise ReceiptError(f"gate record {index} pass fact is inconsistent", code="run.invalid")
 
 
 def _resolve_git_top_level(root: Path) -> Path:
@@ -3362,43 +2637,6 @@ def _resolve_confined_cwd(repo_root: Path, declared: str) -> Path:
             context={"gate_cwd": declared},
         )
     return candidate
-
-
-def _check_resolved_stored_cwd(repo_root: Path, declared: str, *, index: int) -> None:
-    """Confirm a stored gate ``cwd`` resolves to an existing in-repository directory.
-
-    Transitive seal/archive reads must reject stored cwd values whose resolution
-    against the Git top level is missing, escapes the repository through an
-    internal symlink, or is not an existing directory. Resolution follows
-    symlinks; the post-resolution path must remain inside ``repo_root`` and
-    point at a real directory.
-    """
-    try:
-        candidate = (repo_root / declared).resolve()
-    except OSError as exc:
-        raise ReceiptError(
-            f"gate record {index} cwd does not resolve",
-            code="run.invalid",
-        ) from exc
-    try:
-        candidate.relative_to(repo_root)
-    except ValueError as exc:
-        raise ReceiptError(
-            f"gate record {index} cwd resolves outside the repository",
-            code="run.invalid",
-        ) from exc
-    try:
-        candidate_stat = os.lstat(candidate)
-    except OSError as exc:
-        raise ReceiptError(
-            f"gate record {index} cwd does not exist",
-            code="run.invalid",
-        ) from exc
-    if not stat.S_ISDIR(candidate_stat.st_mode):
-        raise ReceiptError(
-            f"gate record {index} cwd is not a directory",
-            code="run.invalid",
-        )
 
 
 def _path_for_evidence_path(index: int, stream: str) -> str:
@@ -3657,15 +2895,12 @@ class ValidationEnvelope:
       ``pass-with-warnings``, or ``fail``).
     * ``critical`` is the parsed non-negative integer count of CRITICAL
       findings.
-    * ``gate_run`` is the typed SHA-256 identifier of the referenced
-      native gate run.
     * ``approved`` is the semantic approval boolean the design derives
       from ``verdict`` and ``critical`` alone.
     """
 
     verdict: str
     critical: int
-    gate_run: str
     approved: bool
 
 
@@ -3680,11 +2915,10 @@ def parse_validation_envelope(text: str | bytes) -> ValidationEnvelope:
     * input must be valid UTF-8 with no BOM;
     * exactly one unfenced, level-2 ``## Verdict`` section;
     * inside the section: blank lines plus exactly one each of
-      ``verdict:``, ``critical:``, and ``gate-run:`` are allowed;
+      ``verdict:`` and ``critical:`` are allowed;
     * duplicate keys, unknown non-blank lines, leading-zero or negative
-      ``critical``, malformed ``gate-run``, or contradictory
-      ``verdict``/``critical`` combinations raise
-      :class:`ReceiptError`.
+      ``critical``, or contradictory ``verdict``/``critical``
+      combinations raise :class:`ReceiptError`.
     """
     if isinstance(text, bytes):
         try:
@@ -3703,21 +2937,8 @@ def parse_validation_envelope(text: str | bytes) -> ValidationEnvelope:
 
     body = sections[0]
     fields = _parse_verdict_lines(body)
-    try:
-        _validate_verdict_fields(fields)
-    except CodecError as exc:
-        raise ReceiptError(
-            f"invalid gate-run identifier in '## Verdict': {exc}",
-            code="validation.malformed",
-        ) from exc
+    _validate_verdict_fields(fields)
     return _envelope_from_fields(fields)
-
-
-def hash_validation_bytes(change: str, body: bytes) -> str:
-    """Return the typed identifier for *body*'s validation bytes."""
-    if not isinstance(change, str) or not change:
-        raise ReceiptError("change name is required to hash validation", code="change.invalid")
-    return typed_hash(VALIDATION_ID_LABEL, body)
 
 
 def _split_verdict_sections(text: str) -> list[str]:
@@ -3791,7 +3012,7 @@ def _parse_verdict_lines(body: str) -> dict[str, str]:
 def _validate_verdict_fields(fields: Mapping[str, str]) -> None:
     """Enforce the exact field set and value grammar on a parsed verdict block."""
 
-    expected = {"verdict", "critical", "gate-run"}
+    expected = {"verdict", "critical"}
     extras = set(fields.keys()) - expected
     missing = expected - set(fields.keys())
     if extras or missing:
@@ -3815,9 +3036,6 @@ def _validate_verdict_fields(fields: Mapping[str, str]) -> None:
         )
     critical = int(critical_raw)
 
-    gate_run = fields["gate-run"]
-    validate_typed_id(gate_run)
-
     if verdict.startswith("pass") and critical > 0:
         raise ReceiptError(
             "verdict declares pass-like outcome but critical count is positive",
@@ -3834,14 +3052,5 @@ def _envelope_from_fields(fields: Mapping[str, str]) -> ValidationEnvelope:
     """Build the typed envelope after all checks passed."""
     verdict = fields["verdict"]
     critical = int(fields["critical"])
-    gate_run = fields["gate-run"]
     approved = (verdict in {"pass", "pass-with-warnings"}) and critical == 0
-    return ValidationEnvelope(verdict=verdict, critical=critical, gate_run=gate_run, approved=approved)
-
-
-# ---------------------------------------------------------------------------
-# FinalValidationReceipts.seal implementation
-# ---------------------------------------------------------------------------
-
-
-# Replace the placeholder seal method with the real implementation.
+    return ValidationEnvelope(verdict=verdict, critical=critical, approved=approved)

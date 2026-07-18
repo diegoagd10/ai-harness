@@ -149,36 +149,9 @@ def test_read_object_rejects_duplicate_extra_files_in_bundle(store: ReceiptObjec
         store.read_object("runs", object_id)
 
 
-def test_publish_receipt_pointer_replaces_atomically(store: ReceiptObjectStore) -> None:
-    object_id = store.publish_object("receipts", {"value": "first"})
-    object_id_2 = store.publish_object("receipts", {"value": "second"})
-
-    store.replace_current_pointer(object_id)
-    pointer_path = store.receipts_dir / "current"
-    data = json.loads(pointer_path.read_text(encoding="utf-8"))
-    assert data["receipt_id"] == object_id
-    assert data["schema_name"] == "ai-harness.receipt-pointer"
-
-    store.replace_current_pointer(object_id_2)
-    data = json.loads(pointer_path.read_text(encoding="utf-8"))
-    assert data["receipt_id"] == object_id_2
-
-
-def test_publish_receipt_pointer_rejects_malformed_pointer_read(store: ReceiptObjectStore, tmp_path: Path) -> None:
-    (tmp_path / ".receipts").mkdir(parents=True, exist_ok=True)
-    (tmp_path / ".receipts" / "current").write_text("not json\n", encoding="utf-8")
+def test_publish_object_rejects_removed_receipt_kind(store: ReceiptObjectStore) -> None:
     with pytest.raises(ReceiptStoreError):
-        store.read_current_pointer()
-
-
-def test_publish_receipt_pointer_rejects_unknown_schema(store: ReceiptObjectStore, tmp_path: Path) -> None:
-    (tmp_path / ".receipts").mkdir(parents=True, exist_ok=True)
-    (tmp_path / ".receipts" / "current").write_text(
-        json.dumps({"receipt_id": "sha256:" + "0" * 64, "schema_name": "wrong", "schema_version": 1}) + "\n",
-        encoding="utf-8",
-    )
-    with pytest.raises(ReceiptStoreError):
-        store.read_current_pointer()
+        store.publish_object("receipts", {"value": "obsolete"})
 
 
 def test_bundled_evidence_round_trip(store: ReceiptObjectStore) -> None:
@@ -207,8 +180,8 @@ def test_bundled_evidence_round_trip(store: ReceiptObjectStore) -> None:
 #
 # The review storage Change introduces a separate package-internal bundle
 # helper for review kinds. The public ``ReceiptObjectStore`` dispatch must
-# stay closed to its existing run and receipt kinds so that review kinds
-# cannot be published through the public receipt API.
+# stay closed to its runs kind so review kinds cannot be published through
+# the public receipt API.
 # ---------------------------------------------------------------------------
 
 

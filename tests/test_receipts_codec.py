@@ -22,8 +22,6 @@ from ai_harness.modules.harness.receipts import (
     GATE_DECLARATION_SCHEMA_VERSION,
     GATE_RUN_SCHEMA_NAME,
     GATE_RUN_SCHEMA_VERSION,
-    RECEIPT_SCHEMA_NAME,
-    RECEIPT_SCHEMA_VERSION,
     CodecError,
     GateDeclaration,
     GateRunRequest,
@@ -107,8 +105,6 @@ def test_schema_names_match_design_specification() -> None:
     assert CANDIDATE_SCHEMA_VERSION == 1
     assert GATE_RUN_SCHEMA_NAME == "ai-harness.gate-run"
     assert GATE_RUN_SCHEMA_VERSION == 1
-    assert RECEIPT_SCHEMA_NAME == "ai-harness.final-validation-receipt"
-    assert RECEIPT_SCHEMA_VERSION == 1
     assert GATE_DECLARATION_SCHEMA_NAME == "ai-harness.gate-declaration"
     assert GATE_DECLARATION_SCHEMA_VERSION == 1
     assert CANONICAL_KEYS["gate-declaration"] == {
