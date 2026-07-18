@@ -108,39 +108,6 @@ A validator run **must** populate both `verdict` and `critical` under
 `semantic_facts`; missing facts surface as `failed` (`verdict: fail`)
 or `blocked` (`status: blocked`), never as a silent pass.
 
-## Native gate-run / seal protocol
-
-Final validation is bound to a native run/write/seal protocol.
-Archive refuses to proceed without a current archive-eligible
-receipt, so the validator MUST follow this exact order every time it
-runs:
-
-1. Declare the ordered gate list (one through 64 entries, unique
-   ids, repo-relative cwd, integer timeout 1–3600) and run them
-   natively with
-   `ai-harness change-gates-run -c {change} -i '<GateRunRequest JSON>'`.
-   The command accepts no fact-bearing options — exit codes,
-   candidate ids, evidence digests, verdicts, pass/fail values, and
-   receipt ids are derived by the runner.
-2. Read `run_id` and per-gate outcomes from the returned JSON. Fact
-   outcomes (`all_gates_passed`, `candidate_stable`, evidence digests)
-   come exclusively from the runner, never from prose.
-3. Write `validation.md` with the EXACT `gate-run: <sha256:...>` line
-   pointing at the native run. `verdict` and `critical` remain
-   semantic judgment and never substitute for native facts.
-4. Run `ai-harness change-receipt-seal {change}` ONCE. Read its
-   summary; the receipt surfaces the conjunction of semantic
-   approval and native all-gates-pass as `archive_eligible`.
-5. After seal, never edit `validation.md` again. Edits invalidate
-   the binding and the next archive verification rejects with
-   `validation.stale`.
-
-The validator NEVER manufactures receipt facts, hand-authors a
-digest, claims native success for a recorded failure, or relies on
-artifacts older than the receipt. A native failure is recorded with
-`all_gates_passed=false`; the receipt may still seal, but it is not
-archive-eligible and archive preflight rejects.
-
 ## `validation.md` structure
 
 ```markdown
@@ -149,7 +116,6 @@ archive-eligible and archive preflight rejects.
 ## Verdict
 verdict: pass | pass-with-warnings | fail
 critical: <int>
-gate-run: <sha256:64-hex from change-gates-run>
 
 ## Coverage
 - task <id> / spec <slug> / scenario <name>: result
@@ -165,7 +131,7 @@ gate-run: <sha256:64-hex from change-gates-run>
 - finding or none
 
 ## Gates
-- gate-id <name>: <launch> / <termination> / passed=<true|false>
+- command: result
 
 ## TDD Evidence Audit
 
