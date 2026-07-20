@@ -25,6 +25,7 @@ from ai_harness.modules.harness.administrators import (
 from ai_harness.utils import opencode_change_agents
 
 EXPECTED_SKILLS = (
+    "ai-harness",
     "branch-pr",
     "change-archiver",
     "change-design",
@@ -494,8 +495,8 @@ def test_install_copilot_manifest_records_agents(tmp_path: Path) -> None:
     data = json.loads((tmp_path / MANIFEST_REL).read_text(encoding="utf-8"))
     assert "copilot" in data["files_by_agent_cli"]
     copilot_files = data["files_by_agent_cli"]["copilot"]
-    # 15 persona+skills + 9 native agents = 24
-    assert len(copilot_files) == 24
+    # 16 persona+skills + 9 native agents = 25
+    assert len(copilot_files) == 25
     assert any(".copilot/agents/" in f for f in copilot_files), "copilot manifest should contain agent paths"
     for name in _NATIVE_AGENT_NAMES:
         expected = f".copilot/agents/{name}.agent.md"
@@ -660,9 +661,9 @@ def test_cli_install_copilot_writes_agents(isolated_home: Path) -> None:
     for name in _NATIVE_AGENT_NAMES:
         assert (agent_dir / f"{name}.agent.md").is_file(), f"CLI install: copilot {name} missing"
 
-    # Generic (15 files) + Copilot (24 files: 15 persona+skills + 9 native agents) = 39 total.
-    assert "39 file(s)" in result.stdout, (
-        f"stdout should report 39 written files (15 generic + 24 copilot), got: {result.stdout!r}"
+    # Generic (16 files) + Copilot (25 files: 16 persona+skills + 9 native agents) = 41 total.
+    assert "41 file(s)" in result.stdout, (
+        f"stdout should report 41 written files (16 generic + 25 copilot), got: {result.stdout!r}"
     )
 
 
@@ -776,9 +777,9 @@ def test_cli_install_opencode_writes_agents(isolated_home: Path) -> None:
         assert (agent_dir / f"{name}.md").is_file(), f"CLI install: {name} missing"
 
     # PRD story 17: stdout reports file count including native OpenCode agents.
-    # Generic (15 files) + 9 OpenCode agents = 24 total.
-    assert "24 file(s)" in result.stdout, (
-        f"stdout should report 24 written files (15 generic + 9 opencode agents), got: {result.stdout!r}"
+    # Generic (16 files) + 9 OpenCode agents = 25 total.
+    assert "25 file(s)" in result.stdout, (
+        f"stdout should report 25 written files (16 generic + 9 opencode agents), got: {result.stdout!r}"
     )
 
 
@@ -885,8 +886,8 @@ def test_install_claude_writes_subagents_and_skill(tmp_path: Path) -> None:
     data = json.loads((tmp_path / MANIFEST_REL).read_text(encoding="utf-8"))
     assert "claude" in data["files_by_agent_cli"]
     claude_files = data["files_by_agent_cli"]["claude"]
-    # 15 persona+skills (CLAUDE.md + 13 skill files + 1 nested ref) + 8 subagents + 1 skill = 24
-    assert len(claude_files) == 24
+    # 16 persona+skills (CLAUDE.md + 14 skill files + 1 nested ref) + 8 subagents + 1 skill = 25
+    assert len(claude_files) == 25
 
 
 def test_install_claude_subagents_have_name_field(tmp_path: Path) -> None:
@@ -993,8 +994,8 @@ def test_install_claude_manifest_is_byte_identical_on_reinstall(tmp_path: Path) 
     # The cli's "Wrote N file(s)" line is also derived from the writer's
     # returned paths; assert it matches the manifest count.
     second_manifest_paths = sum(len(v) for v in second_manifest["files_by_agent_cli"].values())
-    assert second_manifest_paths == 39, (
-        f"manifest should record 39 files (15 generic + 24 claude), got {second_manifest_paths}: "
+    assert second_manifest_paths == 41, (
+        f"manifest should record 41 files (16 generic + 25 claude), got {second_manifest_paths}: "
         f"{second_manifest['files_by_agent_cli']}"
     )
     # No duplicate paths in the claude entry.
@@ -1106,9 +1107,9 @@ def test_cli_install_claude_writes_agents_and_skill(isolated_home: Path) -> None
         "CLI install: claude change skill missing"
     )
 
-    # Generic (15 files) + Claude (24 files: 15 persona+skills + 9 native artifacts) = 39 total.
-    assert "39 file(s)" in result.stdout, (
-        f"stdout should report 39 written files (15 generic + 24 claude), got: {result.stdout!r}"
+    # Generic (16 files) + Claude (25 files: 16 persona+skills + 9 native artifacts) = 41 total.
+    assert "41 file(s)" in result.stdout, (
+        f"stdout should report 41 written files (16 generic + 25 claude), got: {result.stdout!r}"
     )
 
 
