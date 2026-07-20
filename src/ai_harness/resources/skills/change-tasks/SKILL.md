@@ -4,17 +4,30 @@ description: "Change task author — decomposes specs and design, then creates t
 license: Apache-2.0
 metadata:
   author: diegoagd10
-  version: "1.0"
+  version: "2.0"
 ---
 
 # Tasks
 
-You decompose specs/design into task records for a file-backed Change and
-call the CLI; never hand-write `tasks.json`.
+You decompose specs/design into task records for a file-backed Change,
+inline in the current host, reporting to the user directly. You call
+the CLI; never hand-write `tasks.json`. After the tasks exist, you
+validate the phase with the CLI and report next steps or blockers.
+Then you stop — the user triggers the next phase, possibly in a fresh
+session, so everything you need comes from disk and the CLI, never
+from conversation memory.
 
 Every `task-create` payload MUST use the canonical spec reference
 `specs/<capability-id>.md` so each task stays traceable to the
 capability it implements.
+
+## Entry
+
+The `ai-harness` control plane gates entry: it runs `change-continue`,
+requires the route to be `tasks`, and loads you with the change name
+and root. If you were loaded without gating and the inputs below are
+missing, run the exit command yourself to diagnose, then report
+`blocked`.
 
 ## Inputs
 
@@ -25,14 +38,15 @@ capability it implements.
 
 ## CLI contracts
 
-This phase owns one CLI command: `task-create`. Its input shape
-and expected response below are COMPLETE and AUTHORITATIVE.
+This phase owns two CLI commands: `task-create` to persist tasks and
+`change-continue` for exit validation. Their input shapes and expected
+responses below are COMPLETE and AUTHORITATIVE.
 
 **No CLI discovery.** Never run `ai-harness --help`,
 `ai-harness task-create --help`, `which ai-harness`,
 `ai-harness --version`, or any other discovery command — the tool is
-installed and this contract is everything you need. Go straight to
-`ai-harness task-create` with the input shape below.
+installed and this contract is everything you need. Go straight to the
+command you need with the shapes below.
 
 ### `task-create`
 
@@ -117,9 +131,40 @@ possible.
 - Do not create GitHub issues.
 - Do not store task state in Engram.
 
-## Result
+### `change-continue` (exit validation)
 
-```result
-status:    done | blocked
-artifacts: .ai-harness/changes/{change}/tasks.json
+Run from the repository root:
+
+```bash
+ai-harness change-continue {change}
+```
+
+It prints one ChangeStatus JSON object. You consume three fields:
+`taskProgress` (task counts), `nextRecommended` (the route), and
+`blockedReasons`.
+
+## Exit validation
+
+After all `task-create` calls succeed, run `ai-harness
+change-continue {change}` and require BOTH:
+
+- `taskProgress.total` is greater than 0, AND
+- `nextRecommended` is `implement`.
+
+Anything else — zero tasks, unchanged route, `resolve-blockers`, a
+failed command, malformed JSON — is `blocked`. Surface the observed
+status or CLI diagnostics verbatim in the report.
+
+## Report
+
+Emit this block, then stop:
+
+```text
+Change:    {change}
+Phase:     tasks
+State:     done | blocked
+Validated: taskProgress.total=<n>; route advanced to implement
+Tasks:     <n> created
+Next:      implement — invoke change-implementor
+Blockers:  <diagnostics, only when blocked>
 ```

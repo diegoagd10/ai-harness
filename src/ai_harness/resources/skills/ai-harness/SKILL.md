@@ -5,7 +5,7 @@ disable-model-invocation: true
 license: Apache-2.0
 metadata:
   author: diegoagd10
-  version: "1.0"
+  version: "2.0"
 ---
 
 # AI Harness
@@ -29,13 +29,14 @@ instruction authorizes one phase handoff, then control returns to the user.
   inference are outside this skill.
 - Support `sliceStatus.mode: legacy` only. Surface diagnostics and stop for
   `sliced`, `blocked`, missing, or unknown modes.
-- Treat `change-continue` JSON as the routing authority. Phase result envelopes
-  report execution; they do not choose the next phase.
+- Treat `change-continue` JSON as the routing authority. For phases that
+  still return result envelopes, those envelopes report execution; they
+  do not choose the next phase.
 - Begin with whatever shared understanding the user supplies. The user invokes
   `grill-me-one-by-one` separately when an interview is useful.
 - Keep phase mechanics in their matching skill. This control plane creates or
-  resumes the Change, validates status, loads one phase skill, and verifies its
-  outcome.
+  resumes the Change, validates status, loads one phase skill, and — for
+  envelope phases — verifies its outcome.
 
 ## Create Or Resume
 
@@ -54,9 +55,38 @@ instruction authorizes one phase handoff, then control returns to the user.
 3. When `.ai-harness/config.yml` is absent, run `ai-harness init`. Preserve an
    existing config unchanged.
 4. Run `ai-harness change-new {change}` and parse its JSON status. Validate it
-   with **Status Gate**, report the concise status, and stop. `change-new`
-   normally returns `configContext: null`; phase work starts only after a later
-   explicit instruction and fresh `change-continue`.
+   with **Status Gate**. `change-new` normally returns `configContext: null`;
+   phase work starts only after a later explicit instruction and fresh
+   `change-continue`.
+5. Write `.ai-harness/changes/{change}/shared_understanding.md` with the
+   `write` tool, capturing the shared understanding reached so far — the
+   grill-me-one-by-one summary when one exists, otherwise the user's
+   request and constraints as supplied. Always write it, even when the
+   context is thin; it is the persisted scope seed the `explore` and `prd`
+   phases read from disk in fresh sessions. Use this structure, filling
+   what is known and omitting nothing that was stated:
+
+```markdown
+# Shared Understanding — {change}
+
+## Intent
+
+## Scope
+
+### In
+
+### Out
+
+## Business rules
+
+## Edge cases
+
+## Non-goals
+
+## Assumptions
+```
+
+6. Report the concise status and stop.
 
 ### Resume
 
@@ -108,8 +138,8 @@ phase:
 
 | Route | `configContext.phase` | Skill | Additional input |
 | --- | --- | --- | --- |
-| `explore` | `change_explorer` | `change-explorer` | A normalized scope from the user's supplied context |
-| `prd` | `change_propose` | `change-propose` | Available shared understanding / scope seed |
+| `explore` | `change_explorer` | `change-explorer` | Fresh user context, verbatim, when supplied |
+| `prd` | `change_propose` | `change-propose` | Fresh user context, verbatim, when supplied |
 | `design` | `change_design` | `change-design` | None |
 | `specs` | `change_specs` | `change-specs` | None |
 | `tasks` | `change_tasks` | `change-tasks` | None |
@@ -130,9 +160,10 @@ commit_format: <unmodified configContext.commit_format value>
 This correction prevents validator or implementor rules from leaking into the
 tasks phase and prevents validator rules from leaking into implementation.
 
-Exploration requires enough user context to state a concrete scope. If the user
-reopened the session before exploration, use the context they supply again;
-there is no persisted pre-exploration scope artifact.
+`shared_understanding.md`, written at create, is the persisted scope seed
+for the `explore` and `prd` phases; those skills read it from disk. When
+the user supplies fresh context with a phase request, forward it
+verbatim — it is additive to the file, never a replacement.
 
 For implementation, append this exact adapter using the unmodified value from
 `configContext.commit_format`:
@@ -148,23 +179,25 @@ archive mechanics.
 
 ## Verify One Phase
 
-Read the phase skill's result before routing again:
+**Self-verifying phases** — `explore`, `prd`, `design`, `tasks`. The loaded
+skill runs `change-continue` itself, checks its own postcondition, and
+reports next steps or blockers directly to the user. Its report is final;
+control returns to the user.
+
+**Envelope phases** — `specs`, `implement`, `validate`, `archive`. Read the
+phase skill's result before routing again:
 
 - `blocked`, `partial`, or a malformed result: summarize the condition and wait
   for user direction.
 - `done` from `change-archiver`: report its archive paths and commit, then stop.
   Archive is terminal; the active Change no longer exists.
-- `done` from any other phase, including a failed validation verdict: run
-  `ai-harness change-continue {change}`, apply **Status Gate**, and require the
-  corresponding postcondition below.
+- `done` from any other envelope phase, including a failed validation verdict:
+  run `ai-harness change-continue {change}`, apply **Status Gate**, and require
+  the corresponding postcondition below.
 
 | Completed route | Required refreshed status |
 | --- | --- |
-| `explore` | `artifacts.explore: done`; next route `prd` |
-| `prd` | `artifacts.prd: done`; next route `design` |
-| `design` | `artifacts.design: done`; next route `specs` |
 | `specs` | `artifacts.specs: done`; next route `tasks` |
-| `tasks` | `taskProgress.total > 0`; next route `implement` |
 | `implement` | `taskProgress.total > 0` and `taskProgress.allComplete: true`; next route `validate` |
 | `validate` | next route `archive` for a passing verdict; otherwise report validation state and wait |
 

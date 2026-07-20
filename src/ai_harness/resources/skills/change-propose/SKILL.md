@@ -1,37 +1,47 @@
 ---
 name: change-propose
-description: "Change PRD author — writes prd.md in the sdd-propose structure without publishing anywhere."
+description: "Change PRD author — writes prd.md in the sdd-propose structure."
 license: Apache-2.0
 metadata:
   author: diegoagd10
-  version: "1.0"
+  version: "2.0"
 ---
 
 # Propose
 
-You author `prd.md` for a file-backed Change. You synthesize from the shared
-understanding and `exploration.md`; you do not interview the user.
+You author `prd.md` for a file-backed Change, inline in the current
+host, reporting to the user directly. You synthesize from
+`shared_understanding.md` and `exploration.md`; you do not interview
+the user. After writing, you validate the phase with the CLI and
+report next steps or blockers. Then you stop — the user triggers the
+next phase, possibly in a fresh session, so everything you need comes
+from disk and the CLI, never from conversation memory.
 
 No GitHub publish. No Engram store. Just write the file.
 
 **The write is the deliverable.** You MUST create the file with the
-`write` tool before emitting your result block. Returning `status: done`
-while `prd.md` is not on disk is a contract violation — verify the file
-exists (read it back or `ls` it) before returning. Rendering the PRD
-content only in your reply text does not count. A missing
-`exploration.md` does not block you: synthesize from the shared
-understanding and proceed.
+`write` tool before running exit validation. Reporting `done` while
+`prd.md` is not on disk is a contract violation — the exit validation
+below exists to catch exactly that.
+
+## Entry
+
+The `ai-harness` control plane gates entry: it runs `change-continue`,
+requires the route to be `prd`, and loads you with the change name and
+root. Gated entry guarantees `exploration.md` is already on disk. If
+you were loaded without gating and the inputs below are missing, run
+the exit command yourself to diagnose, then report `blocked`.
 
 ## Inputs
 
 - Change name: `{change}`.
 - Change root: `.ai-harness/changes/{change}/`.
+- `shared_understanding.md` in the change root — the persisted scope
+  seed written at create time. It carries the intent into a fresh
+  session; read it before writing.
 - `exploration.md`.
-- Shared understanding or scope seed.
-- Parent PRD path (`.ai-harness/changes/{parent}/prd.md`), only when
-  this Change is a confirmed child of a budget-decomposed parent —
-  read it for high-level scope context before writing this Change's
-  own, narrower `prd.md`.
+- Fresh context the user supplies with the phase request, when present.
+  It is additive to `shared_understanding.md`, never a replacement.
 
 ## Write
 
@@ -65,30 +75,47 @@ Write `.ai-harness/changes/{change}/prd.md` atomically using this
 ## Success Criteria
 ```
 
-`## Capabilities` is the prd→specs handoff. Each entry should be independently
-specifiable as a tracer-bullet vertical slice.
+`## Capabilities` is the prd→specs handoff. Each entry should be
+independently specifiable as a tracer-bullet vertical slice.
 
-When the goal marks this as a PARENT overview prd for a
-budget-decomposed change (see the change-flow skill, "Semantic fork
-— budget"), add one more section after `## Capabilities`:
+## CLI contract (complete, no discovery)
 
-```markdown
-## Child Changes
-- <child-change-name>: <one-line scope>
+`ai-harness` is installed and this section is everything you need.
+Never run `ai-harness --help`, any subcommand `--help`,
+`ai-harness --version`, or `command -v ai-harness`.
+
+Run from the repository root:
+
+```bash
+ai-harness change-continue {change}
 ```
 
-List exactly the confirmed children, one per line, in delivery order.
-Keep `## Intent` and `## Scope` at the overview level for this case —
-each child's own `prd.md` carries the detailed capabilities, approach,
-and risks for its slice.
+It prints one ChangeStatus JSON object. You consume three fields:
+`artifacts` (per-phase `done`/`pending` markers), `nextRecommended`
+(the route), and `blockedReasons`.
 
-If a parent PRD path was provided as input (this Change is a confirmed
-child), name the parent Change under `## Dependencies` so a reader can
-trace back to the overview.
+## Exit validation
 
-## Result
+After writing `prd.md`, run `ai-harness change-continue {change}` and
+require BOTH:
 
-```result
-status:    done | blocked
-artifacts: .ai-harness/changes/{change}/prd.md
+- `artifacts.prd` is `done`, AND
+- `nextRecommended` is `design`.
+
+Anything else — missing artifact, unchanged route, `resolve-blockers`,
+a failed command, malformed JSON — is `blocked`. Surface the observed
+status or CLI diagnostics verbatim in the report.
+
+## Report
+
+Emit this block, then stop:
+
+```text
+Change:    {change}
+Phase:     prd
+State:     done | blocked
+Validated: artifacts.prd=done; route advanced to design
+Artifact:  .ai-harness/changes/{change}/prd.md
+Next:      design — invoke change-design
+Blockers:  <diagnostics, only when blocked>
 ```
