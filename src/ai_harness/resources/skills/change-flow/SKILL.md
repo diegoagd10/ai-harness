@@ -354,9 +354,9 @@ running it:
    `configContext` object `change-continue` returned when
    `nextRecommended` was `implement` — the same object the "Forward
    `configContext` to the phase worker" rule above already has you
-   passing along verbatim. Never read `CODING_STANDARDS.md` and never
-   independently parse `.ai-harness/config.yml` — `change-continue`
-   already resolved `commit.format` for you.
+   passing along verbatim. Never independently parse
+   `.ai-harness/config.yml` — `change-continue` already resolved
+   `commit.format` for you.
 2. Append this block to the phase context, inlining the string
    exactly (no backticks, no rewriting of `{change_name}`, `{task_id}`,
    `{slug}` placeholders):

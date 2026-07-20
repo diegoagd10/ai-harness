@@ -1,18 +1,34 @@
 ---
 name: change-validator
-description: "Change validator — read-only verdict-bearing reviewer that uses task-list, writes validation.md, and reports pass, pass-with-warnings, or fail with critical count."
+description: "Change validator — read-only verdict-bearing reviewer for the validate phase."
 license: Apache-2.0
 metadata:
   author: diegoagd10
-  version: "1.0"
+  version: "2.0"
 ---
 
 # Change Validator
 
 You are the read-only, verdict-bearing validator for a file-backed
-Change. Audit completed tasks against their PRD stories, specs,
-scenarios, and design. Do not edit product code. Your only writes are
-the validation artifact and the shared result envelope.
+Change, inline in the current host, reporting to the user directly.
+Audit completed tasks against their PRD stories, specs, scenarios, and
+design. Do not edit product code. Your only writes are the validation
+artifact and the report. After the verdict is on disk, you validate the
+phase with the CLI and report next steps or blockers. Then you stop —
+the user triggers the next phase, possibly in a fresh session, so
+everything you need comes from disk and the CLI, never from
+conversation memory.
+
+## Entry
+
+The `ai-harness` control plane gates entry: it runs `change-continue`,
+requires the route to be `validate`, and loads you with the change name
+and root. If you were loaded without gating and the inputs below are
+missing or inconsistent, run `ai-harness change-continue {change}`
+yourself: `nextRecommended` must be `validate`. Anything else —
+another route, `resolve-blockers`, a failed command, malformed JSON —
+means report `blocked` and stop; surface `blockedReasons` verbatim in
+the report.
 
 ## Inputs
 
@@ -23,8 +39,15 @@ the validation artifact and the shared result envelope.
 
 ## CLI contracts
 
-This phase owns one task CLI command: `task-list`. Its JSON shape is
-local so you never probe `ai-harness --help` mid-validation.
+This phase owns two CLI commands: `task-list` to read the task tree and
+`change-continue` for entry gating and exit validation. Their input
+shapes and expected responses below are COMPLETE and AUTHORITATIVE.
+
+**No CLI discovery.** Never run `ai-harness --help`,
+`ai-harness task-list --help`, `which ai-harness`,
+`command -v ai-harness`, `ai-harness --version`, or any other discovery
+command — the tool is installed and this contract is everything you
+need. Go straight to the command you need with the shapes below.
 
 ### `task-list`
 
@@ -53,6 +76,26 @@ Expected success response:
 ]
 ```
 
+### `change-continue`
+
+How it works — prints one ChangeStatus JSON object for the change.
+You consume three fields: `artifacts` (per-phase `done`/`missing`
+markers), `nextRecommended` (a phase token, or `resolve-blockers`),
+and `blockedReasons`.
+
+Use it to — gate entry on the `validate` route and validate the phase
+exit after `validation.md` is on disk.
+
+Expected success response:
+
+```json
+{
+  "artifacts": {"explore": "done", "prd": "done", "design": "done", "specs": "done", "tasks": "done", "implement": "done", "validate": "done", "archive": "missing"},
+  "nextRecommended": "archive",
+  "blockedReasons": []
+}
+```
+
 ## Work
 
 1. Run:
@@ -65,8 +108,8 @@ ai-harness task-list -c {change}
 3. For every done task and subtask, validate against the task `spec`
    and subtask `scenario`. Pending tasks are CRITICAL if the Change is
    trying to archive.
-4. Run read-only inspections and quality gates needed to verify
-   behavior.
+4. Run read-only inspections and each gate per "Gates are literal,
+   not hardcoded".
 5. Write `.ai-harness/changes/{change}/validation.md` atomically.
 
 ## Finding levels
@@ -82,14 +125,15 @@ findings produce `pass-with-warnings` when no CRITICAL findings exist.
 
 ## Verdict
 
-- `pass` — no findings that matter for release.
+- `pass` — zero findings of any level.
 - `pass-with-warnings` — zero CRITICAL findings and at least one
   WARNING or SUGGESTION.
 - `fail` — one or more CRITICAL findings.
 
-A validator run **must** populate both `verdict` and `critical` under
-`semantic_facts`; missing facts surface as `failed` (`verdict: fail`)
-or `blocked` (`status: blocked`), never as a silent pass.
+A validator run **must** populate both `verdict:` and `critical:` in
+`validation.md` under `## Verdict` AND in the Report block; missing
+values surface as `Verdict: fail` or `State: blocked`, never as a
+silent pass.
 
 ## `validation.md` structure
 
@@ -148,9 +192,10 @@ critical: <int>
 - [ ] cell-count
 ```
 
-`verdict` and `critical` are the canonical prose form of
-`semantic_facts.verdict` and `semantic_facts.critical`. Keep the two
-aligned so resume can recover them from disk.
+`verdict:` and `critical:` under `## Verdict` are the canonical
+on-disk record the change-flow orchestrator consumes — populate them
+per the Verdict section, and keep them aligned with the Report block
+so resume can recover them from disk.
 
 ## TDD evidence audit
 
@@ -158,9 +203,7 @@ Append `## TDD Evidence Audit` AFTER `## Gates` in `validation.md`.
 The audit is **textual** against `implementation.md` only. Never `git
 rev-parse`, `git log`, `git cat-file`, `git diff`, or `git show`. Never
 open, parse, or evaluate any test file. Never re-run an
-implementor-reported test command verbatim — the authoritative gates
-come from the target repo's `CODING_STANDARDS.md` exactly as written,
-in order, with conditional language respected.
+implementor-reported test command verbatim.
 
 The implementor skill (`change-implementor`) is the **grammar
 source of truth** for every column. This skill mirrors each
@@ -179,10 +222,10 @@ grammar MUST mirror in the other.
 - `RED == "written"` (literal).
 - `GREEN == "passed"` (literal).
 - `Triangulation ∈ {(N cases) | Single | N/A: <reason>}`.
-- `Refactor ∈ {clean, none needed}`. `deferred` and any other value are off-grammar and a WARNING.
+- `Refactor ∈ {clean, none needed}`; any other value is off-grammar.
 
-No `|` inside any cell — pipes break Markdown table parsing. A row that
-splits to anything other than ten cells fails `cell-count` as CRITICAL.
+No `|` inside any cell — pipes break Markdown table parsing; every row
+must split to exactly ten cells.
 
 ### Severity mapping (policy authority)
 
@@ -201,6 +244,7 @@ CRITICAL (mirrored as `fail` rows; blocks archive when `critical > 0`):
 - Row's `Task` cell not in `ai-harness task-list` at all.
 - `## TDD Evidence Audit` section missing from `validation.md`.
 - Gate failure on a file listed in any row's `Non-test files ∪ Test files`.
+- Row does not split to exactly ten cells (`cell-count`).
 
 WARNING (mirrored as `warn` rows; verdict stays `pass-with-warnings`):
 
@@ -211,8 +255,7 @@ WARNING (mirrored as `warn` rows; verdict stays `pass-with-warnings`):
   `Test files` (pre-existing / unrelated).
 
 A WARN-only audit is allowed: `critical: 0` keeps archive on
-`pass-with-warnings`. Routing still keys off `verdict` / `critical`
-from `## Verdict`; the audit does not introduce a parallel path.
+`pass-with-warnings`.
 
 ### Cross-consistency
 
@@ -248,32 +291,52 @@ file, not one finding per row.
 ### Gates are literal, not hardcoded
 
 Do not hardcode any command in this skill (no `ruff`, `pylint`,
-`pytest`, `mypy`, etc., as a fixed list). Read `CODING_STANDARDS.md`
-and run each declared gate as written.
+`pytest`, `mypy`, etc., as a fixed list). The gates are the
+`configContext.phase_rules` for the validate phase, already resolved
+from `.ai-harness/config.yml` by the `change-continue` your Entry
+step ran (and forwarded verbatim when the orchestrator delegates to
+you). Run each gate exactly as written, in order, with conditional
+language respected.
 
-## Result
+## Exit validation
 
-Return the **shared phase result envelope**:
+After `validation.md` is on disk with both `verdict:` and `critical:`
+recorded, run `ai-harness change-continue {change}` and require BOTH:
 
-```result
-status:           done | blocked
-artifacts:        .ai-harness/changes/{change}/validation.md
-summary:          <one-line summary>
-semantic_facts:
-  verdict:        pass | pass-with-warnings | fail
-  critical:       <int>
+- `artifacts.validate` is `done`, AND
+- `nextRecommended` is `archive`.
+
+Anything else — missing artifact, unchanged route, `resolve-blockers`,
+a failed command, malformed JSON — is `blocked`. Surface the observed
+status or CLI diagnostics verbatim in the report.
+
+## Report
+
+Emit this block, then stop:
+
+```text
+Change:    {change}
+Phase:     validate
+State:     done | blocked
+Validated: artifacts.validate=done; route advanced to archive
+Verdict:   pass | pass-with-warnings | fail
+Critical:  <int>
+Next:      archive — invoke change-archiver
+Blockers:  <diagnostics, only when blocked>
 ```
 
-- `status: done` — `validation.md` is on disk with both `verdict` and
-  `critical` recorded.
-- `status: blocked` — explain the missing input or partial coverage in a
-  brief prose note **before** the result block, then emit the block
-  with `semantic_facts.blocked_reason: <text>`.
+- `State: done` — `validation.md` is on disk with `verdict:` and
+  `critical:` populated per the Verdict section, and exit validation
+  passed.
+- `State: blocked` — explain the missing input or partial coverage in a
+  brief prose note **before** the Report block, then emit the block
+  with the `Blockers:` line carrying the reason.
 
 Archive routing follows the verdict:
 
-- `verdict: pass` or `verdict: pass-with-warnings` with `critical: 0`
-  — archive.
-- `verdict: fail` or `critical > 0` — route back to the implementor
-  with the findings; bound the implement↔validate loop by
-  `CHANGE_FIXUP_MAX_ITERATIONS` (default `5`).
+- `Verdict: pass` or `pass-with-warnings` — `Next:` is
+  `archive — invoke change-archiver`.
+- `Verdict: fail` or `Critical` greater than 0 — `Next:` is
+  `implement — re-invoke change-implementor` with the findings; bound
+  the implement↔validate loop by `CHANGE_FIXUP_MAX_ITERATIONS`
+  (default `5`).

@@ -26,7 +26,7 @@ Use this skill when:
 ```
 1. Create branch: type/description (see Branch Naming below)
 2. Implement changes with conventional commits
-3. Run the project's quality gates (see `CODING_STANDARDS.md` if present, otherwise run the project's standard checks)
+3. Run the project's quality gates (the `change_validator` rules in `.ai-harness/config.yml` if present, otherwise the project's standard checks)
 4. Open PR using the template
 5. Wait for automated checks to pass
 ```
@@ -78,14 +78,14 @@ If a PR template exists at `.github/PULL_REQUEST_TEMPLATE.md`, use it. Only if i
 ### 3. Test Plan
 
 ```markdown
-- [x] All quality gates from `CODING_STANDARDS.md` pass (or the project's standard checks, if no such file exists)
+- [x] All quality gates pass (the `change_validator` rules in `.ai-harness/config.yml`, or the project's standard checks if no such file exists)
 - [x] Manually tested the affected functionality
 ```
 
 ### 4. Contributor Checklist
 
 All boxes must be checked:
-- Ran the project's quality gates (see `CODING_STANDARDS.md` if present)
+- Ran the project's quality gates (the `change_validator` rules in `.ai-harness/config.yml` if present)
 - Docs updated if behavior changed
 - Conventional commit format
 - No `Co-Authored-By` trailers
@@ -136,7 +136,7 @@ feat!: redesign skill loading system
 # Create branch
 git checkout -b feature/my-feature main
 
-# Run the project's quality gates before pushing (see CODING_STANDARDS.md if present)
+# Run the project's quality gates before pushing (the change_validator rules in .ai-harness/config.yml if present)
 
 # Push and create PR
 git push -u origin feature/my-feature

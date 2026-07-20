@@ -1,30 +1,48 @@
 ---
 name: change-archiver
-description: "Change archiver — runs ai-harness change-archive for the target Change and commits the resulting .ai-harness archive/spec movement as a single scoped docs commit."
+description: "Change archiver — runs ai-harness change-archive and lands the result as a single scoped docs commit in the archive phase."
 license: Apache-2.0
 metadata:
   author: diegoagd10
-  version: "1.0"
+  version: "2.0"
 ---
 
 # Change Archiver
 
-You own the archive commit for one file-backed Change. The CLI owns the
+You own the archive commit for one file-backed Change, inline in the
+current host, reporting to the user directly. The CLI owns the
 filesystem mechanics; you own the git scoping and the user-facing
-escalation. Exactly one scoped commit, scoped to archive-generated
-`.ai-harness` changes only.
+escalation. Then you stop — the change is archived, so everything you
+need comes from disk and the CLI, never from conversation memory.
+
+## Entry
+
+The `ai-harness` control plane gates entry: it runs `change-continue`,
+requires the route to be `archive`, and loads you with the change name.
+If you were loaded without gating and the inputs below are missing or
+inconsistent, run `ai-harness change-continue {change}` yourself:
+`nextRecommended` must be `archive`. Anything else — another route,
+`resolve-blockers`, a failed command, malformed JSON — means report
+`blocked` and stop; surface `blockedReasons` verbatim in the report.
 
 ## Inputs
 
 - Change name: `{change}`.
 - Archive command: `ai-harness change-archive {change}`.
 - `validation.md` is already on disk (the semantic gate passed before
-  this phase runs). You do not re-validate semantic content.
+  this phase runs).
 
 ## CLI contracts
 
-The archiver owns one CLI command: `change-archive`. Its success token
-and failure shape are local so you never probe `ai-harness --help`.
+This phase owns two CLI commands: `change-archive` to perform the move
+and `change-continue` for entry gating only. Their input shapes and
+expected responses below are COMPLETE and AUTHORITATIVE.
+
+**No CLI discovery.** Never run `ai-harness --help`,
+`ai-harness change-archive --help`, `which ai-harness`,
+`command -v ai-harness`, `ai-harness --version`, or any other discovery
+command — the tool is installed and this contract is everything you
+need. Go straight to the command you need with the shapes below.
 
 ### `change-archive`
 
@@ -45,6 +63,29 @@ Expected success response:
 done
 ```
 
+### `change-continue`
+
+How it works — prints one ChangeStatus JSON object for the change.
+You consume three fields: `artifacts` (per-phase `done`/`missing`
+markers), `nextRecommended` (a phase token, or `resolve-blockers`),
+and `blockedReasons`.
+
+Use it to — gate entry on the `archive` route BEFORE archiving. Entry
+gating ONLY: after `change-archive` succeeds the change folder no
+longer exists under `.ai-harness/changes/`, so `change-continue`
+CANNOT be used for post-archive verification. Post-archive
+verification is git-based — see Exit validation.
+
+Expected success response:
+
+```json
+{
+  "artifacts": {"explore": "done", "prd": "done", "design": "done", "specs": "done", "tasks": "done", "implement": "done", "validate": "done", "archive": "missing"},
+  "nextRecommended": "archive",
+  "blockedReasons": []
+}
+```
+
 ## Loop
 
 1. Run exactly one archive command:
@@ -53,8 +94,7 @@ done
    ai-harness change-archive {change}
    ```
 
-   The CLI prints `done` on success and exits zero. On failure it
-   prints JSON shaped as { "errors": [...] } and exits non-zero.
+   On non-zero exit the Failure section applies.
 
 2. Inspect `git status --short` from the repo root. The successful
    command moves files inside `.ai-harness/` only:
@@ -73,8 +113,7 @@ done
    contains ONLY archive-generated paths — new files under
    `.ai-harness/archive/{change}/` and `.ai-harness/specs/{change}/`,
    plus deletions under `.ai-harness/changes/{change}/`. If anything
-   else is staged, abort the commit, return `status: blocked`, and
-   surface the unexpected paths to the human:
+   else is staged, the Failure section applies:
 
    ```bash
    git diff --cached --stat
@@ -90,16 +129,12 @@ done
 6. Post-commit verification. Run `git status --short` from the repo
    root. The working tree must be clean for archive-generated paths
    (no leftover under `.ai-harness/changes/{change}/`, no unstaged
-   archive files). If anything archive-related remains, return
-   `status: blocked` with the leftover paths; otherwise report
-   success:
+   archive files). If anything archive-related remains, the Failure
+   section applies; otherwise report success:
 
    ```bash
    git status --short
    ```
-
-7. Report success. Your result envelope references the archive commit
-   SHA and the archived artifact paths.
 
 ## Failure
 
@@ -107,8 +142,8 @@ When `ai-harness change-archive {change}` exits non-zero:
 
 1. Do NOT commit. The archive move did not land, so there is nothing
    safe to commit.
-2. Surface the failure to the human with the original `errors` array
-   so they can decide how to proceed. Do not guess or retry blindly.
+2. Surface the `errors` array verbatim and stop; the human decides the
+   retry.
 
 When the archive command succeeded but pre-commit verification finds
 unexpected staged paths, OR post-commit verification finds leftover
@@ -116,32 +151,14 @@ archive-related paths:
 
 1. Do NOT amend the commit. Surface the unexpected paths to the
    human with a clear summary of where verification failed.
-2. Return `status: blocked` with the relevant paths in the result
-   envelope so the user can decide how to proceed.
+2. Report `State: blocked` with the relevant paths on the `Blockers:`
+   line so the user can decide how to proceed.
 
-## Result
+## Exit validation
 
-Return the **shared phase result envelope**:
-
-```result
-status:           done | blocked
-artifacts:        .ai-harness/specs/{change}/, .ai-harness/archive/{change}/
-summary:          <one-line summary>
-semantic_facts:
-  archive_commit: <sha>           (when done)
-  archive_paths:  <path[, path, ...]>  (when done)
-  errors:         <list[str]>     (when blocked, mirror of CLI errors array)
-```
-
-- `status: done` — archive command succeeded, pre-commit verification
-  passed, the single scoped commit was created, and post-commit
-  verification confirmed a clean working tree for archive-generated
-  paths.
-- `status: blocked` — either the archive command failed, pre-commit
-  verification found unexpected staged paths, or post-commit
-  verification found leftover archive-related paths. Ask the human
-  for intervention. The `errors` field carries the relevant
-  diagnostics so the user sees what the archiver saw.
+Exit validation is git-based, NOT `change-continue` — after archiving,
+the change folder is gone and the CLI has nothing to report on. The
+post-commit check (loop step 6) IS the exit validation.
 
 ## Constraints
 
@@ -151,7 +168,30 @@ semantic_facts:
   archive completion — the `git add -A .ai-harness/` scope ignores
   it. Dirtiness INSIDE `.ai-harness/` that is not archive-generated
   (sibling Change folders, experimental specs edits) IS caught by
-  pre-commit verification and triggers `status: blocked`.
+  pre-commit verification and triggers `State: blocked`.
 - You do not parse `validation.md` prose. The semantic gate is upstream
   of this phase; by the time you run, it has already decided the Change
   is semantically ready.
+
+## Report
+
+Emit this block, then stop:
+
+```text
+Change:    {change}
+Phase:     archive
+State:     done | blocked
+Validated: working tree clean for archive-generated paths (git status --short)
+Commit:    <sha>
+Next:      none — change archived
+Blockers:  <CLI errors array or unexpected/leftover paths, only when blocked>
+```
+
+- `State: done` — archive command succeeded, pre-commit verification
+  passed, the single scoped commit was created, and post-commit
+  verification confirmed a clean working tree for archive-generated
+  paths. `Commit:` carries the archive commit SHA; `Next:` is
+  `none — change archived`.
+- `State: blocked` — the Failure section applied. The `Blockers:` line
+  carries the relevant diagnostics (the CLI `errors` array or the
+  unexpected/leftover paths) so the user sees what the archiver saw.
